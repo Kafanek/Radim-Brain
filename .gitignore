@@ -29,3 +29,4 @@ logs/
 # Temp
 tmp/
 temp/
+secrets.txt
