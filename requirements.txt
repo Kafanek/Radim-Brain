@@ -1,0 +1,33 @@
+# ============================================
+# RADIM BRAIN + CHAT v3.1 - Heroku Requirements
+# Claude AI + Web Search Integration
+# ============================================
+
+# Flask & Extensions
+flask==3.0.0
+flask-cors==4.0.0
+flask-socketio==5.3.6
+python-socketio==5.10.0
+
+# Server (eventlet pro WebSocket)
+gunicorn==21.2.0
+eventlet==0.34.2
+
+# HTTP requests (pro Azure REST API, Gemini, WordPress)
+requests==2.31.0
+
+# Push Notifications
+pywebpush==1.14.0
+
+# Cloudinary (media upload)
+cloudinary==1.41.0
+
+# Utilities
+python-dotenv==1.0.0
+
+# 🤖 AI PROVIDERS
+# Anthropic Claude - Primary AI (Web Search enabled)
+anthropic>=0.40.0
+
+# Google Gemini - Fallback (optional)
+# google-generativeai>=0.3.0
