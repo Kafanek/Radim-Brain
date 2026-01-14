@@ -108,6 +108,11 @@ from soul_routes import soul_bp
 app.register_blueprint(soul_bp)
 print("✅ Soul routes registered: /api/soul/*")
 
+# 🎙️ Import Voice Runtime routes - Stavový automat
+from voice_runtime_routes import voice_runtime_bp
+app.register_blueprint(voice_runtime_bp)
+print("✅ Voice Runtime routes registered: /api/voice/*")
+
 # 🔮 Import Anticipation Engine - Předbudoucí čas
 from anticipation_routes import anticipation_bp
 app.register_blueprint(anticipation_bp)
