@@ -331,6 +331,21 @@ def speech_health():
         }), 500
 
 # ============================================
+# AZURE CONFIG FOR FRONTEND SDK
+# ============================================
+@speech_bp.route('/azure-config', methods=['GET'])
+def get_azure_config():
+    """Vrátí Azure Speech config pro frontend SDK (STT)"""
+    if not AZURE_SPEECH_KEY:
+        return jsonify({'success': False, 'error': 'Azure not configured'}), 500
+    
+    return jsonify({
+        'success': True,
+        'key': AZURE_SPEECH_KEY,
+        'region': AZURE_SPEECH_REGION
+    })
+
+# ============================================
 # RADIM HELPER FUNCTION
 # ============================================
 def radim_speak(text, emotion='friendly'):
