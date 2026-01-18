@@ -31,7 +31,7 @@ claude_bp = Blueprint('claude', __name__, url_prefix='/api/claude')
 # ============================================================================
 
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
-CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-sonnet-4-20250514')
+CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-3-5-sonnet-20241022')
 
 # České jmeniny - kompletní kalendář
 NAMEDAY_CALENDAR = {
