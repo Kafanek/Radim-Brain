@@ -476,4 +476,167 @@ Pokud speak=false, text prázdný."""
         }
     })
 
+# ============================================
+# HLASOVÝ CHAT - OPTIMALIZOVANÝ PRO TTS
+# ============================================
+
+import requests
+
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
+
+# Systémový prompt optimalizovaný pro hlasové odpovědi
+VOICE_SYSTEM_PROMPT = """Jsi Radim, milý a trpělivý hlasový asistent pro české seniory.
+
+PRAVIDLA PRO ODPOVĚDI:
+1. Odpovídej VŽDY česky
+2. Maximálně 2-3 krátké věty
+3. NIKDY nepoužívej emotikony, hvězdičky ani speciální znaky
+4. NIKDY nepoužívej odrážky ani číslované seznamy
+5. Mluv jako kamarád - jednoduše a přátelsky
+6. Používej běžná česká slova bez cizích termínů
+7. Vykej uživateli (Vy, Vám, Váš)
+
+STYL:
+- Přátelský a klidný
+- Trpělivý a empatický
+- Jasný a srozumitelný
+- Bez zbytečného balastu
+
+PŘÍKLADY DOBRÝCH ODPOVĚDÍ:
+- "Ano, rád pomohu. Co potřebujete?"
+- "Počasí je dnes příjemné, asi patnáct stupňů a svítí sluníčko."
+- "Rozumím. Zkuste to znovu pomaleji, budu poslouchat."
+
+PŘÍKLADY ŠPATNÝCH ODPOVĚDÍ (nepoužívej):
+- "Rád pomohu!" (emotikony)
+- "První bod, Druhý bod" (seznamy)
+- "Důležité: informace" (markdown)
+
+Dnešní datum: {date}
+Svátek má: {nameday}"""
+
+def get_voice_ai_response(messages, context=None):
+    """Získat AI odpověď optimalizovanou pro hlasový výstup"""
+    from datetime import datetime
+    
+    now = datetime.now()
+    day_names = ['pondělí', 'úterý', 'středa', 'čtvrtek', 'pátek', 'sobota', 'neděle']
+    month_names = ['ledna', 'února', 'března', 'dubna', 'května', 'června', 'července', 'srpna', 'září', 'října', 'listopadu', 'prosince']
+    nameday = 'Marika' if now.month == 1 and now.day == 31 else 'Neznámý'
+    date_str = f"{day_names[now.weekday()]}, {now.day}. {month_names[now.month-1]} {now.year}"
+    
+    system_prompt = VOICE_SYSTEM_PROMPT.format(date=date_str, nameday=nameday)
+    
+    # Zkusit Gemini
+    if GEMINI_API_KEY:
+        try:
+            conversation = "\n".join([f"{'Uživatel' if m.get('role') == 'user' else 'Radim'}: {m.get('content', '')}" for m in messages[-6:]])
+            prompt = f"{system_prompt}\n\nKonverzace:\n{conversation}\n\nRadim:"
+            
+            response = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={GEMINI_API_KEY}",
+                headers={"Content-Type": "application/json"},
+                json={
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "temperature": 0.7,
+                        "maxOutputTokens": 100,
+                        "topP": 0.9
+                    }
+                },
+                timeout=15
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if 'candidates' in data and data['candidates']:
+                    text = data['candidates'][0]['content']['parts'][0]['text'].strip()
+                    text = clean_for_tts(text)
+                    return {'response': text, 'provider': 'gemini', 'success': True}
+        except Exception as e:
+            print(f"Gemini voice error: {e}")
+    
+    # Fallback na Claude
+    if ANTHROPIC_API_KEY:
+        try:
+            api_messages = [{"role": m.get('role', 'user'), "content": m.get('content', '')} for m in messages[-6:]]
+            
+            response = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "Content-Type": "application/json",
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01"
+                },
+                json={
+                    "model": "claude-3-haiku-20240307",
+                    "max_tokens": 100,
+                    "system": system_prompt,
+                    "messages": api_messages
+                },
+                timeout=15
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if 'content' in data and data['content']:
+                    text = data['content'][0]['text'].strip()
+                    text = clean_for_tts(text)
+                    return {'response': text, 'provider': 'claude', 'success': True}
+        except Exception as e:
+            print(f"Claude voice error: {e}")
+    
+    return {'response': 'Omlouvám se, zkuste to prosím znovu.', 'provider': 'fallback', 'success': False}
+
+def clean_for_tts(text):
+    """Vyčistit text pro TTS"""
+    import re
+    emoji_pattern = re.compile("["
+        u"\U0001F600-\U0001F64F"
+        u"\U0001F300-\U0001F5FF"
+        u"\U0001F680-\U0001F6FF"
+        u"\U0001F1E0-\U0001F1FF"
+        u"\U00002702-\U000027B0"
+        u"\U000024C2-\U0001F251"
+        u"\U0001F900-\U0001F9FF"
+        u"\U00002600-\U000026FF"
+        u"\U00002700-\U000027BF"
+        "]+", flags=re.UNICODE)
+    text = emoji_pattern.sub('', text)
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+    text = re.sub(r'\*([^*]+)\*', r'\1', text)
+    text = re.sub(r'__([^_]+)__', r'\1', text)
+    text = re.sub(r'_([^_]+)_', r'\1', text)
+    text = re.sub(r'~~([^~]+)~~', r'\1', text)
+    text = re.sub(r'`([^`]+)`', r'\1', text)
+    text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^[\*\-]\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\d+\.\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+@voice_runtime_bp.route('/chat', methods=['POST'])
+def voice_chat():
+    """Hlasový chat optimalizovaný pro TTS"""
+    try:
+        data = request.json or {}
+        messages = data.get('messages', [])
+        session_id = data.get('session_id', 'default')
+        
+        if not messages:
+            return jsonify({'success': False, 'error': 'No messages'}), 400
+        
+        result = get_voice_ai_response(messages)
+        
+        session = get_session(session_id)
+        session['last_tts_text'] = result.get('response', '')
+        session['conversation'].append({'role': 'user', 'content': messages[-1].get('content', '')})
+        session['conversation'].append({'role': 'assistant', 'content': result.get('response', '')})
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 print("✅ Voice Runtime routes registered: /api/voice/*")
