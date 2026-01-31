@@ -28,6 +28,14 @@ load_dotenv()
 # Import Radim WhatsApp Orchestrator
 from radim_orchestrator import radim_bp
 
+# Import Memory & Learning routes
+try:
+    from memory_routes import memory_bp
+    MEMORY_AVAILABLE = True
+except ImportError:
+    MEMORY_AVAILABLE = False
+    print("⚠️ Memory routes not available")
+
 # ============================================
 # FLASK APP SETUP
 # ============================================
@@ -117,6 +125,11 @@ print("✅ Voice Runtime routes registered: /api/voice/*")
 from anticipation_routes import anticipation_bp
 app.register_blueprint(anticipation_bp)
 print("✅ Anticipation Engine registered: /api/anticipation/*")
+
+# 🧠 Import Memory & Learning routes
+if MEMORY_AVAILABLE:
+    app.register_blueprint(memory_bp)
+    print("✅ Memory routes registered: /api/memory/*")
 
 # ============================================
 # TTS PROXY ENDPOINTS (Azure)
