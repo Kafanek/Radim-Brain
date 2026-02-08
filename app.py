@@ -7,7 +7,7 @@ eventlet.monkey_patch()
 # ============================================
 # RADIM BRAIN + CHAT - ROZŠÍŘENÝ HEROKU BACKEND
 # ============================================
-# Version: 3.0.0 - Full Features
+# Version: 3.1.0 - Full Features + Blueprint Registry
 # radim-brain-2025.herokuapp.com
 
 import os
@@ -453,7 +453,7 @@ def init_db():
     ''')
     db.commit()
     db.close()
-    print("✅ Databáze inicializována (v3.0)")
+    print("✅ Databáze inicializována (v3.1)")
 
 # ============================================
 # HELPERS
@@ -1697,11 +1697,33 @@ def health_ready():
 # ============================================
 @app.route('/health')
 def health():
+    # Registered blueprints registry
+    blueprints = {
+        'radim_orchestrator': {'prefix': '/api/radim/*', 'version': '1.0.0', 'status': 'active'},
+        'orchestrator': {'prefix': '/api/orchestrator/*', 'version': '2.1.0', 'status': 'active'},
+        'speech': {'prefix': '/api/speech/*', 'version': '1.0.0', 'status': 'active'},
+        'claude': {'prefix': '/api/claude/*', 'version': '1.0.0', 'status': 'active'},
+        'soul': {'prefix': '/api/soul/*', 'version': '1.0.0', 'status': 'active'},
+        'voice_runtime': {'prefix': '/api/voice/*', 'version': '1.0.0', 'status': 'active'},
+        'anticipation': {'prefix': '/api/anticipation/*', 'version': '1.0.0', 'status': 'active'},
+    }
+    # Conditional blueprints
+    if SENIORS_AVAILABLE:
+        blueprints['seniors'] = {'prefix': '/api/seniors/*', 'version': '1.0.0', 'status': 'active'}
+    if IOT_AVAILABLE:
+        blueprints['iot'] = {'prefix': '/api/iot/*', 'version': '1.0.0', 'status': 'active'}
+    if PREDICT_AVAILABLE:
+        blueprints['predict'] = {'prefix': '/api/radim/predict/*, /api/consciousness/*', 'version': '1.0.0', 'status': 'active'}
+    if MEMORY_AVAILABLE:
+        blueprints['memory'] = {'prefix': '/api/memory/*', 'version': '1.0.0', 'status': 'active'}
+
     return jsonify({
         'status': 'healthy',
         'service': 'Radim Brain + Chat',
-        'version': '3.0.0',
+        'version': '3.1.0',
         'timestamp': now_iso(),
+        'blueprints': blueprints,
+        'blueprint_count': len(blueprints),
         'modules': {
             'chat': 'active',
             'websocket': True,
@@ -1721,7 +1743,7 @@ def health():
 def api_info():
     return jsonify({
         'name': 'Radim Brain + Chat API',
-        'version': '3.0.0',
+        'version': '3.1.0',
         'endpoints': {
             'chat': {
                 'conversations': '/api/chat/conversations/{userId}',
@@ -1791,7 +1813,7 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     print(f'''
 ╔═══════════════════════════════════════════════════════════╗
-║          🌟 RADIM BRAIN + CHAT SERVER v3.0 🌟             ║
+║          🌟 RADIM BRAIN + CHAT SERVER v3.1 🌟             ║
 ╠═══════════════════════════════════════════════════════════╣
 ║  Port:        {port}                                         ║
 ║  WebSocket:   ✅ Ready                                    ║
