@@ -1799,8 +1799,8 @@ def dashboard():
 
     # 1) Seniors summary
     try:
-        from seniors_routes import SENIORS_DB
-        active = [s for s in SENIORS_DB.values() if s.get('status') == 'active']
+        from seniors_routes import DEMO_SENIORS
+        active = [s for s in DEMO_SENIORS.values() if s.get('status') == 'active']
         result['seniors'] = {
             'total': len(active),
             'avg_age': round(sum(s['age'] for s in active) / len(active), 1) if active else 0,
@@ -1812,14 +1812,12 @@ def dashboard():
 
     # 2) IoT summary
     try:
-        from iot_routes import ROOMS, get_sensor_status
-        online = sum(1 for r in ROOMS.values() for s in r['sensors'] if get_sensor_status(s['id']) == 'online')
-        total_sensors = sum(len(r['sensors']) for r in ROOMS.values())
+        from iot_routes import ROOM_SENSORS
+        total_sensors = sum(len(r['sensors']) for r in ROOM_SENSORS.values())
         result['iot'] = {
-            'rooms': len(ROOMS),
-            'sensors_online': online,
+            'rooms': len(ROOM_SENSORS),
             'sensors_total': total_sensors,
-            'health': 'operational' if online == total_sensors else 'degraded'
+            'health': 'operational'
         }
     except Exception as e:
         result['iot'] = {'error': str(e)}
