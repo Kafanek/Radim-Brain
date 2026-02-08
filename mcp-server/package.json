@@ -1,23 +1,26 @@
 {
-  "name": "@mykolibri/radim-brain-mcp",
-  "version": "1.0.0",
-  "description": "MCP Server pro Radim Brain - kompletní integrace pro Claude Desktop",
+  "name": "@mykolibri/radim-orchestrator-mcp",
+  "version": "2.0.0",
+  "description": "🎭 Radim Orchestrator MCP Server - Claude Desktop orchestrace celého Radim Brain systému",
   "type": "module",
   "main": "build/index.js",
   "bin": {
-    "radim-brain-mcp": "./build/index.js"
+    "radim-orchestrator-mcp": "./build/index.js"
   },
   "scripts": {
     "build": "tsc && chmod +x build/index.js",
     "watch": "tsc --watch",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "start": "node build/index.js"
   },
   "keywords": [
     "mcp",
     "claude",
     "radim-brain",
+    "orchestrator",
     "seniors",
     "iot",
+    "consciousness",
     "ai"
   ],
   "author": "MyKolibri Academy <info@mykolibri-academy.cz>",
