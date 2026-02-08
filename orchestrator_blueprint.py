@@ -67,6 +67,8 @@ def check_all_systems():
         "iot_system": f"{HEROKU_URL}/api/iot/system/status",
         # Consciousness & Predict
         "consciousness_pulse": f"{HEROKU_URL}/api/consciousness/pulse",
+        # Dashboard
+        "dashboard_quick": f"{HEROKU_URL}/api/dashboard/quick",
     }
     
     # WordPress check
@@ -99,6 +101,7 @@ def check_all_systems():
         "core": {"keys": ["heroku_health", "heroku_ready", "heroku_ai_settings", "heroku_radim_health"], "label": "Heroku Core"},
         "seniors_iot": {"keys": ["seniors_api", "iot_system"], "label": "Seniors & IoT"},
         "consciousness": {"keys": ["consciousness_pulse"], "label": "Consciousness Engine"},
+        "dashboard": {"keys": ["dashboard_quick"], "label": "Dashboard API"},
         "wordpress": {"keys": ["wordpress_health", "wordpress_api"], "label": "WordPress"}
     }
     
@@ -330,7 +333,7 @@ def orchestrator_health():
         'service': 'Radim Orchestrator',
         'version': '2.1.0',
         'capabilities': ['health_all', 'analyze', 'monitor', 'chat', 'fix', 'wp_check'],
-        'monitored_subsystems': ['core', 'seniors_iot', 'consciousness', 'wordpress'],
+        'monitored_subsystems': ['core', 'seniors_iot', 'consciousness', 'dashboard', 'wordpress'],
         'heroku_url': HEROKU_URL,
         'wordpress_url': WP_URL,
         'ai_available': bool(GEMINI_API_KEY),

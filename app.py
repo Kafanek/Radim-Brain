@@ -63,6 +63,14 @@ except ImportError:
     PREDICT_AVAILABLE = False
     print("⚠️ Predict routes not available")
 
+# 📊 Import Dashboard API
+try:
+    from dashboard_routes import dashboard_bp
+    DASHBOARD_AVAILABLE = True
+except ImportError:
+    DASHBOARD_AVAILABLE = False
+    print("⚠️ Dashboard routes not available")
+
 # ============================================
 # FLASK APP SETUP
 # ============================================
@@ -89,6 +97,11 @@ if IOT_AVAILABLE:
 if PREDICT_AVAILABLE:
     app.register_blueprint(predict_bp)
     print("✅ Predict routes registered: /api/radim/predict/*, /api/consciousness/*")
+
+# 📊 Register Dashboard Blueprint
+if DASHBOARD_AVAILABLE:
+    app.register_blueprint(dashboard_bp)
+    print("✅ Dashboard routes registered: /api/dashboard/*")
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'radim-secret-key-2025')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 
@@ -1716,6 +1729,8 @@ def health():
         blueprints['predict'] = {'prefix': '/api/radim/predict/*, /api/consciousness/*', 'version': '1.0.0', 'status': 'active'}
     if MEMORY_AVAILABLE:
         blueprints['memory'] = {'prefix': '/api/memory/*', 'version': '1.0.0', 'status': 'active'}
+    if DASHBOARD_AVAILABLE:
+        blueprints['dashboard'] = {'prefix': '/api/dashboard/*', 'version': '1.0.0', 'status': 'active'}
 
     return jsonify({
         'status': 'healthy',
@@ -1780,7 +1795,14 @@ def api_info():
                 'orchestrate': '/api/orchestrator/orchestrate',
                 'health': '/api/orchestrator/health',
                 'systems': '/api/orchestrator/systems'
-            }
+            },
+            'dashboard': {
+                'full': '/api/dashboard',
+                'quick': '/api/dashboard/quick'
+            },
+            'seniors': '/api/seniors',
+            'iot': '/api/iot/system/status',
+            'consciousness': '/api/consciousness/state'
         },
         'websocket': {
             'url': 'wss://radim-brain-2025.herokuapp.com',
