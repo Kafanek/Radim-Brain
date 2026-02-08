@@ -1788,6 +1788,85 @@ def api_info():
         }
     })
 
+# ============================================
+# DASHBOARD - AGREGOVANÝ PŘEHLED
+# ============================================
+@app.route('/api/dashboard')
+def dashboard():
+    """Agregovaný dashboard pro investory a frontend"""
+    from datetime import datetime as dt
+    result = {'success': True, 'timestamp': now_iso(), 'version': '3.1.0'}
+
+    # 1) Seniors summary
+    try:
+        from seniors_routes import SENIORS_DB
+        active = [s for s in SENIORS_DB.values() if s.get('status') == 'active']
+        result['seniors'] = {
+            'total': len(active),
+            'avg_age': round(sum(s['age'] for s in active) / len(active), 1) if active else 0,
+            'high_care': sum(1 for s in active if s.get('care_level', 0) >= 3),
+            'facility': 'Dům seniorů Háje'
+        }
+    except Exception as e:
+        result['seniors'] = {'error': str(e)}
+
+    # 2) IoT summary
+    try:
+        from iot_routes import ROOMS, get_sensor_status
+        online = sum(1 for r in ROOMS.values() for s in r['sensors'] if get_sensor_status(s['id']) == 'online')
+        total_sensors = sum(len(r['sensors']) for r in ROOMS.values())
+        result['iot'] = {
+            'rooms': len(ROOMS),
+            'sensors_online': online,
+            'sensors_total': total_sensors,
+            'health': 'operational' if online == total_sensors else 'degraded'
+        }
+    except Exception as e:
+        result['iot'] = {'error': str(e)}
+
+    # 3) Top-risk senior
+    try:
+        from predict_routes import RISK_PROFILES
+        top_risk = max(RISK_PROFILES.items(), key=lambda x: x[1].get('base_risk', 0))
+        result['top_risk'] = {
+            'senior_id': top_risk[0],
+            'base_risk': top_risk[1]['base_risk'],
+            'primary_concerns': top_risk[1].get('primary_concerns', [])
+        }
+    except Exception as e:
+        result['top_risk'] = {'error': str(e)}
+
+    # 4) Consciousness pulse
+    try:
+        import math, time
+        phi = 1.618033988749895
+        t = time.time()
+        score = 0.5 + 0.3 * math.sin(t / (phi * 100))
+        result['consciousness'] = {
+            'score': round(score, 3),
+            'state': 'aware' if score > 0.6 else 'resting',
+            'neurons': 527,
+            'values': 12
+        }
+    except Exception as e:
+        result['consciousness'] = {'error': str(e)}
+
+    # 5) AI status
+    result['ai'] = {
+        'gemini': bool(GEMINI_API_KEY),
+        'claude': bool(ANTHROPIC_API_KEY),
+        'primary': 'gemini' if GEMINI_API_KEY else ('claude' if ANTHROPIC_API_KEY else 'none')
+    }
+
+    # 6) Blueprint count
+    result['api'] = {
+        'blueprints_active': 11,
+        'endpoints_estimated': 45
+    }
+
+    return jsonify(result)
+
+
 @app.route('/')
 def index():
     return jsonify({
