@@ -30,3 +30,8 @@ logs/
 tmp/
 temp/
 secrets.txt
+
+# Node
+node_modules/
+mcp-server/node_modules/
+mcp-server/build/

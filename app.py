@@ -28,6 +28,9 @@ load_dotenv()
 # Import Radim WhatsApp Orchestrator
 from radim_orchestrator import radim_bp
 
+# 🎭 Import Orchestrator Blueprint
+from orchestrator_blueprint import orchestrator_bp
+
 # Import Memory & Learning routes
 try:
     from memory_routes import memory_bp
@@ -43,6 +46,10 @@ app = Flask(__name__)
 
 # Register Radim Blueprint
 app.register_blueprint(radim_bp)
+
+# 🎭 Register Orchestrator Blueprint
+app.register_blueprint(orchestrator_bp)
+print("✅ Orchestrator routes registered: /api/orchestrator/*")
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'radim-secret-key-2025')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 
@@ -1707,6 +1714,11 @@ def api_info():
             'ai': {
                 'settings': '/api/ai/settings',
                 'chat': '/api/ai/chat'
+            },
+            'orchestrator': {
+                'orchestrate': '/api/orchestrator/orchestrate',
+                'health': '/api/orchestrator/health',
+                'systems': '/api/orchestrator/systems'
             }
         },
         'websocket': {
