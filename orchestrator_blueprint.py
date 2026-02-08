@@ -1,7 +1,7 @@
 # ============================================
 # 🎭 RADIM ORCHESTRATOR BLUEPRINT (Flask)
 # ============================================
-# Version: 2.0.0
+# Version: 2.1.0
 # Orchestrace celého Radim Brain systému
 # Integrace do app.py jako Flask Blueprint
 
@@ -57,10 +57,16 @@ def check_all_systems():
     checks = {}
     
     targets = {
+        # Core
         "heroku_health": f"{HEROKU_URL}/health",
         "heroku_ready": f"{HEROKU_URL}/health/ready",
         "heroku_ai_settings": f"{HEROKU_URL}/api/ai/settings",
         "heroku_radim_health": f"{HEROKU_URL}/api/radim/health",
+        # Seniors & IoT
+        "seniors_api": f"{HEROKU_URL}/api/seniors",
+        "iot_system": f"{HEROKU_URL}/api/iot/system/status",
+        # Consciousness & Predict
+        "consciousness_pulse": f"{HEROKU_URL}/api/consciousness/pulse",
     }
     
     # WordPress check
@@ -69,7 +75,7 @@ def check_all_systems():
         targets["wordpress_api"] = f"{WP_URL}/wp-json/wp/v2/posts?per_page=1"
     
     # Paralelní requesty
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(safe_get, url, 10): name for name, url in targets.items()}
         for future in concurrent.futures.as_completed(futures):
             name = futures[future]
@@ -88,8 +94,29 @@ def check_all_systems():
     ok_count = sum(1 for v in checks.values() if v["status"] == "ok")
     total = len(checks)
     
+    # Subsystem grouping
+    subsystems = {
+        "core": {"keys": ["heroku_health", "heroku_ready", "heroku_ai_settings", "heroku_radim_health"], "label": "Heroku Core"},
+        "seniors_iot": {"keys": ["seniors_api", "iot_system"], "label": "Seniors & IoT"},
+        "consciousness": {"keys": ["consciousness_pulse"], "label": "Consciousness Engine"},
+        "wordpress": {"keys": ["wordpress_health", "wordpress_api"], "label": "WordPress"}
+    }
+    
+    subsystem_status = {}
+    for sub_id, sub_def in subsystems.items():
+        sub_checks = {k: checks[k] for k in sub_def["keys"] if k in checks}
+        sub_ok = sum(1 for v in sub_checks.values() if v["status"] == "ok")
+        sub_total = len(sub_checks)
+        subsystem_status[sub_id] = {
+            "label": sub_def["label"],
+            "healthy": sub_ok,
+            "total": sub_total,
+            "status": "healthy" if sub_ok == sub_total else "degraded" if sub_ok > 0 else "offline" if sub_total > 0 else "not_configured"
+        }
+    
     return {
         "systems": checks,
+        "subsystems": subsystem_status,
         "summary": {
             "total": total,
             "healthy": ok_count,
@@ -301,8 +328,9 @@ def orchestrator_health():
     return jsonify({
         'status': 'healthy',
         'service': 'Radim Orchestrator',
-        'version': '2.0.0',
+        'version': '2.1.0',
         'capabilities': ['health_all', 'analyze', 'monitor', 'chat', 'fix', 'wp_check'],
+        'monitored_subsystems': ['core', 'seniors_iot', 'consciousness', 'wordpress'],
         'heroku_url': HEROKU_URL,
         'wordpress_url': WP_URL,
         'ai_available': bool(GEMINI_API_KEY),
