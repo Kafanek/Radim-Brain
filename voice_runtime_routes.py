@@ -535,7 +535,7 @@ def get_voice_ai_response(messages, context=None):
             prompt = f"{system_prompt}\n\nKonverzace:\n{conversation}\n\nRadim:"
             
             response = requests.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={GEMINI_API_KEY}",
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
                 headers={"Content-Type": "application/json"},
                 json={
                     "contents": [{"parts": [{"text": prompt}]}],
