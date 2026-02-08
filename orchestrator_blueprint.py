@@ -65,7 +65,7 @@ def check_all_systems():
     
     # WordPress check
     if WP_URL:
-        targets["wordpress_health"] = f"{WP_URL}/wp-json/kafanek-brain/v1/health"
+        targets["wordpress_health"] = f"{WP_URL}/wp-json/kafanek-brain/v1/brain/health"
         targets["wordpress_api"] = f"{WP_URL}/wp-json/wp/v2/posts?per_page=1"
     
     # Paralelní requesty
@@ -242,24 +242,25 @@ def orchestrate():
             wp_results["rest_api"] = {"status": "ok" if wp_api.get("status") == 200 else "error"}
             
             # Kafánek Brain plugin
-            wp_brain = safe_get(f"{WP_URL}/wp-json/kafanek-brain/v1/health")
+            wp_brain = safe_get(f"{WP_URL}/wp-json/kafanek-brain/v1/brain/health")
             wp_results["kafanek_brain"] = {
                 "status": "ok" if wp_brain.get("status") == 200 else "error",
                 "data": wp_brain.get("data")
             }
             
-            # AI providers endpoint
-            wp_ai = safe_get(f"{WP_URL}/wp-json/kafanek-brain/v1/ai/providers")
-            wp_results["ai_providers"] = {
-                "status": "ok" if wp_ai.get("status") == 200 else "missing_route",
-                "error": wp_ai.get("error")
+            # Brain status endpoint
+            wp_status = safe_get(f"{WP_URL}/wp-json/kafanek-brain/v1/brain/status")
+            wp_results["brain_status"] = {
+                "status": "ok" if wp_status.get("status") == 200 else "error",
+                "data": wp_status.get("data") if wp_status.get("status") == 200 else None,
+                "error": wp_status.get("error")
             }
             
-            # Brain stats endpoint
-            wp_stats = safe_get(f"{WP_URL}/wp-json/kafanek-brain/v1/stats")
-            wp_results["brain_stats"] = {
-                "status": "ok" if wp_stats.get("status") == 200 else "missing_route",
-                "error": wp_stats.get("error")
+            # Intelligence scores
+            wp_intel = safe_get(f"{WP_URL}/wp-json/kafanek-brain/v1/brain/intelligence/scores")
+            wp_results["intelligence"] = {
+                "status": "ok" if wp_intel.get("status") == 200 else "error",
+                "error": wp_intel.get("error")
             }
             
             thinking = {"approach": "WordPress plugin endpointy kontrola"}
