@@ -39,6 +39,30 @@ except ImportError:
     MEMORY_AVAILABLE = False
     print("⚠️ Memory routes not available")
 
+# 👴 Import Seniors API
+try:
+    from seniors_routes import seniors_bp
+    SENIORS_AVAILABLE = True
+except ImportError:
+    SENIORS_AVAILABLE = False
+    print("⚠️ Seniors routes not available")
+
+# 🌡️ Import IoT & Sensors API
+try:
+    from iot_routes import iot_bp
+    IOT_AVAILABLE = True
+except ImportError:
+    IOT_AVAILABLE = False
+    print("⚠️ IoT routes not available")
+
+# 🔮 Import Predict & Consciousness API
+try:
+    from predict_routes import predict_bp
+    PREDICT_AVAILABLE = True
+except ImportError:
+    PREDICT_AVAILABLE = False
+    print("⚠️ Predict routes not available")
+
 # ============================================
 # FLASK APP SETUP
 # ============================================
@@ -50,6 +74,21 @@ app.register_blueprint(radim_bp)
 # 🎭 Register Orchestrator Blueprint
 app.register_blueprint(orchestrator_bp)
 print("✅ Orchestrator routes registered: /api/orchestrator/*")
+
+# 👴 Register Seniors Blueprint
+if SENIORS_AVAILABLE:
+    app.register_blueprint(seniors_bp)
+    print("✅ Seniors routes registered: /api/seniors/*")
+
+# 🌡️ Register IoT Blueprint
+if IOT_AVAILABLE:
+    app.register_blueprint(iot_bp)
+    print("✅ IoT routes registered: /api/iot/*")
+
+# 🔮 Register Predict Blueprint
+if PREDICT_AVAILABLE:
+    app.register_blueprint(predict_bp)
+    print("✅ Predict routes registered: /api/radim/predict/*, /api/consciousness/*")
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'radim-secret-key-2025')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 
