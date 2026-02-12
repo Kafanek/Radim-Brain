@@ -419,14 +419,31 @@ def log_interaction():
         was_helpful = data.get('was_helpful', True)
         was_mistake = data.get('was_mistake', False)
         empathy_shown = data.get('empathy_shown', 0.5)
+        mood = data.get('mood', 'neutral')
+        dominant_emotion = data.get('dominant_emotion', '')
+        intensity = data.get('intensity', 0)
         
         conn = sqlite3.connect(DATABASE)
         cursor = conn.cursor()
         
+        # Ensure extended columns exist
+        try:
+            cursor.execute('ALTER TABLE soul_interactions ADD COLUMN mood TEXT DEFAULT "neutral"')
+        except:
+            pass
+        try:
+            cursor.execute('ALTER TABLE soul_interactions ADD COLUMN dominant_emotion TEXT DEFAULT ""')
+        except:
+            pass
+        try:
+            cursor.execute('ALTER TABLE soul_interactions ADD COLUMN intensity REAL DEFAULT 0')
+        except:
+            pass
+        
         cursor.execute('''
-            INSERT INTO soul_interactions (user_id, interaction_type, was_helpful, was_mistake, empathy_shown)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (user_id, interaction_type, was_helpful, was_mistake, empathy_shown))
+            INSERT INTO soul_interactions (user_id, interaction_type, was_helpful, was_mistake, empathy_shown, mood, dominant_emotion, intensity)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (user_id, interaction_type, was_helpful, was_mistake, empathy_shown, mood, dominant_emotion, intensity))
         
         conn.commit()
         conn.close()
@@ -434,6 +451,8 @@ def log_interaction():
         return jsonify({
             "success": True,
             "message": "Interakce zalogována",
+            "mood": mood,
+            "emotion": dominant_emotion,
             "timestamp": datetime.utcnow().isoformat()
         })
         

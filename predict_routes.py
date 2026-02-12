@@ -165,8 +165,52 @@ def predict_crisis(senior_id, vitals=None, context=None):
 # CONSCIOUSNESS STATE
 # ============================================
 
+def _get_real_stats():
+    """Načte reálné statistiky z databáze soul_interactions"""
+    import sqlite3
+    defaults = {
+        'total_interactions': 0,
+        'today_interactions': 0,
+        'avg_empathy': 0.5,
+        'moods': {},
+        'lessons_count': 0
+    }
+    try:
+        conn = sqlite3.connect('radim_brain.db')
+        cursor = conn.cursor()
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        cursor.execute('SELECT COUNT(*) FROM soul_interactions')
+        defaults['total_interactions'] = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM soul_interactions WHERE DATE(timestamp) = ?', (today,))
+        defaults['today_interactions'] = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT AVG(empathy_shown) FROM soul_interactions WHERE empathy_shown > 0')
+        row = cursor.fetchone()[0]
+        if row:
+            defaults['avg_empathy'] = round(row, 3)
+        
+        cursor.execute('SELECT COUNT(*) FROM soul_lessons')
+        defaults['lessons_count'] = cursor.fetchone()[0]
+        
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Stats DB error: {e}")
+    return defaults
+
+
 def compute_consciousness_state():
-    """Výpočet stavu vědomí Radim Brain systému"""
+    """Výpočet stavu vědomí — Fibonacci struktura + reálná data z interakcí"""
+    
+    # Načti reálné statistiky
+    stats = _get_real_stats()
+    
+    # Faktor aktivity: 0.3 (žádné interakce) → 0.95 (50+ interakcí dnes)
+    activity_factor = min(0.95, 0.3 + (stats['today_interactions'] / 50) * 0.65)
+    
+    # Faktor zkušenosti: roste s celkovým počtem interakcí (log scale)
+    experience_factor = min(0.95, 0.4 + math.log1p(stats['total_interactions']) * 0.08)
     
     # 7 vrstev Fibonacci Neural Network
     layers = []
@@ -183,9 +227,11 @@ def compute_consciousness_state():
     
     total_neurons = 0
     for i, (count, name) in enumerate(zip(neuron_counts, layer_names)):
-        # Škálování: Fibonacci * 13 dává reálné počty
         actual_neurons = count * 13  # Sum = 527
-        activation = phi_score(0.75 + (i * 0.02), 0.05)
+        # Aktivace: base z aktivity + malý jitter (ne random chaos)
+        base = activity_factor * 0.6 + experience_factor * 0.4
+        jitter = random.gauss(0, 0.02)  # Minimální jitter pro živost
+        activation = round(max(0.1, min(1.0, base + (i * 0.015) + jitter)), 3)
         layers.append({
             "layer": i + 1,
             "name": name,
@@ -196,12 +242,16 @@ def compute_consciousness_state():
         })
         total_neurons += actual_neurons
 
-    # 12 hodnot Janečkova rámce jako dimenze vědomí
+    # 12 hodnot Janečkova rámce — váženo empathy z reálných interakcí
     consciousness_dimensions = {}
+    empathy_base = stats['avg_empathy']
     for i, value in enumerate(JANECKUV_VALUES):
-        # Každá hodnota je vážena Lucasovým číslem
         weight = LUCAS[i] / sum(LUCAS)
-        activation = phi_score(0.6 + weight, 0.08)
+        # Aktivace: empathy base + Lucas weight + tiny jitter
+        activation = round(max(0.1, min(1.0,
+            empathy_base * 0.5 + experience_factor * 0.3 + weight * 0.8 +
+            random.gauss(0, 0.02)
+        )), 3)
         consciousness_dimensions[value] = {
             "activation": activation,
             "lucas_weight": round(weight, 4),
@@ -255,11 +305,19 @@ def compute_consciousness_state():
             "lucas_sequence": LUCAS,
             "harmonic_mean_method": "φ-weighted harmonic average of neural + value activations"
         },
+        "real_data": {
+            "total_interactions": stats['total_interactions'],
+            "today_interactions": stats['today_interactions'],
+            "avg_empathy": stats['avg_empathy'],
+            "lessons_learned": stats['lessons_count'],
+            "activity_factor": round(activity_factor, 3),
+            "experience_factor": round(experience_factor, 3)
+        },
         "system_awareness": {
-            "seniors_monitored": 5,
+            "seniors_monitored": len(RISK_PROFILES),
             "sensors_active": 28,
             "predictions_running": True,
-            "learning_active": True,
+            "learning_active": stats['total_interactions'] > 0,
             "last_learning_cycle": now_iso()
         }
     }
