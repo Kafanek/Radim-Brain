@@ -31,7 +31,7 @@ claude_bp = Blueprint('claude', __name__, url_prefix='/api/claude')
 # ============================================================================
 
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
-CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-3-5-sonnet-20241022')
+CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-sonnet-4-5-20250929')
 
 # České jmeniny - kompletní kalendář
 NAMEDAY_CALENDAR = {
@@ -209,23 +209,23 @@ def chat_with_radim():
             nameday=info["nameday"]
         )
         
-        # Tools pro web search
-        tools = None
+        # Volání Claude API
+        api_kwargs = {
+            "model": CLAUDE_MODEL,
+            "max_tokens": 1024,
+            "system": system,
+            "messages": [{"role": "user", "content": message}]
+        }
+        
+        # Web search tool (volitelný)
         if use_search:
-            tools = [{
+            api_kwargs["tools"] = [{
                 "type": "web_search_20250305",
                 "name": "web_search",
                 "max_uses": 3
             }]
         
-        # Volání Claude API
-        response = client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=1024,
-            system=system,
-            tools=tools,
-            messages=[{"role": "user", "content": message}]
-        )
+        response = client.messages.create(**api_kwargs)
         
         text = extract_text_from_response(response)
         
