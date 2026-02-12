@@ -2,7 +2,7 @@
 💝 SOUL ROUTES - Duše Radima API
 Panel pro zobrazení hodnot, statistik a ponaučení Radima
 
-Version: 1.0.0
+Version: 2.0.0
 """
 
 import os

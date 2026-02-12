@@ -194,6 +194,20 @@ def _get_real_stats():
         cursor.execute('SELECT COUNT(*) FROM soul_lessons')
         defaults['lessons_count'] = cursor.fetchone()[0]
         
+        # Mood distribution (safe - column may not exist yet)
+        try:
+            cursor.execute('SELECT mood, COUNT(*) FROM soul_interactions WHERE mood IS NOT NULL GROUP BY mood')
+            defaults['moods'] = {row[0]: row[1] for row in cursor.fetchall() if row[0]}
+        except:
+            pass
+
+        # Top emotions today
+        try:
+            cursor.execute("SELECT dominant_emotion, COUNT(*) FROM soul_interactions WHERE DATE(timestamp) = ? AND dominant_emotion IS NOT NULL AND dominant_emotion != '' GROUP BY dominant_emotion ORDER BY COUNT(*) DESC LIMIT 5", (today,))
+            defaults['top_emotions_today'] = {row[0]: row[1] for row in cursor.fetchall()}
+        except:
+            defaults['top_emotions_today'] = {}
+
         conn.close()
     except Exception as e:
         print(f"⚠️ Stats DB error: {e}")
@@ -311,7 +325,9 @@ def compute_consciousness_state():
             "avg_empathy": stats['avg_empathy'],
             "lessons_learned": stats['lessons_count'],
             "activity_factor": round(activity_factor, 3),
-            "experience_factor": round(experience_factor, 3)
+            "experience_factor": round(experience_factor, 3),
+            "mood_distribution": stats.get('moods', {}),
+            "top_emotions_today": stats.get('top_emotions_today', {})
         },
         "system_awareness": {
             "seniors_monitored": len(RISK_PROFILES),
