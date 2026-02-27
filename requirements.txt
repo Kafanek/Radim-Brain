@@ -1,6 +1,6 @@
 # ============================================
 # RADIM BRAIN + CHAT v3.1 - Heroku Requirements
-# Claude AI + Web Search Integration
+# Claude AI + Web Search + PostgreSQL
 # ============================================
 
 # Flask & Extensions
@@ -15,6 +15,10 @@ eventlet==0.34.2
 
 # HTTP requests (pro Azure REST API, Gemini, WordPress)
 requests==2.31.0
+
+# Database - PostgreSQL (Heroku Postgres)
+# Falls back to SQLite if DATABASE_URL not set
+psycopg2-binary==2.9.9
 
 # Push Notifications
 pywebpush==1.14.0

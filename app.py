@@ -7,13 +7,12 @@ eventlet.monkey_patch()
 # ============================================
 # RADIM BRAIN + CHAT - ROZŠÍŘENÝ HEROKU BACKEND
 # ============================================
-# Version: 3.1.0 - Full Features + Blueprint Registry
+# Version: 3.1.0 - PostgreSQL + Security + Blueprint Registry
 # radim-brain-2025.herokuapp.com
 
 import os
 import json
 import uuid
-import sqlite3
 import requests
 import base64
 from datetime import datetime
@@ -22,6 +21,8 @@ from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from dotenv import load_dotenv
+from database import get_db_for_flask, close_db_for_flask, get_connection
+from database import init_db as db_init_db, is_postgres
 
 load_dotenv()
 
@@ -193,7 +194,9 @@ if MEMORY_AVAILABLE:
 # ============================================
 # TTS PROXY ENDPOINTS (Azure)
 # ============================================
-AZURE_TTS_KEY = os.environ.get('AZURE_TTS_KEY', 'JikrPUH2HODm8u5cj4ozmOGWCgQd2XeCasMt9kW09lc0mM59PwYyJQQJ99BIAC5RqLJXJ3w3AAAYACOGgKKC')
+AZURE_TTS_KEY = os.environ.get('AZURE_TTS_KEY')
+if not AZURE_TTS_KEY:
+    print("⚠️  WARNING: AZURE_TTS_KEY not set - Azure TTS proxy will not work")
 # Try eastus - Heroku has DNS timeout on EU regions
 AZURE_TTS_REGION = os.environ.get('AZURE_TTS_REGION', 'eastus')
 
@@ -210,6 +213,8 @@ def azure_tts_preflight():
 @app.route('/api/azure/tts', methods=['POST'])
 def azure_tts_proxy():
     """Azure TTS Proxy - Antonín voice"""
+    if not AZURE_TTS_KEY:
+        return jsonify({'error': 'Azure TTS not configured (AZURE_TTS_KEY missing)'}), 503
     try:
         data = request.json
         text = data.get('text', '')
@@ -341,132 +346,17 @@ def tts_health():
     })
 
 # ============================================
-# DATABASE
+# DATABASE (via database.py adapter - SQLite/PostgreSQL)
 # ============================================
-DATABASE = os.environ.get('DATABASE_PATH', 'radim_chat.db')
-
 def get_db():
-    if 'db' not in g:
-        g.db = sqlite3.connect(DATABASE)
-        g.db.row_factory = sqlite3.Row
-    return g.db
+    return get_db_for_flask(g)
 
 @app.teardown_appcontext
 def close_db(exception):
-    db = g.pop('db', None)
-    if db is not None:
-        db.close()
+    close_db_for_flask(g)
 
 def init_db():
-    db = sqlite3.connect(DATABASE)
-    db.executescript('''
-        -- Chat tables
-        CREATE TABLE IF NOT EXISTS chat_conversations (
-            id TEXT PRIMARY KEY,
-            participants TEXT NOT NULL,
-            type TEXT DEFAULT 'direct',
-            name TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_message TEXT,
-            settings TEXT DEFAULT '{}'
-        );
-
-        CREATE TABLE IF NOT EXISTS chat_messages (
-            id TEXT PRIMARY KEY,
-            conversation_id TEXT NOT NULL,
-            sender_id TEXT NOT NULL,
-            type TEXT DEFAULT 'text',
-            content TEXT NOT NULL,
-            reply_to TEXT,
-            metadata TEXT DEFAULT '{}',
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            status TEXT DEFAULT 'sent',
-            reactions TEXT DEFAULT '[]',
-            read_by TEXT DEFAULT '[]',
-            ai_generated INTEGER DEFAULT 0,
-            FOREIGN KEY (conversation_id) REFERENCES chat_conversations(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS chat_contacts (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            contact_id TEXT NOT NULL,
-            name TEXT NOT NULL,
-            role TEXT DEFAULT 'Rodina',
-            avatar TEXT,
-            pinned INTEGER DEFAULT 0,
-            muted INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS chat_users (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            email TEXT,
-            avatar TEXT,
-            role TEXT DEFAULT 'user',
-            online INTEGER DEFAULT 0,
-            last_seen TIMESTAMP,
-            wp_user_id INTEGER,
-            push_subscription TEXT,
-            settings TEXT DEFAULT '{}',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-
-        -- Media table
-        CREATE TABLE IF NOT EXISTS chat_media (
-            id TEXT PRIMARY KEY,
-            message_id TEXT,
-            user_id TEXT NOT NULL,
-            type TEXT NOT NULL,
-            url TEXT NOT NULL,
-            public_id TEXT,
-            filename TEXT,
-            size INTEGER,
-            duration REAL,
-            thumbnail_url TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-
-        -- Push subscriptions
-        CREATE TABLE IF NOT EXISTS push_subscriptions (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            endpoint TEXT NOT NULL,
-            keys TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(user_id, endpoint)
-        );
-
-        -- Admin stats
-        CREATE TABLE IF NOT EXISTS admin_stats (
-            id TEXT PRIMARY KEY,
-            date DATE NOT NULL,
-            total_messages INTEGER DEFAULT 0,
-            total_users INTEGER DEFAULT 0,
-            ai_messages INTEGER DEFAULT 0,
-            voice_messages INTEGER DEFAULT 0,
-            active_conversations INTEGER DEFAULT 0,
-            UNIQUE(date)
-        );
-
-        -- Indexes
-        CREATE INDEX IF NOT EXISTS idx_messages_conversation ON chat_messages(conversation_id);
-        CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON chat_messages(timestamp DESC);
-        CREATE INDEX IF NOT EXISTS idx_contacts_user ON chat_contacts(user_id);
-        CREATE INDEX IF NOT EXISTS idx_media_message ON chat_media(message_id);
-        CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
-    ''')
-    
-    # Radim AI assistant
-    db.execute('''
-        INSERT OR REPLACE INTO chat_users (id, name, role, online, settings)
-        VALUES ('radim', 'Radim Asistent', 'ai_assistant', 1, '{"ai_enabled": true, "voice": "radim"}')
-    ''')
-    db.commit()
-    db.close()
-    print("✅ Databáze inicializována (v3.1)")
+    db_init_db()
 
 # ============================================
 # HELPERS
@@ -480,7 +370,8 @@ def now_iso():
 def today_date():
     return datetime.utcnow().strftime('%Y-%m-%d')
 
-users_online = {}
+users_online = {}  # In-memory cache of {user_id: socket_sid} for fast lookups
+# Note: On dyno restart, all users are set offline in init_db_online_reset()
 
 # ============================================
 # RADIM AI - GEMINI/CLAUDE INTEGRATION
@@ -736,18 +627,35 @@ def sync_wp_user(wp_user):
         db = get_db()
         user_id = f"wp_{wp_user['id']}"
         
-        db.execute('''
-            INSERT OR REPLACE INTO chat_users (id, name, email, avatar, role, wp_user_id, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            user_id,
-            wp_user.get('name', wp_user.get('slug')),
-            wp_user.get('email'),
-            wp_user.get('avatar_urls', {}).get('96'),
-            'user',
-            wp_user['id'],
-            now_iso()
-        ))
+        if is_postgres():
+            db.execute('''
+                INSERT INTO chat_users (id, name, email, avatar, role, wp_user_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO UPDATE SET
+                    name = EXCLUDED.name, email = EXCLUDED.email,
+                    avatar = EXCLUDED.avatar, wp_user_id = EXCLUDED.wp_user_id
+            ''', (
+                user_id,
+                wp_user.get('name', wp_user.get('slug')),
+                wp_user.get('email'),
+                wp_user.get('avatar_urls', {}).get('96'),
+                'user',
+                wp_user['id'],
+                now_iso()
+            ))
+        else:
+            db.execute('''
+                INSERT OR REPLACE INTO chat_users (id, name, email, avatar, role, wp_user_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                user_id,
+                wp_user.get('name', wp_user.get('slug')),
+                wp_user.get('email'),
+                wp_user.get('avatar_urls', {}).get('96'),
+                'user',
+                wp_user['id'],
+                now_iso()
+            ))
         db.commit()
         
         return user_id
@@ -1193,11 +1101,20 @@ def subscribe_push():
         subscription = data['subscription']
         
         db = get_db()
-        db.execute('''
-            INSERT OR REPLACE INTO push_subscriptions (id, user_id, endpoint, keys, created_at)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (generate_id(), user_id, subscription['endpoint'], 
-              json.dumps(subscription['keys']), now_iso()))
+        if is_postgres():
+            db.execute('''
+                INSERT INTO push_subscriptions (id, user_id, endpoint, keys, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (user_id, endpoint) DO UPDATE SET
+                    keys = EXCLUDED.keys, created_at = EXCLUDED.created_at
+            ''', (generate_id(), user_id, subscription['endpoint'],
+                  json.dumps(subscription['keys']), now_iso()))
+        else:
+            db.execute('''
+                INSERT OR REPLACE INTO push_subscriptions (id, user_id, endpoint, keys, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (generate_id(), user_id, subscription['endpoint'],
+                  json.dumps(subscription['keys']), now_iso()))
         db.commit()
         
         return jsonify({'success': True, 'message': 'Subscribed to push notifications'})
@@ -1315,10 +1232,15 @@ def wp_sync_users():
 # ============================================
 def update_daily_stats(field):
     """Aktualizuj denní statistiky"""
+    # Whitelist allowed field names to prevent SQL injection
+    ALLOWED_FIELDS = {'total_messages', 'total_users', 'ai_messages', 'voice_messages', 'active_conversations'}
+    if field not in ALLOWED_FIELDS:
+        print(f"⚠️  Invalid stats field: {field}")
+        return
     try:
         db = get_db()
         today = today_date()
-        
+
         db.execute(f'''
             INSERT INTO admin_stats (id, date, {field})
             VALUES (?, ?, 1)
@@ -1485,14 +1407,14 @@ def handle_disconnect():
             break
     if user_id:
         socketio.emit('user_offline', {'userId': user_id, 'timestamp': now_iso()}, broadcast=True)
-        # Update user last_seen
+        # Update user last_seen (using adapter for proper connection handling)
         try:
-            db = sqlite3.connect(DATABASE)
+            db = get_connection()
             db.execute('UPDATE chat_users SET online = 0, last_seen = ? WHERE id = ?', (now_iso(), user_id))
             db.commit()
             db.close()
-        except:
-            pass
+        except Exception as e:
+            print(f"⚠️  Error updating user offline status: {e}")
 
 @socketio.on('join')
 def handle_join(data):
@@ -1501,14 +1423,14 @@ def handle_join(data):
         users_online[user_id] = request.sid
         join_room(user_id)
         socketio.emit('user_online', {'userId': user_id, 'timestamp': now_iso()}, broadcast=True)
-        # Update user online status
+        # Update user online status (using adapter for proper connection handling)
         try:
-            db = sqlite3.connect(DATABASE)
+            db = get_connection()
             db.execute('UPDATE chat_users SET online = 1 WHERE id = ?', (user_id,))
             db.commit()
             db.close()
-        except:
-            pass
+        except Exception as e:
+            print(f"⚠️  Error updating user online status: {e}")
 
 @socketio.on('join_conversation')
 def handle_join_conversation(data):
@@ -1742,7 +1664,9 @@ def health():
         'modules': {
             'chat': 'active',
             'websocket': True,
+            'database': 'postgresql' if is_postgres() else 'sqlite',
             'speech': bool(os.environ.get('AZURE_SPEECH_KEY')),
+            'azure_tts_proxy': bool(AZURE_TTS_KEY),
             'ai': {
                 'gemini': bool(GEMINI_API_KEY),
                 'claude': bool(ANTHROPIC_API_KEY)
@@ -1890,8 +1814,9 @@ def dashboard():
 @app.route('/')
 def index():
     return jsonify({
-        'message': '🌟 Radim Brain + Chat API v3.0',
+        'message': '🌟 Radim Brain + Chat API v3.1',
         'status': 'running',
+        'database': 'postgresql' if is_postgres() else 'sqlite',
         'docs': '/api',
         'health': '/health'
     })
@@ -1907,6 +1832,15 @@ def server_error(e):
 # Initialize database
 with app.app_context():
     init_db()
+    # Reset all users to offline on server start (dyno restart resets socket connections)
+    try:
+        db = get_connection()
+        db.execute("UPDATE chat_users SET online = 0 WHERE id != 'radim'")
+        db.commit()
+        db.close()
+        print("✅ All user online statuses reset")
+    except Exception as e:
+        print(f"⚠️  Could not reset online statuses: {e}")
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
@@ -1915,6 +1849,7 @@ if __name__ == '__main__':
 ║          🌟 RADIM BRAIN + CHAT SERVER v3.1 🌟             ║
 ╠═══════════════════════════════════════════════════════════╣
 ║  Port:        {port}                                         ║
+║  Database:    {'🐘 PostgreSQL' if is_postgres() else '📁 SQLite (dev)'}                                ║
 ║  WebSocket:   ✅ Ready                                    ║
 ║  Chat:        ✅ Active                                   ║
 ║  AI:          {'✅ Gemini' if GEMINI_API_KEY else '❌ Not configured'}                                  ║
