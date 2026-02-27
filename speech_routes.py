@@ -331,18 +331,71 @@ def speech_health():
         }), 500
 
 # ============================================
-# AZURE CONFIG FOR FRONTEND SDK
+# AZURE SPEECH TOKEN FOR FRONTEND SDK
 # ============================================
-@speech_bp.route('/azure-config', methods=['GET'])
-def get_azure_config():
-    """Vrátí Azure Speech config pro frontend SDK (STT)"""
+# Token-based auth: backend holds the key, frontend gets a 10-min token.
+# This prevents API key exposure in browser devtools/network tab.
+
+_token_cache = {'token': None, 'expires': 0}
+
+@speech_bp.route('/azure-token', methods=['GET'])
+def get_azure_token():
+    """Vrátí krátkodobý Azure Speech token pro frontend SDK (STT/TTS)"""
     if not AZURE_SPEECH_KEY:
         return jsonify({'success': False, 'error': 'Azure not configured'}), 500
-    
+
+    import time
+    now = time.time()
+
+    # Return cached token if still valid (refresh 1 min before expiry)
+    if _token_cache['token'] and _token_cache['expires'] > now + 60:
+        return jsonify({
+            'success': True,
+            'token': _token_cache['token'],
+            'region': AZURE_SPEECH_REGION,
+            'expiresIn': int(_token_cache['expires'] - now)
+        })
+
+    # Fetch new token from Azure (valid for 10 minutes)
+    try:
+        token_url = f"https://{AZURE_SPEECH_REGION}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
+        headers = {
+            'Ocp-Apim-Subscription-Key': AZURE_SPEECH_KEY,
+            'Content-Length': '0'
+        }
+        response = requests.post(token_url, headers=headers, timeout=10)
+
+        if response.status_code == 200:
+            token = response.text
+            _token_cache['token'] = token
+            _token_cache['expires'] = now + 600  # 10 minutes
+
+            return jsonify({
+                'success': True,
+                'token': token,
+                'region': AZURE_SPEECH_REGION,
+                'expiresIn': 600
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Azure token error: {response.status_code}'
+            }), 500
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Token fetch error: {str(e)}'
+        }), 500
+
+@speech_bp.route('/azure-config', methods=['GET'])
+def get_azure_config():
+    """DEPRECATED: Use /azure-token instead. Returns region only (no key)."""
     return jsonify({
         'success': True,
-        'key': AZURE_SPEECH_KEY,
-        'region': AZURE_SPEECH_REGION
+        'region': AZURE_SPEECH_REGION,
+        'note': 'API key no longer exposed. Use /api/speech/azure-token for token-based auth.',
+        'token_endpoint': '/api/speech/azure-token'
     })
 
 # ============================================
