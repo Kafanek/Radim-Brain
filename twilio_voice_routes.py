@@ -29,6 +29,17 @@ TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE_NUMBER = os.environ.get("TWILIO_PHONE_NUMBER")  # +420 XXX XXX XXX
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
+# Azure TTS for Radim's voice (male Czech - AntoninNeural)
+AZURE_SPEECH_KEY = os.environ.get("AZURE_SPEECH_KEY")
+AZURE_SPEECH_REGION = os.environ.get("AZURE_SPEECH_REGION", "germanywestcentral")
+
+# Voice configuration - Radim is MALE
+# Priority: Azure TTS (cs-CZ-AntoninNeural) → Google male → basic man
+RADIM_VOICE_GOOGLE = "Google.cs-CZ-Standard-A"  # fallback (female, but best quality)
+RADIM_VOICE_BASIC = "man"  # basic male voice
+RADIM_LANG = "cs-CZ"
+RADIM_AZURE_VOICE = "cs-CZ-AntoninNeural"  # THE Radim voice - male Czech
+
 # Twilio client (lazy init)
 _twilio_client = None
 
@@ -43,6 +54,57 @@ def get_twilio_client():
         except ImportError:
             logger.warning("twilio package not installed")
     return _twilio_client
+
+
+def azure_tts_available():
+    """Check if Azure TTS is configured"""
+    return bool(AZURE_SPEECH_KEY and AZURE_SPEECH_REGION)
+
+
+def generate_azure_tts(text):
+    """Generate audio bytes using Azure TTS (AntoninNeural - Radim's voice)"""
+    if not azure_tts_available():
+        return None
+
+    try:
+        url = f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
+        ssml = f"""<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='cs-CZ'>
+            <voice name='{RADIM_AZURE_VOICE}'>
+                <prosody rate='-5%' pitch='-2%'>{text}</prosody>
+            </voice>
+        </speak>"""
+
+        resp = http_requests.post(
+            url,
+            headers={
+                'Ocp-Apim-Subscription-Key': AZURE_SPEECH_KEY,
+                'Content-Type': 'application/ssml+xml',
+                'X-Microsoft-OutputFormat': 'audio-16khz-32kbitrate-mono-mp3',
+            },
+            data=ssml.encode('utf-8'),
+            timeout=8
+        )
+        if resp.status_code == 200:
+            return resp.content
+        else:
+            logger.error(f"Azure TTS error: {resp.status_code} {resp.text[:200]}")
+            return None
+    except Exception as e:
+        logger.error(f"Azure TTS exception: {e}")
+        return None
+
+
+def twiml_say(text):
+    """Generate TwiML for Radim speaking - uses Azure TTS <Play> or fallback <Say>"""
+    if azure_tts_available():
+        # Use Azure TTS via /api/twilio/tts endpoint
+        from urllib.parse import quote
+        encoded = quote(text, safe='')
+        backend_url = os.environ.get('BACKEND_URL', 'https://radim-brain-2025-be1cd52b04dc.herokuapp.com')
+        return f'<Play>{backend_url}/api/twilio/tts?text={encoded}</Play>'
+    else:
+        # Fallback: basic male voice
+        return f'<Say voice="{RADIM_VOICE_BASIC}" language="{RADIM_LANG}">{text}</Say>'
 
 
 # ============================================================================
@@ -212,21 +274,26 @@ def twilio_voice_webhook():
         else:
             greeting = "Dobrý den, tady Radim. Jsem váš asistent. Jak vám mohu pomoci?"
 
+        say_greeting = twiml_say(greeting)
+        say_listen = twiml_say("Poslouchám vás.")
+        say_noheard = twiml_say("Neslyšel jsem vás. Pokud potřebujete pomoc, zavolejte znovu.")
+
         twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">{greeting}</Say>
+    {say_greeting}
     <Gather input="speech" language="cs-CZ" action="/api/twilio/gather" method="POST" speechTimeout="3" timeout="10">
-        <Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">Poslouchám vás.</Say>
+        {say_listen}
     </Gather>
-    <Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">Neslyšel jsem vás. Pokud potřebujete pomoc, zavolejte znovu.</Say>
+    {say_noheard}
 </Response>"""
         return twiml_response(twiml)
 
     except Exception as e:
         logger.error(f"Twilio voice error: {e}")
-        return twiml_response("""<?xml version="1.0" encoding="UTF-8"?>
+        say_err = twiml_say("Omlouvám se, mám technické potíže. Zkuste zavolat znovu.")
+        return twiml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">Omlouvám se, mám technické potíže. Zkuste zavolat znovu.</Say>
+    {say_err}
 </Response>""")
 
 
@@ -243,11 +310,13 @@ def twilio_gather_webhook():
         print(f"🎤 Speech: '{speech_result}' (confidence: {confidence})")
 
         if not speech_result.strip():
-            return twiml_response("""<?xml version="1.0" encoding="UTF-8"?>
+            say_retry = twiml_say("Promiňte, neslyšel jsem vás. Můžete to zopakovat?")
+            say_here = twiml_say("Jsem tu pro vás.")
+            return twiml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">Promiňte, neslyšel jsem vás. Můžete to zopakovat?</Say>
+    {say_retry}
     <Gather input="speech" language="cs-CZ" action="/api/twilio/gather" method="POST" speechTimeout="3" timeout="10">
-        <Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">Jsem tu pro vás.</Say>
+        {say_here}
     </Gather>
 </Response>""")
 
@@ -261,9 +330,10 @@ def twilio_gather_webhook():
                 if want_conference:
                     # 3-way conference
                     conf_name = f"radim-{call_sid[:8]}"
+                    say_conf = twiml_say(f"Přidávám vaši {transfer['name']} do hovoru. Zůstanu s vámi.")
                     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">Přidávám vaši {transfer['name']} do hovoru. Zůstanu s vámi.</Say>
+    {say_conf}
     <Dial>
         <Conference startConferenceOnEnter="true" endConferenceOnExit="false">{conf_name}</Conference>
     </Dial>
@@ -272,19 +342,21 @@ def twilio_gather_webhook():
                     twilio_client = get_twilio_client()
                     if twilio_client and TWILIO_PHONE_NUMBER:
                         try:
+                            say_outgoing = twiml_say("Dobrý den, volá vám Radim v zastoupení vašeho blízkého.")
                             twilio_client.calls.create(
                                 to=target_phone,
                                 from_=TWILIO_PHONE_NUMBER,
-                                twiml=f'<Response><Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">Dobrý den, volá vám Radim v zastoupení vašeho blízkého.</Say><Dial><Conference>{conf_name}</Conference></Dial></Response>'
+                                twiml=f'<Response>{say_outgoing}<Dial><Conference>{conf_name}</Conference></Dial></Response>'
                             )
                         except Exception as e:
                             logger.error(f"Conference call error: {e}")
                     return twiml_response(twiml)
                 else:
                     # Direct transfer
+                    say_transfer = twiml_say(f"Přepojuji vás na vaši {transfer['name']}. Moment prosím.")
                     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">Přepojuji vás na vaši {transfer['name']}. Moment prosím.</Say>
+    {say_transfer}
     <Dial callerId="{TWILIO_PHONE_NUMBER or ''}" action="/api/twilio/dial-status" method="POST">
         <Number>{target_phone}</Number>
     </Dial>
@@ -294,11 +366,13 @@ def twilio_gather_webhook():
                     return twiml_response(twiml)
             else:
                 ai_resp = f"Bohužel nemám uložené číslo na vaši {transfer['name']}. Chcete mi ho nadiktovat?"
+                say_no_num = twiml_say(ai_resp)
+                say_here2 = twiml_say("Jsem tu pro vás.")
                 return twiml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">{ai_resp}</Say>
+    {say_no_num}
     <Gather input="speech" language="cs-CZ" action="/api/twilio/gather" method="POST" speechTimeout="3" timeout="10">
-        <Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">Jsem tu pro vás.</Say>
+        {say_here2}
     </Gather>
 </Response>""")
 
@@ -307,31 +381,38 @@ def twilio_gather_webhook():
         if any(w in speech_result.lower() for w in goodbye_words) and len(speech_result) < 30:
             if call_sid in active_calls:
                 active_calls[call_sid]["status"] = "ended"
-            return twiml_response("""<?xml version="1.0" encoding="UTF-8"?>
+            say_bye = twiml_say("Na shledanou! Bylo mi potěšením. Kdykoliv potřebujete, zavolejte znovu. Mějte se krásně!")
+            return twiml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">Na shledanou! Bylo mi potěšením. Kdykoliv potřebujete, zavolejte znovu. Mějte se krásně!</Say>
+    {say_bye}
 </Response>""")
 
         # Normal AI conversation
         ai_response = get_ai_response_for_call(speech_result, call_sid)
         ai_safe = ai_response.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
+        say_ai = twiml_say(ai_safe if not azure_tts_available() else ai_response)
+        say_here3 = twiml_say("Jsem tu pro vás.")
+        say_end = twiml_say("Pokud nepotřebujete nic dalšího, přeji vám krásný den!")
+
         return twiml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">{ai_safe}</Say>
+    {say_ai}
     <Gather input="speech" language="cs-CZ" action="/api/twilio/gather" method="POST" speechTimeout="3" timeout="10">
-        <Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">Jsem tu pro vás.</Say>
+        {say_here3}
     </Gather>
-    <Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">Pokud nepotřebujete nic dalšího, přeji vám krásný den!</Say>
+    {say_end}
 </Response>""")
 
     except Exception as e:
         logger.error(f"Twilio gather error: {e}", exc_info=True)
-        return twiml_response("""<?xml version="1.0" encoding="UTF-8"?>
+        say_err2 = twiml_say("Promiňte, měl jsem krátký výpadek. Zkuste to prosím znovu.")
+        say_listen2 = twiml_say("Poslouchám.")
+        return twiml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">Promiňte, měl jsem krátký výpadek. Zkuste to prosím znovu.</Say>
+    {say_err2}
     <Gather input="speech" language="cs-CZ" action="/api/twilio/gather" method="POST" speechTimeout="3">
-        <Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">Poslouchám.</Say>
+        {say_listen2}
     </Gather>
 </Response>""")
 
@@ -363,11 +444,13 @@ def twilio_dial_status_webhook():
         dial_status = request.form.get("DialCallStatus", "unknown")
         logger.info(f"📞 Dial status: {call_sid} → {dial_status}")
         if dial_status in ("busy", "no-answer", "failed", "canceled"):
+            say_fail = twiml_say("Bohužel se mi nepodařilo spojit hovor. Můžu pro vás udělat něco jiného?")
+            say_here4 = twiml_say("Jsem tu pro vás.")
             return twiml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">Bohužel se mi nepodařilo spojit hovor. Můžu pro vás udělat něco jiného?</Say>
+    {say_fail}
     <Gather input="speech" language="cs-CZ" action="/api/twilio/gather" method="POST" speechTimeout="3" timeout="10">
-        <Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">Jsem tu pro vás.</Say>
+        {say_here4}
     </Gather>
 </Response>""")
         if call_sid in active_calls:
@@ -401,10 +484,12 @@ def initiate_outgoing_call():
         if not to:
             return jsonify({"success": False, "error": "Chybí telefonní číslo"}), 400
 
+        say_greet_out = twiml_say(greeting)
+        say_listen_out = twiml_say("Poslouchám vás.")
         call = twilio_client.calls.create(
             to=to,
             from_=TWILIO_PHONE_NUMBER,
-            twiml=f'<Response><Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">{greeting}</Say><Gather input="speech" language="cs-CZ" action="/api/twilio/gather" method="POST" speechTimeout="3"><Say voice="Google.cs-CZ-Standard-A" language="cs-CZ">Poslouchám vás.</Say></Gather></Response>',
+            twiml=f'<Response>{say_greet_out}<Gather input="speech" language="cs-CZ" action="/api/twilio/gather" method="POST" speechTimeout="3">{say_listen_out}</Gather></Response>',
             status_callback="/api/twilio/status",
             status_callback_method="POST"
         )
@@ -477,16 +562,37 @@ def register_known_caller():
     })
 
 
+@twilio_bp.route('/tts', methods=['GET'])
+def twilio_tts():
+    """Azure TTS endpoint - returns MP3 audio of Radim's voice"""
+    text = request.args.get('text', '')
+    if not text:
+        return Response(b'', content_type='audio/mpeg', status=400)
+
+    audio = generate_azure_tts(text)
+    if audio:
+        return Response(audio, content_type='audio/mpeg', headers={
+            'Cache-Control': 'public, max-age=3600',
+            'Content-Length': str(len(audio))
+        })
+    else:
+        # Azure TTS failed — return empty (Twilio will skip <Play> and continue)
+        logger.error(f"TTS failed for: {text[:50]}")
+        return Response(b'', content_type='audio/mpeg', status=500)
+
+
 @twilio_bp.route('/health', methods=['GET'])
 def twilio_health():
     """Twilio Voice health check"""
     return jsonify({
         "status": "healthy",
         "service": "Twilio Voice",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "configured": bool(TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN),
         "phone_number": TWILIO_PHONE_NUMBER or "not set",
         "ai_available": bool(ANTHROPIC_API_KEY),
+        "azure_tts": azure_tts_available(),
+        "voice": RADIM_AZURE_VOICE if azure_tts_available() else RADIM_VOICE_BASIC,
         "active_calls": len([d for d in active_calls.values() if d.get("status") not in ("completed", "ended", "failed")]),
         "known_callers": len(known_callers)
     })
