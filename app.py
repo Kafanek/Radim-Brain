@@ -186,6 +186,16 @@ from anticipation_routes import anticipation_bp
 app.register_blueprint(anticipation_bp)
 print("✅ Anticipation Engine registered: /api/anticipation/*")
 
+# 📞 Import Twilio Voice routes - Phone calls for seniors
+try:
+    from twilio_voice_routes import twilio_bp
+    app.register_blueprint(twilio_bp)
+    TWILIO_AVAILABLE = True
+    print("✅ Twilio Voice routes registered: /api/twilio/*")
+except ImportError:
+    TWILIO_AVAILABLE = False
+    print("⚠️ Twilio Voice routes not available")
+
 # 🧠 Import Memory & Learning routes
 if MEMORY_AVAILABLE:
     app.register_blueprint(memory_bp)
@@ -1653,11 +1663,13 @@ def health():
         blueprints['memory'] = {'prefix': '/api/memory/*', 'version': '1.0.0', 'status': 'active'}
     if DASHBOARD_AVAILABLE:
         blueprints['dashboard'] = {'prefix': '/api/dashboard/*', 'version': '1.0.0', 'status': 'active'}
+    if TWILIO_AVAILABLE:
+        blueprints['twilio_voice'] = {'prefix': '/api/twilio/*', 'version': '1.0.0', 'status': 'active'}
 
     return jsonify({
         'status': 'healthy',
         'service': 'Radim Brain + Chat',
-        'version': '3.1.0',
+        'version': '3.2.0',
         'timestamp': now_iso(),
         'blueprints': blueprints,
         'blueprint_count': len(blueprints),
@@ -1673,7 +1685,8 @@ def health():
             },
             'media': bool(CLOUDINARY_URL),
             'push': bool(VAPID_PRIVATE_KEY),
-            'wordpress': bool(WP_URL and WP_USER)
+            'wordpress': bool(WP_URL and WP_USER),
+            'twilio_voice': {'configured': bool(os.environ.get('TWILIO_ACCOUNT_SID')), 'phone': os.environ.get('TWILIO_PHONE_NUMBER')}
         },
         'online_users': len(users_online)
     })
