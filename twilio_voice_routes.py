@@ -562,6 +562,61 @@ def register_known_caller():
     })
 
 
+@twilio_bp.route('/invite', methods=['POST', 'OPTIONS'])
+def send_call_invitation():
+    """Send SMS invitation with Jitsi join link"""
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    twilio_client = get_twilio_client()
+    if not twilio_client or not TWILIO_PHONE_NUMBER:
+        return jsonify({"success": False, "error": "Twilio není nakonfigurováno"}), 503
+
+    try:
+        data = request.json or {}
+        to = data.get("to", "")
+        caller_name = data.get("caller_name", "Váš blízký")
+        room_code = data.get("room_code", "")
+        call_type = data.get("call_type", "video")
+        join_url = data.get("join_url", "")
+
+        if not to or not room_code:
+            return jsonify({"success": False, "error": "Chybí telefonní číslo nebo kód místnosti"}), 400
+
+        # Build join URL with parameters
+        if not join_url:
+            join_url = f"https://meet.jit.si/{room_code}"
+
+        # Frontend join page URL (with nice UI)
+        frontend_url = os.environ.get('FRONTEND_URL', 'https://polite-bush-001303503.6.azurestaticapps.net')
+        nice_url = f"{frontend_url}/call.html?room={room_code}&from={caller_name}&type={call_type}"
+
+        # Build SMS message
+        type_label = "video hovor" if call_type == "video" else "hlasový hovor"
+        sms_body = f"📞 {caller_name} vás zve na {type_label} přes Radim.\n\nPřipojte se: {nice_url}\n\n(Stačí kliknout na odkaz, nic neinstalujete.)"
+
+        # Send SMS
+        message = twilio_client.messages.create(
+            to=to,
+            from_=TWILIO_PHONE_NUMBER,
+            body=sms_body
+        )
+
+        logger.info(f"📱 SMS invite sent to {to}: {message.sid}")
+        print(f"📱 SMS invite sent to {to} (room: {room_code})")
+
+        return jsonify({
+            "success": True,
+            "message_sid": message.sid,
+            "join_url": nice_url,
+            "room_code": room_code
+        })
+
+    except Exception as e:
+        logger.error(f"SMS invite error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @twilio_bp.route('/tts', methods=['GET'])
 def twilio_tts():
     """Azure TTS endpoint - returns MP3 audio of Radim's voice"""
