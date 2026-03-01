@@ -53,7 +53,7 @@ from integrations.vscode_integration import VSCodeIntegration
 from integrations.mykolibri_integration import MyKolibriIntegration
 from api import therapy_routes, gemini_routes, learning_routes, ai_bridge_routes, news_routes, quiz_routes, radim_routes, auth_routes, gdpr_routes, iot_routes, radim_iot_routes, senior_api_routes, azure_proxy, elevenlabs_proxy, gcal_proxy, harmony_routes, notification_routes, soul_routes, claude_orchestrator
 from routers import (
-    library, publications, radim_memory, voice_synthesis, quantum_routes, mcp_routes, agent_routes, radim_google, mamba_rag_routes, tts_proxy_routes, consciousness_routes, phi27_routes, values_routes, story_studio, monitoring_dashboard, agents_live_test
+    library, publications, radim_memory, voice_synthesis, quantum_routes, mcp_routes, agent_routes, radim_google, mamba_rag_routes, tts_proxy_routes, consciousness_routes, phi27_routes, values_routes, story_studio, monitoring_dashboard, agents_live_test, twilio_voice
 )
 import windsurf_proxy
 
@@ -314,6 +314,7 @@ app.include_router(phi27_routes.router)  # 🌌 Φ27 Balance Model - FastAPI (Mi
 app.include_router(values_routes.router)  # 💎 Values System - FastAPI (Migrated!)
 app.include_router(story_studio.router)  # 📖 Story Studio - AI Storytelling Engine
 app.include_router(monitoring_dashboard.router)  # 📊 Monitoring Dashboard - Real-time Metrics
+app.include_router(twilio_voice.router)  # 📞 Twilio Voice - Phone Calls for Seniors
 
 # 🗄️ Azure SQL Database API
 from routers import memories_api
@@ -605,6 +606,7 @@ async def health_check():
             "aiwu": {"status": "unknown", "api_version": None},
             "database": {"status": "unknown", "connection": False},
             "voice_services": {"status": "unknown", "azure_speech": False},
+            "twilio_voice": {"configured": bool(os.getenv("TWILIO_ACCOUNT_SID")), "phone": os.getenv("TWILIO_PHONE_NUMBER")},
             "memory_usage": {"status": "ok", "rss_mb": 0}
         },
         "senior_optimizations": {

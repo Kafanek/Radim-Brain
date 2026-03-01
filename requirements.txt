@@ -35,3 +35,6 @@ anthropic>=0.40.0
 
 # Google Gemini - Fallback (optional)
 # google-generativeai>=0.3.0
+
+# 📞 Twilio Voice (phone calls for seniors)
+twilio>=9.0.0
