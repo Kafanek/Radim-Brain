@@ -11,6 +11,7 @@ import re
 import os
 import base64
 from datetime import datetime
+from xml.sax.saxutils import escape as xml_escape
 
 radim_bp = Blueprint('radim', __name__)
 
@@ -394,17 +395,22 @@ def radim_voice_speak():
         
         if not text:
             return jsonify({'success': False, 'error': 'Text je povinný'}), 400
-        
+
+        # Sanitize inputs to prevent SSML injection
+        safe_text = xml_escape(text)
+        if not re.match(r'^[a-zA-Z]{2}-[A-Z]{2}-[a-zA-Z]+Neural$', voice):
+            voice = 'cs-CZ-AntoninNeural'
+
         emotion_settings = {
             'friendly': {'pitch': '-5%', 'rate': '0.85'},
             'calm': {'pitch': '-8%', 'rate': '0.8'},
             'warm': {'pitch': '-3%', 'rate': '0.9'}
         }
         settings = emotion_settings.get(emotion, emotion_settings['friendly'])
-        
+
         ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="cs-CZ">
             <voice name="{voice}">
-                <prosody rate="{settings['rate']}" pitch="{settings['pitch']}" volume="loud">{text}</prosody>
+                <prosody rate="{settings['rate']}" pitch="{settings['pitch']}" volume="loud">{safe_text}</prosody>
             </voice>
         </speak>'''
         

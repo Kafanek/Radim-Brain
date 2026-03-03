@@ -13,6 +13,7 @@ import time
 import json
 import logging
 import requests as http_requests
+from xml.sax.saxutils import escape as xml_escape
 from flask import Blueprint, request, jsonify, Response
 
 logger = logging.getLogger(__name__)
@@ -68,9 +69,10 @@ def generate_azure_tts(text):
 
     try:
         url = f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
+        safe_text = xml_escape(text)
         ssml = f"""<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='cs-CZ'>
             <voice name='{RADIM_AZURE_VOICE}'>
-                <prosody rate='-5%' pitch='-2%'>{text}</prosody>
+                <prosody rate='-5%' pitch='-2%'>{safe_text}</prosody>
             </voice>
         </speak>"""
 
@@ -103,8 +105,9 @@ def twiml_say(text):
         backend_url = os.environ.get('BACKEND_URL', 'https://radim-brain-2025-be1cd52b04dc.herokuapp.com')
         return f'<Play>{backend_url}/api/twilio/tts?text={encoded}</Play>'
     else:
-        # Fallback: basic male voice
-        return f'<Say voice="{RADIM_VOICE_BASIC}" language="{RADIM_LANG}">{text}</Say>'
+        # Fallback: basic male voice - escape XML to prevent TwiML injection
+        safe_text = xml_escape(text)
+        return f'<Say voice="{RADIM_VOICE_BASIC}" language="{RADIM_LANG}">{safe_text}</Say>'
 
 
 # ============================================================================

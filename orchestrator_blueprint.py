@@ -322,7 +322,12 @@ def orchestrate():
         })
         
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e), 'action': data.get('action', 'unknown')}), 500
+        action_name = 'unknown'
+        try:
+            action_name = data.get('action', 'unknown') if data else 'unknown'
+        except Exception:
+            pass
+        return jsonify({'success': False, 'error': 'Internal server error', 'action': action_name}), 500
 
 
 @orchestrator_bp.route('/api/orchestrator/health', methods=['GET'])

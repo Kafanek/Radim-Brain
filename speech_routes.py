@@ -5,9 +5,11 @@
 # Používá Azure Speech REST API místo SDK (kompatibilní s Heroku)
 
 import os
+import re as _re
 import uuid
 import base64
 import requests
+from xml.sax.saxutils import escape as xml_escape
 from flask import Blueprint, request, jsonify, Response
 
 speech_bp = Blueprint('speech', __name__, url_prefix='/api/speech')
@@ -51,18 +53,25 @@ def synthesize_speech():
             return jsonify({'success': False, 'error': 'Text je povinný'}), 400
         
         azure_voice = CZECH_VOICES.get(voice_name, CZECH_VOICES['antonin'])
-        
+
         if senior_mode:
             rate = SENIOR_DEFAULTS['rate']
             pitch = SENIOR_DEFAULTS['pitch']
-        
+
+        # Sanitize inputs to prevent SSML injection
+        safe_text = xml_escape(text)
+        if not _re.match(r'^[0-9.]+$', str(rate).replace('%', '')):
+            rate = SENIOR_DEFAULTS['rate']
+        if not _re.match(r'^[+-]?[0-9]+%?$', str(pitch).replace('Hz', '')):
+            pitch = SENIOR_DEFAULTS['pitch']
+
         # SSML pro Azure REST API
-        ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" 
+        ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
                xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="cs-CZ">
             <voice name="{azure_voice}">
                 <mstts:express-as style="friendly" styledegree="1.2">
                     <prosody rate="{rate}" pitch="{pitch}" volume="{SENIOR_DEFAULTS['volume']}">
-                        {text}
+                        {safe_text}
                     </prosody>
                 </mstts:express-as>
             </voice>
@@ -129,10 +138,11 @@ def synthesize_stream():
         
         azure_voice = CZECH_VOICES.get(voice_name, CZECH_VOICES['antonin'])
         
+        safe_text = xml_escape(text)
         ssml = f'''<speak version="1.0" xml:lang="cs-CZ">
             <voice name="{azure_voice}">
                 <prosody rate="{SENIOR_DEFAULTS['rate']}" pitch="{SENIOR_DEFAULTS['pitch']}">
-                    {text}
+                    {safe_text}
                 </prosody>
             </voice>
         </speak>'''
@@ -419,13 +429,14 @@ def radim_speak(text, emotion='friendly'):
         }
         
         style, degree = emotion_styles.get(emotion, ('friendly', '1.2'))
-        
-        ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" 
+        safe_text = xml_escape(text)
+
+        ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
                xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="cs-CZ">
             <voice name="cs-CZ-AntoninNeural">
                 <mstts:express-as style="{style}" styledegree="{degree}">
                     <prosody rate="{SENIOR_DEFAULTS['rate']}" pitch="{SENIOR_DEFAULTS['pitch']}">
-                        {text}
+                        {safe_text}
                     </prosody>
                 </mstts:express-as>
             </voice>

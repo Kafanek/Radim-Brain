@@ -314,6 +314,7 @@ def chat_with_radim():
 def get_news():
     """📰 Získat aktuální české zprávy"""
     category = 'general'
+    count = 5
     try:
         data = request.get_json() or {}
         category = data.get('category', 'general')

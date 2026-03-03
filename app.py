@@ -117,7 +117,7 @@ if LIBRARY_AVAILABLE:
     app.register_blueprint(library_bp)
     print("✅ Library routes registered: /kal/library/*")
 
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'radim-secret-key-2025')
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 
 # CORS - Allow all routes from specific origins
@@ -137,8 +137,8 @@ ALLOWED_ORIGINS = [
     "http://localhost:60670"
 ]
 
-CORS(app, 
-     resources={r"/*": {"origins": "*"}},
+CORS(app,
+     resources={r"/*": {"origins": ALLOWED_ORIGINS}},
      supports_credentials=False,
      allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])

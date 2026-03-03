@@ -30,7 +30,14 @@ if USE_POSTGRES:
         import psycopg2
         import psycopg2.extras
         import psycopg2.pool
-        print(f"🐘 PostgreSQL mode - connecting to: {DATABASE_URL[:40]}...")
+        # Redact credentials from log output
+        try:
+            from urllib.parse import urlparse as _urlparse
+            _parsed = _urlparse(DATABASE_URL)
+            _safe_url = f"{_parsed.scheme}://{_parsed.username}:***@{_parsed.hostname}:{_parsed.port}{_parsed.path}"
+        except Exception:
+            _safe_url = "postgresql://***"
+        print(f"🐘 PostgreSQL mode - connecting to: {_safe_url}")
     except ImportError:
         print("⚠️  psycopg2 not installed, falling back to SQLite")
         USE_POSTGRES = False

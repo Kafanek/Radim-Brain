@@ -21,6 +21,7 @@ import json
 import math
 import sqlite3
 from datetime import datetime, timedelta
+from xml.sax.saxutils import escape as xml_escape
 from flask import Blueprint, request, jsonify, g
 
 # Flask Blueprint
@@ -534,10 +535,11 @@ def speech_adjust():
         rate_percent = int(speech_params["rate"] * 100)
         pitch_hz = f"{speech_params['pitch']:+.0f}Hz" if speech_params["pitch"] != 0 else "+0Hz"
         
+        safe_text = xml_escape(text)
         ssml = f"""<speak version='1.0' xml:lang='cs-CZ'>
     <voice name='cs-CZ-AntoninNeural'>
         <prosody rate='{rate_percent}%' pitch='{pitch_hz}'>
-            {text}
+            {safe_text}
         </prosody>
     </voice>
 </speak>"""
