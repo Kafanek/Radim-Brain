@@ -72,6 +72,14 @@ except ImportError:
     DASHBOARD_AVAILABLE = False
     print("⚠️ Dashboard routes not available")
 
+# 📚 Import Library / E-book API
+try:
+    from library_routes import library_bp
+    LIBRARY_AVAILABLE = True
+except ImportError:
+    LIBRARY_AVAILABLE = False
+    print("⚠️ Library routes not available")
+
 # ============================================
 # FLASK APP SETUP
 # ============================================
@@ -103,6 +111,12 @@ if PREDICT_AVAILABLE:
 if DASHBOARD_AVAILABLE:
     app.register_blueprint(dashboard_bp)
     print("✅ Dashboard routes registered: /api/dashboard/*")
+
+# 📚 Register Library Blueprint
+if LIBRARY_AVAILABLE:
+    app.register_blueprint(library_bp)
+    print("✅ Library routes registered: /kal/library/*")
+
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'radim-secret-key-2025')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 
