@@ -8,8 +8,11 @@
 import os
 import json
 import math
+import logging
 from datetime import datetime
 from flask import Blueprint, request, jsonify
+
+logger = logging.getLogger(__name__)
 
 voice_runtime_bp = Blueprint('voice_runtime', __name__, url_prefix='/api/voice')
 
@@ -271,7 +274,8 @@ def voice_health():
     return jsonify({
         'status': 'healthy',
         'service': 'RADIM Voice Runtime',
-        'version': '1.0.0',
+        'version': '1.1.0',
+        'anticipation_engine': _ANT_AVAILABLE,
         'constants': {
             'phi': PHI,
             'delta': DELTA,
@@ -481,9 +485,23 @@ Pokud speak=false, text prázdný."""
 # ============================================
 
 import requests
+from xml.sax.saxutils import escape as xml_escape
 
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
+
+# ============================================
+# ANTICIPATION ENGINE INTEGRATION
+# ============================================
+try:
+    from anticipation_routes import (
+        predict_C as ant_predict_C, calculate_emotions as ant_calculate_emotions,
+        calculate_speech_params as ant_calculate_speech_params,
+        classify_state as ant_classify_state
+    )
+    _ANT_AVAILABLE = True
+except ImportError:
+    _ANT_AVAILABLE = False
 
 # Systémový prompt optimalizovaný pro hlasové odpovědi
 VOICE_SYSTEM_PROMPT = """Jsi Radim, milý a trpělivý hlasový asistent pro české seniory.
@@ -618,24 +636,84 @@ def clean_for_tts(text):
 
 @voice_runtime_bp.route('/chat', methods=['POST'])
 def voice_chat():
-    """Hlasový chat optimalizovaný pro TTS"""
+    """Hlasový chat optimalizovaný pro TTS.
+    Now integrates Anticipation Engine for adaptive speech parameters."""
     try:
         data = request.json or {}
         messages = data.get('messages', [])
         session_id = data.get('session_id', 'default')
-        
+        sensors = data.get('sensors', {})
+        bio = data.get('bio', {})
+
         if not messages:
             return jsonify({'success': False, 'error': 'No messages'}), 400
-        
-        result = get_voice_ai_response(messages)
-        
+
         session = get_session(session_id)
-        session['last_tts_text'] = result.get('response', '')
+
+        # Compute metrics from sensors/bio if provided
+        C = session['C']
+        alpha = session['alpha']
+        if sensors or bio:
+            C = compute_C(sensors, bio)
+            system_state = get_system_state(C)
+            user_text = messages[-1].get('content', '') if messages else ''
+            alpha = compute_alpha(system_state, user_text)
+            kappa = compute_kappa(C, alpha, session['kappa'])
+            session['C'] = C
+            session['alpha'] = alpha
+            session['kappa'] = kappa
+
+        # Get AI response
+        result = get_voice_ai_response(messages)
+        response_text = result.get('response', '')
+
+        session['last_tts_text'] = response_text
         session['conversation'].append({'role': 'user', 'content': messages[-1].get('content', '')})
-        session['conversation'].append({'role': 'assistant', 'content': result.get('response', '')})
-        
+        session['conversation'].append({'role': 'assistant', 'content': response_text})
+
+        # ============================================
+        # ANTICIPATION ENGINE: Adaptive TTS params
+        # ============================================
+        tts_data = get_tts_params(get_system_state(C))  # Base from voice runtime
+        ssml = None
+
+        if _ANT_AVAILABLE and response_text:
+            try:
+                C_pred = ant_predict_C(C, 0, alpha)
+                emotions = ant_calculate_emotions(C_pred, alpha)
+                ant_params = ant_calculate_speech_params(C_pred, alpha, emotions)
+                state = ant_classify_state(C_pred)
+
+                # Override tts_data with anticipation params
+                tts_data['rate'] = ant_params['rate']
+                tts_data['pitch'] = f"{ant_params['pitch']:+.0f}Hz"
+                tts_data['pause_ms'] = ant_params['pause_ms']
+                tts_data['empathy'] = ant_params['empathy']
+                tts_data['state'] = state
+                tts_data['anticipation'] = True
+
+                # Generate SSML
+                rate_pct = int(ant_params['rate'] * 100)
+                pitch_hz = f"{ant_params['pitch']:+.0f}Hz" if ant_params['pitch'] != 0 else "+0Hz"
+                safe_text = xml_escape(response_text)
+                ssml = (f"<speak version='1.0' xml:lang='cs-CZ'>"
+                        f"<voice name='cs-CZ-AntoninNeural'>"
+                        f"<prosody rate='{rate_pct}%' pitch='{pitch_hz}'>"
+                        f"{safe_text}</prosody></voice></speak>")
+            except Exception as ae:
+                logger.warning(f"Anticipation in /chat (non-fatal): {ae}")
+
+        result['tts_params'] = tts_data
+        if ssml:
+            result['ssml'] = ssml
+        result['metrics'] = {
+            'C': round(C, 2),
+            'alpha': round(alpha, 3),
+            'system_state': get_system_state(C)
+        }
+
         return jsonify(result)
-        
+
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 

@@ -22,6 +22,121 @@ logger = logging.getLogger(__name__)
 twilio_bp = Blueprint('twilio_voice', __name__, url_prefix='/api/twilio')
 
 # ============================================================================
+# ANTICIPATION ENGINE INTEGRATION
+# ============================================================================
+# Import math functions from Anticipation Engine (same process)
+try:
+    from anticipation_routes import (
+        predict_C, calculate_emotions, calculate_speech_params,
+        classify_state, PHI as ANT_PHI, C_HARMONY, C_ALERT
+    )
+    ANTICIPATION_AVAILABLE = True
+    logger.info("✅ Anticipation Engine connected to Twilio Voice")
+except ImportError:
+    ANTICIPATION_AVAILABLE = False
+    logger.warning("⚠️ Anticipation Engine not available - using hardcoded TTS params")
+
+
+# Emotional keyword sets for C/α estimation from speech
+_CRISIS_WORDS = {'pomoc', 'help', 'bolest', 'pain', 'spadl', 'fell', 'sos',
+                 'nouzové', 'emergency', 'nemůžu', 'špatně', 'umírám', 'záchranku'}
+_STRESS_WORDS = {'strach', 'afraid', 'bojím', 'nervous', 'nemocný', 'sick',
+                 'unavený', 'tired', 'problém', 'bolí', 'nespím', 'samota', 'sám'}
+_CALM_WORDS = {'děkuji', 'díky', 'hezky', 'nice', 'dobře', 'good', 'krásně',
+               'fajn', 'prima', 'skvěle', 'výborně', 'pohoda'}
+
+
+def estimate_call_C_alpha(call_sid, speech_result, confidence):
+    """
+    Estimate C (consciousness load 0-40) and α (stress 0-1) from phone call context.
+    Uses: speech content keywords, STT confidence, conversation turn count.
+    Smoothed via EMA with previous call state.
+    """
+    call_data = active_calls.get(call_sid, {})
+    history = call_data.get("history", [])
+    turn_count = len(history) // 2
+
+    # Base C
+    C = 5.0
+
+    # Turn count factor (longer calls → slight increase)
+    C += min(turn_count * 0.5, 5)
+
+    # STT confidence factor (low confidence → stress/unclear speech)
+    try:
+        conf_val = float(confidence)
+    except (ValueError, TypeError):
+        conf_val = 0.5
+    if conf_val < 0.5:
+        C += (0.5 - conf_val) * 10  # up to +5
+
+    # Keyword detection
+    text_lower = speech_result.lower()
+    words = set(text_lower.split())
+
+    crisis_hits = len(words & _CRISIS_WORDS)
+    stress_hits = len(words & _STRESS_WORDS)
+    calm_hits = len(words & _CALM_WORDS)
+
+    C += crisis_hits * 8
+    C += stress_hits * 3
+    C -= calm_hits * 2
+    C = max(0, min(C, 40))
+
+    # Alpha estimation
+    alpha = 0.2
+    if crisis_hits > 0:
+        alpha = 0.8
+    elif stress_hits > 0:
+        alpha = 0.5
+    elif calm_hits > 0:
+        alpha = 0.1
+
+    # EMA smoothing with previous state
+    if call_sid in active_calls:
+        prev_C = active_calls[call_sid].get("C", 5.0)
+        prev_alpha = active_calls[call_sid].get("alpha", 0.2)
+        C = 0.7 * C + 0.3 * prev_C
+        alpha = 0.7 * alpha + 0.3 * prev_alpha
+        active_calls[call_sid]["C"] = round(C, 2)
+        active_calls[call_sid]["alpha"] = round(alpha, 3)
+
+    return C, alpha
+
+
+def get_adaptive_speech_params(C, alpha):
+    """
+    Get adaptive speech parameters from Anticipation Engine.
+    Falls back to hardcoded defaults if engine not available.
+
+    Returns: {"rate_pct": "90%", "pitch_hz": "-2Hz", "state": "HARMONY", ...}
+    """
+    if not ANTICIPATION_AVAILABLE:
+        return {"rate_pct": "-5%", "pitch_hz": "-2%", "state": "UNKNOWN"}
+
+    try:
+        C_pred = predict_C(C, 0, alpha)  # No trend for quick estimate
+        emotions = calculate_emotions(C_pred, alpha)
+        params = calculate_speech_params(C_pred, alpha, emotions)
+        state = classify_state(C_pred)
+
+        # Convert to Azure SSML format
+        rate_pct = f"{int(params['rate'] * 100)}%"
+        pitch_hz = f"{params['pitch']:+.0f}Hz" if params['pitch'] != 0 else "+0Hz"
+
+        return {
+            "rate_pct": rate_pct,
+            "pitch_hz": pitch_hz,
+            "state": state,
+            "empathy": params["empathy"],
+            "pause_ms": params["pause_ms"],
+            "raw": params
+        }
+    except Exception as e:
+        logger.error(f"Anticipation fallback: {e}")
+        return {"rate_pct": "-5%", "pitch_hz": "-2%", "state": "FALLBACK"}
+
+# ============================================================================
 # CONFIGURATION
 # ============================================================================
 
@@ -62,17 +177,31 @@ def azure_tts_available():
     return bool(AZURE_SPEECH_KEY and AZURE_SPEECH_REGION)
 
 
-def generate_azure_tts(text):
-    """Generate audio bytes using Azure TTS (AntoninNeural - Radim's voice)"""
+def generate_azure_tts(text, rate_pct=None, pitch_hz=None):
+    """
+    Generate audio bytes using Azure TTS (AntoninNeural - Radim's voice).
+    Now accepts adaptive speech parameters from Anticipation Engine.
+
+    Args:
+        text: Text to synthesize
+        rate_pct: Prosody rate (e.g. "90%", "-5%"). Default: "95%" (= -5%)
+        pitch_hz: Prosody pitch (e.g. "-2Hz", "+0Hz"). Default: "-2Hz"
+    """
     if not azure_tts_available():
         return None
+
+    # Defaults (original hardcoded values) if no adaptive params
+    if rate_pct is None:
+        rate_pct = "-5%"
+    if pitch_hz is None:
+        pitch_hz = "-2%"
 
     try:
         url = f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
         safe_text = xml_escape(text)
         ssml = f"""<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='cs-CZ'>
             <voice name='{RADIM_AZURE_VOICE}'>
-                <prosody rate='-5%' pitch='-2%'>{safe_text}</prosody>
+                <prosody rate='{rate_pct}' pitch='{pitch_hz}'>{safe_text}</prosody>
             </voice>
         </speak>"""
 
@@ -96,14 +225,28 @@ def generate_azure_tts(text):
         return None
 
 
-def twiml_say(text):
-    """Generate TwiML for Radim speaking - uses Azure TTS <Play> or fallback <Say>"""
+def twiml_say(text, speech_params=None):
+    """
+    Generate TwiML for Radim speaking - uses Azure TTS <Play> or fallback <Say>.
+    Now accepts adaptive speech_params from Anticipation Engine.
+
+    Args:
+        text: Text to speak
+        speech_params: dict with rate_pct, pitch_hz from get_adaptive_speech_params()
+    """
     if azure_tts_available():
         # Use Azure TTS via /api/twilio/tts endpoint
-        from urllib.parse import quote
+        from urllib.parse import quote, urlencode
         encoded = quote(text, safe='')
         backend_url = os.environ.get('BACKEND_URL', 'https://radim-brain-2025-be1cd52b04dc.herokuapp.com')
-        return f'<Play>{backend_url}/api/twilio/tts?text={encoded}</Play>'
+        url = f'{backend_url}/api/twilio/tts?text={encoded}'
+        # Append adaptive speech params to URL
+        if speech_params and isinstance(speech_params, dict):
+            if speech_params.get("rate_pct"):
+                url += f'&rate={quote(str(speech_params["rate_pct"]), safe="")}'
+            if speech_params.get("pitch_hz"):
+                url += f'&pitch={quote(str(speech_params["pitch_hz"]), safe="")}'
+        return f'<Play>{url}</Play>'
     else:
         # Fallback: basic male voice - escape XML to prevent TwiML injection
         safe_text = xml_escape(text)
@@ -258,14 +401,16 @@ def twilio_voice_webhook():
         logger.info(f"📞 Incoming call: {caller} → {called} (SID: {call_sid})")
         print(f"📞 Incoming call: {caller} → {called} (SID: {call_sid})")
 
-        # Register active call
+        # Register active call (with C/α tracking for Anticipation Engine)
         active_calls[call_sid] = {
             "from": caller,
             "to": called,
             "started": time.time(),
             "history": [],
             "caller_name": "",
-            "status": "active"
+            "status": "active",
+            "C": 5.0,       # Initial consciousness load (HARMONY)
+            "alpha": 0.2    # Initial stress level (low)
         }
 
         # Personalized greeting
@@ -390,13 +535,29 @@ def twilio_gather_webhook():
     {say_bye}
 </Response>""")
 
+        # ================================================================
+        # ANTICIPATION ENGINE INTEGRATION
+        # Estimate C/α from speech → get adaptive TTS params
+        # ================================================================
+        speech_params = None
+        if ANTICIPATION_AVAILABLE:
+            try:
+                C, alpha = estimate_call_C_alpha(call_sid, speech_result, confidence)
+                speech_params = get_adaptive_speech_params(C, alpha)
+                state = speech_params.get("state", "?")
+                logger.info(f"🧮 Anticipation: C={C:.1f} α={alpha:.2f} → {state} "
+                            f"rate={speech_params.get('rate_pct')} pitch={speech_params.get('pitch_hz')}")
+            except Exception as ae:
+                logger.error(f"Anticipation error (non-fatal): {ae}")
+
         # Normal AI conversation
         ai_response = get_ai_response_for_call(speech_result, call_sid)
         ai_safe = ai_response.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
-        say_ai = twiml_say(ai_safe if not azure_tts_available() else ai_response)
-        say_here3 = twiml_say("Jsem tu pro vás.")
-        say_end = twiml_say("Pokud nepotřebujete nic dalšího, přeji vám krásný den!")
+        # Pass adaptive speech_params to TTS
+        say_ai = twiml_say(ai_safe if not azure_tts_available() else ai_response, speech_params)
+        say_here3 = twiml_say("Jsem tu pro vás.", speech_params)
+        say_end = twiml_say("Pokud nepotřebujete nic dalšího, přeji vám krásný den!", speech_params)
 
         return twiml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -622,12 +783,17 @@ def send_call_invitation():
 
 @twilio_bp.route('/tts', methods=['GET'])
 def twilio_tts():
-    """Azure TTS endpoint - returns MP3 audio of Radim's voice"""
+    """Azure TTS endpoint - returns MP3 audio of Radim's voice.
+    Now reads adaptive rate/pitch params from Anticipation Engine via query string."""
     text = request.args.get('text', '')
     if not text:
         return Response(b'', content_type='audio/mpeg', status=400)
 
-    audio = generate_azure_tts(text)
+    # Read adaptive speech params (from Anticipation Engine via twiml_say URL)
+    rate_pct = request.args.get('rate')    # e.g. "90%" or "-5%"
+    pitch_hz = request.args.get('pitch')   # e.g. "-2Hz" or "+0Hz"
+
+    audio = generate_azure_tts(text, rate_pct=rate_pct, pitch_hz=pitch_hz)
     if audio:
         return Response(audio, content_type='audio/mpeg', headers={
             'Cache-Control': 'public, max-age=3600',
@@ -645,12 +811,13 @@ def twilio_health():
     return jsonify({
         "status": "healthy",
         "service": "Twilio Voice",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "configured": bool(TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN),
         "phone_number": TWILIO_PHONE_NUMBER or "not set",
         "ai_available": bool(ANTHROPIC_API_KEY),
         "azure_tts": azure_tts_available(),
         "voice": RADIM_AZURE_VOICE if azure_tts_available() else RADIM_VOICE_BASIC,
+        "anticipation_engine": ANTICIPATION_AVAILABLE,
         "active_calls": len([d for d in active_calls.values() if d.get("status") not in ("completed", "ended", "failed")]),
         "known_callers": len(known_callers)
     })
