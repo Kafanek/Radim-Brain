@@ -31,7 +31,8 @@ claude_bp = Blueprint('claude', __name__, url_prefix='/api/claude')
 # ============================================================================
 
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
-CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-sonnet-4-5-20250929')
+CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-sonnet-4-6-20250514')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
 # České jmeniny - kompletní kalendář
 NAMEDAY_CALENDAR = {
@@ -108,6 +109,41 @@ def get_claude_client():
     if not ANTHROPIC_API_KEY:
         return None
     return Anthropic(api_key=ANTHROPIC_API_KEY)
+
+def call_gemini_fallback(prompt, system_prompt="", max_tokens=1024):
+    """Gemini fallback when Claude API is unavailable (e.g. credits exhausted)"""
+    if not GEMINI_API_KEY:
+        return None
+    try:
+        import requests as req
+        parts = [{"text": f"{system_prompt}\n\n{prompt}" if system_prompt else prompt}]
+        resp = req.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
+            headers={"Content-Type": "application/json"},
+            json={
+                "contents": [{"parts": parts}],
+                "generationConfig": {
+                    "temperature": 0.7,
+                    "maxOutputTokens": max_tokens,
+                    "topP": 0.9
+                }
+            },
+            timeout=30
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if 'candidates' in data and data['candidates']:
+                return data['candidates'][0]['content']['parts'][0]['text'].strip()
+        logger.warning(f"Gemini fallback error: {resp.status_code}")
+        return None
+    except Exception as e:
+        logger.error(f"Gemini fallback exception: {e}")
+        return None
+
+def is_credit_error(error):
+    """Check if the error is an Anthropic credit balance error"""
+    error_str = str(error).lower()
+    return 'credit balance' in error_str or 'billing' in error_str
 
 def get_today_info():
     """Get today's date info"""
@@ -252,6 +288,21 @@ def chat_with_radim():
         
     except Exception as e:
         logger.error(f"Chat error: {e}")
+        # Gemini fallback on credit/billing errors
+        if is_credit_error(e):
+            info = get_today_info()
+            system = RADIM_SYSTEM_PROMPT.format(
+                date=info["date"], day_name=info["day_name"], nameday=info["nameday"]
+            )
+            gemini_text = call_gemini_fallback(message, system)
+            if gemini_text:
+                return jsonify({
+                    "success": True,
+                    "response": gemini_text,
+                    "intent": "general",
+                    "source": "gemini_fallback",
+                    "timestamp": datetime.utcnow().isoformat()
+                })
         return jsonify({
             "success": False,
             "response": "Promiňte, něco se pokazilo. Zkuste to prosím znovu.",
@@ -262,6 +313,7 @@ def chat_with_radim():
 @claude_bp.route('/news', methods=['POST'])
 def get_news():
     """📰 Získat aktuální české zprávy"""
+    category = 'general'
     try:
         data = request.get_json() or {}
         category = data.get('category', 'general')
@@ -330,8 +382,30 @@ Dnešní datum: {info['date']}"""
         
     except Exception as e:
         logger.error(f"News error: {e}")
+        # Gemini fallback on credit errors
+        if is_credit_error(e):
+            info = get_today_info()
+            gemini_text = call_gemini_fallback(
+                f"Vyhledej {count if 'count' in dir() else 5} aktuálních českých zpráv z kategorie: {category}. Dnešní datum: {info['date']}. Odpověz jako JSON pole [{{'title':'...','description':'...','source':'...'}}]",
+                max_tokens=2048
+            )
+            if gemini_text:
+                try:
+                    json_match = re.search(r'\[.*\]', gemini_text, re.DOTALL)
+                    if json_match:
+                        articles = json.loads(json_match.group())
+                        return jsonify({
+                            "success": True,
+                            "category": category,
+                            "articles": articles,
+                            "ai_summary": f"Zprávy via Gemini",
+                            "source": "gemini_fallback",
+                            "timestamp": datetime.utcnow().isoformat()
+                        })
+                except:
+                    pass
         return jsonify({
-            "success": False,
+            "success": True,
             "category": category,
             "articles": get_fallback_news(category),
             "timestamp": datetime.utcnow().isoformat()
@@ -388,6 +462,7 @@ def get_weather():
 @claude_bp.route('/quiz', methods=['POST'])
 def generate_quiz():
     """🎮 Vygenerovat kvíz"""
+    topic = 'general'
     try:
         data = request.get_json() or {}
         topic = data.get('topic', 'general')
@@ -446,6 +521,7 @@ FORMÁT (pouze JSON):
 @claude_bp.route('/story', methods=['POST'])
 def generate_story():
     """📖 Vygenerovat příběh"""
+    theme = 'nature'
     try:
         data = request.get_json() or {}
         theme = data.get('theme', 'nature')
@@ -589,7 +665,7 @@ def analyze_emotion():
 Kontext: Péče o seniory. Buď citlivý k implicitním emocím."""
 
         response = client.messages.create(
-            model="claude-3-haiku-20240307",
+            model="claude-haiku-4-5-20251001",
             max_tokens=300,
             system=system,
             messages=[{"role": "user", "content": f"Analyzuj emoce: {text}"}]

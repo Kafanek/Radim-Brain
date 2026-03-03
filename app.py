@@ -248,12 +248,24 @@ def azure_tts_proxy():
         
         if not text:
             return jsonify({'error': 'Text is required'}), 400
-        
+
+        # Sanitize inputs to prevent SSML injection
+        from xml.sax.saxutils import escape as xml_escape
+        safe_text = xml_escape(text)
+        # Whitelist voice names and validate rate/pitch format
+        import re as _re
+        if not _re.match(r'^[a-zA-Z]{2}-[A-Z]{2}-[a-zA-Z]+$', voice):
+            voice = 'cs-CZ-AntoninNeural'
+        if not _re.match(r'^[0-9.]+$', str(rate).replace('%', '')):
+            rate = '0.85'
+        if not _re.match(r'^[+-]?[0-9]+Hz$', pitch):
+            pitch = '+0Hz'
+
         # Build SSML
         ssml = f"""<speak version='1.0' xml:lang='cs-CZ'>
             <voice name='{voice}'>
                 <prosody rate='{rate}' pitch='{pitch}'>
-                    {text}
+                    {safe_text}
                 </prosody>
             </voice>
         </speak>"""
