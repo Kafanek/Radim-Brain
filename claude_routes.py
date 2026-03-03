@@ -760,7 +760,8 @@ def get_consciousness_state():
         emotions = data.get('emotions', {})
 
         harmony = calculate_harmony(emotions)
-        crisis_level = emotions.get('crisis_level', 0)
+        # Accept crisis_level from top-level OR nested in emotions
+        crisis_level = data.get('crisis_level', emotions.get('crisis_level', 0))
 
         # Convert crisis_level (0-10) to C (0-40) for Anticipation Engine
         # crisis_level 0→C=5, 3→C=12, 7→C=27, 10→C=40
