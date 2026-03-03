@@ -23,6 +23,17 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Anticipation Engine integration
+try:
+    from anticipation_routes import (
+        predict_C as _cl_predict_C, calculate_emotions as _cl_ant_emotions,
+        calculate_speech_params as _cl_ant_speech, classify_state as _cl_classify,
+        C_HARMONY as _CL_C_HARMONY, C_ALERT as _CL_C_ALERT, C_MAX as _CL_C_MAX
+    )
+    _CL_ANT_AVAILABLE = True
+except ImportError:
+    _CL_ANT_AVAILABLE = False
+
 # Flask Blueprint
 claude_bp = Blueprint('claude', __name__, url_prefix='/api/claude')
 
@@ -747,25 +758,62 @@ def get_consciousness_state():
     try:
         data = request.get_json() or {}
         emotions = data.get('emotions', {})
-        
+
         harmony = calculate_harmony(emotions)
         crisis_level = emotions.get('crisis_level', 0)
-        
-        speech_params = {
-            "rate": 0.9 if crisis_level < 3 else 0.75,
-            "pitch": 1.0 if crisis_level < 5 else 0.95,
-            "pause_multiplier": 1.0 + (crisis_level * 0.1),
-            "empathy_level": min(1.0, 0.5 + (emotions.get('sadness', 0) + emotions.get('fear', 0)) * 0.5)
-        }
-        
+
+        # Convert crisis_level (0-10) to C (0-40) for Anticipation Engine
+        # crisis_level 0→C=5, 3→C=12, 7→C=27, 10→C=40
+        C_estimated = 5 + crisis_level * 3.5
+        alpha_estimated = min(1.0, crisis_level / 10.0)
+
+        # Use Anticipation Engine for speech params if available
+        anticipation_data = None
+        if _CL_ANT_AVAILABLE:
+            try:
+                C_pred = _cl_predict_C(C_estimated, 0, alpha_estimated)
+                ant_emo = _cl_ant_emotions(C_pred, alpha_estimated)
+                ant_params = _cl_ant_speech(C_pred, alpha_estimated, ant_emo)
+                ant_state = _cl_classify(C_pred)
+
+                speech_params = {
+                    "rate": ant_params["rate"],
+                    "pitch": ant_params["pitch"],
+                    "pause_ms": ant_params["pause_ms"],
+                    "empathy_level": ant_params["empathy"],
+                    "anticipation_state": ant_state,
+                    "C": round(C_estimated, 1),
+                    "alpha": round(alpha_estimated, 2)
+                }
+                anticipation_data = {
+                    "state": ant_state,
+                    "emotions": {k: round(v, 3) for k, v in ant_emo.items()},
+                    "adjustments": ant_params.get("adjustments", {})
+                }
+            except Exception as ae:
+                logger.warning(f"Anticipation in consciousness-state (non-fatal): {ae}")
+                speech_params = {
+                    "rate": 0.9 if crisis_level < 3 else 0.75,
+                    "pitch": 0 if crisis_level < 5 else -2,
+                    "pause_ms": 300 + (crisis_level * 50),
+                    "empathy_level": min(1.0, 0.5 + (emotions.get('sadness', 0) + emotions.get('fear', 0)) * 0.5)
+                }
+        else:
+            speech_params = {
+                "rate": 0.9 if crisis_level < 3 else 0.75,
+                "pitch": 0 if crisis_level < 5 else -2,
+                "pause_ms": 300 + (crisis_level * 50),
+                "empathy_level": min(1.0, 0.5 + (emotions.get('sadness', 0) + emotions.get('fear', 0)) * 0.5)
+            }
+
         suggestions = []
         if crisis_level >= 7:
             suggestions.append({"type": "offer", "text": "Chcete zavolat někomu blízkému?", "action": "contact_family"})
             suggestions.append({"type": "offer", "text": "Mohu vám nabídnout dýchací cvičení?", "action": "breathing"})
         elif crisis_level >= 4:
             suggestions.append({"type": "offer", "text": "Chcete si o tom promluvit?", "action": "talk"})
-        
-        return jsonify({
+
+        result = {
             "success": True,
             "harmony": harmony,
             "crisis_level": crisis_level,
@@ -773,8 +821,12 @@ def get_consciousness_state():
             "suggestions": suggestions,
             "dominant_emotion": emotions.get('dominant_emotion', 'neutral'),
             "timestamp": datetime.utcnow().isoformat()
-        })
-        
+        }
+        if anticipation_data:
+            result["anticipation"] = anticipation_data
+
+        return jsonify(result)
+
     except Exception as e:
         logger.error(f"Consciousness state error: {e}")
         return jsonify({
@@ -782,7 +834,7 @@ def get_consciousness_state():
             "error": str(e),
             "harmony": 0.5,
             "crisis_level": 0,
-            "speech_params": {"rate": 0.9, "pitch": 1.0, "pause_multiplier": 1.0, "empathy_level": 0.5},
+            "speech_params": {"rate": 0.9, "pitch": 0, "pause_ms": 300, "empathy_level": 0.5},
             "suggestions": []
         })
 

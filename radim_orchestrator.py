@@ -15,6 +15,16 @@ from xml.sax.saxutils import escape as xml_escape
 
 radim_bp = Blueprint('radim', __name__)
 
+# Anticipation Engine integration
+try:
+    from anticipation_routes import (
+        predict_C as _orch_predict_C, calculate_emotions as _orch_emotions,
+        calculate_speech_params as _orch_speech_params, classify_state as _orch_classify
+    )
+    _ORCH_ANT_AVAILABLE = True
+except ImportError:
+    _ORCH_ANT_AVAILABLE = False
+
 # ============================================
 # KONFIGURACE
 # ============================================
@@ -408,6 +418,23 @@ def radim_voice_speak():
         }
         settings = emotion_settings.get(emotion, emotion_settings['friendly'])
 
+        # Anticipation Engine: adaptive params from C/α
+        ant_state = None
+        C_val = data.get('C')
+        alpha_val = data.get('alpha')
+        if C_val is not None and alpha_val is not None and _ORCH_ANT_AVAILABLE:
+            try:
+                C_pred = _orch_predict_C(float(C_val), 0, float(alpha_val))
+                emo = _orch_emotions(C_pred, float(alpha_val))
+                ant_params = _orch_speech_params(C_pred, float(alpha_val), emo)
+                ant_state = _orch_classify(C_pred)
+                settings = {
+                    'rate': str(ant_params['rate']),
+                    'pitch': f"{ant_params['pitch']:+.0f}%"
+                }
+            except Exception:
+                pass  # Fall back to emotion_settings
+
         ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="cs-CZ">
             <voice name="{voice}">
                 <prosody rate="{settings['rate']}" pitch="{settings['pitch']}" volume="loud">{safe_text}</prosody>
@@ -427,13 +454,16 @@ def radim_voice_speak():
         
         if response.status_code == 200:
             audio_base64 = base64.b64encode(response.content).decode('utf-8')
-            return jsonify({
+            resp_data = {
                 'success': True,
                 'audio': audio_base64,
                 'format': 'mp3',
                 'voice': voice,
                 'emotion': emotion
-            })
+            }
+            if ant_state:
+                resp_data['anticipation_state'] = ant_state
+            return jsonify(resp_data)
         
         return jsonify({'success': False, 'error': f'Azure TTS error: {response.status_code}'}), 500
         
@@ -447,12 +477,13 @@ def radim_health():
         'success': True,
         'status': 'healthy',
         'service': 'Radim WhatsApp Orchestrator',
-        'version': '1.0.0',
+        'version': '1.1.0',
         'features': {
             'whatsapp_chat': True,
             'task_management': True,
             'story_templates': True,
             'voice_synthesis': bool(os.environ.get('AZURE_SPEECH_KEY')),
+            'anticipation_engine': _ORCH_ANT_AVAILABLE,
             'ai_provider': 'gemini' if GEMINI_API_KEY else 'none'
         },
         'timestamp': datetime.utcnow().isoformat() + 'Z'

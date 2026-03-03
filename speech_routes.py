@@ -14,6 +14,16 @@ from flask import Blueprint, request, jsonify, Response
 
 speech_bp = Blueprint('speech', __name__, url_prefix='/api/speech')
 
+# Anticipation Engine integration
+try:
+    from anticipation_routes import (
+        predict_C as _ant_predict_C, calculate_emotions as _ant_emotions,
+        calculate_speech_params as _ant_speech_params, classify_state as _ant_classify
+    )
+    _SPEECH_ANT_AVAILABLE = True
+except ImportError:
+    _SPEECH_ANT_AVAILABLE = False
+
 # Azure Speech konfigurace
 AZURE_SPEECH_KEY = os.environ.get('AZURE_SPEECH_KEY')
 AZURE_SPEECH_REGION = os.environ.get('AZURE_SPEECH_REGION', 'westeurope')
@@ -30,6 +40,21 @@ SENIOR_DEFAULTS = {
     'pitch': '-5%',
     'volume': 'loud',
 }
+
+
+def _get_anticipation_tts(C, alpha):
+    """Get adaptive rate/pitch from Anticipation Engine. Returns (rate_str, pitch_str) or None."""
+    if not _SPEECH_ANT_AVAILABLE:
+        return None
+    try:
+        C_pred = _ant_predict_C(C, 0, alpha)
+        emotions = _ant_emotions(C_pred, alpha)
+        params = _ant_speech_params(C_pred, alpha, emotions)
+        rate_str = str(params['rate'])
+        pitch_str = f"{params['pitch']:+.0f}%" if params['pitch'] != 0 else "-0%"
+        return rate_str, pitch_str, _ant_classify(C_pred), params
+    except Exception:
+        return None
 
 # ============================================
 # TEXT-TO-SPEECH (REST API)
@@ -53,6 +78,16 @@ def synthesize_speech():
             return jsonify({'success': False, 'error': 'Text je povinný'}), 400
         
         azure_voice = CZECH_VOICES.get(voice_name, CZECH_VOICES['antonin'])
+
+        # Anticipation Engine: if C and alpha provided, compute adaptive params
+        C_val = data.get('C')
+        alpha_val = data.get('alpha')
+        ant_state = None
+        if C_val is not None and alpha_val is not None and _SPEECH_ANT_AVAILABLE:
+            ant_result = _get_anticipation_tts(float(C_val), float(alpha_val))
+            if ant_result:
+                rate, pitch, ant_state, _ = ant_result
+                senior_mode = False  # Don't override with defaults
 
         if senior_mode:
             rate = SENIOR_DEFAULTS['rate']
@@ -94,13 +129,16 @@ def synthesize_speech():
             
             if return_base64:
                 audio_base64 = base64.b64encode(audio_data).decode('utf-8')
-                return jsonify({
+                resp_data = {
                     'success': True,
                     'audio': audio_base64,
                     'format': 'mp3',
                     'voice': azure_voice,
                     'text': text
-                })
+                }
+                if ant_state:
+                    resp_data['anticipation_state'] = ant_state
+                return jsonify(resp_data)
             else:
                 return Response(
                     audio_data,
@@ -138,15 +176,25 @@ def synthesize_stream():
         
         azure_voice = CZECH_VOICES.get(voice_name, CZECH_VOICES['antonin'])
         
+        # Anticipation Engine adaptive params
+        rate = SENIOR_DEFAULTS['rate']
+        pitch = SENIOR_DEFAULTS['pitch']
+        C_val = data.get('C') if data else None
+        alpha_val = data.get('alpha') if data else None
+        if C_val is not None and alpha_val is not None and _SPEECH_ANT_AVAILABLE:
+            ant_result = _get_anticipation_tts(float(C_val), float(alpha_val))
+            if ant_result:
+                rate, pitch, _, _ = ant_result
+
         safe_text = xml_escape(text)
         ssml = f'''<speak version="1.0" xml:lang="cs-CZ">
             <voice name="{azure_voice}">
-                <prosody rate="{SENIOR_DEFAULTS['rate']}" pitch="{SENIOR_DEFAULTS['pitch']}">
+                <prosody rate="{rate}" pitch="{pitch}">
                     {safe_text}
                 </prosody>
             </voice>
         </speak>'''
-        
+
         tts_url = f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
         
         headers = {
@@ -324,6 +372,7 @@ def speech_health():
                 'tts_ready': True,
                 'stt_ready': True,
                 'api_type': 'REST',
+                'anticipation_engine': _SPEECH_ANT_AVAILABLE,
                 'voices_available': list(CZECH_VOICES.keys())
             })
         else:
@@ -411,14 +460,15 @@ def get_azure_config():
 # ============================================
 # RADIM HELPER FUNCTION
 # ============================================
-def radim_speak(text, emotion='friendly'):
+def radim_speak(text, emotion='friendly', C=None, alpha=None):
     """
-    Helper funkce pro Radima - převede text na audio data
-    Vrací bytes audio data nebo None při chybě
+    Helper funkce pro Radima - převede text na audio data.
+    Accepts optional C/α from Anticipation Engine for adaptive speech.
+    Vrací bytes audio data nebo None při chybě.
     """
     if not AZURE_SPEECH_KEY or not text:
         return None
-    
+
     try:
         emotion_styles = {
             'friendly': ('friendly', '1.2'),
@@ -427,15 +477,29 @@ def radim_speak(text, emotion='friendly'):
             'empathetic': ('empathetic', '1.1'),
             'serious': ('serious', '0.9')
         }
-        
+
         style, degree = emotion_styles.get(emotion, ('friendly', '1.2'))
+
+        # Adaptive params from Anticipation Engine
+        rate = SENIOR_DEFAULTS['rate']
+        pitch = SENIOR_DEFAULTS['pitch']
+        if C is not None and alpha is not None and _SPEECH_ANT_AVAILABLE:
+            ant_result = _get_anticipation_tts(float(C), float(alpha))
+            if ant_result:
+                rate, pitch, ant_state, ant_params = ant_result
+                # Also adapt style based on anticipation state
+                if ant_state == 'CRISIS':
+                    style, degree = 'calm', '1.0'
+                elif ant_state == 'ALERT':
+                    style, degree = 'empathetic', '1.1'
+
         safe_text = xml_escape(text)
 
         ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
                xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="cs-CZ">
             <voice name="cs-CZ-AntoninNeural">
                 <mstts:express-as style="{style}" styledegree="{degree}">
-                    <prosody rate="{SENIOR_DEFAULTS['rate']}" pitch="{SENIOR_DEFAULTS['pitch']}">
+                    <prosody rate="{rate}" pitch="{pitch}">
                         {safe_text}
                     </prosody>
                 </mstts:express-as>
