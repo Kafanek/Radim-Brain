@@ -1567,25 +1567,28 @@ def kal_radim_health():
 @app.route('/kal/radim/history/<user_id>')
 def kal_radim_history(user_id):
     """Get user conversation history + stats"""
-    if MEMORY_AVAILABLE:
-        from memory_routes import CONVERSATION_HISTORY, USER_LEARNING
-        history = CONVERSATION_HISTORY.get(user_id, [])
-        learning = USER_LEARNING[user_id]
-        limit = request.args.get('limit', 10, type=int)
-        return jsonify({
-            "success": True,
-            "conversations": history[-limit:],
-            "stats": {
-                "total_conversations": len(history),
-                "days_active": 1,
-                "breakthrough_count": 0,
-                "milestone_count": 0
-            },
-            "recent_mood": learning.get("last_mood", "neutral"),
-            "progress": "stabilni",
-            "breakthroughs": [],
-            "milestones": []
-        }), 200
+    try:
+        if MEMORY_AVAILABLE:
+            from memory_routes import get_conversation_messages, get_user_context
+            limit = request.args.get('limit', 10, type=int)
+            history = get_conversation_messages(user_id, limit=limit)
+            ctx = get_user_context(user_id)
+            return jsonify({
+                "success": True,
+                "conversations": history,
+                "stats": {
+                    "total_conversations": len(history),
+                    "days_active": 1,
+                    "breakthrough_count": 0,
+                    "milestone_count": 0
+                },
+                "recent_mood": ctx.get("last_mood", "neutral"),
+                "progress": "stabilni",
+                "breakthroughs": [],
+                "milestones": []
+            }), 200
+    except Exception as e:
+        print(f"⚠️ kal_radim_history error: {e}")
     return jsonify({"success": True, "conversations": [], "stats": {"total_conversations": 0, "days_active": 0, "breakthrough_count": 0, "milestone_count": 0}, "recent_mood": "neutral", "progress": "start", "breakthroughs": [], "milestones": []}), 200
 
 @app.route('/kal/radim/user/register', methods=['POST', 'OPTIONS'])
@@ -1595,15 +1598,19 @@ def kal_radim_register():
         return '', 204
     data = request.get_json() or {}
     user_id = data.get('user_id', str(uuid.uuid4()))
-    if MEMORY_AVAILABLE:
-        from memory_routes import USER_PROFILES, USER_LEARNING
-        if user_id not in USER_PROFILES:
-            USER_PROFILES[user_id] = {
-                "user_id": user_id,
-                "created_at": datetime.utcnow().isoformat(),
-                "first_message": data.get("first_message", "")
-            }
-        USER_LEARNING[user_id]["interaction_count"] += 0  # init defaultdict
+    try:
+        if MEMORY_AVAILABLE:
+            from memory_routes import _db_load_profile, _db_save_profile
+            profile = _db_load_profile(user_id)
+            if not profile:
+                profile = {
+                    "user_id": user_id,
+                    "created_at": datetime.utcnow().isoformat(),
+                    "first_message": data.get("first_message", "")
+                }
+                _db_save_profile(user_id, profile)
+    except Exception as e:
+        print(f"⚠️ kal_radim_register error: {e}")
     return jsonify({"success": True, "message": "User registered", "user": {"user_id": user_id}}), 200
 
 @app.route('/kal/radim/user/<user_id>', methods=['PUT', 'OPTIONS'])
@@ -1612,32 +1619,37 @@ def kal_radim_update_user(user_id):
     if request.method == 'OPTIONS':
         return '', 204
     data = request.get_json() or {}
-    if MEMORY_AVAILABLE:
-        from memory_routes import USER_PROFILES
-        profile = USER_PROFILES.get(user_id, {"user_id": user_id})
-        profile.update(data)
-        USER_PROFILES[user_id] = profile
-        return jsonify({"success": True, "user": profile}), 200
+    try:
+        if MEMORY_AVAILABLE:
+            from memory_routes import _db_load_profile, _db_save_profile
+            profile = _db_load_profile(user_id) or {"user_id": user_id}
+            profile.update(data)
+            _db_save_profile(user_id, profile)
+            return jsonify({"success": True, "user": profile}), 200
+    except Exception as e:
+        print(f"⚠️ kal_radim_update_user error: {e}")
     return jsonify({"success": True, "user": {"user_id": user_id}}), 200
 
 @app.route('/kal/radim/insights/<user_id>')
 def kal_radim_insights(user_id):
     """Get user insights from learning data"""
-    if MEMORY_AVAILABLE:
-        from memory_routes import USER_LEARNING, CONVERSATION_HISTORY
-        learning = USER_LEARNING[user_id]
-        history = CONVERSATION_HISTORY.get(user_id, [])
-        return jsonify({
-            "success": True,
-            "insights": {
-                "total_interactions": learning.get("interaction_count", 0),
-                "preferred_length": learning.get("preferred_length", "medium"),
-                "communication_style": learning.get("communication_style", "warm"),
-                "last_mood": learning.get("last_mood", "neutral"),
-                "top_topics": dict(list(learning.get("topics", {}).items())[:5]),
-                "conversation_count": len(history)
-            }
-        }), 200
+    try:
+        if MEMORY_AVAILABLE:
+            from memory_routes import get_user_context
+            ctx = get_user_context(user_id)
+            return jsonify({
+                "success": True,
+                "insights": {
+                    "total_interactions": ctx.get("interaction_count", 0),
+                    "preferred_length": ctx.get("preferred_length", "medium"),
+                    "communication_style": ctx.get("communication_style", "warm"),
+                    "last_mood": ctx.get("last_mood", "neutral"),
+                    "top_topics": {t: 1 for t in ctx.get("top_interests", [])},
+                    "conversation_count": len(ctx.get("recent_history", []))
+                }
+            }), 200
+    except Exception as e:
+        print(f"⚠️ kal_radim_insights error: {e}")
     return jsonify({"success": True, "insights": {"total_interactions": 0, "preferred_length": "medium", "communication_style": "warm", "last_mood": "neutral", "top_topics": {}, "conversation_count": 0}}), 200
 
 @app.route('/kal/radim/conversation', methods=['POST', 'OPTIONS'])
@@ -1647,30 +1659,43 @@ def kal_radim_conversation():
         return '', 204
     data = request.get_json() or {}
     user_id = data.get('user_id', 'anonymous')
-    if MEMORY_AVAILABLE:
-        from memory_routes import record_interaction
-        record_interaction(
-            user_id=user_id,
-            user_message=data.get('user_message', ''),
-            assistant_response=data.get('kafanek_reply', '')
-        )
+    try:
+        if MEMORY_AVAILABLE:
+            from memory_routes import record_interaction
+            record_interaction(
+                user_id=user_id,
+                user_message=data.get('user_message', ''),
+                assistant_response=data.get('kafanek_reply', '')
+            )
+    except Exception as e:
+        print(f"⚠️ kal_radim_conversation error: {e}")
     return jsonify({"success": True, "conversation": {"saved": True}}), 200
 
 @app.route('/kal/radim/stats')
 def kal_radim_stats():
     """Global Radim stats"""
-    if MEMORY_AVAILABLE:
-        from memory_routes import USER_PROFILES, CONVERSATION_HISTORY
-        total_convs = sum(len(v) for v in CONVERSATION_HISTORY.values())
-        return jsonify({
-            "success": True,
-            "message": f"Radim pomohl {len(USER_PROFILES)} lidem v {total_convs} konverzacich",
-            "impact": {
-                "total_users": len(USER_PROFILES),
-                "total_conversations": total_convs,
-                "active_today": len(USER_PROFILES)
-            }
-        }), 200
+    try:
+        if MEMORY_AVAILABLE:
+            from database import get_connection, is_postgres
+            db = get_connection()
+            if is_postgres():
+                profiles_count = db.execute("SELECT COUNT(*) as cnt FROM memory_profiles").fetchone()['cnt']
+                history_count = db.execute("SELECT COUNT(*) as cnt FROM memory_history").fetchone()['cnt']
+            else:
+                profiles_count = db.execute("SELECT COUNT(*) as cnt FROM memory_profiles").fetchone()['cnt']
+                history_count = db.execute("SELECT COUNT(*) as cnt FROM memory_history").fetchone()['cnt']
+            db.close()
+            return jsonify({
+                "success": True,
+                "message": f"Radim pomohl {profiles_count} lidem v {history_count} konverzacich",
+                "impact": {
+                    "total_users": profiles_count,
+                    "total_conversations": history_count,
+                    "active_today": profiles_count
+                }
+            }), 200
+    except Exception as e:
+        print(f"⚠️ kal_radim_stats error: {e}")
     return jsonify({"success": True, "message": "Radim stats", "impact": {"total_users": 0, "total_conversations": 0, "active_today": 0}}), 200
 
 @app.route('/api/proxy/azure/speech-token')
