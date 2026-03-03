@@ -1784,6 +1784,8 @@ def health():
         blueprints['dashboard'] = {'prefix': '/api/dashboard/*', 'version': '1.0.0', 'status': 'active'}
     if TWILIO_AVAILABLE:
         blueprints['twilio_voice'] = {'prefix': '/api/twilio/*', 'version': '1.0.0', 'status': 'active'}
+    if LIBRARY_AVAILABLE:
+        blueprints['library'] = {'prefix': '/kal/library/*', 'version': '1.0.0', 'status': 'active'}
 
     return jsonify({
         'status': 'healthy',
