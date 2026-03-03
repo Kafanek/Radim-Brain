@@ -34,6 +34,20 @@ try:
 except ImportError:
     _CL_ANT_AVAILABLE = False
 
+# Memory persistence
+try:
+    from memory_routes import record_interaction, get_conversation_messages, get_user_context
+    _CL_MEMORY_AVAILABLE = True
+except ImportError:
+    _CL_MEMORY_AVAILABLE = False
+
+# DB access for memory notes
+try:
+    from database import get_connection, is_postgres
+    _CL_DB_AVAILABLE = True
+except ImportError:
+    _CL_DB_AVAILABLE = False
+
 # Flask Blueprint
 claude_bp = Blueprint('claude', __name__, url_prefix='/api/claude')
 
@@ -851,31 +865,30 @@ def calculate_harmony(emotions):
 
 @claude_bp.route('/memory/save', methods=['POST'])
 def save_memory_note():
-    """📝 Uložit poznámku do paměti"""
+    """📝 Uložit poznámku do paměti (persisted to PostgreSQL)"""
     try:
         data = request.get_json() or {}
         user_id = data.get('user_id', 'anonymous')
         note_type = data.get('type', 'observation')
         content = data.get('content', '')
-        emotions = data.get('emotions', {})
-        
-        note = {
-            "user_id": user_id,
-            "type": note_type,
-            "content": content[:500],
-            "emotions": emotions,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        
+
+        if not content:
+            return jsonify({"success": False, "error": "Empty content"}), 400
+
+        # Persist via memory_routes (saves to DB)
+        if _CL_MEMORY_AVAILABLE:
+            record_interaction(user_id, f"[{note_type}] {content[:500]}", "Poznámka uložena.")
+
         logger.info(f"Memory note saved | User: {user_id} | Type: {note_type}")
-        
+
         return jsonify({
             "success": True,
+            "persisted": _CL_MEMORY_AVAILABLE,
             "note_id": f"note_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
             "message": "Poznámka uložena",
             "timestamp": datetime.utcnow().isoformat()
         })
-        
+
     except Exception as e:
         logger.error(f"Memory save error: {e}")
         return jsonify({"success": False, "error": str(e)})
@@ -883,18 +896,29 @@ def save_memory_note():
 
 @claude_bp.route('/memory/recall', methods=['POST'])
 def recall_memory():
-    """🔍 Vybavit si vzpomínky"""
+    """🔍 Vybavit si vzpomínky (from PostgreSQL)"""
     try:
         data = request.get_json() or {}
         user_id = data.get('user_id', 'anonymous')
-        
+        limit = data.get('limit', 20)
+
+        memories = []
+        context = {}
+
+        if _CL_MEMORY_AVAILABLE:
+            messages = get_conversation_messages(user_id, limit=limit)
+            memories = messages
+            context = get_user_context(user_id)
+
         return jsonify({
             "success": True,
-            "memories": [],
-            "message": "Paměť zatím prázdná",
+            "memories": memories,
+            "context": context,
+            "count": len(memories),
+            "message": f"{len(memories)} vzpomínek nalezeno" if memories else "Paměť zatím prázdná",
             "timestamp": datetime.utcnow().isoformat()
         })
-        
+
     except Exception as e:
         logger.error(f"Memory recall error: {e}")
         return jsonify({"success": False, "error": str(e), "memories": []})

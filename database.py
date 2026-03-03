@@ -341,6 +341,29 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_contacts_user ON chat_contacts(user_id);
             CREATE INDEX IF NOT EXISTS idx_media_message ON chat_media(message_id);
             CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
+
+            CREATE TABLE IF NOT EXISTS memory_profiles (
+                user_id TEXT PRIMARY KEY,
+                data JSONB NOT NULL DEFAULT '{}',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS memory_history (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS memory_learning (
+                user_id TEXT PRIMARY KEY,
+                data JSONB NOT NULL DEFAULT '{}',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_memory_history_user ON memory_history(user_id);
+            CREATE INDEX IF NOT EXISTS idx_memory_history_ts ON memory_history(created_at DESC);
         ''')
 
         # Upsert Radim AI assistant
@@ -449,6 +472,29 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_contacts_user ON chat_contacts(user_id);
             CREATE INDEX IF NOT EXISTS idx_media_message ON chat_media(message_id);
             CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
+
+            CREATE TABLE IF NOT EXISTS memory_profiles (
+                user_id TEXT PRIMARY KEY,
+                data TEXT NOT NULL DEFAULT '{}',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS memory_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS memory_learning (
+                user_id TEXT PRIMARY KEY,
+                data TEXT NOT NULL DEFAULT '{}',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_memory_history_user ON memory_history(user_id);
+            CREATE INDEX IF NOT EXISTS idx_memory_history_ts ON memory_history(created_at DESC);
         ''')
 
         db.execute('''
@@ -460,7 +506,7 @@ def init_db():
     db.close()
 
     db_type = "PostgreSQL" if USE_POSTGRES else "SQLite"
-    print(f"✅ Databáze inicializována ({db_type}, v3.1)")
+    print(f"✅ Databáze inicializována ({db_type}, v3.2)")
 
 
 def is_postgres():

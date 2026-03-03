@@ -2,8 +2,9 @@
 """
 🧠 RADIM MEMORY ROUTES - Adaptivní učící se komunikace
 Conversation history + User profiles + Learning
+PostgreSQL persistence with in-memory cache
 
-Version: 1.0.0
+Version: 2.0.0
 """
 
 import os
@@ -19,26 +20,228 @@ logger = logging.getLogger(__name__)
 memory_bp = Blueprint('memory', __name__, url_prefix='/api/memory')
 
 # ============================================================================
-# IN-MEMORY STORAGE (Pro produkci použít Redis/PostgreSQL)
+# DATABASE LAYER
 # ============================================================================
 
-# Conversation history per user (last N messages)
-CONVERSATION_HISTORY = defaultdict(list)
-MAX_HISTORY = 20  # Posledních 20 zpráv
+try:
+    from database import get_connection, is_postgres
+    _DB_AVAILABLE = True
+except ImportError:
+    _DB_AVAILABLE = False
+    logger.warning("⚠️ database module not available - memory will not persist")
 
-# User profiles
-USER_PROFILES = {}
+MAX_HISTORY = 50  # Posledních 50 zpráv v DB
 
-# Learning data - témata zájmu, preference
-USER_LEARNING = defaultdict(lambda: {
-    "topics": defaultdict(int),      # Počet dotazů na téma
-    "preferred_length": "medium",    # short/medium/long
-    "communication_style": "warm",   # warm/formal/casual
-    "last_mood": "neutral",          # happy/neutral/sad/anxious
-    "interaction_count": 0,
-    "successful_interactions": 0,
-    "last_interaction": None
-})
+
+def _db_load_profile(user_id: str) -> dict:
+    """Load user profile from DB"""
+    if not _DB_AVAILABLE:
+        return {}
+    try:
+        db = get_connection()
+        row = db.execute(
+            "SELECT data FROM memory_profiles WHERE user_id = %s" if is_postgres()
+            else "SELECT data FROM memory_profiles WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+        db.close()
+        if row:
+            data = row['data'] if isinstance(row['data'], dict) else json.loads(row['data'])
+            return data
+        return {}
+    except Exception as e:
+        logger.warning(f"DB load profile error: {e}")
+        return {}
+
+
+def _db_save_profile(user_id: str, profile: dict):
+    """Save user profile to DB"""
+    if not _DB_AVAILABLE:
+        return
+    try:
+        db = get_connection()
+        data_json = json.dumps(profile, ensure_ascii=False)
+        if is_postgres():
+            db.execute(
+                """INSERT INTO memory_profiles (user_id, data, updated_at)
+                   VALUES (%s, %s, %s)
+                   ON CONFLICT (user_id) DO UPDATE SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at""",
+                (user_id, data_json, datetime.utcnow())
+            )
+        else:
+            db.execute(
+                "INSERT OR REPLACE INTO memory_profiles (user_id, data, updated_at) VALUES (?, ?, ?)",
+                (user_id, data_json, datetime.utcnow().isoformat())
+            )
+        db.commit()
+        db.close()
+    except Exception as e:
+        logger.warning(f"DB save profile error: {e}")
+
+
+def _db_delete_profile(user_id: str):
+    """Delete all user data from DB"""
+    if not _DB_AVAILABLE:
+        return
+    try:
+        db = get_connection()
+        p = "%s" if is_postgres() else "?"
+        db.execute(f"DELETE FROM memory_profiles WHERE user_id = {p}", (user_id,))
+        db.execute(f"DELETE FROM memory_history WHERE user_id = {p}", (user_id,))
+        db.execute(f"DELETE FROM memory_learning WHERE user_id = {p}", (user_id,))
+        db.commit()
+        db.close()
+    except Exception as e:
+        logger.warning(f"DB delete profile error: {e}")
+
+
+def _db_load_history(user_id: str, limit: int = 50) -> list:
+    """Load conversation history from DB"""
+    if not _DB_AVAILABLE:
+        return []
+    try:
+        db = get_connection()
+        if is_postgres():
+            rows = db.execute(
+                "SELECT role, content, created_at FROM memory_history WHERE user_id = %s ORDER BY created_at DESC LIMIT %s",
+                (user_id, limit)
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT role, content, created_at FROM memory_history WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                (user_id, limit)
+            ).fetchall()
+        db.close()
+        # Reverse so oldest first
+        messages = []
+        for r in reversed(rows):
+            ts = r['created_at']
+            if hasattr(ts, 'isoformat'):
+                ts = ts.isoformat()
+            messages.append({
+                "role": r['role'],
+                "content": r['content'],
+                "timestamp": str(ts)
+            })
+        return messages
+    except Exception as e:
+        logger.warning(f"DB load history error: {e}")
+        return []
+
+
+def _db_add_history(user_id: str, role: str, content: str):
+    """Add message to conversation history in DB"""
+    if not _DB_AVAILABLE:
+        return
+    try:
+        db = get_connection()
+        if is_postgres():
+            db.execute(
+                "INSERT INTO memory_history (user_id, role, content) VALUES (%s, %s, %s)",
+                (user_id, role, content)
+            )
+            # Trim old messages (keep last MAX_HISTORY)
+            db.execute(
+                """DELETE FROM memory_history WHERE id IN (
+                    SELECT id FROM memory_history WHERE user_id = %s
+                    ORDER BY created_at DESC OFFSET %s
+                )""",
+                (user_id, MAX_HISTORY)
+            )
+        else:
+            db.execute(
+                "INSERT INTO memory_history (user_id, role, content) VALUES (?, ?, ?)",
+                (user_id, role, content)
+            )
+            db.execute(
+                """DELETE FROM memory_history WHERE id NOT IN (
+                    SELECT id FROM memory_history WHERE user_id = ?
+                    ORDER BY created_at DESC LIMIT ?
+                ) AND user_id = ?""",
+                (user_id, MAX_HISTORY, user_id)
+            )
+        db.commit()
+        db.close()
+    except Exception as e:
+        logger.warning(f"DB add history error: {e}")
+
+
+def _db_clear_history(user_id: str):
+    """Clear conversation history from DB"""
+    if not _DB_AVAILABLE:
+        return
+    try:
+        db = get_connection()
+        p = "%s" if is_postgres() else "?"
+        db.execute(f"DELETE FROM memory_history WHERE user_id = {p}", (user_id,))
+        db.commit()
+        db.close()
+    except Exception as e:
+        logger.warning(f"DB clear history error: {e}")
+
+
+def _db_load_learning(user_id: str) -> dict:
+    """Load learning data from DB"""
+    if not _DB_AVAILABLE:
+        return _default_learning()
+    try:
+        db = get_connection()
+        row = db.execute(
+            "SELECT data FROM memory_learning WHERE user_id = %s" if is_postgres()
+            else "SELECT data FROM memory_learning WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+        db.close()
+        if row:
+            data = row['data'] if isinstance(row['data'], dict) else json.loads(row['data'])
+            # Ensure all keys exist
+            defaults = _default_learning()
+            for k, v in defaults.items():
+                if k not in data:
+                    data[k] = v
+            return data
+        return _default_learning()
+    except Exception as e:
+        logger.warning(f"DB load learning error: {e}")
+        return _default_learning()
+
+
+def _db_save_learning(user_id: str, learning: dict):
+    """Save learning data to DB"""
+    if not _DB_AVAILABLE:
+        return
+    try:
+        db = get_connection()
+        data_json = json.dumps(learning, ensure_ascii=False)
+        if is_postgres():
+            db.execute(
+                """INSERT INTO memory_learning (user_id, data, updated_at)
+                   VALUES (%s, %s, %s)
+                   ON CONFLICT (user_id) DO UPDATE SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at""",
+                (user_id, data_json, datetime.utcnow())
+            )
+        else:
+            db.execute(
+                "INSERT OR REPLACE INTO memory_learning (user_id, data, updated_at) VALUES (?, ?, ?)",
+                (user_id, data_json, datetime.utcnow().isoformat())
+            )
+        db.commit()
+        db.close()
+    except Exception as e:
+        logger.warning(f"DB save learning error: {e}")
+
+
+def _default_learning() -> dict:
+    return {
+        "topics": {},
+        "preferred_length": "medium",
+        "communication_style": "warm",
+        "last_mood": "neutral",
+        "interaction_count": 0,
+        "successful_interactions": 0,
+        "last_interaction": None
+    }
+
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -46,13 +249,14 @@ USER_LEARNING = defaultdict(lambda: {
 
 def get_user_context(user_id: str) -> dict:
     """Získat kontext pro Claude system prompt"""
-    profile = USER_PROFILES.get(user_id, {})
-    learning = USER_LEARNING[user_id]
-    history = CONVERSATION_HISTORY.get(user_id, [])
-    
+    profile = _db_load_profile(user_id)
+    learning = _db_load_learning(user_id)
+    history = _db_load_history(user_id, limit=5)
+
     # Top 3 témata zájmu
-    top_topics = sorted(learning["topics"].items(), key=lambda x: x[1], reverse=True)[:3]
-    
+    topics = learning.get("topics", {})
+    top_topics = sorted(topics.items(), key=lambda x: x[1], reverse=True)[:3]
+
     context = {
         "has_profile": bool(profile),
         "name": profile.get("name", ""),
@@ -65,38 +269,38 @@ def get_user_context(user_id: str) -> dict:
         "top_interests": [t[0] for t in top_topics],
         "interaction_count": learning.get("interaction_count", 0),
         "last_mood": learning.get("last_mood", "neutral"),
-        "recent_history": history[-5:] if history else []  # Posledních 5 zpráv pro kontext
+        "recent_history": history
     }
-    
+
     return context
 
 def build_personalized_prompt(user_id: str) -> str:
     """Vytvořit personalizovaný system prompt addition"""
     ctx = get_user_context(user_id)
-    
+
     if not ctx["has_profile"] and ctx["interaction_count"] == 0:
         return ""  # Nový uživatel - žádná personalizace
-    
+
     parts = ["\n\n═══════════════════════════════════════════════════════════════"]
     parts.append("👤 PERSONALIZACE PRO TOHOTO UŽIVATELE")
     parts.append("═══════════════════════════════════════════════════════════════")
-    
+
     if ctx["name"]:
         parts.append(f"- Jméno: {ctx['name']} (oslovuj jménem)")
-    
+
     if ctx["age_group"]:
         parts.append(f"- Věková skupina: {ctx['age_group']}")
-    
+
     # Zdravotní potřeby
     if ctx["hearing"] != "normal":
         parts.append(f"- Sluch: {ctx['hearing']} → Používej JASNÉ, KRÁTKÉ věty")
-    
+
     if ctx["vision"] != "normal":
         parts.append(f"- Zrak: {ctx['vision']} → Zmíň že může zapnout větší text")
-    
+
     if ctx["memory_support"]:
         parts.append("- Podpora paměti: ANO → Opakuj klíčové informace, buď trpělivý")
-    
+
     # Komunikační styl
     style_map = {
         "warm": "Buď vřelý a empatický, používej přátelský tón",
@@ -104,7 +308,7 @@ def build_personalized_prompt(user_id: str) -> str:
         "casual": "Buď neformální, používej humor"
     }
     parts.append(f"- Styl: {style_map.get(ctx['communication_style'], style_map['warm'])}")
-    
+
     # Délka odpovědí
     length_map = {
         "short": "Odpovídej STRUČNĚ (max 2-3 věty)",
@@ -112,12 +316,12 @@ def build_personalized_prompt(user_id: str) -> str:
         "long": "Můžeš odpovídat podrobněji"
     }
     parts.append(f"- Délka: {length_map.get(ctx['preferred_length'], length_map['medium'])}")
-    
+
     # Témata zájmu
     if ctx["top_interests"]:
         interests_str = ", ".join(ctx["top_interests"])
         parts.append(f"- Oblíbená témata: {interests_str} → Můžeš na ně navázat")
-    
+
     # Nálada
     mood_map = {
         "happy": "Uživatel je v dobré náladě",
@@ -127,19 +331,19 @@ def build_personalized_prompt(user_id: str) -> str:
     }
     if ctx["last_mood"] != "neutral":
         parts.append(f"- Nálada: {mood_map.get(ctx['last_mood'], '')}")
-    
+
     # Počet interakcí
     if ctx["interaction_count"] > 10:
         parts.append(f"- Známý uživatel ({ctx['interaction_count']} interakcí) - můžeš odkazovat na předchozí konverzace")
-    
+
     parts.append("═══════════════════════════════════════════════════════════════")
-    
+
     return "\n".join(parts)
 
 def detect_topic(message: str) -> str:
     """Detekovat téma zprávy"""
     msg = message.lower()
-    
+
     topic_keywords = {
         "health": ["zdraví", "lék", "doktor", "bolest", "nemoc", "léčba"],
         "weather": ["počasí", "teplota", "déšť", "slunce", "vítr"],
@@ -152,28 +356,28 @@ def detect_topic(message: str) -> str:
         "technology": ["počítač", "telefon", "internet", "aplikace"],
         "emotions": ["cítím", "smutný", "šťastný", "osamělý", "strach"]
     }
-    
+
     for topic, keywords in topic_keywords.items():
         if any(kw in msg for kw in keywords):
             return topic
-    
+
     return "general"
 
 def detect_mood(message: str) -> str:
     """Detekovat náladu z zprávy"""
     msg = message.lower()
-    
+
     happy_words = ["rád", "šťastný", "skvělé", "super", "děkuji", "výborně", "hezky"]
     sad_words = ["smutný", "osamělý", "chybí mi", "bolí", "unavený", "špatně"]
     anxious_words = ["strach", "bojím", "nervózní", "úzkost", "stres", "nemůžu spát"]
-    
+
     if any(w in msg for w in anxious_words):
         return "anxious"
     elif any(w in msg for w in sad_words):
         return "sad"
     elif any(w in msg for w in happy_words):
         return "happy"
-    
+
     return "neutral"
 
 # ============================================================================
@@ -186,8 +390,9 @@ def health_check():
     return jsonify({
         "status": "healthy",
         "service": "RADIM Memory & Learning",
-        "users_tracked": len(USER_PROFILES),
-        "conversations_active": len(CONVERSATION_HISTORY),
+        "version": "2.0.0",
+        "persistence": "postgresql" if (_DB_AVAILABLE and is_postgres()) else "sqlite" if _DB_AVAILABLE else "none",
+        "db_available": _DB_AVAILABLE,
         "timestamp": datetime.utcnow().isoformat()
     })
 
@@ -198,19 +403,19 @@ def health_check():
 @memory_bp.route('/profile/<user_id>', methods=['GET'])
 def get_profile(user_id):
     """Získat profil uživatele"""
-    profile = USER_PROFILES.get(user_id, {})
-    learning = USER_LEARNING[user_id]
-    
+    profile = _db_load_profile(user_id)
+    learning = _db_load_learning(user_id)
+
     return jsonify({
         "success": True,
         "user_id": user_id,
         "profile": profile,
         "learning": {
-            "interaction_count": learning["interaction_count"],
-            "top_topics": dict(sorted(learning["topics"].items(), key=lambda x: x[1], reverse=True)[:5]),
-            "preferred_length": learning["preferred_length"],
-            "communication_style": learning["communication_style"],
-            "last_mood": learning["last_mood"]
+            "interaction_count": learning.get("interaction_count", 0),
+            "top_topics": dict(sorted(learning.get("topics", {}).items(), key=lambda x: x[1], reverse=True)[:5]),
+            "preferred_length": learning.get("preferred_length", "medium"),
+            "communication_style": learning.get("communication_style", "warm"),
+            "last_mood": learning.get("last_mood", "neutral")
         },
         "timestamp": datetime.utcnow().isoformat()
     })
@@ -219,28 +424,31 @@ def get_profile(user_id):
 def save_profile(user_id):
     """Uložit/aktualizovat profil uživatele"""
     data = request.get_json() or {}
-    
+
     # Validace
-    allowed_fields = ["name", "age_group", "hearing", "vision", "memory_support", 
+    allowed_fields = ["name", "age_group", "hearing", "vision", "memory_support",
                       "communication_style", "preferred_length", "character", "tone"]
-    
-    profile = USER_PROFILES.get(user_id, {})
-    
+
+    profile = _db_load_profile(user_id)
+
     for field in allowed_fields:
         if field in data:
             profile[field] = data[field]
-    
+
     profile["updated_at"] = datetime.utcnow().isoformat()
-    USER_PROFILES[user_id] = profile
-    
+    _db_save_profile(user_id, profile)
+
     # Update learning preferences
-    if "communication_style" in data:
-        USER_LEARNING[user_id]["communication_style"] = data["communication_style"]
-    if "preferred_length" in data:
-        USER_LEARNING[user_id]["preferred_length"] = data["preferred_length"]
-    
+    if "communication_style" in data or "preferred_length" in data:
+        learning = _db_load_learning(user_id)
+        if "communication_style" in data:
+            learning["communication_style"] = data["communication_style"]
+        if "preferred_length" in data:
+            learning["preferred_length"] = data["preferred_length"]
+        _db_save_learning(user_id, learning)
+
     logger.info(f"Profile saved for user: {user_id}")
-    
+
     return jsonify({
         "success": True,
         "user_id": user_id,
@@ -252,15 +460,10 @@ def save_profile(user_id):
 @memory_bp.route('/profile/<user_id>', methods=['DELETE'])
 def delete_profile(user_id):
     """Smazat profil uživatele (GDPR)"""
-    if user_id in USER_PROFILES:
-        del USER_PROFILES[user_id]
-    if user_id in USER_LEARNING:
-        del USER_LEARNING[user_id]
-    if user_id in CONVERSATION_HISTORY:
-        del CONVERSATION_HISTORY[user_id]
-    
+    _db_delete_profile(user_id)
+
     logger.info(f"Profile deleted for user: {user_id}")
-    
+
     return jsonify({
         "success": True,
         "message": "Všechna data smazána",
@@ -274,13 +477,13 @@ def delete_profile(user_id):
 @memory_bp.route('/history/<user_id>', methods=['GET'])
 def get_history(user_id):
     """Získat historii konverzací"""
-    history = CONVERSATION_HISTORY.get(user_id, [])
     limit = request.args.get('limit', 20, type=int)
-    
+    history = _db_load_history(user_id, limit=limit)
+
     return jsonify({
         "success": True,
         "user_id": user_id,
-        "messages": history[-limit:],
+        "messages": history,
         "total_count": len(history),
         "timestamp": datetime.utcnow().isoformat()
     })
@@ -289,46 +492,41 @@ def get_history(user_id):
 def add_to_history(user_id):
     """Přidat zprávu do historie"""
     data = request.get_json() or {}
-    
-    message = {
-        "role": data.get("role", "user"),  # user/assistant
-        "content": data.get("content", ""),
-        "timestamp": datetime.utcnow().isoformat()
-    }
-    
-    if not message["content"]:
+
+    role = data.get("role", "user")
+    content = data.get("content", "")
+
+    if not content:
         return jsonify({"success": False, "error": "Empty message"}), 400
-    
-    # Add to history
-    CONVERSATION_HISTORY[user_id].append(message)
-    
-    # Keep only last N messages
-    if len(CONVERSATION_HISTORY[user_id]) > MAX_HISTORY:
-        CONVERSATION_HISTORY[user_id] = CONVERSATION_HISTORY[user_id][-MAX_HISTORY:]
-    
-    # Update learning
-    if message["role"] == "user":
-        topic = detect_topic(message["content"])
-        mood = detect_mood(message["content"])
-        
-        USER_LEARNING[user_id]["topics"][topic] += 1
-        USER_LEARNING[user_id]["last_mood"] = mood
-        USER_LEARNING[user_id]["interaction_count"] += 1
-        USER_LEARNING[user_id]["last_interaction"] = datetime.utcnow().isoformat()
-    
+
+    # Persist to DB
+    _db_add_history(user_id, role, content)
+
+    # Update learning for user messages
+    if role == "user":
+        learning = _db_load_learning(user_id)
+        topic = detect_topic(content)
+        mood = detect_mood(content)
+
+        topics = learning.get("topics", {})
+        topics[topic] = topics.get(topic, 0) + 1
+        learning["topics"] = topics
+        learning["last_mood"] = mood
+        learning["interaction_count"] = learning.get("interaction_count", 0) + 1
+        learning["last_interaction"] = datetime.utcnow().isoformat()
+        _db_save_learning(user_id, learning)
+
     return jsonify({
         "success": True,
-        "message_added": message,
-        "history_length": len(CONVERSATION_HISTORY[user_id]),
+        "message_added": {"role": role, "content": content, "timestamp": datetime.utcnow().isoformat()},
         "timestamp": datetime.utcnow().isoformat()
     })
 
 @memory_bp.route('/history/<user_id>', methods=['DELETE'])
 def clear_history(user_id):
     """Vymazat historii konverzací"""
-    if user_id in CONVERSATION_HISTORY:
-        CONVERSATION_HISTORY[user_id] = []
-    
+    _db_clear_history(user_id)
+
     return jsonify({
         "success": True,
         "message": "Historie vymazána",
@@ -344,17 +542,11 @@ def get_context(user_id):
     """Získat kontext pro Claude API volání"""
     context = get_user_context(user_id)
     personalized_prompt = build_personalized_prompt(user_id)
-    
+
     # Build messages array for Claude
-    history = CONVERSATION_HISTORY.get(user_id, [])
-    claude_messages = []
-    
-    for msg in history[-10:]:  # Last 10 messages
-        claude_messages.append({
-            "role": msg["role"],
-            "content": msg["content"]
-        })
-    
+    history = _db_load_history(user_id, limit=10)
+    claude_messages = [{"role": m["role"], "content": m["content"]} for m in history]
+
     return jsonify({
         "success": True,
         "user_id": user_id,
@@ -372,23 +564,24 @@ def get_context(user_id):
 def submit_feedback(user_id):
     """Uložit feedback pro učení"""
     data = request.get_json() or {}
-    
+
     feedback_type = data.get("type", "neutral")  # positive/negative/neutral
-    message_id = data.get("message_id")
     comment = data.get("comment", "")
-    
-    # Update learning based on feedback
+
+    learning = _db_load_learning(user_id)
+
     if feedback_type == "positive":
-        USER_LEARNING[user_id]["successful_interactions"] += 1
+        learning["successful_interactions"] = learning.get("successful_interactions", 0) + 1
     elif feedback_type == "negative":
-        # Můžeme upravit styl komunikace
         if "příliš dlouhé" in comment.lower():
-            USER_LEARNING[user_id]["preferred_length"] = "short"
+            learning["preferred_length"] = "short"
         elif "příliš krátké" in comment.lower():
-            USER_LEARNING[user_id]["preferred_length"] = "long"
-    
+            learning["preferred_length"] = "long"
+
+    _db_save_learning(user_id, learning)
+
     logger.info(f"Feedback from {user_id}: {feedback_type}")
-    
+
     return jsonify({
         "success": True,
         "message": "Děkuji za zpětnou vazbu!",
@@ -406,43 +599,32 @@ def get_personalized_system_prompt(user_id: str, base_prompt: str) -> str:
 
 def get_conversation_messages(user_id: str, limit: int = 10) -> list:
     """Vrátit konverzační historii pro Claude"""
-    history = CONVERSATION_HISTORY.get(user_id, [])
-    return [{"role": m["role"], "content": m["content"]} for m in history[-limit:]]
+    history = _db_load_history(user_id, limit=limit)
+    return [{"role": m["role"], "content": m["content"]} for m in history]
 
 def record_interaction(user_id: str, user_message: str, assistant_response: str):
     """Zaznamenat interakci"""
-    # Add user message
-    CONVERSATION_HISTORY[user_id].append({
-        "role": "user",
-        "content": user_message,
-        "timestamp": datetime.utcnow().isoformat()
-    })
-    
-    # Add assistant response
-    CONVERSATION_HISTORY[user_id].append({
-        "role": "assistant", 
-        "content": assistant_response,
-        "timestamp": datetime.utcnow().isoformat()
-    })
-    
-    # Keep only last N
-    if len(CONVERSATION_HISTORY[user_id]) > MAX_HISTORY:
-        CONVERSATION_HISTORY[user_id] = CONVERSATION_HISTORY[user_id][-MAX_HISTORY:]
-    
+    _db_add_history(user_id, "user", user_message)
+    _db_add_history(user_id, "assistant", assistant_response)
+
     # Update learning
+    learning = _db_load_learning(user_id)
     topic = detect_topic(user_message)
     mood = detect_mood(user_message)
-    
-    USER_LEARNING[user_id]["topics"][topic] += 1
-    USER_LEARNING[user_id]["last_mood"] = mood
-    USER_LEARNING[user_id]["interaction_count"] += 1
-    USER_LEARNING[user_id]["last_interaction"] = datetime.utcnow().isoformat()
+
+    topics = learning.get("topics", {})
+    topics[topic] = topics.get(topic, 0) + 1
+    learning["topics"] = topics
+    learning["last_mood"] = mood
+    learning["interaction_count"] = learning.get("interaction_count", 0) + 1
+    learning["last_interaction"] = datetime.utcnow().isoformat()
+    _db_save_learning(user_id, learning)
 
 # Export
 __all__ = [
     'memory_bp',
     'get_personalized_system_prompt',
-    'get_conversation_messages', 
+    'get_conversation_messages',
     'record_interaction',
     'get_user_context'
 ]

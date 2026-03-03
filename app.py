@@ -200,6 +200,16 @@ from anticipation_routes import anticipation_bp
 app.register_blueprint(anticipation_bp)
 print("✅ Anticipation Engine registered: /api/anticipation/*")
 
+# Anticipation functions for azure_tts_proxy
+try:
+    from anticipation_routes import (
+        predict_C as _app_predict_C, calculate_emotions as _app_ant_emotions,
+        calculate_speech_params as _app_ant_speech, classify_state as _app_classify
+    )
+    _APP_ANT_AVAILABLE = True
+except ImportError:
+    _APP_ANT_AVAILABLE = False
+
 # 📞 Import Twilio Voice routes - Phone calls for seniors
 try:
     from twilio_voice_routes import twilio_bp
@@ -245,7 +255,22 @@ def azure_tts_proxy():
         voice = data.get('voice', 'cs-CZ-AntoninNeural')
         rate = data.get('rate', '0.85')
         pitch = data.get('pitch', '+0Hz')
-        
+
+        # Optional: Use Anticipation Engine if C/α provided
+        C_val = data.get('C')
+        alpha_val = data.get('alpha')
+        ant_state = None
+        if C_val is not None and alpha_val is not None and _APP_ANT_AVAILABLE:
+            try:
+                C_pred = _app_predict_C(float(C_val), 0, float(alpha_val))
+                emo = _app_ant_emotions(C_pred, float(alpha_val))
+                params = _app_ant_speech(C_pred, float(alpha_val), emo)
+                ant_state = _app_classify(C_pred)
+                rate = str(round(params['rate'] * 100)) + '%'
+                pitch = f"{int(params['pitch'])}Hz" if params['pitch'] <= 0 else f"+{int(params['pitch'])}Hz"
+            except Exception:
+                pass  # Fall through to default rate/pitch
+
         if not text:
             return jsonify({'error': 'Text is required'}), 400
 
@@ -287,14 +312,17 @@ def azure_tts_proxy():
         
         if response.status_code == 200:
             from flask import Response
+            resp_headers = {
+                    'X-Voice-Name': voice,
+                    'X-Voice-Rate': str(rate),
+                    'Cache-Control': 'no-cache'
+                }
+            if ant_state:
+                resp_headers['X-Anticipation-State'] = ant_state
             return Response(
                 response.content,
                 mimetype='audio/mpeg',
-                headers={
-                    'X-Voice-Name': voice,
-                    'X-Voice-Rate': rate,
-                    'Cache-Control': 'no-cache'
-                }
+                headers=resp_headers
             )
         else:
             return jsonify({'error': f'Azure TTS error: {response.status_code}'}), response.status_code
