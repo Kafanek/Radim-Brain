@@ -245,6 +245,117 @@ def _default_learning() -> dict:
 
 
 # ============================================================================
+# ADAPTIVNÍ KOMUNIKACE — podle typu potřeby uživatele
+# ============================================================================
+
+_COMMUNICATION_NEEDS = {
+    # ── DEMENCE ──
+    "alzheimer": """⚠️ KOMUNIKAČNÍ POTŘEBA: Alzheimerova choroba
+- Opakuj klíčové informace klidně, bez výčitek ("Už jsem ti to říkal")
+- NIKDY neříkej "pamatuješ?" — může zvýšit úzkost
+- Když se ptá opakovaně na totéž, odpověz jako poprvé — stejně trpělivě
+- Používej krátké, jednoduché věty. Jednu myšlenku najednou.
+- Nabízej konkrétní volby ("Chceš čaj nebo kávu?") místo otevřených otázek
+- Při dezorientaci v čase: jemně orientuj ("Je středa odpoledne") bez konfrontace""",
+
+    "alzheimer_early": """⚠️ KOMUNIKAČNÍ POTŘEBA: Alzheimer — počáteční stádium
+- Člověk si je vědom svých obtíží — to je bolestivé. Respektuj to.
+- Pomáhej najít slova, ale neskákej do řeči příliš rychle
+- Nabízej strukturu: "Mluvil jsi o..." když ztratí nit
+- Humor je v pořádku — neztrácej lehkost jen proto, že má diagnózu""",
+
+    "alzheimer_middle": """⚠️ KOMUNIKAČNÍ POTŘEBA: Alzheimer — střední stádium
+- Věty max 5-7 slov. Jedna informace = jedna věta.
+- Používej jméno na začátku věty (orientační kotva)
+- Při konfabulaci (vymyšlené vzpomínky): NEPOPÍREJ, ale ani nepotvrzuj jako fakt
+  → Místo toho: "To zní hezky" nebo přesměruj na emoce: "Vypadáš šťastná"
+- Při agitaci: klidný hlas, krátké věty, nabídni něco konkrétního""",
+
+    "alzheimer_late": """⚠️ KOMUNIKAČNÍ POTŘEBA: Alzheimer — pokročilé stádium
+- Komunikuj hlavně tónem, ne obsahem. Klidně, laskavě, pomalu.
+- Věty max 3-4 slova. Opakuj klíčová slova.
+- Používej jméno. Často.
+- I když neodpovídá smysluplně, odpovídej s úctou — slyší tvůj tón.""",
+
+    "lewy_body": """⚠️ KOMUNIKAČNÍ POTŘEBA: Demence s Lewyho tělísky
+- Kolísání pozornosti je normální — nepovažuj to za nezájem
+- Při vizuálních halucinacích: NEPOPÍREJ ("To tam není!") ani nepotvrzuj
+  → Řekni: "Vidím, že tě to trápí" a přesměruj pozornost
+- Při podezíravosti ("někdo mi krade věci"): neargumentuj, pomoz hledat
+- Pozor na pády — při zmínce o nestabilitě doporuč opatrnost""",
+
+    "vascular": """⚠️ KOMUNIKAČNÍ POTŘEBA: Vaskulární demence
+- Schopnosti kolísají den ode dne — přizpůsob se aktuálnímu stavu
+- Emoční labilita (náhlý pláč/smích) je symptom, ne manipulace — reaguj klidně
+- Při frustraci z toho, co dřív uměl: uznej ztrátu, nebagatalizuj""",
+
+    "frontotemporal": """⚠️ KOMUNIKAČNÍ POTŘEBA: Frontotemporální demence
+- Může říkat věci bez filtrů (hrubé, nevhodné) — nepohoršuj se, neopravuj
+- Empatie bývá snížená — neočekávej reciprocitu
+- Drž strukturu konverzace — tendence k odklonům
+- Buď konkrétní a přímý""",
+
+    # ── PORUCHY ŘEČI ──
+    "aphasia": """⚠️ KOMUNIKAČNÍ POTŘEBA: Afázie (porucha řeči po CMP/úrazu)
+- Člověk VÍ co chce říct, ale nemůže — to je frustrující. Buď trpělivý.
+- Když hledá slovo: nabídni 2-3 možnosti ("Myslíš čaj? Kávu? Vodu?")
+- Neskákej do řeči. Dej čas.
+- Používej jednoduché věty, ale NEMLUV jako na dítě — inteligence je zachovaná
+- Potvrzuj porozumění: "Rozumím, chceš čaj. Správně?"
+- Ano/ne otázky jsou jednodušší než otevřené""",
+
+    "dysphasia_child": """⚠️ KOMUNIKAČNÍ POTŘEBA: Vývojová dysfázie (dítě)
+- Dítě rozumí víc, než dokáže říct. Nehodnoť inteligenci podle řeči.
+- Kratší věty (3-5 slov). Jedna instrukce = jedna věta.
+- Dej čas na odpověď — nespěchej, nedoplňuj za něj
+- Zrcadli a rozšiřuj: dítě řekne "kočka tam" → "Ano, kočka je tam venku!"
+- Oceňuj SNAHU komunikovat, ne správnost
+- Používej opakování přirozeně (ne jako korekci)
+- Buď hravý, veselý — ne terapeutický""",
+
+    # ── SMYSLOVÉ PORUCHY ──
+    "hearing_impaired": """⚠️ KOMUNIKAČNÍ POTŘEBA: Porucha sluchu
+- JASNÉ, ZŘETELNÉ věty. Žádné mumlání.
+- Klíčová slova na začátek věty.
+- Opakuj jinak (jinými slovy), ne stejně ale hlasitěji.""",
+
+    "vision_impaired": """⚠️ KOMUNIKAČNÍ POTŘEBA: Porucha zraku
+- Popisuj co je na obrazovce slovně
+- Nabízej hlasové ovládání
+- "Řekni mi a já to udělám za tebe".""",
+
+    # ── KOGNITIVNÍ SPECIFIKA ──
+    "mild_cognitive": """⚠️ KOMUNIKAČNÍ POTŘEBA: Mírná kognitivní porucha (MCI)
+- Člověk si je vědom problémů — může být úzkostný. Normalizuj.
+- Nabízej připomínky přirozeně, ne jako kompenzaci
+- "Mimochodem, dneska je středa" je lepší než "Víš jaký je den?"
+- Pomáhej budovat rutiny a struktury""",
+
+    "intellectual_disability": """⚠️ KOMUNIKAČNÍ POTŘEBA: Mentální postižení
+- Jednoduché, konkrétní věty. Abstrakce je těžká.
+- Opakuj důležité věci různými slovy
+- Buď trpělivý, pozitivní, povzbuzující
+- Jeden krok = jedna instrukce"""
+}
+
+
+def _get_communication_instructions(needs_key: str) -> str:
+    """Vrátí komunikační instrukce podle typu potřeby."""
+    if not needs_key:
+        return ""
+
+    # Podpora více potřeb oddělených čárkou
+    keys = [k.strip() for k in needs_key.split(",")]
+    parts = []
+    for key in keys:
+        instruction = _COMMUNICATION_NEEDS.get(key, "")
+        if instruction:
+            parts.append(instruction)
+
+    return "\n".join(parts)
+
+
+# ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
 
@@ -265,6 +376,8 @@ def get_user_context(user_id: str) -> dict:
         "hearing": profile.get("hearing", "normal"),
         "vision": profile.get("vision", "normal"),
         "memory_support": profile.get("memory_support", False),
+        "communication_needs": profile.get("communication_needs", ""),
+        "mobility": profile.get("mobility", "normal"),
         "communication_style": learning.get("communication_style", "warm"),
         "preferred_length": learning.get("preferred_length", "medium"),
         "top_interests": [t[0] for t in top_topics],
@@ -301,6 +414,13 @@ def build_personalized_prompt(user_id: str) -> str:
 
     if ctx["memory_support"]:
         parts.append("- Podpora paměti: ANO → Opakuj klíčové informace, buď trpělivý")
+
+    # Komunikační potřeby (demence, afázie, dysfázie, aj.)
+    comm_needs = profile.get("communication_needs", "")
+    if comm_needs:
+        needs_instructions = _get_communication_instructions(comm_needs)
+        if needs_instructions:
+            parts.append(needs_instructions)
 
     # Komunikační styl
     style_map = {
@@ -437,7 +557,8 @@ def save_profile(user_id):
 
     # Validace
     allowed_fields = ["name", "age_group", "hearing", "vision", "memory_support",
-                      "communication_style", "preferred_length", "character", "tone"]
+                      "communication_style", "preferred_length", "character", "tone",
+                      "communication_needs", "mobility"]
 
     profile = _db_load_profile(user_id)
 
