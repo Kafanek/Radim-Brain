@@ -495,50 +495,63 @@ def generate_quiz():
         difficulty = data.get('difficulty', 'easy')
         count = data.get('count', 5)
         
-        client = get_claude_client()
-        
-        if not client:
-            return jsonify({
-                "success": True,
-                "topic": topic,
-                "questions": get_fallback_quiz(topic),
-                "timestamp": datetime.utcnow().isoformat()
-            })
-        
         system = f"""Vytvoř {count} kvízových otázek pro seniory.
 Téma: {topic}, Obtížnost: {difficulty}
 
 FORMÁT (pouze JSON):
 [{{"question": "Otázka?", "options": {{"A": "...", "B": "...", "C": "...", "D": "..."}}, "correct": "A", "explanation": "Vysvětlení."}}]"""
 
-        response = client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=2048,
-            system=system,
-            messages=[{"role": "user", "content": f"Vytvoř kvíz na téma: {topic}"}]
-        )
-        
-        text = extract_text_from_response(response)
-        
+        text = None
+
+        # Try Claude first
+        client = get_claude_client()
+        if client:
+            try:
+                response = client.messages.create(
+                    model=CLAUDE_MODEL,
+                    max_tokens=2048,
+                    system=system,
+                    messages=[{"role": "user", "content": f"Vytvoř kvíz na téma: {topic}"}]
+                )
+                text = extract_text_from_response(response)
+            except Exception as claude_err:
+                logger.warning(f"Claude quiz failed: {claude_err}")
+
+        # Gemini fallback
+        if not text:
+            gemini_text = call_gemini_fallback(
+                f"Vytvoř kvíz na téma: {topic}",
+                system,
+                2048
+            )
+            if gemini_text:
+                text = gemini_text
+
+        # Parse questions from AI response
         questions = []
-        try:
-            json_match = re.search(r'\[.*\]', text, re.DOTALL)
-            if json_match:
-                questions = json.loads(json_match.group())
-        except:
+        if text:
+            try:
+                json_match = re.search(r'\[.*\]', text, re.DOTALL)
+                if json_match:
+                    questions = json.loads(json_match.group())
+            except:
+                pass
+
+        # Static fallback if no AI response
+        if not questions:
             questions = get_fallback_quiz(topic)
-        
+
         return jsonify({
             "success": True,
             "topic": topic,
             "questions": questions,
             "timestamp": datetime.utcnow().isoformat()
         })
-        
+
     except Exception as e:
         logger.error(f"Quiz error: {e}")
         return jsonify({
-            "success": False,
+            "success": True,
             "topic": topic,
             "questions": get_fallback_quiz(topic),
             "timestamp": datetime.utcnow().isoformat()
@@ -554,19 +567,8 @@ def generate_story():
         length = data.get('length', 'short')
         style = data.get('style', 'relaxing')
         
-        client = get_claude_client()
-        
-        if not client:
-            return jsonify({
-                "success": True,
-                "title": "Procházka parkem",
-                "content": "Bylo krásné jarní ráno. Pan Josef vyšel na svou oblíbenou procházku do parku...",
-                "theme": theme,
-                "timestamp": datetime.utcnow().isoformat()
-            })
-        
         length_words = {"short": "100-150", "medium": "200-300", "long": "400-500"}
-        
+
         system = f"""Vyprávěj {style} příběh pro seniory.
 Téma: {theme}, Délka: {length_words.get(length, '150')} slov.
 Česká jména a místa. Pozitivní a uklidňující.
@@ -574,15 +576,42 @@ Téma: {theme}, Délka: {length_words.get(length, '150')} slov.
 FORMÁT (pouze JSON):
 {{"title": "Název", "content": "Text příběhu..."}}"""
 
-        response = client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=1024,
-            system=system,
-            messages=[{"role": "user", "content": f"Vyprávěj příběh na téma: {theme}"}]
-        )
-        
-        text = extract_text_from_response(response)
-        
+        text = None
+
+        # Try Claude first
+        client = get_claude_client()
+        if client:
+            try:
+                response = client.messages.create(
+                    model=CLAUDE_MODEL,
+                    max_tokens=1024,
+                    system=system,
+                    messages=[{"role": "user", "content": f"Vyprávěj příběh na téma: {theme}"}]
+                )
+                text = extract_text_from_response(response)
+            except Exception as claude_err:
+                logger.warning(f"Claude story failed: {claude_err}")
+
+        # Gemini fallback
+        if not text:
+            gemini_text = call_gemini_fallback(
+                f"Vyprávěj příběh na téma: {theme}",
+                system,
+                1024
+            )
+            if gemini_text:
+                text = gemini_text
+
+        # Static fallback
+        if not text:
+            return jsonify({
+                "success": True,
+                "title": "Procházka parkem",
+                "content": "Bylo krásné jarní ráno. Pan Josef vyšel na svou oblíbenou procházku do parku. Slunce hřálo a ptáci zpívali. U rybníčku potkal svého starého přítele Karla a společně si povídali o starých časech. Byl to krásný den.",
+                "theme": theme,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+
         story = {}
         try:
             json_match = re.search(r'\{.*\}', text, re.DOTALL)
@@ -590,7 +619,7 @@ FORMÁT (pouze JSON):
                 story = json.loads(json_match.group())
         except:
             story = {"title": f"Příběh o {theme}", "content": text}
-        
+
         return jsonify({
             "success": True,
             "title": story.get("title", "Příběh"),
@@ -598,7 +627,7 @@ FORMÁT (pouze JSON):
             "theme": theme,
             "timestamp": datetime.utcnow().isoformat()
         })
-        
+
     except Exception as e:
         logger.error(f"Story error: {e}")
         return jsonify({
