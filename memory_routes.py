@@ -11,7 +11,8 @@ import os
 import json
 import logging
 from datetime import datetime, timedelta
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
+from auth_middleware import require_auth
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
@@ -401,8 +402,13 @@ def health_check():
 # ─────────────────────────────────────────────────────────────────────────────
 
 @memory_bp.route('/profile/<user_id>', methods=['GET'])
+@require_auth
 def get_profile(user_id):
     """Získat profil uživatele"""
+    # Auth check: user can only access own data
+    auth_user_id = str(g.auth_user.get('id', ''))
+    if auth_user_id and auth_user_id != str(user_id):
+        return jsonify({"success": False, "error": "Přístup odepřen"}), 403
     profile = _db_load_profile(user_id)
     learning = _db_load_learning(user_id)
 
@@ -421,8 +427,12 @@ def get_profile(user_id):
     })
 
 @memory_bp.route('/profile/<user_id>', methods=['POST'])
+@require_auth
 def save_profile(user_id):
     """Uložit/aktualizovat profil uživatele"""
+    auth_user_id = str(g.auth_user.get('id', ''))
+    if auth_user_id and auth_user_id != str(user_id):
+        return jsonify({"success": False, "error": "Přístup odepřen"}), 403
     data = request.get_json() or {}
 
     # Validace
@@ -458,8 +468,12 @@ def save_profile(user_id):
     })
 
 @memory_bp.route('/profile/<user_id>', methods=['DELETE'])
+@require_auth
 def delete_profile(user_id):
     """Smazat profil uživatele (GDPR)"""
+    auth_user_id = str(g.auth_user.get('id', ''))
+    if auth_user_id and auth_user_id != str(user_id):
+        return jsonify({"success": False, "error": "Přístup odepřen"}), 403
     _db_delete_profile(user_id)
 
     logger.info(f"Profile deleted for user: {user_id}")
@@ -475,8 +489,12 @@ def delete_profile(user_id):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @memory_bp.route('/history/<user_id>', methods=['GET'])
+@require_auth
 def get_history(user_id):
     """Získat historii konverzací"""
+    auth_user_id = str(g.auth_user.get('id', ''))
+    if auth_user_id and auth_user_id != str(user_id):
+        return jsonify({"success": False, "error": "Přístup odepřen"}), 403
     limit = request.args.get('limit', 20, type=int)
     history = _db_load_history(user_id, limit=limit)
 
@@ -489,8 +507,12 @@ def get_history(user_id):
     })
 
 @memory_bp.route('/history/<user_id>', methods=['POST'])
+@require_auth
 def add_to_history(user_id):
     """Přidat zprávu do historie"""
+    auth_user_id = str(g.auth_user.get('id', ''))
+    if auth_user_id and auth_user_id != str(user_id):
+        return jsonify({"success": False, "error": "Přístup odepřen"}), 403
     data = request.get_json() or {}
 
     role = data.get("role", "user")
@@ -523,8 +545,12 @@ def add_to_history(user_id):
     })
 
 @memory_bp.route('/history/<user_id>', methods=['DELETE'])
+@require_auth
 def clear_history(user_id):
     """Vymazat historii konverzací"""
+    auth_user_id = str(g.auth_user.get('id', ''))
+    if auth_user_id and auth_user_id != str(user_id):
+        return jsonify({"success": False, "error": "Přístup odepřen"}), 403
     _db_clear_history(user_id)
 
     return jsonify({
@@ -538,8 +564,12 @@ def clear_history(user_id):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @memory_bp.route('/context/<user_id>', methods=['GET'])
+@require_auth
 def get_context(user_id):
     """Získat kontext pro Claude API volání"""
+    auth_user_id = str(g.auth_user.get('id', ''))
+    if auth_user_id and auth_user_id != str(user_id):
+        return jsonify({"success": False, "error": "Přístup odepřen"}), 403
     context = get_user_context(user_id)
     personalized_prompt = build_personalized_prompt(user_id)
 
@@ -561,8 +591,12 @@ def get_context(user_id):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @memory_bp.route('/feedback/<user_id>', methods=['POST'])
+@require_auth
 def submit_feedback(user_id):
     """Uložit feedback pro učení"""
+    auth_user_id = str(g.auth_user.get('id', ''))
+    if auth_user_id and auth_user_id != str(user_id):
+        return jsonify({"success": False, "error": "Přístup odepřen"}), 403
     data = request.get_json() or {}
 
     feedback_type = data.get("type", "neutral")  # positive/negative/neutral

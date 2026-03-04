@@ -10,7 +10,8 @@ import uuid
 import base64
 import requests
 from xml.sax.saxutils import escape as xml_escape
-from flask import Blueprint, request, jsonify, Response
+from flask import Blueprint, request, jsonify, Response, g
+from auth_middleware import require_auth
 
 speech_bp = Blueprint('speech', __name__, url_prefix='/api/speech')
 
@@ -60,6 +61,7 @@ def _get_anticipation_tts(C, alpha):
 # TEXT-TO-SPEECH (REST API)
 # ============================================
 @speech_bp.route('/synthesize', methods=['POST'])
+@require_auth
 def synthesize_speech():
     """Převeď text na řeč pomocí Azure REST API"""
     if not AZURE_SPEECH_KEY:
@@ -161,6 +163,7 @@ def synthesize_speech():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @speech_bp.route('/synthesize/stream', methods=['POST'])
+@require_auth
 def synthesize_stream():
     """Streamovaná syntéza pro okamžité přehrávání"""
     if not AZURE_SPEECH_KEY:
@@ -225,6 +228,7 @@ def synthesize_stream():
 # SPEECH-TO-TEXT (REST API)
 # ============================================
 @speech_bp.route('/transcribe', methods=['POST'])
+@require_auth
 def transcribe_speech():
     """Převeď řeč na text pomocí Azure REST API"""
     if not AZURE_SPEECH_KEY:
@@ -398,6 +402,7 @@ def speech_health():
 _token_cache = {'token': None, 'expires': 0}
 
 @speech_bp.route('/azure-token', methods=['GET'])
+@require_auth
 def get_azure_token():
     """Vrátí krátkodobý Azure Speech token pro frontend SDK (STT/TTS)"""
     if not AZURE_SPEECH_KEY:
@@ -448,6 +453,7 @@ def get_azure_token():
         }), 500
 
 @speech_bp.route('/azure-config', methods=['GET'])
+@require_auth
 def get_azure_config():
     """DEPRECATED: Use /azure-token instead. Returns region only (no key)."""
     return jsonify({

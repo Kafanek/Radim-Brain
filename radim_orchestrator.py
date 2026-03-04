@@ -4,7 +4,8 @@
 # Version: 1.0.0
 # WhatsApp styl chat s action JSON
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
+from auth_middleware import require_auth
 import requests
 import json
 import re
@@ -24,6 +25,17 @@ try:
     _ORCH_ANT_AVAILABLE = True
 except ImportError:
     _ORCH_ANT_AVAILABLE = False
+
+# Memory system integration
+try:
+    from memory_routes import (
+        build_personalized_prompt as _orch_build_prompt,
+        get_conversation_messages as _orch_get_history,
+        record_interaction as _orch_record
+    )
+    _ORCH_MEMORY_AVAILABLE = True
+except ImportError:
+    _ORCH_MEMORY_AVAILABLE = False
 
 # ============================================
 # KONFIGURACE
@@ -138,24 +150,36 @@ def extract_time(message):
 # ============================================
 # GEMINI AI CALL
 # ============================================
-def call_gemini_whatsapp(message, context=None, mode='senior'):
-    """Volání Gemini s WhatsApp promptem"""
+def call_gemini_whatsapp(message, context=None, mode='senior', personalized_prompt='', history=None):
+    """Volání Gemini s WhatsApp promptem + personalizace + historie"""
     if not GEMINI_API_KEY:
         return None, None
-    
+
     try:
         system = RADIM_WHATSAPP_PROMPT
-        
+
         if mode == 'rodina':
             system += "\n\nREŽIM RODINA: Odpovídej stručně a informativně."
         elif mode == 'technik':
             system += "\n\nREŽIM TECHNIK: Odpovídej technicky."
-        
+
+        # 🧠 Add personalized prompt from memory (name, interests, style, mood)
+        if personalized_prompt:
+            system += personalized_prompt
+
         context_text = ""
         if context:
             context_text = f"\n\nKontext:\n{json.dumps(context, ensure_ascii=False)}"
-        
-        full_prompt = f"{system}{context_text}\n\nUživatel: {message}\nRadim:"
+
+        # 📜 Add conversation history for continuity
+        history_text = ""
+        if history:
+            history_text = "\n\nPředchozí konverzace:\n"
+            for msg in history[-6:]:  # Last 6 messages (3 turns)
+                role_label = "Uživatel" if msg["role"] == "user" else "Radim"
+                history_text += f"{role_label}: {msg['content']}\n"
+
+        full_prompt = f"{system}{context_text}{history_text}\n\nUživatel: {message}\nRadim:"
         
         response = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
@@ -243,6 +267,7 @@ STORY_TEMPLATES = [
 # ============================================
 
 @radim_bp.route('/api/radim/chat', methods=['POST', 'OPTIONS'])
+@require_auth
 def radim_chat():
     """Hlavní WhatsApp-styl chat endpoint"""
     if request.method == 'OPTIONS':
@@ -251,13 +276,20 @@ def radim_chat():
     try:
         data = request.json
         message = data.get('message', '')
-        user_id = data.get('user_id', 'default-senior')
+        # Prefer JWT user_id, fallback to request body
+        auth_user = getattr(g, 'auth_user', None) or {}
+        user_id = str(auth_user.get('id', '')) or data.get('user_id', 'default-senior')
         mode = data.get('mode', 'senior')
         context = data.get('context', {})
-        
+        emotional_context = data.get('emotional_context', '')
+
         if not message:
             return jsonify({'success': False, 'error': 'Zpráva je povinná'}), 400
-        
+
+        # Add emotional context from frontend (RadimEmpathyBridge)
+        if emotional_context:
+            context['emotional_state'] = emotional_context
+
         intent = detect_intent(message)
         
         if intent == 'task':
@@ -277,11 +309,28 @@ def radim_chat():
                 'mode': mode
             })
         
-        text_response, action_json = call_gemini_whatsapp(message, context, mode)
-        
+        # 🧠 Load personalization and history from memory
+        personalized = ''
+        history = None
+        if _ORCH_MEMORY_AVAILABLE:
+            try:
+                personalized = _orch_build_prompt(user_id)
+                history = _orch_get_history(user_id, limit=6)
+            except Exception as mem_err:
+                print(f"Memory load warning: {mem_err}")
+
+        text_response, action_json = call_gemini_whatsapp(message, context, mode, personalized, history)
+
         if not text_response:
             text_response = "Promiňte, zkuste to za chvíli. 🙏"
-        
+
+        # 🧠 Record interaction to memory (save history + update learning)
+        if _ORCH_MEMORY_AVAILABLE and text_response != "Promiňte, zkuste to za chvíli. 🙏":
+            try:
+                _orch_record(user_id, message, text_response)
+            except Exception as rec_err:
+                print(f"Memory record warning: {rec_err}")
+
         return jsonify({
             'success': True,
             'response': text_response,
@@ -295,6 +344,7 @@ def radim_chat():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @radim_bp.route('/api/radim/tasks', methods=['GET', 'POST', 'OPTIONS'])
+@require_auth
 def radim_tasks():
     """Task management endpoint"""
     if request.method == 'OPTIONS':
@@ -337,6 +387,7 @@ def radim_story_templates():
     })
 
 @radim_bp.route('/api/radim/stories/generate', methods=['POST', 'OPTIONS'])
+@require_auth
 def radim_story_generate():
     """Generování story obsahu"""
     if request.method == 'OPTIONS':
@@ -386,6 +437,7 @@ Odpověz POUZE textem příspěvku:"""
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @radim_bp.route('/api/radim/voice/speak', methods=['POST', 'OPTIONS'])
+@require_auth
 def radim_voice_speak():
     """Azure TTS endpoint"""
     if request.method == 'OPTIONS':

@@ -10,7 +10,8 @@ import json
 import math
 import logging
 from datetime import datetime
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
+from auth_middleware import require_auth
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +289,7 @@ def voice_health():
     })
 
 @voice_runtime_bp.route('/metrics', methods=['POST'])
+@require_auth
 def compute_metrics():
     """
     Hlavní endpoint pro výpočet metrik
@@ -362,6 +364,7 @@ def compute_metrics():
         return jsonify({'error': str(e)}), 500
 
 @voice_runtime_bp.route('/state', methods=['POST'])
+@require_auth
 def update_state():
     """
     Update stavového automatu
@@ -427,6 +430,7 @@ def update_state():
         return jsonify({'error': str(e)}), 500
 
 @voice_runtime_bp.route('/session/<session_id>', methods=['GET'])
+@require_auth
 def get_session_info(session_id):
     """Získat informace o session"""
     session = get_session(session_id)
@@ -635,6 +639,7 @@ def clean_for_tts(text):
     return text
 
 @voice_runtime_bp.route('/chat', methods=['POST'])
+@require_auth
 def voice_chat():
     """Hlasový chat optimalizovaný pro TTS.
     Now integrates Anticipation Engine for adaptive speech parameters."""

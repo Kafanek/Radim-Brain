@@ -11,7 +11,8 @@ import json
 import re
 import logging
 from datetime import datetime
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
+from auth_middleware import require_auth, optional_auth
 
 # Anthropic Claude SDK
 try:
@@ -36,7 +37,7 @@ except ImportError:
 
 # Memory persistence
 try:
-    from memory_routes import record_interaction, get_conversation_messages, get_user_context
+    from memory_routes import record_interaction, get_conversation_messages, get_user_context, get_personalized_system_prompt
     _CL_MEMORY_AVAILABLE = True
 except ImportError:
     _CL_MEMORY_AVAILABLE = False
@@ -233,6 +234,7 @@ def get_nameday():
     })
 
 @claude_bp.route('/chat', methods=['POST'])
+@require_auth
 def chat_with_radim():
     """
     💬 Hlavní chat endpoint s Claude + Web Search
@@ -240,8 +242,11 @@ def chat_with_radim():
     try:
         data = request.get_json() or {}
         message = data.get('message', '')
-        user_id = data.get('user_id', 'anonymous')
+        # Prefer JWT user_id, fallback to request body
+        auth_user = getattr(g, 'auth_user', None) or {}
+        user_id = str(auth_user.get('id', '')) or data.get('user_id', 'anonymous')
         use_search = data.get('use_search', True)
+        emotional_context = data.get('emotional_context', '')
         
         if not message:
             return jsonify({
@@ -263,19 +268,40 @@ def chat_with_radim():
         
         info = get_today_info()
         
-        # System prompt
+        # System prompt with personalization from memory
         system = RADIM_SYSTEM_PROMPT.format(
             date=info["date"],
             day_name=info["day_name"],
             nameday=info["nameday"]
         )
-        
+
+        # 🧠 Personalize from learning data (name, interests, style, mood)
+        if _CL_MEMORY_AVAILABLE:
+            try:
+                system = get_personalized_system_prompt(user_id, system)
+            except Exception as pers_err:
+                logger.warning(f"Personalization failed (non-fatal): {pers_err}")
+
+        # 💚 Add emotional context from frontend (RadimEmpathyBridge)
+        if emotional_context:
+            system += f"\n\n═══ EMOČNÍ KONTEXT (aktuální stav uživatele) ═══\n{emotional_context}"
+
+        # 📜 Build messages array with conversation history
+        messages = []
+        if _CL_MEMORY_AVAILABLE:
+            try:
+                history_msgs = get_conversation_messages(user_id, limit=10)
+                messages.extend(history_msgs)
+            except Exception as hist_err:
+                logger.warning(f"History load failed (non-fatal): {hist_err}")
+        messages.append({"role": "user", "content": message})
+
         # Volání Claude API
         api_kwargs = {
             "model": CLAUDE_MODEL,
             "max_tokens": 1024,
             "system": system,
-            "messages": [{"role": "user", "content": message}]
+            "messages": messages
         }
         
         # Web search tool (volitelný)
@@ -289,7 +315,14 @@ def chat_with_radim():
         response = client.messages.create(**api_kwargs)
         
         text = extract_text_from_response(response)
-        
+
+        # 🧠 Record interaction to memory (save history + update learning)
+        if _CL_MEMORY_AVAILABLE:
+            try:
+                record_interaction(user_id, message, text)
+            except Exception as mem_err:
+                logger.warning(f"Memory record failed (non-fatal): {mem_err}")
+
         # Detekovat intent
         intent = "general"
         msg_lower = message.lower()
@@ -302,7 +335,7 @@ def chat_with_radim():
         elif any(w in msg_lower for w in ["příběh", "povídka"]):
             intent = "story"
         
-        logger.info(f"Chat | User: {user_id} | Intent: {intent}")
+        logger.info(f"Chat | User: {user_id} | Intent: {intent} | Memory: {_CL_MEMORY_AVAILABLE}")
         
         return jsonify({
             "success": True,
@@ -321,6 +354,12 @@ def chat_with_radim():
             )
             gemini_text = call_gemini_fallback(message, system)
             if gemini_text:
+                # Record Gemini fallback interaction too
+                if _CL_MEMORY_AVAILABLE:
+                    try:
+                        record_interaction(user_id, message, gemini_text)
+                    except Exception:
+                        pass
                 return jsonify({
                     "success": True,
                     "response": gemini_text,
@@ -336,6 +375,7 @@ def chat_with_radim():
         })
 
 @claude_bp.route('/news', methods=['POST'])
+@require_auth
 def get_news():
     """📰 Získat aktuální české zprávy"""
     category = 'general'
@@ -438,6 +478,7 @@ Dnešní datum: {info['date']}"""
         })
 
 @claude_bp.route('/weather', methods=['GET'])
+@optional_auth
 def get_weather():
     """🌤️ Získat aktuální počasí"""
     location = request.args.get('location', 'Praha')
@@ -486,6 +527,7 @@ def get_weather():
         return jsonify(get_fallback_weather(location))
 
 @claude_bp.route('/quiz', methods=['POST'])
+@require_auth
 def generate_quiz():
     """🎮 Vygenerovat kvíz"""
     topic = 'general'
@@ -558,6 +600,7 @@ FORMÁT (pouze JSON):
         })
 
 @claude_bp.route('/story', methods=['POST'])
+@require_auth
 def generate_story():
     """📖 Vygenerovat příběh"""
     theme = 'nature'
@@ -639,6 +682,7 @@ FORMÁT (pouze JSON):
         })
 
 @claude_bp.route('/dashboard-data', methods=['GET'])
+@require_auth
 def get_dashboard_data():
     """📊 Všechna data pro dashboard"""
     info = get_today_info()
@@ -673,6 +717,7 @@ def get_dashboard_data():
 # ============================================================================
 
 @claude_bp.route('/analyze-emotion', methods=['POST'])
+@require_auth
 def analyze_emotion():
     """
     🧠 Analyzuj emoce v textu pro RadimConsciousnessEngine
@@ -794,6 +839,7 @@ def analyze_emotions_local(text):
 
 
 @claude_bp.route('/consciousness-state', methods=['POST'])
+@require_auth
 def get_consciousness_state():
     """
     🧠 Získat doporučení pro stav vědomí
@@ -893,6 +939,7 @@ def calculate_harmony(emotions):
 
 
 @claude_bp.route('/memory/save', methods=['POST'])
+@require_auth
 def save_memory_note():
     """📝 Uložit poznámku do paměti (persisted to PostgreSQL)"""
     try:
@@ -924,6 +971,7 @@ def save_memory_note():
 
 
 @claude_bp.route('/memory/recall', methods=['POST'])
+@require_auth
 def recall_memory():
     """🔍 Vybavit si vzpomínky (from PostgreSQL)"""
     try:

@@ -23,6 +23,7 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 from dotenv import load_dotenv
 from database import get_db_for_flask, close_db_for_flask, get_connection
 from database import init_db as db_init_db, is_postgres
+from auth_middleware import require_auth, require_premium, optional_auth, decode_jwt
 
 load_dotenv()
 
@@ -1855,7 +1856,9 @@ def health():
     return jsonify({
         'status': 'healthy',
         'service': 'Radim Brain + Chat',
-        'version': '3.2.0',
+        'version': '3.3.0',
+        'auth': 'JWT (WordPress)',
+        'gdpr': True,
         'timestamp': now_iso(),
         'blueprints': blueprints,
         'blueprint_count': len(blueprints),
@@ -1875,6 +1878,96 @@ def health():
             'twilio_voice': {'configured': bool(os.environ.get('TWILIO_ACCOUNT_SID')), 'phone': os.environ.get('TWILIO_PHONE_NUMBER')}
         },
         'online_users': len(users_online)
+    })
+
+# ============================================
+# 🔐 AUTH ENDPOINTS
+# ============================================
+
+@app.route('/api/auth/verify', methods=['GET'])
+@require_auth
+def auth_verify():
+    """Ověří JWT token a vrátí user data"""
+    return jsonify({
+        "success": True,
+        "user": g.auth_user,
+        "message": "Token je platný"
+    })
+
+@app.route('/api/auth/data-export', methods=['GET'])
+@require_auth
+def auth_data_export():
+    """GDPR: Export všech dat uživatele z backendu"""
+    user_id = str(g.auth_user.get('id', ''))
+    export_data = {
+        "export_date": now_iso(),
+        "user_id": user_id,
+        "backend_data": {}
+    }
+
+    # Export memory data
+    try:
+        conn = get_connection()
+        if conn:
+            cursor = conn.cursor()
+            # Profile
+            cursor.execute("SELECT data FROM memory_profiles WHERE user_id = %s", (user_id,))
+            row = cursor.fetchone()
+            if row:
+                export_data["backend_data"]["profile"] = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+
+            # History (last 500)
+            cursor.execute(
+                "SELECT role, content, timestamp FROM memory_history WHERE user_id = %s ORDER BY timestamp DESC LIMIT 500",
+                (user_id,)
+            )
+            export_data["backend_data"]["history"] = [
+                {"role": r[0], "content": r[1], "timestamp": str(r[2])} for r in cursor.fetchall()
+            ]
+
+            # Learning data
+            cursor.execute("SELECT data FROM memory_learning WHERE user_id = %s", (user_id,))
+            row = cursor.fetchone()
+            if row:
+                export_data["backend_data"]["learning"] = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+
+            cursor.close()
+            conn.close()
+    except Exception as e:
+        export_data["backend_data"]["error"] = str(e)
+
+    return jsonify({
+        "success": True,
+        "data": export_data
+    })
+
+@app.route('/api/auth/data', methods=['DELETE'])
+@require_auth
+def auth_data_delete():
+    """GDPR: Smaže všechna data uživatele z backendu"""
+    user_id = str(g.auth_user.get('id', ''))
+    deleted = {"profile": False, "history": False, "learning": False}
+
+    try:
+        conn = get_connection()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM memory_profiles WHERE user_id = %s", (user_id,))
+            deleted["profile"] = cursor.rowcount > 0
+            cursor.execute("DELETE FROM memory_history WHERE user_id = %s", (user_id,))
+            deleted["history"] = cursor.rowcount > 0
+            cursor.execute("DELETE FROM memory_learning WHERE user_id = %s", (user_id,))
+            deleted["learning"] = cursor.rowcount > 0
+            conn.commit()
+            cursor.close()
+            conn.close()
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+    return jsonify({
+        "success": True,
+        "message": "Všechna data uživatele byla smazána",
+        "deleted": deleted
     })
 
 @app.route('/api')
