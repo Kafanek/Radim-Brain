@@ -935,8 +935,8 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
 
 <h3>Typické příznaky</h3>
 <ul>
-<li><strong>Zapomínání nedávných událostí</strong> — „Co jsem měl k obědu?" (ale dávné vzpomínky jsou zachovány)</li>
-<li><strong>Hledání slov</strong> — „Ta věc na pití... sklenice!"</li>
+<li><strong>Zapomínání nedávných událostí</strong> — 'Co jsem měl k obědu?" (ale dávné vzpomínky jsou zachovány)</li>
+<li><strong>Hledání slov</strong> — 'Ta věc na pití... sklenice!"</li>
 <li><strong>Dezorientace v čase</strong> — neví, jaký je den v týdnu</li>
 <li><strong>Problémy s financemi</strong> — zapomíná platit účty, chybné výpočty</li>
 <li><strong>Opakování otázek</strong> — ptá se znovu na to, co už slyšel</li>
@@ -946,7 +946,7 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
 <ul>
 <li>Buďte trpěliví, když hledá slova — napovězte, ale netlačte</li>
 <li>Strukturujte den — nástěnka s rozvrhem, připomínky</li>
-<li>Neříkejte „to jsem ti už říkal" — je to zraňující</li>
+<li>Neříkejte 'to jsem ti už říkal" — je to zraňující</li>
 <li>Podporujte samostatnost — nechte dělat, co ještě zvládá</li>
 <li>Zapojte do rozhovorů o minulosti — dávné vzpomínky fungují</li>
 </ul>
@@ -979,10 +979,10 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
 <h3>Komunikace ve středním stádiu</h3>
 <ul>
 <li><strong>Krátké věty</strong> — max 5 slov, jedna myšlenka</li>
-<li><strong>Ano/ne otázky</strong> — „Chceš čaj?" místo „Co chceš pít?"</li>
+<li><strong>Ano/ne otázky</strong> — 'Chceš čaj?" místo 'Co chceš pít?"</li>
 <li><strong>Oční kontakt a dotek</strong> — nejdřív navážete kontakt, pak mluvíte</li>
 <li><strong>Klidný hlas</strong> — nervozita se přenáší</li>
-<li><strong>Validace emocí</strong> — „Vidím, že jsi smutný" místo „Nemáš důvod být smutný"</li>
+<li><strong>Validace emocí</strong> — 'Vidím, že jsi smutný" místo 'Nemáš důvod být smutný"</li>
 </ul>
 
 <h3>Pokročilé stádium</h3>
@@ -1012,8 +1012,8 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
                             "question": "Jaký typ otázek je vhodný ve středním stádiu Alzheimera?",
                             "type": "single_choice",
                             "options": [
-                                {"id": "a", "text": "Otevřené otázky („Co chceš?")", "correct": False},
-                                {"id": "b", "text": "Ano/ne otázky („Chceš čaj?")", "correct": True},
+                                {"id": "a", "text": "Otevřené otázky (Co chceš?)", "correct": False},
+                                {"id": "b", "text": "Ano/ne otázky (Chceš čaj?)", "correct": True},
                                 {"id": "c", "text": "Složité otázky s více možnostmi", "correct": False}
                             ],
                             "explanation": "Ve středním stádiu jsou nejvhodnější jednoduché ano/ne otázky. Otevřené otázky mohou být příliš složité a frustrující."
@@ -1045,10 +1045,10 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
 
 <h3>Typické příznaky</h3>
 <ul>
-<li><strong>Kolísání pozornosti</strong> — jeden den je „jasný", druhý den zmatený</li>
+<li><strong>Kolísání pozornosti</strong> — jeden den je 'jasný", druhý den zmatený</li>
 <li><strong>Vizuální halucinace</strong> — vidí lidi, zvířata, děti (velmi realistické!)</li>
 <li><strong>Parkinsonismus</strong> — ztuhlost, pomalá chůze, třes</li>
-<li><strong>Poruchy REM spánku</strong> — „prožívání" snů, křičí, kope ve spánku</li>
+<li><strong>Poruchy REM spánku</strong> — 'prožívání" snů, křičí, kope ve spánku</li>
 <li><strong>Opakované pády</strong> a mdloby</li>
 </ul>
 
@@ -1058,13 +1058,13 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
 
 <h3>Jak reagovat na halucinace</h3>
 <ul>
-<li><strong>NEPOPÍREJTE</strong> — neříkejte „tam nikdo není", pro něj jsou reálné</li>
-<li><strong>Přesměrujte</strong> — „Pojďme se podívat do druhého pokoje"</li>
-<li><strong>Uklidněte</strong> — „Jsem tady s tebou, jsi v bezpečí"</li>
+<li><strong>NEPOPÍREJTE</strong> — neříkejte 'tam nikdo není", pro něj jsou reálné</li>
+<li><strong>Přesměrujte</strong> — 'Pojďme se podívat do druhého pokoje"</li>
+<li><strong>Uklidněte</strong> — 'Jsem tady s tebou, jsi v bezpečí"</li>
 <li><strong>Dobré osvětlení</strong> — stíny mohou vyvolat halucinace</li>
 </ul>""",
                         "key_points": [
-                            "Kolísání pozornosti — „dobré" a „špatné" dny",
+                            "Kolisani pozornosti — dobre a spatne dny",
                             "Vizuální halucinace jsou velmi realistické — nepopírejte je",
                             "POZOR na neuroleptika — mohou být nebezpečná!",
                             "Poruchy REM spánku — křik a pohyb ve spánku",
@@ -1082,7 +1082,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
 <h3>Jak se liší od Alzheimera</h3>
 <ul>
 <li><strong>Schodovité zhoršování</strong> — náhlé zhoršení (po příhodě), pak stabilita, pak další zhoršení</li>
-<li><strong>Pomalejší myšlení</strong> — pacient „ví, ale trvá mu to déle"</li>
+<li><strong>Pomalejší myšlení</strong> — pacient 'ví, ale trvá mu to déle"</li>
 <li><strong>Paměť může být lepší</strong> než u Alzheimera — hlavní problém je rychlost a plánování</li>
 <li><strong>Deprese</strong> — velmi častá a může zhoršovat kognitivní příznaky</li>
 <li><strong>Emocionální labilita</strong> — náhlý pláč nebo smích bez zjevného důvodu</li>
@@ -1153,7 +1153,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
 
 <h3>Varovné příznaky</h3>
 <ul>
-<li><strong>Ztráta empatie</strong> — „je mu jedno, co cítím"</li>
+<li><strong>Ztráta empatie</strong> — 'je mu jedno, co cítím"</li>
 <li><strong>Nevhodné chování na veřejnosti</strong> — říká věci, které dřív neříkal</li>
 <li><strong>Kompulzivní jednání</strong> — sbírání věcí, opakované rituály</li>
 <li><strong>Změny stravovacích návyků</strong> — přejídání se sladkým</li>
@@ -1162,7 +1162,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
 </ul>
 
 <h3>Proč je diagnóza tak obtížná</h3>
-<p>Rodina často říká: „Změnil se, jako by to byl jiný člověk." Lékaři mohou diagnostikovat depresi nebo bipolární poruchu. Správná diagnóza trvá průměrně <strong>3–4 roky</strong>.</p>
+<p>Rodina často říká: 'Změnil se, jako by to byl jiný člověk." Lékaři mohou diagnostikovat depresi nebo bipolární poruchu. Správná diagnóza trvá průměrně <strong>3–4 roky</strong>.</p>
 
 <h3>Komunikace s člověkem s FTD</h3>
 <ul>
@@ -1213,7 +1213,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
 <li>Halucinace: stejný přístup jako u Lewy body — uklidněte, přesměrujte</li>
 </ul>
 
-<p class="key-point">💡 <strong>Tichý obličej ≠ lhostejnost.</strong> U Parkinsona jsou oslabeny obličejové svaly — člověk CÍTÍ emoce, ale nedokáže je VYJÁDŘIT mimikou. Říkáme tomu „maskový obličej" (hypomimie).</p>""",
+<p class="key-point">💡 <strong>Tichý obličej ≠ lhostejnost.</strong> U Parkinsona jsou oslabeny obličejové svaly — člověk CÍTÍ emoce, ale nedokáže je VYJÁDŘIT mimikou. Říkáme tomu 'maskový obličej" (hypomimie).</p>""",
                         "key_points": [
                             "Až 80 % lidí s Parkinsonem vyvine demenci",
                             "Pohybové příznaky přichází PŘED kognitivními (rozdíl od Lewy body)",
