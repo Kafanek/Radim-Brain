@@ -815,6 +815,504 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
                 }
             }
         ]
+    },
+
+    # ─────────────────────────────────────────
+    # DEMENCE — různé druhy
+    # ─────────────────────────────────────────
+    "dementia": {
+        "id": "dementia",
+        "title": "Demence — průvodce pro rodiny a pečovatele",
+        "subtitle": "Alzheimer, Lewy body, vaskulární, frontotemporální a další formy demence",
+        "icon": "🧠",
+        "category": "Demence",
+        "difficulty": "intermediate",
+        "duration_minutes": 60,
+        "tags": ["demence", "Alzheimer", "Lewy body", "vaskulární", "frontotemporální", "Parkinson", "pečovatel"],
+        "description": "Kompletní průvodce nejčastějšími typy demence. Naučíte se rozlišit jednotlivé formy, porozumíte průběhu onemocnění a osvojíte si správné komunikační strategie.",
+        "target_audience": ["pečovatelé", "rodina", "zdravotníci", "sociální pracovníci"],
+        "learning_objectives": [
+            "Pochopíte rozdíl mezi 5 hlavními typy demence",
+            "Rozpoznáte varovné příznaky jednotlivých forem",
+            "Naučíte se komunikační strategie pro každé stádium",
+            "Porozumíte, jak správně reagovat na halucinace a zmatenost",
+            "Zjistíte, kde v ČR najdete pomoc"
+        ],
+        "modules": [
+            {
+                "id": "dementia-m1",
+                "title": "Co je demence? Přehled typů",
+                "order": 1,
+                "duration_minutes": 12,
+                "icon": "📖",
+                "lessons": [
+                    {
+                        "id": "dementia-m1-l1",
+                        "title": "Demence není normální stárnutí",
+                        "type": "article",
+                        "content": """<h2>Demence — když zapomínání přestane být normální</h2>
+
+<p><strong>Demence</strong> není jedno onemocnění, ale <strong>skupina příznaků</strong> (syndrom), které postihují paměť, myšlení a schopnost zvládat běžné denní činnosti. Postihuje přibližně <strong>160 000 lidí v ČR</strong> a toto číslo roste.</p>
+
+<h3>Normální stárnutí vs. demence</h3>
+<table>
+<tr><th>Normální stárnutí</th><th>Demence</th></tr>
+<tr><td>Občas zapomene jméno, ale vzpomene si později</td><td>Zapomíná jména blízkých a nevzpomene si</td></tr>
+<tr><td>Občas hledá klíče</td><td>Dává klíče do lednice a neví proč</td></tr>
+<tr><td>Pomaleji se učí nové věci</td><td>Nedokáže se naučit obsluhovat TV ovladač</td></tr>
+<tr><td>Občas špatné rozhodnutí</td><td>Opakovaně špatné finanční rozhodnutí</td></tr>
+</table>
+
+<h3>5 hlavních typů demence</h3>
+<ol>
+<li><strong>Alzheimerova choroba</strong> (60–70 %) — nejčastější, postupná ztráta paměti</li>
+<li><strong>Vaskulární demence</strong> (15–20 %) — po cévních příhodách, schodovité zhoršování</li>
+<li><strong>Demence s Lewyho tělísky</strong> (10–15 %) — halucinace, kolísání pozornosti</li>
+<li><strong>Frontotemporální demence</strong> (5–10 %) — změny chování a osobnosti</li>
+<li><strong>Demence při Parkinsonově chorobě</strong> — zpomalené myšlení, halucinace</li>
+</ol>
+
+<p class="key-point">💡 <strong>Důležité:</strong> Každý typ demence se projevuje JINAK a vyžaduje JINÝ přístup. Proto je správná diagnóza tak důležitá — žádejte vyšetření u neurologa nebo v memory klinice.</p>""",
+                        "key_points": [
+                            "Demence postihuje 160 000 lidí v ČR",
+                            "Není normální součást stárnutí — je to nemoc",
+                            "5 hlavních typů: Alzheimer, vaskulární, Lewy body, frontotemporální, Parkinson",
+                            "Každý typ se projevuje jinak a vyžaduje jiný přístup",
+                            "Správná diagnóza je klíčová — neurolog nebo memory klinika"
+                        ]
+                    }
+                ],
+                "quiz": {
+                    "id": "dementia-m1-quiz",
+                    "title": "Ověřte si: Základy demence",
+                    "questions": [
+                        {
+                            "id": "q1",
+                            "question": "Který typ demence je nejčastější?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Alzheimerova choroba", "correct": True},
+                                {"id": "b", "text": "Vaskulární demence", "correct": False},
+                                {"id": "c", "text": "Frontotemporální demence", "correct": False}
+                            ],
+                            "explanation": "Alzheimerova choroba tvoří 60–70 % všech demencí a je zdaleka nejčastějším typem."
+                        },
+                        {
+                            "id": "q2",
+                            "question": "Je demence normální součást stárnutí?",
+                            "type": "true_false",
+                            "correct_answer": False,
+                            "explanation": "Demence NENÍ normální stárnutí. Je to onemocnění mozku, které vyžaduje diagnostiku a péči."
+                        },
+                        {
+                            "id": "q3",
+                            "question": "Který typ demence se projevuje především změnami chování a osobnosti?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Alzheimerova choroba", "correct": False},
+                                {"id": "b", "text": "Frontotemporální demence", "correct": True},
+                                {"id": "c", "text": "Vaskulární demence", "correct": False}
+                            ],
+                            "explanation": "Frontotemporální demence typicky začíná změnami osobnosti a chování — ztráta empatie, nevhodné chování — zatímco paměť může být dlouho zachovaná."
+                        }
+                    ]
+                }
+            },
+            {
+                "id": "dementia-m2",
+                "title": "Alzheimerova choroba — 3 stádia",
+                "order": 2,
+                "duration_minutes": 12,
+                "icon": "🔬",
+                "lessons": [
+                    {
+                        "id": "dementia-m2-l1",
+                        "title": "Počáteční stádium Alzheimera",
+                        "type": "article",
+                        "content": """<h2>Alzheimer — počáteční stádium</h2>
+
+<p>V počátečním stádiu člověk <strong>stále žije samostatně</strong>, ale objevují se varovné signály:</p>
+
+<h3>Typické příznaky</h3>
+<ul>
+<li><strong>Zapomínání nedávných událostí</strong> — „Co jsem měl k obědu?" (ale dávné vzpomínky jsou zachovány)</li>
+<li><strong>Hledání slov</strong> — „Ta věc na pití... sklenice!"</li>
+<li><strong>Dezorientace v čase</strong> — neví, jaký je den v týdnu</li>
+<li><strong>Problémy s financemi</strong> — zapomíná platit účty, chybné výpočty</li>
+<li><strong>Opakování otázek</strong> — ptá se znovu na to, co už slyšel</li>
+</ul>
+
+<h3>Jak komunikovat v počátečním stádiu</h3>
+<ul>
+<li>Buďte trpěliví, když hledá slova — napovězte, ale netlačte</li>
+<li>Strukturujte den — nástěnka s rozvrhem, připomínky</li>
+<li>Neříkejte „to jsem ti už říkal" — je to zraňující</li>
+<li>Podporujte samostatnost — nechte dělat, co ještě zvládá</li>
+<li>Zapojte do rozhovorů o minulosti — dávné vzpomínky fungují</li>
+</ul>
+
+<p class="key-point">💡 <strong>Tip pro rodinu:</strong> Počáteční stádium je nejlepší čas na plánování budoucnosti — právní záležitosti, přání ohledně péče, finanční plánování. Mluvte o tom, dokud to ještě jde.</p>""",
+                        "key_points": [
+                            "Zapomínání nedávných událostí, ale dávné vzpomínky zachovány",
+                            "Hledání slov, dezorientace v čase",
+                            "Člověk je stále relativně samostatný",
+                            "Neopravujte, nepoukazujte na chyby — podporujte",
+                            "Plánujte budoucnost, dokud to jde"
+                        ]
+                    },
+                    {
+                        "id": "dementia-m2-l2",
+                        "title": "Střední a pokročilé stádium",
+                        "type": "article",
+                        "content": """<h2>Alzheimer — střední a pokročilé stádium</h2>
+
+<h3>Střední stádium (nejdelší — může trvat roky)</h3>
+<ul>
+<li>Nepoznává některé blízké osoby</li>
+<li>Bloudí v známém prostředí</li>
+<li>Potřebuje pomoc s oblékáním, hygienou</li>
+<li>Může být agresivní nebo úzkostný (ne ze zlé vůle!)</li>
+<li>Noční neklid, převrácený rytmus den/noc</li>
+<li>Opakování stále stejných vět nebo příběhů</li>
+</ul>
+
+<h3>Komunikace ve středním stádiu</h3>
+<ul>
+<li><strong>Krátké věty</strong> — max 5 slov, jedna myšlenka</li>
+<li><strong>Ano/ne otázky</strong> — „Chceš čaj?" místo „Co chceš pít?"</li>
+<li><strong>Oční kontakt a dotek</strong> — nejdřív navážete kontakt, pak mluvíte</li>
+<li><strong>Klidný hlas</strong> — nervozita se přenáší</li>
+<li><strong>Validace emocí</strong> — „Vidím, že jsi smutný" místo „Nemáš důvod být smutný"</li>
+</ul>
+
+<h3>Pokročilé stádium</h3>
+<ul>
+<li>Téměř úplná ztráta řeči</li>
+<li>Plná závislost na péči</li>
+<li>Komunikace skrze dotek, mimiku, přítomnost</li>
+<li><strong>Člověk stále vnímá emoce</strong> — laskavý dotek a klidný hlas ho uklidní</li>
+</ul>
+
+<p class="key-point">💡 <strong>Nikdy nezapomínejte:</strong> I v pokročilém stádiu člověk CÍTÍ vaši lásku a přítomnost. Držte ho za ruku, pusťte oblíbenou hudbu, buďte prostě s ním.</p>""",
+                        "key_points": [
+                            "Střední stádium: potřebuje pomoc, bloudí, nepoznává blízké",
+                            "Agrese/úzkost nejsou záměrné — je to nemoc",
+                            "Krátké věty, Ano/ne otázky, klidný hlas",
+                            "Pokročilé stádium: ztráta řeči, komunikace přes dotek",
+                            "Emoce zůstávají do konce — láska a přítomnost pomáhá"
+                        ]
+                    }
+                ],
+                "quiz": {
+                    "id": "dementia-m2-quiz",
+                    "title": "Ověřte si: Alzheimerova choroba",
+                    "questions": [
+                        {
+                            "id": "q1",
+                            "question": "Jaký typ otázek je vhodný ve středním stádiu Alzheimera?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Otevřené otázky („Co chceš?")", "correct": False},
+                                {"id": "b", "text": "Ano/ne otázky („Chceš čaj?")", "correct": True},
+                                {"id": "c", "text": "Složité otázky s více možnostmi", "correct": False}
+                            ],
+                            "explanation": "Ve středním stádiu jsou nejvhodnější jednoduché ano/ne otázky. Otevřené otázky mohou být příliš složité a frustrující."
+                        },
+                        {
+                            "id": "q2",
+                            "question": "Vnímá člověk v pokročilém stádiu Alzheimera emoce okolí?",
+                            "type": "true_false",
+                            "correct_answer": True,
+                            "explanation": "Ano! I v pokročilém stádiu člověk vnímá emoce — laskavý dotek a klidný hlas ho uklidní. Emocionální vnímání přetrvává nejdéle."
+                        }
+                    ]
+                }
+            },
+            {
+                "id": "dementia-m3",
+                "title": "Lewy body a vaskulární demence",
+                "order": 3,
+                "duration_minutes": 12,
+                "icon": "🔍",
+                "lessons": [
+                    {
+                        "id": "dementia-m3-l1",
+                        "title": "Demence s Lewyho tělísky",
+                        "type": "article",
+                        "content": """<h2>Demence s Lewyho tělísky — záhadný chameleon</h2>
+
+<p>Demence s Lewyho tělísky (DLB) je <strong>druhá nejčastější degenerativní demence</strong> po Alzheimeru. Je zákeřná, protože se často zaměňuje s jinými diagnózami.</p>
+
+<h3>Typické příznaky</h3>
+<ul>
+<li><strong>Kolísání pozornosti</strong> — jeden den je „jasný", druhý den zmatený</li>
+<li><strong>Vizuální halucinace</strong> — vidí lidi, zvířata, děti (velmi realistické!)</li>
+<li><strong>Parkinsonismus</strong> — ztuhlost, pomalá chůze, třes</li>
+<li><strong>Poruchy REM spánku</strong> — „prožívání" snů, křičí, kope ve spánku</li>
+<li><strong>Opakované pády</strong> a mdloby</li>
+</ul>
+
+<h3>⚠️ KRITICKÉ UPOZORNĚNÍ</h3>
+<p class="key-point" style="background: #ffe0e0;">🚨 <strong>NEUROLEPTIKA MOHOU BÝT NEBEZPEČNÁ!</strong><br>
+U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci — ztuhlost, horečku, až ohrožení života. Vždy informujte lékaře o diagnóze DLB!</p>
+
+<h3>Jak reagovat na halucinace</h3>
+<ul>
+<li><strong>NEPOPÍREJTE</strong> — neříkejte „tam nikdo není", pro něj jsou reálné</li>
+<li><strong>Přesměrujte</strong> — „Pojďme se podívat do druhého pokoje"</li>
+<li><strong>Uklidněte</strong> — „Jsem tady s tebou, jsi v bezpečí"</li>
+<li><strong>Dobré osvětlení</strong> — stíny mohou vyvolat halucinace</li>
+</ul>""",
+                        "key_points": [
+                            "Kolísání pozornosti — „dobré" a „špatné" dny",
+                            "Vizuální halucinace jsou velmi realistické — nepopírejte je",
+                            "POZOR na neuroleptika — mohou být nebezpečná!",
+                            "Poruchy REM spánku — křik a pohyb ve spánku",
+                            "Přesměrujte, uklidněte, zajistěte dobré osvětlení"
+                        ]
+                    },
+                    {
+                        "id": "dementia-m3-l2",
+                        "title": "Vaskulární demence",
+                        "type": "article",
+                        "content": """<h2>Vaskulární demence — mozek bez kyslíku</h2>
+
+<p><strong>Vaskulární demence</strong> vzniká, když mozek nedostává dostatek krve a kyslíku — nejčastěji po cévní mozkové příhodě nebo při postižení malých cév.</p>
+
+<h3>Jak se liší od Alzheimera</h3>
+<ul>
+<li><strong>Schodovité zhoršování</strong> — náhlé zhoršení (po příhodě), pak stabilita, pak další zhoršení</li>
+<li><strong>Pomalejší myšlení</strong> — pacient „ví, ale trvá mu to déle"</li>
+<li><strong>Paměť může být lepší</strong> než u Alzheimera — hlavní problém je rychlost a plánování</li>
+<li><strong>Deprese</strong> — velmi častá a může zhoršovat kognitivní příznaky</li>
+<li><strong>Emocionální labilita</strong> — náhlý pláč nebo smích bez zjevného důvodu</li>
+</ul>
+
+<h3>Prevence (jediná demence, kde funguje!)</h3>
+<ul>
+<li>Kontrola krevního tlaku (hypertenze je hlavní riziko!)</li>
+<li>Léčba cukrovky a vysokého cholesterolu</li>
+<li>Nekouřit, omezit alkohol</li>
+<li>Pravidelný pohyb — 30 minut denně</li>
+<li>Léčba fibrilace síní (prevence embolií)</li>
+</ul>
+
+<p class="key-point">💡 <strong>Dobrá zpráva:</strong> Vaskulární demence je jediný typ, kde skutečně funguje PREVENCE. Kontrola cévních rizikových faktorů může zastavit nebo zpomalit zhoršování!</p>""",
+                        "key_points": [
+                            "Vzniká po cévních příhodách — schodovité zhoršování",
+                            "Hlavní problém: pomalost myšlení, ne paměť",
+                            "Deprese je velmi častá — léčte ji!",
+                            "Prevence funguje: tlak, cukrovka, cholesterol, pohyb",
+                            "Jediná demence, kde lze zhoršování ZASTAVIT prevencí"
+                        ]
+                    }
+                ],
+                "quiz": {
+                    "id": "dementia-m3-quiz",
+                    "title": "Ověřte si: Lewy body a vaskulární demence",
+                    "questions": [
+                        {
+                            "id": "q1",
+                            "question": "Proč je důležité u demence s Lewyho tělísky informovat lékaře o diagnóze?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Kvůli speciální dietě", "correct": False},
+                                {"id": "b", "text": "Některá léky (neuroleptika) mohou být nebezpečná", "correct": True},
+                                {"id": "c", "text": "Potřebuje jiný typ lůžka", "correct": False}
+                            ],
+                            "explanation": "U demence s Lewyho tělísky mohou klasická antipsychotika způsobit těžkou, až život ohrožující reakci. Proto je nutné vždy informovat lékaře."
+                        },
+                        {
+                            "id": "q2",
+                            "question": "Která demence je jediná, kde skutečně funguje prevence?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Alzheimerova choroba", "correct": False},
+                                {"id": "b", "text": "Frontotemporální demence", "correct": False},
+                                {"id": "c", "text": "Vaskulární demence", "correct": True}
+                            ],
+                            "explanation": "Vaskulární demence vzniká kvůli cévním problémům, které lze předcházet — kontrola krevního tlaku, cukrovky, cholesterolu a pravidelný pohyb."
+                        }
+                    ]
+                }
+            },
+            {
+                "id": "dementia-m4",
+                "title": "Frontotemporální demence a Parkinson",
+                "order": 4,
+                "duration_minutes": 12,
+                "icon": "🧬",
+                "lessons": [
+                    {
+                        "id": "dementia-m4-l1",
+                        "title": "Frontotemporální demence — skrytá demence",
+                        "type": "article",
+                        "content": """<h2>Frontotemporální demence — když se změní osobnost</h2>
+
+<p><strong>Frontotemporální demence (FTD)</strong> je zákeřná, protože se často projeví <strong>u lidí mezi 45–65 lety</strong> — tedy v produktivním věku. A protože začíná změnami CHOVÁNÍ, ne paměti, je často zaměňována za psychiatrické onemocnění.</p>
+
+<h3>Varovné příznaky</h3>
+<ul>
+<li><strong>Ztráta empatie</strong> — „je mu jedno, co cítím"</li>
+<li><strong>Nevhodné chování na veřejnosti</strong> — říká věci, které dřív neříkal</li>
+<li><strong>Kompulzivní jednání</strong> — sbírání věcí, opakované rituály</li>
+<li><strong>Změny stravovacích návyků</strong> — přejídání se sladkým</li>
+<li><strong>Apatie</strong> — ztráta zájmů, iniciativy</li>
+<li><strong>Paměť může být dlouho ZACHOVANÁ!</strong></li>
+</ul>
+
+<h3>Proč je diagnóza tak obtížná</h3>
+<p>Rodina často říká: „Změnil se, jako by to byl jiný člověk." Lékaři mohou diagnostikovat depresi nebo bipolární poruchu. Správná diagnóza trvá průměrně <strong>3–4 roky</strong>.</p>
+
+<h3>Komunikace s člověkem s FTD</h3>
+<ul>
+<li>Nastavte jasná pravidla a strukturu</li>
+<li>Nevyčítejte nevhodné chování — nedokáže ho kontrolovat</li>
+<li>Jednoduché pokyny, rutina</li>
+<li>Vizuální připomínky (obrázky, piktogramy)</li>
+<li>Chraňte před rizikovými situacemi (finance, řízení)</li>
+</ul>
+
+<p class="key-point">💡 <strong>Pokud se osobnost blízkého člověka (45–65 let) výrazně změní a léčba antidepresivy nepomáhá — žádejte neurologické vyšetření na FTD.</strong></p>""",
+                        "key_points": [
+                            "Postihuje lidi v produktivním věku (45–65 let)",
+                            "Začíná změnami chování a osobnosti, ne paměti",
+                            "Často zaměňována za psychiatrické onemocnění",
+                            "Diagnóza trvá průměrně 3–4 roky",
+                            "Nevhodné chování nelze kontrolovat — je to nemoc"
+                        ]
+                    },
+                    {
+                        "id": "dementia-m4-l2",
+                        "title": "Demence při Parkinsonově chorobě",
+                        "type": "article",
+                        "content": """<h2>Parkinsonova choroba a demence</h2>
+
+<p>Až <strong>80 % lidí s Parkinsonovou chorobou</strong> vyvine v pozdějších stádiích demenci. Tato forma je podobná demenci s Lewyho tělísky, ale liší se pořadím příznaků.</p>
+
+<h3>Rozdíl: Lewy body vs. Parkinson s demencí</h3>
+<ul>
+<li><strong>Lewy body demence:</strong> kognitivní příznaky se objeví PRVNÍ nebo současně s pohybovými</li>
+<li><strong>Parkinson s demencí:</strong> pohybové příznaky (třes, ztuhlost) jsou NEJMÉNĚ 1 rok PŘED demencí</li>
+</ul>
+
+<h3>Příznaky demence při Parkinsonu</h3>
+<ul>
+<li>Zpomalené myšlení a reakce</li>
+<li>Problémy s plánováním a organizací</li>
+<li>Vizuální halucinace (podobně jako u Lewy body)</li>
+<li>Deprese a apatie</li>
+<li>Denní ospalost, noční neklid</li>
+</ul>
+
+<h3>Komunikační tipy</h3>
+<ul>
+<li>Dejte více času na odpověď — myšlení je pomalejší, ne hloupější</li>
+<li>Tichá mimika neznamená lhostejnost (maskový obličej je příznak Parkinsonu)</li>
+<li>Tichý hlas — přibližte se, nežádejte křičení</li>
+<li>Halucinace: stejný přístup jako u Lewy body — uklidněte, přesměrujte</li>
+</ul>
+
+<p class="key-point">💡 <strong>Tichý obličej ≠ lhostejnost.</strong> U Parkinsona jsou oslabeny obličejové svaly — člověk CÍTÍ emoce, ale nedokáže je VYJÁDŘIT mimikou. Říkáme tomu „maskový obličej" (hypomimie).</p>""",
+                        "key_points": [
+                            "Až 80 % lidí s Parkinsonem vyvine demenci",
+                            "Pohybové příznaky přichází PŘED kognitivními (rozdíl od Lewy body)",
+                            "Zpomalené myšlení — dejte více času na odpověď",
+                            "Maskový obličej ≠ lhostejnost — svaly, ne emoce",
+                            "Halucinace: uklidněte, přesměrujte, nepopírejte"
+                        ]
+                    }
+                ],
+                "quiz": {
+                    "id": "dementia-m4-quiz",
+                    "title": "Ověřte si: FTD a Parkinson",
+                    "questions": [
+                        {
+                            "id": "q1",
+                            "question": "Jaký je hlavní rozdíl mezi frontotemporální demencí a Alzheimerem?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "FTD začíná ztrátou paměti", "correct": False},
+                                {"id": "b", "text": "FTD začíná změnami chování a osobnosti, paměť je zachovaná", "correct": True},
+                                {"id": "c", "text": "FTD postihuje jen starší lidi", "correct": False}
+                            ],
+                            "explanation": "Frontotemporální demence typicky začíná změnami osobnosti a chování, zatímco paměť může být dlouho zachovaná. Na rozdíl od Alzheimera postihuje často mladší lidi (45–65 let)."
+                        },
+                        {
+                            "id": "q2",
+                            "question": "Co znamená 'maskový obličej' u Parkinsonovy choroby?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Pacient je lhostejný", "correct": False},
+                                {"id": "b", "text": "Pacient odmítá komunikovat", "correct": False},
+                                {"id": "c", "text": "Oslabené obličejové svaly — emoce cítí, ale nedokáže je vyjádřit", "correct": True}
+                            ],
+                            "explanation": "Maskový obličej (hypomimie) je příznak Parkinsona — obličejové svaly jsou oslabeny. Člověk CÍTÍ emoce plně, jen je nedokáže vyjádřit mimikou."
+                        }
+                    ]
+                }
+            },
+            {
+                "id": "dementia-m5",
+                "title": "Kde hledat pomoc v ČR",
+                "order": 5,
+                "duration_minutes": 8,
+                "icon": "🏥",
+                "lessons": [
+                    {
+                        "id": "dementia-m5-l1",
+                        "title": "Podpora pro rodiny a pečovatele",
+                        "type": "article",
+                        "content": """<h2>Kde najít pomoc — průvodce pro rodiny</h2>
+
+<h3>Diagnostika</h3>
+<ul>
+<li><strong>Memory kliniky</strong> — specializovaná pracoviště: Motol, FN Brno, FN Olomouc, FN Hradec Králové</li>
+<li><strong>Neurolog</strong> — první kontakt pro vyšetření</li>
+<li><strong>Geriatr</strong> — pro seniory s více diagnózami</li>
+</ul>
+
+<h3>Organizace</h3>
+<ul>
+<li><strong>Česká alzheimerovská společnost</strong> (ČALS) — alzheimer.cz — poradenství, svépomocné skupiny</li>
+<li><strong>Alzheimer nadační fond</strong> — finanční podpora rodin</li>
+<li><strong>Diakonie, Charita</strong> — terénní a odlehčovací služby</li>
+<li><strong>Centrum pro studium demence</strong> — výzkum a vzdělávání</li>
+</ul>
+
+<h3>Služby pro rodiny</h3>
+<ul>
+<li><strong>Denní stacionáře</strong> — péče přes den, pečovatel si odpočine</li>
+<li><strong>Respitní péče</strong> — krátkodobé umístění pro odpočinek rodiny</li>
+<li><strong>Pečovatelská služba</strong> — pomoc v domácnosti</li>
+<li><strong>Tísňové linky:</strong>
+  <ul>
+    <li>116 123 — psychická podpora</li>
+    <li>155 — při akutním zhoršení</li>
+    <li>ČALS linka: 283 880 346</li>
+  </ul>
+</li>
+</ul>
+
+<h3>Pro pečovatele</h3>
+<ul>
+<li>Příspěvek na péči (zákon č. 108/2006 Sb.) — 4 stupně</li>
+<li>Svépomocné skupiny — sdílení zkušeností s dalšími rodinami</li>
+<li>Psychologická podpora — pečovatel TAKÉ potřebuje péči!</li>
+</ul>
+
+<p class="key-point">💡 <strong>Nejdůležitější rada pro pečovatele:</strong> Požádat o pomoc NENÍ slabost. Nemůžete pečovat o druhého, pokud se sami zhroutíte. Využívejte respitní péči, mluvte o svých pocitech, hledejte podporu.</p>""",
+                        "key_points": [
+                            "Memory kliniky pro diagnostiku — Motol, Brno, Olomouc, HK",
+                            "ČALS (alzheimer.cz) — hlavní organizace pro rodiny",
+                            "Denní stacionáře a respitní péče — odpočinek pro pečovatele",
+                            "Příspěvek na péči — 4 stupně finanční podpory",
+                            "Pečovatel TAKÉ potřebuje péči — není slabost požádat o pomoc"
+                        ]
+                    }
+                ]
+            }
+        ]
     }
 }
 
@@ -1315,7 +1813,9 @@ def get_communication_needs():
     course_to_needs = {
         "dysphasia": ["dysphasia_child", "dysphasia_adult", "aphasia"],
         "huntington": ["huntington"],
-        "als": ["als"]
+        "als": ["als"],
+        "dementia": ["alzheimer", "alzheimer_early", "alzheimer_middle", "alzheimer_late",
+                      "lewy_body", "vascular", "frontotemporal", "parkinson_dementia"]
     }
 
     if need_type:
@@ -1519,7 +2019,103 @@ TEACHERS = {
         "role": "AI Tutor",
         "specialization": ["disfázie", "komunikace", "vzácná onemocnění"],
         "avatar": "🤖",
-        "description": "AI asistent specializovaný na vzdělávání o komunikačních potřebách"
+        "description": "AI asistent specializovaný na vzdělávání o komunikačních potřebách",
+        "target_groups": ["pečovatelé", "rodina", "zdravotníci"]
+    },
+    "dysphasia-child-tutor": {
+        "id": "dysphasia-child-tutor",
+        "name": "Logopedka Radka",
+        "role": "Specialistka na dětskou disfázii",
+        "specialization": ["vývojová disfázie", "dětská logopedie", "speciální pedagogika"],
+        "avatar": "👩‍🏫",
+        "description": "Specializovaná AI logopedka pro děti s vývojovou disfázií. Pomáhá rodičům i učitelům porozumět potřebám dítěte a nastavit správnou podporu.",
+        "target_groups": ["rodiče", "učitelé MŠ/ZŠ", "asistenti pedagoga", "logopedi"],
+        "teaching_approach": {
+            "principles": [
+                "Trpělivost — dítě potřebuje čas na formulování myšlenek",
+                "Vizuální podpora — obrázky, piktogramy, gesta",
+                "Krátké a jednoduché věty — max 3–5 slov",
+                "Pozitivní zpětná vazba — chválit snahu, ne jen výsledek",
+                "Rutina a předvídatelnost — jasný denní režim",
+                "Hra jako základ — učení formou hry, ne drilu"
+            ],
+            "red_flags": [
+                "Dítě ve 2 letech nemluví žádná slova",
+                "Ve 3 letech netvoří dvouslovné věty",
+                "Ve 4 letech mu nerozumí lidé mimo rodinu",
+                "Dítě se vyhýbá komunikaci nebo je frustrované",
+                "Nerozumí jednoduchým pokynům odpovídajícím věku"
+            ],
+            "exercises": [
+                {"name": "Pojmenuj obrázek", "age": "2–4", "desc": "Ukazujte obrázky a pojmenovávejte je společně"},
+                {"name": "Co je na obrázku špatně?", "age": "4–6", "desc": "Absurdní obrázky — dítě hledá, co tam nepatří"},
+                {"name": "Příběh podle obrázků", "age": "5–7", "desc": "3–4 obrázky v řadě, dítě vypráví příběh"},
+                {"name": "Rýmy a říkanky", "age": "3–5", "desc": "Opakování rýmů rozvíjí fonologické povědomí"},
+                {"name": "Hra na obchod", "age": "4–6", "desc": "Hraní rolí procvičuje praktickou komunikaci"},
+                {"name": "Deník s obrázky", "age": "5+", "desc": "Dítě kreslí a popisuje, co zažilo"}
+            ],
+            "school_tips": [
+                "Zajistit IVP (individuální vzdělávací plán)",
+                "Sednout dítě dopředu — blízko učitele",
+                "Vizuální rozvrh na tabuli / na lavici",
+                "Více času na testy a úkoly",
+                "Asistent pedagoga při výuce",
+                "Spolupráce s SPC (speciálně pedagogickým centrem)"
+            ]
+        }
+    },
+    "dementia-tutor": {
+        "id": "dementia-tutor",
+        "name": "Dr. Radim Neurolog",
+        "role": "Specialista na demenci",
+        "specialization": ["Alzheimer", "Lewy body demence", "vaskulární demence", "frontotemporální demence"],
+        "avatar": "🧠",
+        "description": "AI specialista na různé druhy demence. Pomáhá pečovatelům a rodinám porozumět průběhu onemocnění a správně komunikovat s nemocným.",
+        "target_groups": ["pečovatelé", "rodina", "zdravotníci", "sociální pracovníci"],
+        "dementia_guide": {
+            "types": {
+                "alzheimer": {
+                    "name": "Alzheimerova choroba",
+                    "prevalence": "60–70 % všech demencí",
+                    "key_features": "Postupná ztráta paměti, dezorientace, problémy s řečí",
+                    "stages": ["Počáteční — zapomínání, hledání slov", "Střední — potřebuje pomoc, bloudí, nerozeznává blízké", "Pokročilé — plná závislost na péči, ztráta řeči"]
+                },
+                "lewy_body": {
+                    "name": "Demence s Lewyho tělísky",
+                    "prevalence": "10–15 % demencí",
+                    "key_features": "Kolísání pozornosti, vizuální halucinace, parkinsonismus, poruchy spánku",
+                    "warning": "POZOR: Neuroleptika mohou být NEBEZPEČNÁ — vždy konzultujte neurologa!"
+                },
+                "vascular": {
+                    "name": "Vaskulární demence",
+                    "prevalence": "15–20 % demencí",
+                    "key_features": "Schodovité zhoršování po mozkových příhodách, zpomalené myšlení, deprese",
+                    "prevention": "Kontrola krevního tlaku, cukrovky, cholesterolu, nekouřit"
+                },
+                "frontotemporal": {
+                    "name": "Frontotemporální demence",
+                    "prevalence": "5–10 % demencí, častěji u mladších (45–65 let)",
+                    "key_features": "Změny osobnosti a chování DŘÍVE než poruchy paměti, ztráta empatie, nevhodné chování",
+                    "warning": "Často zaměňována za psychiatrické onemocnění. Paměť může být dlouho zachovaná."
+                },
+                "parkinson_dementia": {
+                    "name": "Demence při Parkinsonově chorobě",
+                    "prevalence": "Až 80 % pacientů s Parkinsonem v pozdních stádiích",
+                    "key_features": "Zpomalené myšlení, halucinace, podobné Lewy body demenci",
+                    "note": "Pokud se demence objeví BEZ pohybových příznaků — spíše Lewy body; pokud PO nich — Parkinson s demencí"
+                }
+            },
+            "communication_rules": [
+                "Mluvte pomalu, klidně, s úsměvem",
+                "Krátké věty — jedna myšlenka = jedna věta",
+                "Ano/ne otázky místo otevřených",
+                "Nepopírejte halucinace — přesměrujte pozornost",
+                "Neopravujte nesprávné vzpomínky — validujte emoce",
+                "Oční kontakt a dotek — neverbální komunikace je klíčová",
+                "Tiché prostředí bez rušivých zvuků",
+                "Rutina a stabilní prostředí snižují úzkost"
+            ]
+        }
     }
 }
 
@@ -1529,11 +2125,48 @@ TEACHER_ASSIGNMENTS = {}  # {user_id: teacher_id}
 @education_bp.route('/api/education/teachers', methods=['GET'])
 def list_teachers():
     """Seznam dostupných učitelů/tutorů"""
+    specialization = request.args.get('specialization')
+    teachers = list(TEACHERS.values())
+    if specialization:
+        teachers = [t for t in teachers if specialization.lower() in
+                    ' '.join(t.get('specialization', [])).lower()]
     return jsonify({
         "success": True,
-        "teachers": list(TEACHERS.values()),
+        "teachers": teachers,
+        "total": len(teachers),
         "timestamp": now_iso()
     })
+
+
+@education_bp.route('/api/education/teacher/<teacher_id>', methods=['GET'])
+def get_teacher_detail(teacher_id):
+    """Detail učitele včetně specializovaného průvodce"""
+    teacher = TEACHERS.get(teacher_id)
+    if not teacher:
+        return jsonify({"success": False, "error": "Učitel nenalezen"}), 404
+
+    result = {
+        "success": True,
+        "teacher": teacher,
+        "timestamp": now_iso()
+    }
+
+    # Specializovaný obsah podle typu učitele
+    if teacher_id == "dysphasia-child-tutor":
+        result["guide"] = teacher.get("teaching_approach", {})
+        result["guide_type"] = "dysphasia_child"
+        result["related_courses"] = ["dysphasia"]
+        result["related_communication_needs"] = ["dysphasia_child"]
+    elif teacher_id == "dementia-tutor":
+        result["guide"] = teacher.get("dementia_guide", {})
+        result["guide_type"] = "dementia"
+        result["related_courses"] = ["dementia"]
+        result["related_communication_needs"] = [
+            "alzheimer", "alzheimer_early", "alzheimer_middle", "alzheimer_late",
+            "lewy_body", "vascular", "frontotemporal", "parkinson_dementia"
+        ]
+
+    return jsonify(result)
 
 
 @education_bp.route('/api/education/teacher/assign', methods=['POST'])
@@ -1623,6 +2256,19 @@ def teacher_review(user_id):
     if profile["avg_score"] >= 85:
         auto_recommendations.append("Výborný student. Doporučit pokročilejší materiály.")
 
+    # Doporučení na základě přiřazeného učitele
+    assigned_tid = TEACHER_ASSIGNMENTS.get(user_id)
+    if assigned_tid == "dysphasia-child-tutor":
+        auto_recommendations.append("🗣️ Specialistka: Zkontrolovat IVP dítěte a spolupráci s SPC.")
+        auto_recommendations.append("🗣️ Tip: Využít cvičení 'Pojmenuj obrázek' a 'Rýmy a říkanky'.")
+        if profile["avg_score"] < 50:
+            auto_recommendations.append("🗣️ Doporučení: Zjednodušit materiály — vizuální podpora, piktogramy.")
+    elif assigned_tid == "dementia-tutor":
+        auto_recommendations.append("🧠 Specialista: Ověřit, zda pečovatel zná správný typ demence pacienta.")
+        auto_recommendations.append("🧠 Tip: Procvičit komunikační pravidla pro příslušné stádium.")
+        if "Demence" in profile.get("weaknesses", []):
+            auto_recommendations.append("🧠 Priorita: Zopakovat rozdíly mezi typy demence a komunikační strategie.")
+
     return jsonify({
         "success": True,
         "student": {
@@ -1695,6 +2341,30 @@ def education_news():
                 "source": "ALS Liga",
                 "category": "health",
                 "relevance": "als",
+                "url": None
+            },
+            {
+                "title": "Nový lék na Alzheimera schválen v EU",
+                "description": "Evropská léková agentura schválila lecanemab — první lék, který prokazatelně zpomaluje úbytek kognitivních funkcí v počátečním stádiu Alzheimera.",
+                "source": "EMA",
+                "category": "health",
+                "relevance": "dementia",
+                "url": None
+            },
+            {
+                "title": "Demence v ČR — 160 000 lidí potřebuje pomoc",
+                "description": "Česká alzheimerovská společnost upozorňuje na rostoucí počet lidí s demencí a nedostatek specializované péče. Nový Národní akční plán slibuje změnu.",
+                "source": "ČALS",
+                "category": "health",
+                "relevance": "dementia",
+                "url": None
+            },
+            {
+                "title": "Dětská disfázie — kdy navštívit logopeda?",
+                "description": "Včasná diagnostika vývojové disfázie je klíčová. Logopedi doporučují vyšetření, pokud dítě ve 2 letech nemluví žádná slova nebo ve 3 letech netvoří věty.",
+                "source": "Asociace klinických logopedů ČR",
+                "category": "health",
+                "relevance": "dysphasia",
                 "url": None
             }
         ],
