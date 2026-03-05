@@ -38,3 +38,6 @@ anthropic>=0.40.0
 
 # 📞 Twilio Voice (phone calls for seniors)
 twilio>=9.0.0
+
+# ⏰ Background Scheduler (task reminders push notifications)
+APScheduler==3.10.4

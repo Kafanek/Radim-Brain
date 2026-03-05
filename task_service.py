@@ -264,6 +264,101 @@ def get_due_tasks(user_id, window_minutes=30):
 
 
 # ============================================
+# SCHEDULER HELPERS (v231 — background reminder checks)
+# ============================================
+
+def get_all_due_tasks(window_minutes=5):
+    """
+    Získat VŠECHNY splatné úkoly napříč uživateli (pro scheduler).
+    Filtruje: pending, naplánovaný čas v okně, ještě nenotifikované.
+
+    Returns:
+        list of dict — úkoly ke notifikaci
+    """
+    if not _DB_AVAILABLE:
+        return []
+
+    try:
+        now = datetime.now()
+        current_time = now.strftime('%H:%M')
+        future_time = (now + timedelta(minutes=window_minutes)).strftime('%H:%M')
+        current_date = now.date().isoformat()
+
+        db = get_connection()
+        p = _p()
+
+        rows = db.execute(
+            f"""SELECT * FROM radim_tasks
+                WHERE status = 'pending'
+                AND scheduled_time IS NOT NULL
+                AND (scheduled_date = {p} OR scheduled_date IS NULL OR recurrence != 'once')
+                AND scheduled_time >= {p} AND scheduled_time <= {p}
+                ORDER BY scheduled_time""",
+            (current_date, current_time, future_time)
+        ).fetchall()
+
+        db.close()
+
+        # Filter out already-notified tasks
+        results = []
+        for r in rows:
+            d = dict(r)
+            meta = {}
+            if d.get('metadata'):
+                try:
+                    meta = json.loads(d['metadata']) if isinstance(d['metadata'], str) else d['metadata']
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if not meta.get('notified'):
+                results.append(d)
+
+        return results
+
+    except Exception as e:
+        logger.error(f"get_all_due_tasks error: {e}")
+        return []
+
+
+def mark_task_notified(task_id):
+    """Označit úkol jako notifikovaný (zabránit dvojitému odeslání)."""
+    if not _DB_AVAILABLE:
+        return False
+
+    try:
+        db = get_connection()
+        p = _p()
+
+        # Read existing metadata
+        row = db.execute(
+            f"SELECT metadata FROM radim_tasks WHERE id = {p}", (task_id,)
+        ).fetchone()
+
+        meta = {}
+        if row and row['metadata']:
+            try:
+                meta = json.loads(row['metadata']) if isinstance(row['metadata'], str) else dict(row['metadata'])
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        meta['notified'] = True
+        meta['notified_at'] = datetime.now().isoformat()
+
+        db.execute(
+            f"UPDATE radim_tasks SET metadata = {p} WHERE id = {p}",
+            (json.dumps(meta), task_id)
+        )
+        db.commit()
+        db.close()
+
+        logger.info(f"🔔 Task #{task_id} marked as notified")
+        return True
+
+    except Exception as e:
+        logger.error(f"mark_task_notified error: {e}")
+        return False
+
+
+# ============================================
 # MEDICATION LOG
 # ============================================
 

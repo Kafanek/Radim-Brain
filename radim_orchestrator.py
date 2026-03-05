@@ -11,7 +11,8 @@ import json
 import re
 import os
 import base64
-from datetime import datetime
+import time as _time
+from datetime import datetime, timedelta, date
 from xml.sax.saxutils import escape as xml_escape
 
 radim_bp = Blueprint('radim', __name__)
@@ -82,6 +83,24 @@ WP_USER = os.environ.get('WP_USER')
 WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD')
 
 # ============================================
+# USER ID EXTRACTION (v231 — žádný sdílený default-senior)
+# ============================================
+def _extract_user_id(auth_user_from_g, fallback_from_data=None):
+    """Bezpečná extrakce user_id. Nikdy nevrátí sdílený 'default-senior'."""
+    auth_user = auth_user_from_g or {}
+    uid = str(auth_user.get('id', '')).strip()
+    if uid and uid != '0':
+        return uid
+    # Fallback z request body
+    if fallback_from_data:
+        body_uid = str(fallback_from_data).strip()
+        if body_uid and body_uid not in ('', 'default-senior', '0'):
+            return body_uid
+    # Unikátní anonymous ID — žádné sdílení dat
+    return f'anon-{int(datetime.utcnow().timestamp())}'
+
+
+# ============================================
 # ČESKÉ STÁTNÍ SVÁTKY
 # ============================================
 _CZECH_HOLIDAYS = {
@@ -98,8 +117,45 @@ _CZECH_HOLIDAYS = {
     (12, 26): "2. svátek vánoční",
 }
 
+# ============================================
+# WEATHER CONTEXT (open-meteo.com, free, no API key)
+# ============================================
+_weather_cache = {'data': None, 'ts': 0}
+
+def _fetch_weather_context():
+    """Počasí z open-meteo.com. Cache 30 min, timeout 3s, tichý fail."""
+    if _weather_cache['data'] and (_time.time() - _weather_cache['ts']) < 1800:
+        return _weather_cache['data']
+    try:
+        resp = requests.get('https://api.open-meteo.com/v1/forecast', params={
+            'latitude': 50.08, 'longitude': 14.42,
+            'current': 'temperature_2m,weather_code,wind_speed_10m',
+            'timezone': 'Europe/Prague', 'forecast_days': 1
+        }, timeout=3)
+        if resp.status_code == 200:
+            cur = resp.json().get('current', {})
+            temp = cur.get('temperature_2m')
+            wind = cur.get('wind_speed_10m')
+            code = cur.get('weather_code', 0)
+            wmo = {0: 'jasno', 1: 'převážně jasno', 2: 'polojasno', 3: 'zataženo',
+                   45: 'mlha', 48: 'mrznoucí mlha',
+                   51: 'mrholení', 53: 'mrholení', 55: 'silné mrholení',
+                   61: 'slabý déšť', 63: 'déšť', 65: 'silný déšť',
+                   71: 'slabé sněžení', 73: 'sněžení', 75: 'silné sněžení',
+                   80: 'přeháňky', 81: 'přeháňky', 82: 'silné přeháňky',
+                   95: 'bouřka', 96: 'bouřka s krupobitím'}
+            cond = wmo.get(code, '')
+            wind_str = f", vítr {wind} km/h" if wind and wind > 5 else ""
+            result = f"\nPočasí v Praze: {temp}°C, {cond}{wind_str}."
+            _weather_cache.update(data=result, ts=_time.time())
+            return result
+    except Exception:
+        pass
+    return ""
+
+
 def _build_time_context():
-    """Sestaví časový kontext pro system prompt (den, hodina, svátek)."""
+    """Sestaví časový kontext pro system prompt (den, hodina, svátek, počasí)."""
     try:
         now = datetime.now()
         hour = now.hour
@@ -129,9 +185,12 @@ def _build_time_context():
         holiday = _CZECH_HOLIDAYS.get((now.month, now.day), "")
         holiday_note = f"\nDnes je státní svátek: {holiday}." if holiday else ""
 
+        # Počasí
+        weather = _fetch_weather_context()
+
         return (f"{time_of_day}. Dnes je {day_names[now.weekday()]} "
                 f"{now.day}. {month_names[now.month - 1]} {now.year}. "
-                f"Svátek má {nameday}.{holiday_note}")
+                f"Svátek má {nameday}.{holiday_note}{weather}")
     except Exception as e:
         print(f"Time context warning: {e}")
         return ""
@@ -264,22 +323,86 @@ def detect_intent(message):
     return 'chat'
 
 def extract_time(message):
-    """Extrahovat čas ze zprávy"""
-    time_pattern = r'(\d{1,2})[:\.]?(\d{2})?\s*(hodin|ráno|večer)?'
-    match = re.search(time_pattern, message)
-    
-    if match:
-        hour = int(match.group(1))
-        minute = int(match.group(2)) if match.group(2) else 0
-        return f"{hour:02d}:{minute:02d}"
-    
-    if 'ráno' in message.lower():
+    """Robustní extrakce času z české zprávy (v231).
+    Zvládá: '15:30', 'v 15 hodin', 'za 2 hodiny', 'za půl hodiny',
+    'za 30 minut', 'ráno', 'odpoledne', 'večer', 'v noci'.
+    """
+    msg = message.lower()
+    now = datetime.now()
+
+    # 1. Relativní: "za N hodin/hodiny/hodinu"
+    m = re.search(r'za\s+(\d+)\s+hodin[yua]?', msg)
+    if m:
+        future = now + timedelta(hours=int(m.group(1)))
+        return f"{future.hour:02d}:{future.minute:02d}"
+
+    # 2. Relativní: "za půl hodiny"
+    if re.search(r'za\s+p[uů]l\s+hodin', msg):
+        future = now + timedelta(minutes=30)
+        return f"{future.hour:02d}:{future.minute:02d}"
+
+    # 3. Relativní: "za N minut"
+    m = re.search(r'za\s+(\d+)\s+minut', msg)
+    if m:
+        future = now + timedelta(minutes=int(m.group(1)))
+        return f"{future.hour:02d}:{future.minute:02d}"
+
+    # 4. Absolutní: "v 15 hodin", "ve 3 hodiny"
+    m = re.search(r'v[e]?\s+(\d{1,2})\s+hodin', msg)
+    if m:
+        hour = int(m.group(1))
+        if 0 <= hour <= 23:
+            return f"{hour:02d}:00"
+
+    # 5. Absolutní: "15:30", "15.30", "8:00"
+    m = re.search(r'(\d{1,2})[:\.](\d{2})', msg)
+    if m:
+        hour, minute = int(m.group(1)), int(m.group(2))
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return f"{hour:02d}:{minute:02d}"
+
+    # 6. Pojmenované: "ráno", "dopoledne", "v poledne", "odpoledne", "večer", "v noci"
+    if 'ráno' in msg or 'dopoledne' in msg:
         return '08:00'
-    if 'poledne' in message.lower():
+    if 'poledne' in msg:
         return '12:00'
-    if 'večer' in message.lower():
+    if 'odpoledne' in msg:
+        return '14:00'
+    if 'večer' in msg:
         return '18:00'
-    
+    if 'noci' in msg or 'v noc' in msg:
+        return '22:00'
+
+    return None
+
+
+def extract_date(message):
+    """Extrakce data z české zprávy (v231).
+    Zvládá: 'zítra', 'pozítří', 'dnes', české dny v týdnu ('v pondělí').
+    Vrací YYYY-MM-DD nebo None.
+    """
+    msg = message.lower()
+    today = date.today()
+
+    if 'pozítří' in msg:
+        return (today + timedelta(days=2)).isoformat()
+    if 'zítra' in msg or 'zejtra' in msg:
+        return (today + timedelta(days=1)).isoformat()
+    if 'dnes' in msg or 'dneska' in msg:
+        return today.isoformat()
+
+    # České dny v týdnu → nejbližší budoucí výskyt
+    _cz_days = {
+        'pondělí': 0, 'úterý': 1, 'střed': 2, 'čtvrtek': 3,
+        'pátek': 4, 'sobot': 5, 'neděl': 6
+    }
+    for name, weekday in _cz_days.items():
+        if name in msg:
+            days_ahead = (weekday - today.weekday()) % 7
+            if days_ahead == 0:
+                days_ahead = 7  # příští týden pokud je dnes ten den
+            return (today + timedelta(days=days_ahead)).isoformat()
+
     return None
 
 # ============================================
@@ -415,9 +538,8 @@ def radim_chat():
     try:
         data = request.json
         message = data.get('message', '')
-        # Prefer JWT user_id, fallback to request body
-        auth_user = getattr(g, 'auth_user', None) or {}
-        user_id = str(auth_user.get('id', '')) or data.get('user_id', 'default-senior')
+        # Prefer JWT user_id, fallback to request body (v231: unique per-session)
+        user_id = _extract_user_id(getattr(g, 'auth_user', None), data.get('user_id'))
         mode = data.get('mode', 'senior')
         context = data.get('context', {})
         emotional_context = data.get('emotional_context', '')
@@ -433,6 +555,7 @@ def radim_chat():
         
         if intent == 'task':
             context['extracted_time'] = extract_time(message)
+            context['extracted_date'] = extract_date(message)
         
         if intent == 'safety':
             severity = 'critical' if any(w in message.lower() for w in ['155', '112', 'záchranka']) else 'high'
@@ -531,7 +654,7 @@ def radim_chat():
                         title=payload.get('title', 'Připomínka od Radima'),
                         task_type=payload.get('task_type', 'reminder'),
                         scheduled_time=payload.get('time') or extract_time(message),
-                        scheduled_date=payload.get('date'),
+                        scheduled_date=payload.get('date') or extract_date(message),
                         description=payload.get('description')
                     )
                     if task:
@@ -578,8 +701,7 @@ def radim_tasks():
     if request.method == 'OPTIONS':
         return '', 204
 
-    auth_user = getattr(g, 'auth_user', None) or {}
-    user_id = str(auth_user.get('id', '')) or request.args.get('user_id', 'default-senior')
+    user_id = _extract_user_id(getattr(g, 'auth_user', None), request.args.get('user_id'))
 
     if not _ORCH_TASK_SERVICE:
         return jsonify({'success': False, 'error': 'Task service unavailable'}), 503
@@ -633,8 +755,7 @@ def radim_medications():
     if request.method == 'OPTIONS':
         return '', 204
 
-    auth_user = getattr(g, 'auth_user', None) or {}
-    user_id = str(auth_user.get('id', '')) or request.args.get('user_id', 'default-senior')
+    user_id = _extract_user_id(getattr(g, 'auth_user', None), request.args.get('user_id'))
 
     if not _ORCH_TASK_SERVICE:
         return jsonify({'success': False, 'error': 'Task service unavailable'}), 503

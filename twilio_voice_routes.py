@@ -36,6 +36,23 @@ except ImportError:
     ANTICIPATION_AVAILABLE = False
     logger.warning("⚠️ Anticipation Engine not available - using hardcoded TTS params")
 
+# Task Service integration (v231 — voice knows about tasks & medications)
+try:
+    from task_service import (
+        build_tasks_context as _voice_tasks_context,
+        get_tasks as _voice_get_tasks
+    )
+    _VOICE_TASK_SERVICE = True
+except ImportError:
+    _VOICE_TASK_SERVICE = False
+
+# Memory system (v231 — personalized voice prompts)
+try:
+    from memory_routes import build_personalized_prompt as _voice_build_prompt
+    _VOICE_MEMORY = True
+except ImportError:
+    _VOICE_MEMORY = False
+
 
 # Emotional keyword sets for C/α estimation from speech
 _CRISIS_WORDS = {'pomoc', 'help', 'bolest', 'pain', 'spadl', 'fell', 'sos',
@@ -284,14 +301,18 @@ def twiml_response(twiml_xml):
     return Response(twiml_xml, content_type="text/xml")
 
 
-def get_ai_response_for_call(user_text, call_sid):
-    """Get Claude AI response for phone conversation (synchronous for Flask)"""
+def get_ai_response_for_call(user_text, call_sid, user_id=None):
+    """Get Claude AI response for phone conversation (synchronous for Flask).
+    v231: user_id enables task/medication/profile awareness during calls.
+    """
     if not ANTHROPIC_API_KEY:
         return "Omlouvám se, právě mám technické potíže. Zkuste to prosím za chvíli."
 
     call_data = active_calls.get(call_sid, {})
     history = call_data.get("history", [])
     caller_name = call_data.get("caller_name", "")
+    # v231: prefer stored user_id from active_calls, then parameter
+    uid = call_data.get("user_id") or user_id
 
     # Build messages
     messages = []
@@ -300,6 +321,25 @@ def get_ai_response_for_call(user_text, call_sid):
     messages.append({"role": "user", "content": user_text})
 
     name_ctx = f"Voláš se seniorem jménem {caller_name}. " if caller_name else ""
+
+    # v231: Load task context + personalized profile for voice
+    extra_ctx = ""
+    if uid:
+        if _VOICE_TASK_SERVICE:
+            try:
+                tasks_ctx = _voice_tasks_context(uid)
+                if tasks_ctx:
+                    extra_ctx += f"\n{tasks_ctx}"
+            except Exception:
+                pass
+        if _VOICE_MEMORY:
+            try:
+                profile_ctx = _voice_build_prompt(uid)
+                if profile_ctx:
+                    extra_ctx += f"\n{profile_ctx}"
+            except Exception:
+                pass
+
     system_prompt = f"""Jsi RADIM - AI asistent pro seniory. {name_ctx}Právě vedeš telefonní hovor.
 
 PRAVIDLA PRO TELEFONNÍ HOVOR:
@@ -309,9 +349,10 @@ PRAVIDLA PRO TELEFONNÍ HOVOR:
 - Buď empatický a trpělivý
 - Pokud senior chce zavolat někomu (dcera, syn, doktor), řekni "Rozumím, přepojím vás."
 - NIKDY neříkej "jako AI" nebo "jako chatbot" — jsi Radim, asistent
+- Pokud se ptá na úkoly, léky nebo připomínky, odpověz podle kontextu níže
 
 12 hodnot: empatie, respekt, trpělivost, důstojnost, naslouchání, konkrétní pomoc.
-Smlouva: "Jsem zde, abych naslouchal, ne abych soudil." """
+Smlouva: "Jsem zde, abych naslouchal, ne abych soudil."{extra_ctx}"""
 
     try:
         # Try Anthropic SDK first
@@ -402,6 +443,7 @@ def twilio_voice_webhook():
         print(f"📞 Incoming call: {caller} → {called} (SID: {call_sid})")
 
         # Register active call (with C/α tracking for Anticipation Engine)
+        caller_data = known_callers.get(caller, {})
         active_calls[call_sid] = {
             "from": caller,
             "to": called,
@@ -410,11 +452,11 @@ def twilio_voice_webhook():
             "caller_name": "",
             "status": "active",
             "C": 5.0,       # Initial consciousness load (HARMONY)
-            "alpha": 0.2    # Initial stress level (low)
+            "alpha": 0.2,   # Initial stress level (low)
+            "user_id": caller_data.get("user_id")  # v231: link to task/profile data
         }
 
         # Personalized greeting
-        caller_data = known_callers.get(caller, {})
         caller_name = caller_data.get("name", "")
         if caller_name:
             active_calls[call_sid]["caller_name"] = caller_name
@@ -550,8 +592,9 @@ def twilio_gather_webhook():
             except Exception as ae:
                 logger.error(f"Anticipation error (non-fatal): {ae}")
 
-        # Normal AI conversation
-        ai_response = get_ai_response_for_call(speech_result, call_sid)
+        # Normal AI conversation (v231: pass user_id for task/profile awareness)
+        _call_uid = active_calls.get(call_sid, {}).get("user_id")
+        ai_response = get_ai_response_for_call(speech_result, call_sid, user_id=_call_uid)
         ai_safe = ai_response.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
         # Pass adaptive speech_params to TTS
@@ -718,6 +761,7 @@ def register_known_caller():
         "name": name,
         "formality": data.get("formality", "formal"),
         "contacts": data.get("contacts", {}),
+        "user_id": data.get("user_id"),  # v231: link phone to user profile
         "registered_at": time.time()
     }
     return jsonify({

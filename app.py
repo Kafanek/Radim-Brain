@@ -227,6 +227,56 @@ if MEMORY_AVAILABLE:
     print("✅ Memory routes registered: /api/memory/*")
 
 # ============================================
+# ⏰ BACKGROUND SCHEDULER — push reminders (v231)
+# ============================================
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+    import atexit
+
+    def _check_reminders():
+        """Každých 5 minut: zkontroluj splatné úkoly → push notifikace."""
+        with app.app_context():
+            try:
+                from task_service import get_all_due_tasks, mark_task_notified
+                due = get_all_due_tasks(window_minutes=5)
+                for task in due:
+                    uid = task.get('user_id', '')
+                    title = task.get('title', 'Připomínka')
+                    t_type = task.get('task_type', 'reminder')
+                    sched = task.get('scheduled_time', '')
+
+                    # Emoji podle typu
+                    icon = {'medication': '💊', 'appointment': '🏥', 'reminder': '🔔'}.get(t_type, '📋')
+                    body = f"{icon} {title}"
+                    if sched:
+                        body += f" ({sched})"
+
+                    send_push_notification(
+                        uid,
+                        title='Radim — připomínka',
+                        body=body,
+                        data={'task_id': task.get('id'), 'type': t_type}
+                    )
+                    mark_task_notified(task['id'])
+                    print(f"🔔 Reminder sent: '{title}' → {uid}")
+
+                if due:
+                    print(f"⏰ Scheduler: {len(due)} reminders sent")
+            except Exception as e:
+                print(f"⏰ Scheduler error (non-fatal): {e}")
+
+    scheduler = BackgroundScheduler(daemon=True)
+    scheduler.add_job(_check_reminders, 'interval', minutes=5, id='radim_reminders')
+    scheduler.start()
+    atexit.register(lambda: scheduler.shutdown(wait=False))
+    print("✅ APScheduler started: reminder check every 5 min")
+
+except ImportError:
+    print("⚠️ APScheduler not installed — reminders will not auto-send")
+except Exception as sched_err:
+    print(f"⚠️ Scheduler init error: {sched_err}")
+
+# ============================================
 # TTS PROXY ENDPOINTS (Azure)
 # ============================================
 AZURE_TTS_KEY = os.environ.get('AZURE_TTS_KEY')
