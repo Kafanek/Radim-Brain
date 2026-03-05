@@ -633,6 +633,197 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
                         ]
                     }
                 ]
+            },
+            {
+                "id": "dysphasia-m6",
+                "title": "Modul pro rodiče a pedagogy",
+                "order": 6,
+                "duration_minutes": 15,
+                "icon": "👩‍🏫",
+                "lessons": [
+                    {
+                        "id": "dysphasia-m6-l1",
+                        "title": "Domaci cviceni pro rodice",
+                        "type": "article",
+                        "content": """<h2>Domaci logopedicka cviceni pro rodice</h2>
+
+<p>Logopedka Radka doporucuje tato cviceni, ktera muzete delat doma kazdy den. <strong>Klicove je pravidelnost</strong> — kratsi cviceni kazdy den je lepsi nez dlouhe jednou tydne.</p>
+
+<h3>Cviceni podle veku ditete</h3>
+
+<h4>2–4 roky: Pojmenuj obrazek</h4>
+<ul>
+<li>Ukazujte obrazky zvirat, jidla, hracek</li>
+<li>Rekni: <em>'Co to je?'</em> a pockejte (pocitejte do 10)</li>
+<li>Pokud dite nereka — rekni vy a nechte ho zopakovat</li>
+<li>Chvalte: <em>'Super, to je kocka! Skvele!'</em></li>
+</ul>
+
+<h4>3–5 let: Rymy a rikanky</h4>
+<ul>
+<li>Opakovane rikejte jednoduche rikanky</li>
+<li>Nechte dite doplnit posledni slovo: <em>'Kocka leze...'</em> (dirou)</li>
+<li>Rymovani rozviji fonologicke povedomi — zaklad pro cteni</li>
+<li>Zpivejte — melodie pomaha zapamatovat si slova</li>
+</ul>
+
+<h4>4–6 let: Hra na obchod</h4>
+<ul>
+<li>Hrajte si na nakupovani — dite je zakaznik i prodavac</li>
+<li>Procvicuje: pojmenovani veci, zadani o neco, dekovat</li>
+<li><em>'Prosim, chtela bych dva rohliky a mleko.'</em></li>
+<li>Meni role — dite se uci ruzne komunikacni situace</li>
+</ul>
+
+<h4>5–7 let: Pribeh podle obrazku</h4>
+<ul>
+<li>Dejte diteti 3–4 obrazky v rade</li>
+<li>Dite vypravi, co se deje: <em>'Nejdriv... pak... nakonec...'</em></li>
+<li>Pomahejte otazkami: <em>'A co se stalo potom?'</em></li>
+<li>Rozviji: slovosled, casova posloupnost, slovni zasobu</li>
+</ul>
+
+<h4>5+ let: Denik s obrazky</h4>
+<ul>
+<li>Kazdy den dite nakresli, co zazilo</li>
+<li>Spolecne popisete obrazek 2–3 vetami</li>
+<li>Dite diktuje, rodic zapisuje (nebo naopak)</li>
+<li>Vytvari navyk vyjadrovat zazitky slovy</li>
+</ul>
+
+<h3>Zlata pravidla domaciho cviceni</h3>
+<ol>
+<li><strong>Max 10–15 minut denne</strong> — kratke a hrave</li>
+<li><strong>Zadny dril</strong> — pokud dite nechce, nenutte ho</li>
+<li><strong>Chvalte snahu</strong>, ne spravnost</li>
+<li><strong>Budte partakem</strong>, ne ucitelem</li>
+<li><strong>Zapojte sourozence</strong> — deti se uci od sebe nejlepe</li>
+</ol>
+
+<p class="key-point">💡 <strong>Tip od logopedky Radky:</strong> Nejlepsi logopedicke cviceni je spolecne varani! Dite pojmenovava ingredience, popisuje co delas, zada o vec. A vysledek je jeste k jidlu.</p>""",
+                        "key_points": [
+                            "Pravidelnost je klicova — kratke cviceni kazdy den",
+                            "Cviceni podle veku: obrazky, rymy, hra na obchod, pribehy",
+                            "Max 10–15 minut denne, hravou formou",
+                            "Chvalit snahu, ne spravnost vysledku",
+                            "Zapojit cviceni do beznych cinnosti (varani, nakupy)"
+                        ]
+                    },
+                    {
+                        "id": "dysphasia-m6-l2",
+                        "title": "Pruvodce pro ucitele a asistenty",
+                        "type": "article",
+                        "content": """<h2>Dite s disfazii ve skole — pruvodce pro pedagogy</h2>
+
+<p>Dite s vyvojovou disfazii muze byt ve tride plne uspesne, pokud dostane <strong>spravnou podporu</strong>. Neni to o snizovani naroku — je to o prizpusobeni FORMY, ne OBSAHU.</p>
+
+<h3>Zakladni opatreni ve tride</h3>
+
+<h4>1. Individualni vzdelavaci plan (IVP)</h4>
+<ul>
+<li><strong>Narok ze zakona</strong> — rodic zada, skola MUSI vyhovet</li>
+<li>Stanovi konkretni upravi: vice casu, jiny zpusob hodnoceni</li>
+<li>Aktualizovat minimalne 1x rocne s SPC</li>
+<li>Zapojit rodice, logopeda, tridiho ucitele, asistenta</li>
+</ul>
+
+<h4>2. Usazeni ve tride</h4>
+<ul>
+<li>Dite sedi <strong>vpredu</strong>, blizko ucitele</li>
+<li>Daleko od okna a dveri (min rusivy zvuky)</li>
+<li>Vedle klidneho spoluzaka, ktery muze pomoct</li>
+</ul>
+
+<h4>3. Vizualni podpora</h4>
+<ul>
+<li><strong>Vizualni rozvrh</strong> na tabuli nebo na lavici</li>
+<li>Piktogramy pro instrukce (sedni, otevri sesit, poslouchej)</li>
+<li>Obrazove karty pro klicova slova tematu</li>
+<li>Barevne oznaceni dulezitych informaci</li>
+</ul>
+
+<h4>4. Komunikace s ditetem</h4>
+<ul>
+<li>Jedna instrukce najednou — pockejte na splneni</li>
+<li>Overit porozumeni: <em>'Rekni mi, co mas delat'</em></li>
+<li>Vice casu na odpoved — nepreskakovejte k jinemu diteti</li>
+<li>NIKDY: <em>'Rekni to poradne'</em> nebo <em>'Mluv cesky'</em></li>
+</ul>
+
+<h4>5. Hodnoceni a testy</h4>
+<ul>
+<li><strong>Vice casu</strong> na pisemne prace (1,5x–2x)</li>
+<li>Moznost <strong>ustniho zkoušeni</strong> misto pisemneho</li>
+<li>Hodnotit OBSAH, ne jazykovou formu (pokud nejde o cestinu)</li>
+<li>Zkraceny diktovat nebo nahradit jinou formou</li>
+</ul>
+
+<h3>Spoluprace s SPC</h3>
+<p><strong>Specialne pedagogicke centrum</strong> (SPC) je klicovy partner:</p>
+<ul>
+<li>Provadi diagnostiku a doporucuje podpurna opatreni</li>
+<li>Vystavuje doporuceni pro IVP</li>
+<li>Konzultace pro ucitele — jak prizpusobit vyuku</li>
+<li>Kontakt: kazdy kraj ma SPC pro poruchy reci</li>
+</ul>
+
+<h3>Prevence sikany</h3>
+<ul>
+<li>Vysvetlit spoluzakum, co disfazie je (primerenou formou)</li>
+<li>Zduraznit: <em>'Tomas je chytry jako vy, jen mluvi trochu jinak'</em></li>
+<li>Zapojit dite do skupinovych aktivit, kde vynikne (kresleni, sport)</li>
+<li>Sledovat socialni dynamiku — dite se muze stahovat</li>
+</ul>
+
+<p class="key-point">💡 <strong>Klicova zprava:</strong> Dite s disfazii NENI linne, hlupe, ani neposlousne. Ma neurologickou poruchu, ktera ovlivnuje rec, ale NE inteligenci. S vasim porozumenim muze ve skole prospivat.</p>""",
+                        "key_points": [
+                            "IVP je narok ze zakona — rodic zada, skola musi vyhovet",
+                            "Usadit vpredu, vizualni rozvrh, piktogramy",
+                            "Vice casu na testy, hodnotit obsah ne formu",
+                            "Spoluprace s SPC — diagnostika a doporuceni",
+                            "Prevence sikany — vysvetlit spoluzakum, zapojit do aktivit"
+                        ]
+                    }
+                ],
+                "quiz": {
+                    "id": "dysphasia-m6-quiz",
+                    "title": "Overite si: Podpora ditete s disfazii",
+                    "questions": [
+                        {
+                            "id": "q1",
+                            "question": "Jake domaci cviceni je vhodne pro 3–5lete dite s disfazii?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Diktovani slov a oprava chyb", "correct": False},
+                                {"id": "b", "text": "Rymy, rikanky a zpivani", "correct": True},
+                                {"id": "c", "text": "Cist nahlas minimalne 30 minut denne", "correct": False}
+                            ],
+                            "explanation": "Rymy a rikanky rozviji fonologicke povedomi hravou formou. Jsou idealni pro 3–5lete deti. Diktovani a nucene cteni jsou nevhodne — vytvarejipresne a odpor k komunikaci."
+                        },
+                        {
+                            "id": "q2",
+                            "question": "Co je IVP a kdo o nej zada?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "IVP = Individualni vzdelavaci plan, zada rodic", "correct": True},
+                                {"id": "b", "text": "IVP = Intenzivni vyukovy program, zada ucitel", "correct": False},
+                                {"id": "c", "text": "IVP = Integracni vyrovnavaci plan, zada SPC", "correct": False}
+                            ],
+                            "explanation": "IVP je Individualni vzdelavaci plan. Zakonny zastupce (rodic) o nej zada a skola je ze zakona povinna ho vytvorit na zaklade doporuceni SPC."
+                        },
+                        {
+                            "id": "q3",
+                            "question": "Jak by mel ucitel hodnotit pisemne prace ditete s disfazii?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Presne stejne jako ostatni deti", "correct": False},
+                                {"id": "b", "text": "Hodnotit obsah a myslenky, ne jazykovou formu", "correct": True},
+                                {"id": "c", "text": "Nehodnotit vubec a dat automaticky jednicku", "correct": False}
+                            ],
+                            "explanation": "Spravny pristup je hodnotit OBSAH a MYSLENKY ditete, ne jazykovou formu (krome hodin cestiny). Dite s disfazii muze mit skvele napady, i kdyz je vyjadri s gramatickymi chybami."
+                        }
+                    ]
+                }
             }
         ]
     },
@@ -1311,6 +1502,157 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                         ]
                     }
                 ]
+            },
+            {
+                "id": "dementia-m6",
+                "title": "Pece o pecujiciho — prevence vyhoreni",
+                "order": 6,
+                "duration_minutes": 12,
+                "icon": "💚",
+                "lessons": [
+                    {
+                        "id": "dementia-m6-l1",
+                        "title": "Syndrom vyhoreni u pecovatelu",
+                        "type": "article",
+                        "content": """<h2>Pecovatel tez potrebuje peci</h2>
+
+<p>Pece o cloveka s demenci je <strong>jednou z nejnarocnejsich zivtnich roli</strong>. Pecovatel casto zapomina na sebe. Statistiky ukazuji:</p>
+
+<ul>
+<li><strong>40–70 %</strong> rodinnych pecovatelu trpi depresivnimi prznaky</li>
+<li><strong>50 %</strong> pecovatelu ma chronicke zdravotni problemy</li>
+<li>Pecovatel o cloveka s demenci stravuje prumetrne <strong>9–12 hodin denne</strong> peci</li>
+<li>Riziko onemocneni pecujiciho je <strong>2–3x vyssi</strong> nez u bezne populace</li>
+</ul>
+
+<h3>Varovne znaky vyhoreni</h3>
+<ul>
+<li><strong>Telesne:</strong> chronicka unava, bolesti hlavy a zad, poruchy spanku, castejsi nemoci</li>
+<li><strong>Emocni:</strong> podrazdeni, plac, pocity viny ('delam to spatne'), beznadej</li>
+<li><strong>Socialni:</strong> izolace, ztrata zajmu o vlastni koniciky, vyhybani se pratelum</li>
+<li><strong>Chovani:</strong> zvysena spotreba alkoholu, zanedbalvani vlastniho zdravi, agrese vuci nemocnemu</li>
+</ul>
+
+<p class="key-point">💡 <strong>Dulezite:</strong> Pocit viny je NORMALNY. Pecovat je tezke a clovek nemuze byt dokonaly 24/7. Pokud citite vyhoreni, NENI to vase selhani — je to signal, ze potrebujete pomoc.</p>
+
+<h3>5 pravidel sebepece pro pecovatele</h3>
+<ol>
+<li><strong>Odpocion si kazdy den</strong> — alespon 30 minut JEN pro sebe (procnhazka, kniha, kava)</li>
+<li><strong>Neodmitatejt pomoc</strong> — kdyz nekdo nabidne pomoc, rikejte ANO</li>
+<li><strong>Mluvte o svych pocitech</strong> — svepomocna skupina, psycholog, pritel</li>
+<li><strong>Hlídejte sve zdravi</strong> — pravidelne prohlidky, pohyb, strava, spanek</li>
+<li><strong>Plánujte respitni peci</strong> — pravidleny odpocion neni luxus, je to nutnost</li>
+</ol>""",
+                        "key_points": [
+                            "40–70 % pecovatelu trpi depresivnimi prznaky",
+                            "Varovne znaky: chronicka unava, podrazdeni, izolace, pocity viny",
+                            "Pocit viny je normalni — neni to selhani",
+                            "Kazdodenni odpocinek a pravidelna respitni pece jsou nutnost",
+                            "Prijimat pomoc neni slabost"
+                        ]
+                    },
+                    {
+                        "id": "dementia-m6-l2",
+                        "title": "Respitni pece a prakticka podpora",
+                        "type": "article",
+                        "content": """<h2>Respitni pece — jak si odpocinout</h2>
+
+<p><strong>Respitni pece</strong> znamena docasne prevzeti pece o nemocneho, aby si pecovatel mohl odpocinout. Neni to odlozeni blizkeho — je to <strong>investice do kvality pece</strong>.</p>
+
+<h3>Formy respitni pece v CR</h3>
+
+<h4>Denni stacionare</h4>
+<ul>
+<li>Odborne zarizen kde je clovek pres den, vecer jde domu</li>
+<li>Programy: cviceni pameti, pohyb, tvoriiva cinnost, spolecenske aktivity</li>
+<li>Pecovatel ma celodennni prostor — prace, odpocinek, vyrizovani</li>
+<li>Cena: cca 100–300 Kc/den (mozno hradit z prispevku na peci)</li>
+</ul>
+
+<h4>Odlehcovaci sluzby</h4>
+<ul>
+<li>Profesionalni pecovatel prijde DOMU — zastoupi vas na par hodin</li>
+<li>Mozno i na cele dny (respitni pobyt v zarizen)</li>
+<li>Vhodne pro pravidelny odpocink pecovatele</li>
+</ul>
+
+<h4>Kratkodoba ubytovaci pece</h4>
+<ul>
+<li>Domov seniru nebo specializovane zarizeni na 1–4 tydny</li>
+<li>Idealni pro dovolenou pecovatele nebo hospitalizaci</li>
+<li>Nutno objednat dopredu — kapacity byvaji omezene</li>
+</ul>
+
+<h3>Financni podpora</h3>
+<ul>
+<li><strong>Prispevek na peci</strong> (zakon 108/2006 Sb.)</li>
+  <ul>
+    <li>Stupen I: 880 Kc/mesic</li>
+    <li>Stupen II: 4 400 Kc/mesic</li>
+    <li>Stupen III: 12 800 Kc/mesic</li>
+    <li>Stupen IV: 19 200 Kc/mesic</li>
+  </ul>
+<li>Zadost na Uradu prace</li>
+<li>Mozno vyuzit na profesionalni peci i rodinneho pecovatele</li>
+</ul>
+
+<h3>Svepomocne skupiny</h3>
+<ul>
+<li><strong>CALS</strong> — pravidelna setkani po cele CR (i online)</li>
+<li>Sdileni zkusenosti s lidmi, kteri rozumi vasi situaci</li>
+<li>Praktickke rady: <em>'Jak zvladate nocni neklid?'</em></li>
+<li>Emocni podpora: <em>'Nejste v tom sami'</em></li>
+</ul>
+
+<p class="key-point">💡 <strong>Pamatujte:</strong> Nemuzete nalit z prazdneho. Pokud se sami zhrouttite, kdo se postara o vaseho blizkeho? Pravidelny odpocinek je SOUCASI pece, ne jeji opak.</p>""",
+                        "key_points": [
+                            "Respitni pece = odpocion pro pecovatele, ne odlozeni blizkeho",
+                            "Denni stacionare, odlehcovaci sluzby, kratkodoba ubytovaci pece",
+                            "Prispevek na peci: 880–19 200 Kc mesicne podle stupne",
+                            "CALS svepomocne skupiny po cele CR (i online)",
+                            "Nemuzete nalit z prazdneho — odpocinek je soucast pece"
+                        ]
+                    }
+                ],
+                "quiz": {
+                    "id": "dementia-m6-quiz",
+                    "title": "Overite si: Pece o pecujiciho",
+                    "questions": [
+                        {
+                            "id": "q1",
+                            "question": "Jake procento rodinnych pecovatelu trpi depresivnimi prznaky?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Asi 10 %", "correct": False},
+                                {"id": "b", "text": "40–70 %", "correct": True},
+                                {"id": "c", "text": "Asi 5 %", "correct": False}
+                            ],
+                            "explanation": "Studie ukazuji, ze 40–70 % rodinnych pecovatelu o osoby s demenci trpi depresivnimi prznaky. Je to obrovske cislo a ukazuje, jak dulezita je podpora pecovatelu."
+                        },
+                        {
+                            "id": "q2",
+                            "question": "Co je respitni pece?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Trvale umisteni do domova senioru", "correct": False},
+                                {"id": "b", "text": "Docasne prevzeti pece, aby si pecovatel odpocinul", "correct": True},
+                                {"id": "c", "text": "Ukonceni pece o nemocneho", "correct": False}
+                            ],
+                            "explanation": "Respitni pece je docasne prevzeti pece o nemocneho (na hodiny, dny nebo tydny), aby si pecovatel mohl odpocinout a nabrat sily."
+                        },
+                        {
+                            "id": "q3",
+                            "question": "Pecovatel citi vinu, ze nezvlada. Co je spravna reakce?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Musi se vic snazit a nepripoustet si slabost", "correct": False},
+                                {"id": "b", "text": "Je to normalni pocit, potrebuje pomoc a odpocinek", "correct": True},
+                                {"id": "c", "text": "Mel by prestst pecovat a najit profesioonala", "correct": False}
+                            ],
+                            "explanation": "Pocit viny je u pecovatelu zcela normalni a NENI to selhani. Spravna reakce je priznat si unavu, pozadat o pomoc a pravidelne vyuzivat respitni peci."
+                        }
+                    ]
+                }
             }
         ]
     }
@@ -1348,6 +1690,7 @@ def list_courses():
             "description": course["description"],
             "target_audience": course.get("target_audience", []),
             "module_count": len(course.get("modules", [])),
+            "quiz_count": sum(1 for m in course.get("modules", []) if "quiz" in m),
             "learning_objectives": course.get("learning_objectives", [])
         }
         courses.append(compact)
@@ -2419,5 +2762,328 @@ def education_news():
         "count": len(articles),
         "articles": articles,
         "categories_available": list(static_news.keys()),
+        "timestamp": now_iso()
+    })
+
+
+# ============================================
+# 🎭 INTERACTIVE COMMUNICATION SCENARIOS
+# ============================================
+
+COMMUNICATION_SCENARIOS = {
+    "dysphasia": [
+        {
+            "id": "dys-s1",
+            "title": "Dite nechce mluvit",
+            "context": "Petilete dite s disfazii odmita komunikovat. Stahuje se a plache. Snazite se ho zapojit do aktivity.",
+            "difficulty": "beginner",
+            "character": "Tomasek (5 let, vyvojova disfazie)",
+            "situation": "Tomasek sedi v kutu a nechce rikat, co chce k svacine. Diva se do zeme.",
+            "options": [
+                {
+                    "id": "a",
+                    "text": "Tomasku, rekni mi, co chces k svacine. Mluv!",
+                    "score": 0,
+                    "feedback": "Spatny pristup. Prikaz 'mluv!' vytvari tlak a zvysuje uzkost ditete. Tomasek se jeste vic stahne.",
+                    "consequence": "Tomasek zacne plakat a odmita spolupracovat."
+                },
+                {
+                    "id": "b",
+                    "text": "Tomasku, podivej — mam rohlicek a jablicko. Co bys chtel? Ukazni prstikem.",
+                    "score": 100,
+                    "feedback": "Vyborne! Nabidli jste konkretni volby a umoznili neverbalni komunikaci (ukazani). Zadny tlak, jasna nabidka.",
+                    "consequence": "Tomasek se usmeje a ukaze na jablicko. Vy reknete: 'Jablicko! Skvely vyber!' — prirozene zrcadlite."
+                },
+                {
+                    "id": "c",
+                    "text": "Tak to nevadi, svacinu si vybere ucitelka.",
+                    "score": 30,
+                    "feedback": "Vyhybate se problemu. Dite neziskava sanci komunikovat a ucit se. Lepsi je nabidnout alternativy.",
+                    "consequence": "Tomasek dostane rohlicek, ale chtel jablicko. Je nastvany, ale neumi to rict."
+                }
+            ],
+            "learning_point": "Vzdy nabidnete 2–3 konkretni volby. Umoznete i neverbalni komunikaci (ukazovani, kyvani). Nikdy nenutit mluvit prikazem."
+        },
+        {
+            "id": "dys-s2",
+            "title": "Dospely po CMP hleda slova",
+            "context": "Pan Karel (65 let) prodeal CMP pred 3 mesici. Ma expresivni disfazii — rozumi dobre, ale tezce hleda slova.",
+            "difficulty": "intermediate",
+            "character": "Pan Karel (65 let, expresivni disfazie po CMP)",
+            "situation": "Pan Karel rika: 'Ja bych chtel... ten... no... je to v... tam...' a ukazuje smerem ke kuchyni. Vypada frustrovane.",
+            "options": [
+                {
+                    "id": "a",
+                    "text": "Chcete neco z kuchyne? Caj? Kafe? Vodu?",
+                    "score": 100,
+                    "feedback": "Vyborne! Potvrdili jste smer (kuchyn) a nabidli konkretni moznosti. Pan Karel muze vybrat bez tlaku.",
+                    "consequence": "Pan Karel se usmeje: 'Ano! Ka... kafe!' a kyvne. Vy: 'Kafe, rozumim! Uz ho delam.'"
+                },
+                {
+                    "id": "b",
+                    "text": "Pane Karle, zkuste se soustredite a rict to celou vetou.",
+                    "score": 10,
+                    "feedback": "Spatny pristup. Pozadavek 'reknete celou vetou' vytvari enormni tlak. Pan Karel VI, co chce rict — jen nemuze. Tohle ho frustruje jeste vic.",
+                    "consequence": "Pan Karel zrudne, prasky pesti do stolu a prestane komunikovat na pul hodiny."
+                },
+                {
+                    "id": "c",
+                    "text": "Muzete mi to nakreslit nebo ukazat?",
+                    "score": 80,
+                    "feedback": "Dobry pristup! Nabizite alternativni komunikacni kanal. Nekteri lide po CMP lepe kresli nebo ukazuji nez mluvi.",
+                    "consequence": "Pan Karel nakresli hrnek. Vy: 'Aha, hrnek! Chcete napoj. Caj nebo kafe?'"
+                }
+            ],
+            "learning_point": "Nabidnete volby NEBO alternativni komunikaci (kresba, ukazovani). NIKDY nepozadujte 'celou vetu' — clovek s disfazii VI, co chce rict, ale nemuze to formulovat."
+        },
+        {
+            "id": "dys-s3",
+            "title": "Spoluziaci se smejou diteti",
+            "context": "Jste ucitelka. Honzik (7 let, disfazie) cetl nahlas a spoluzaci se smali jeho vyslovnosti.",
+            "difficulty": "intermediate",
+            "character": "Honzik (7 let, disfazie) a trida 2.B",
+            "situation": "Honzik precetl vetu s obtizemi, nekteri zaci se zasmali. Honzik zrudl a sklopil hlavu.",
+            "options": [
+                {
+                    "id": "a",
+                    "text": "Ticho! Kdo se smel, ten dostane poznamku!",
+                    "score": 30,
+                    "feedback": "Tresty pomahaji jen kratkodobe a mohou Honzika stigmatizovat jeste vic ('kvuli nemu mame problemy').",
+                    "consequence": "Deti ztichou, ale o prestavce rikaji Honzikovi: 'Kvuli tobe jsme dostali poznamku.'"
+                },
+                {
+                    "id": "b",
+                    "text": "Honziku, skvele jsi to precetl! Dekuju. A vy ostatni — kazdy z nas se neco uci jinak. Honzik je v matice skvely. Kdo je skvely ve cteni, pomohl by Honzikovi? A Honzik, pomohl bys zase jim s matikou?",
+                    "score": 100,
+                    "feedback": "Vyborne! Pochvalili jste Honzika, normalizovali rozdily a vytvorili spolupracujici prostredi. Kazdy ma svou silnou stranku.",
+                    "consequence": "Honzik se usmeje. Lucka se prihlasi, ze by mu pomohla se ctenim. Trida se uci respektu."
+                },
+                {
+                    "id": "c",
+                    "text": "Honziku, priste to prectes potichu a ukolu ja. Neni to na tebe.",
+                    "score": 10,
+                    "feedback": "Tohle Honzika vyradi a posiluje pocit, ze je 'horsi'. Kazde dite ma pravo cist nahlas a ucit se.",
+                    "consequence": "Honzik se citi odlisny a vylouceny. Priste odmitne cist vubec."
+                }
+            ],
+            "learning_point": "Zduraznete silne stranky ditete, normalizujte rozdily a vytvorte prostredi vzajemne pomoci. Nikdy dite nevyrazujte z aktivity."
+        }
+    ],
+    "dementia": [
+        {
+            "id": "dem-s1",
+            "title": "Babicka nepoznava vnucku",
+            "context": "Vase babicka ma stredni stadium Alzheimera. Prijedete na navstevu a babicka vas nepoznava.",
+            "difficulty": "beginner",
+            "character": "Babicka Marie (82 let, Alzheimer — stredni stadium)",
+            "situation": "Babicka se na vas diva a rika: 'Kdo jste? Ja vas neznam. Jdete pryc!'",
+            "options": [
+                {
+                    "id": "a",
+                    "text": "Babicko, ja jsem prece Jana! Tvoje vnucka! Pamatujes si na me?",
+                    "score": 30,
+                    "feedback": "Pochopitelna reakce, ale otazka 'pamatujes si na me?' vytvari tlak a muze vyvolat uzkost. Babicka SI nepamatuje a neni to jeji vina.",
+                    "consequence": "Babicka je zmatena a rozrusena: 'Ja zadnou Janu neznam!' Zacina plakat."
+                },
+                {
+                    "id": "b",
+                    "text": "Dobry den, ja jsem Jana. Prisla jsem vas navstivit. Mam pro vas kolacky. Mate rada kolacky?",
+                    "score": 100,
+                    "feedback": "Skvele! Predstavili jste se klidne, bez ocekavani ze vas pozna. Prinesli jste pozitivni podnet (kolacky) a ptate se na neco prijemneho.",
+                    "consequence": "Babicka se usmeje: 'Kolacky? Ja mam rada kolacky!' Napeti opadne a muzete stravit hezkou navstevu."
+                },
+                {
+                    "id": "c",
+                    "text": "To je ale smutny. Minuly tyden jste me jeste poznala...",
+                    "score": 10,
+                    "feedback": "Vase emoce jsou pochopitelne, ale toto babicce nepomuze. Ona zije v pritomnosti a nepotrebuje videt vas smutek — potrebuje klid.",
+                    "consequence": "Babicka vidi vas smutek a je rozrusena, i kdyz nevi proc. Atmosfera je tiziva."
+                }
+            ],
+            "learning_point": "Nepozadujte rozpoznani. Predstavte se klidne, nabidnete pozitivni podnet a budte v pritomnem okamziku. Clovek s demenci nemuze za to, ze si nepamatuje."
+        },
+        {
+            "id": "dem-s2",
+            "title": "Pacient ma halucinace",
+            "context": "Pecujete o pana Novaka (75 let), ktery ma demenci s Lewyho talisky. Vidite, ze je rozruseny.",
+            "difficulty": "intermediate",
+            "character": "Pan Novak (75 let, Lewy body demence)",
+            "situation": "Pan Novak ukazuje do rohu mistnosti a rika: 'Tam stoji cizi clovek! Vykopnete ho!'",
+            "options": [
+                {
+                    "id": "a",
+                    "text": "Pane Novaku, tam nikdo neni. To se vam jenom zda.",
+                    "score": 20,
+                    "feedback": "Popirani halucinaci nefunguje. Pro pana Novaka je ten clovek REALNY. Popirani zvysuje uzkost a neduveru.",
+                    "consequence": "Pan Novak se rozci: 'Ja prece vidim, ze tam stoji! Vy jste s nim spolceny!'"
+                },
+                {
+                    "id": "b",
+                    "text": "Vidim, ze vas to znepokojuje. Pojdte, pujdeme do kuchyne, udelam vam caj. Tady budeme v bezpeci.",
+                    "score": 100,
+                    "feedback": "Vyborne! Validujete emoci (znepokojeni), nepopirate realitu, a presmerujete pozornost do jineho prostoru. Nabidka bezpeci je klicova.",
+                    "consequence": "Pan Novak vas nasleduje do kuchyne. Halucinace zmizi se zmenou prostredi. Klidne pije caj."
+                },
+                {
+                    "id": "c",
+                    "text": "Ano, vidim ho taky. Rekneme mu, at odejde.",
+                    "score": 40,
+                    "feedback": "Potvrzeni halucinace muze kratkodobe uklidnit, ale dlouhodobe posiluje zmateni. Lepsi je validovat EMOCI, ne obsah halucinace.",
+                    "consequence": "Pan Novak se ukllidni na chvili, ale za 5 minut 'vidi' dalsiho cloveka. Ocekava, ze ho zase 'vyhodite'."
+                }
+            ],
+            "learning_point": "U halucinaci: NEPOPIREJTE a NEPOTVRZUJTE obsah. Validujte EMOCI ('vidim, ze vas to trapi') a PRESMERUJTE pozornost (zmena mistnosti, cinnost, jidlo)."
+        },
+        {
+            "id": "dem-s3",
+            "title": "Mama chce jit domu (i kdyz je doma)",
+            "context": "Vase mama (78 let, Alzheimer) zije s vami. Kazdý vecer chce 'jit domu' — mysli svuj detsky domov.",
+            "difficulty": "intermediate",
+            "character": "Mama Vera (78 let, Alzheimer — stredni stadium)",
+            "situation": "Mama stoji u dveri a rika: 'Musim jit domu. Maminka na me ceka. Pustete me!'",
+            "options": [
+                {
+                    "id": "a",
+                    "text": "Mamo, ty JSI doma. Tady bydlis uz 20 let. Tvoje maminka uz nezije.",
+                    "score": 10,
+                    "feedback": "I kdyz je to pravda, pro mamu je to krutaa informace, kterou SI NEUZIVI. Kazde sdeleni o smrti blizkeho proziva ZNOVU, jako by to slysela poprve.",
+                    "consequence": "Mama zacne plakat: 'Maminka umrela? Proc mi to nikdo nerekl?' Za hodinu se zeptaa znovu."
+                },
+                {
+                    "id": "b",
+                    "text": "Maminka dneska volala, ze mas zustat tady. Rika, at se nebojis. Udelam ti kakao, co ty na to?",
+                    "score": 90,
+                    "feedback": "Vstoupili jste do jeji reality a uklidnili ji zpusobem, kteremu rozumi. 'Terapeuticka loz' je u demence legitimni nastroj, kdyz chrany pred bolesti.",
+                    "consequence": "Mama se ukllidni: 'Maminka volala? Tak dobre. Kakao bych dala.' Sedi a je v pohode."
+                },
+                {
+                    "id": "c",
+                    "text": "Rozumim, ze chces domu. Povidej mi o svem domu — jak tam vypadalo?",
+                    "score": 100,
+                    "feedback": "Skvele! Validujete emoci, nepopirrate jeji realitu a presmerujete na pozitivni vzpominky. Vzpominani na detstvu muze byt uklidnujici.",
+                    "consequence": "Mama se usmeje a zacne vypraved o svem detskem dome, zahrade, mamince. Pocit 'chci domu' se zmeni na hezke vzpominani."
+                }
+            ],
+            "learning_point": "NIKDY nepripiminejte smrt blizkeho — clovek s demenci ji proziva ZNOVU. Vstoupte do jeho reality, validujte emoce a presmerujte na pozitivni vzpominky."
+        }
+    ]
+}
+
+
+@education_bp.route('/api/education/scenarios', methods=['GET'])
+def list_scenarios():
+    """Seznam interaktivnich komunikacnich scenaru"""
+    course = request.args.get('course')
+
+    if course and course in COMMUNICATION_SCENARIOS:
+        scenarios = COMMUNICATION_SCENARIOS[course]
+    else:
+        scenarios = []
+        for c, sc_list in COMMUNICATION_SCENARIOS.items():
+            for sc in sc_list:
+                sc_copy = dict(sc)
+                sc_copy["course"] = c
+                scenarios.append(sc_copy)
+
+    # Compact view — bez options/feedback (to se zobrazi az v detailu)
+    compact = []
+    for sc in scenarios:
+        compact.append({
+            "id": sc["id"],
+            "title": sc["title"],
+            "context": sc["context"],
+            "difficulty": sc["difficulty"],
+            "character": sc["character"],
+            "course": sc.get("course", course or "")
+        })
+
+    return jsonify({
+        "success": True,
+        "count": len(compact),
+        "scenarios": compact,
+        "available_courses": list(COMMUNICATION_SCENARIOS.keys()),
+        "timestamp": now_iso()
+    })
+
+
+@education_bp.route('/api/education/scenarios/<scenario_id>', methods=['GET'])
+def get_scenario(scenario_id):
+    """Detail scenare — plna situace s moznostmi"""
+    for course_id, sc_list in COMMUNICATION_SCENARIOS.items():
+        for sc in sc_list:
+            if sc["id"] == scenario_id:
+                return jsonify({
+                    "success": True,
+                    "scenario": sc,
+                    "course": course_id,
+                    "timestamp": now_iso()
+                })
+
+    return jsonify({"success": False, "error": "Scenar nenalezen"}), 404
+
+
+@education_bp.route('/api/education/scenarios/<scenario_id>/answer', methods=['POST'])
+def answer_scenario(scenario_id):
+    """Odpoved na scenar — vyhodnoceni volby"""
+    data = request.json or {}
+    answer_id = data.get('answer')
+    user_id = data.get('userId', 'anonymous')
+
+    if not answer_id:
+        return jsonify({"success": False, "error": "answer je vyzadovano"}), 400
+
+    # Najdi scenar
+    scenario = None
+    course_id = None
+    for cid, sc_list in COMMUNICATION_SCENARIOS.items():
+        for sc in sc_list:
+            if sc["id"] == scenario_id:
+                scenario = sc
+                course_id = cid
+                break
+        if scenario:
+            break
+
+    if not scenario:
+        return jsonify({"success": False, "error": "Scenar nenalezen"}), 404
+
+    # Najdi zvolenou moznost
+    chosen = next((o for o in scenario["options"] if o["id"] == answer_id), None)
+    if not chosen:
+        return jsonify({"success": False, "error": "Neplatna odpoved"}), 400
+
+    # Vsechny moznosti s hodnocenim
+    all_options = []
+    for opt in scenario["options"]:
+        all_options.append({
+            "id": opt["id"],
+            "text": opt["text"],
+            "score": opt["score"],
+            "feedback": opt["feedback"],
+            "consequence": opt["consequence"],
+            "is_chosen": opt["id"] == answer_id
+        })
+
+    # Ulozit do progress
+    key = f"scenario_{scenario_id}"
+    if user_id not in EDUCATION_PROGRESS:
+        EDUCATION_PROGRESS[user_id] = {}
+    EDUCATION_PROGRESS[user_id][key] = {
+        "scenario_id": scenario_id,
+        "answer": answer_id,
+        "score": chosen["score"],
+        "timestamp": now_iso()
+    }
+
+    return jsonify({
+        "success": True,
+        "scenario_id": scenario_id,
+        "your_answer": answer_id,
+        "score": chosen["score"],
+        "feedback": chosen["feedback"],
+        "consequence": chosen["consequence"],
+        "learning_point": scenario["learning_point"],
+        "all_options": all_options,
+        "is_best_answer": chosen["score"] == 100,
         "timestamp": now_iso()
     })
