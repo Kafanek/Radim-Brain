@@ -917,6 +917,210 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
                         }
                     ]
                 }
+            },
+            {
+                "id": "huntington-m2",
+                "title": "Komunikace a kazdy den s HD",
+                "order": 2,
+                "duration_minutes": 12,
+                "icon": "🗣️",
+                "lessons": [
+                    {
+                        "id": "huntington-m2-l1",
+                        "title": "Jak se meni komunikace pri HD",
+                        "type": "article",
+                        "content": """<h2>Komunikace pri Huntingtonove chorobe</h2>
+
+<p>Huntingtonova choroba postupne ovlivnuje <strong>rec, polykani a schopnost vyjadrovat emoce</strong>. Zmeny jsou pozvolne, ale pro rodinu casto velmi tezke.</p>
+
+<h3>Zmeny v reci podle stadia</h3>
+
+<h4>Rane stadium</h4>
+<ul>
+<li>Rec je srozumitelna, ale muze byt <strong>zrychlena nebo nerovnomerna</strong></li>
+<li>Obcas hledani slov, opakovanieee slabik</li>
+<li>Podradeni nebo impulzivni reakce (psychiatricke prznaky)</li>
+<li>Clovek si zmeny uvedomuje — frustrace a styd</li>
+</ul>
+
+<h4>Stredni stadium</h4>
+<ul>
+<li>Rec se stava <strong>obtizne srozumitelna</strong> — dysartrie</li>
+<li>Mimovolni pohyby (chorea) narusujoi koordinaci rtluu a jazyka</li>
+<li>Delsi vety jsou problematicke — clovek ztraci myslenku</li>
+<li>Polykani se zhorsuje — riziko zachvaeni</li>
+</ul>
+
+<h4>Pozdni stadium</h4>
+<ul>
+<li>Rec muze byt <strong>zcela nesrozumitelna</strong> nebo nemozna</li>
+<li>Komunikace predevsim neverbalni — vyrazy obliceje, dotyk, prritomnost</li>
+<li>Clovek <strong>STALE rozumi</strong> vic, nez muze vyjadrit</li>
+</ul>
+
+<h3>Komunikacni strategie</h3>
+<ol>
+<li><strong>Ano/ne otazky</strong> — jednodussi nez otevrenee otazky</li>
+<li><strong>Dejte cas</strong> — chorea zpomaluje artikulaci, ne mysleni</li>
+<li><strong>Klidne prostredi</strong> — ruch zhorsuje soustredeni</li>
+<li><strong>Ocni kontakt</strong> — udrzte pozornost a pokaz, ze naslouchaate</li>
+<li><strong>Nepreruste</strong> — i kdyz vite, co chce rict</li>
+<li><strong>Komunikacni pomucky</strong> — tabulky, tablety, piktogramy</li>
+</ol>
+
+<p class="key-point">💡 <strong>Dulezite:</strong> Podrazdeni a impulzivita u HD NEJSOU zloba — jsou to prznaky onemocneni. Clovek za ne NEMUZE. Trpelivost a porozumeni jsou nejlepsi 'lek'.</p>""",
+                        "key_points": [
+                            "Rec se meni od zrychlene pres dysartrii az po nesrozumitelnost",
+                            "Mimovolni pohyby (chorea) narusuji artikulaci",
+                            "Clovek rozumi vic nez muze vyjadrit",
+                            "Ano/ne otazky, klidne prostredi, ocni kontakt",
+                            "Podrazdeni a impulzivita jsou prznaky, ne zloba"
+                        ]
+                    },
+                    {
+                        "id": "huntington-m2-l2",
+                        "title": "Geneticke testovani a rodina",
+                        "type": "article",
+                        "content": """<h2>HD a rodina — geneticke testovani</h2>
+
+<p>Kazde dite rodice s HD ma <strong>50% riziko</strong>, ze gen zdedilo. Rozhodnuti o genetickem testu je <strong>jedno z nejtezsich v zivote</strong>.</p>
+
+<h3>Prediktivni geneticky test</h3>
+<ul>
+<li>Krevni test, ktery ukaze, zda osoba nese mutaci genu HTT</li>
+<li>Dostupny od 18 let (v CR presne od 18)</li>
+<li>Povinny geneticky poradenstvi pred testem i po nem</li>
+<li>Vysledek je DEFINITIVNI — pokud je pozitivni, onemocneni se projevi</li>
+</ul>
+
+<h3>Dilema: Testovat se, nebo ne?</h3>
+
+<h4>Proc ANO</h4>
+<ul>
+<li>Jistota — konec nevedeni</li>
+<li>Planovani zivota — kariery, rodiny, financi</li>
+<li>Moznost preimplantacni diagnostiky (PGD) — mit deti BEZ HD genu</li>
+<li>Ucast ve vyzkumnych studiich</li>
+</ul>
+
+<h4>Proc NE</h4>
+<ul>
+<li>Psychicka zatez pozitivniho vysledku</li>
+<li>Aktualne neexistuje lecba — vedet predem muze byt tezke</li>
+<li>Riziko diskriminace (pojistovny, zamestnavatele)</li>
+<li>Nekteri lide zijou lepe v nevedeni</li>
+</ul>
+
+<h3>Pro rodiny</h3>
+<ul>
+<li><strong>Nikdy netlacte</strong> na blizkeho, aby se testoval</li>
+<li>Respektujte jeho rozhodnuti — AT UZ je jakekoli</li>
+<li>Svepomocne skupiny pro rodiny s HD: <strong>Spolecnost pro pomoc pri Huntingtonove chorobe</strong></li>
+<li>Psychologicka podpora je NUTNOST — pro vsechny cleny rodiny</li>
+</ul>
+
+<p class="key-point">💡 <strong>Dulezite:</strong> Rozhodnuti o genetickem testu je osobni a intimni. Neexistuje spravna ani spatna volba. Oba pristupy — vedet i nevedet — jsou legitimni.</p>""",
+                        "key_points": [
+                            "50% riziko dedicnosti — prediktivni test od 18 let",
+                            "Test je definitivni — povinne geneticke poradenstvi",
+                            "PGD umoznuje mit deti bez HD genu",
+                            "Nikdy netlacit na testovani — respektovat rozhodnuti",
+                            "Psychologicka podpora pro celou rodinu"
+                        ]
+                    }
+                ],
+                "quiz": {
+                    "id": "huntington-m2-quiz",
+                    "title": "Overite si: Komunikace a rodina pri HD",
+                    "questions": [
+                        {
+                            "id": "q1",
+                            "question": "Proc je clovek s HD nekdy podrazdeny a impulzivni?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Je to priznak onemocneni, nemuze za to", "correct": True},
+                                {"id": "b", "text": "Je to jeho povaaha", "correct": False},
+                                {"id": "c", "text": "Dela to naschval", "correct": False}
+                            ],
+                            "explanation": "Podrazdeni a impulzivita jsou psychiatricke prznaky HD. Onemocneni poskoze oblast mozku, ktera reguluje emoce. Clovek za to NEMUZE."
+                        },
+                        {
+                            "id": "q2",
+                            "question": "Jake je riziko, ze dite rodice s HD zdedi gen?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "25 %", "correct": False},
+                                {"id": "b", "text": "50 %", "correct": True},
+                                {"id": "c", "text": "75 %", "correct": False}
+                            ],
+                            "explanation": "Huntingtonova choroba se dedi autozomalne dominantne — kazde dite postizeneho rodice ma presne 50% sanci, ze gen zdedilo."
+                        },
+                        {
+                            "id": "q3",
+                            "question": "Mel by se kazdy v ohrozene rodine testovat?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Ano, kazdý by mel vedet", "correct": False},
+                                {"id": "b", "text": "Ne, rozhodnuti je osobni a oba pristupy jsou legitimni", "correct": True},
+                                {"id": "c", "text": "Ano, kvuli detem", "correct": False}
+                            ],
+                            "explanation": "Rozhodnuti o genetickem testu je hluboce osobni. Neexistuje 'spravna' volba — nekteri lide chteji vedet, jini ne. Oba pristupy jsou legitimni a je treba je respektovat."
+                        }
+                    ]
+                }
+            },
+            {
+                "id": "huntington-m3",
+                "title": "Kde najit pomoc v CR",
+                "order": 3,
+                "duration_minutes": 6,
+                "icon": "🏥",
+                "lessons": [
+                    {
+                        "id": "huntington-m3-l1",
+                        "title": "Zdroje a podpora pro rodiny s HD",
+                        "type": "resources",
+                        "content": """<h2>Pomoc pro rodiny s Huntingtonovou chorobou v CR</h2>
+
+<h3>Specializovana centra</h3>
+<ul>
+<li><strong>FN Motol, Praha</strong> — Neurologicka klinika (prof. Klempir) — hlavni centrum pro HD v CR</li>
+<li><strong>FN Brno</strong> — Neurologicka klinika</li>
+<li><strong>Geneticke poradny</strong> — kazda fakultni nemocnice</li>
+</ul>
+
+<h3>Organizace</h3>
+<ul>
+<li><strong>Spolecnost pro pomoc pri Huntingtonove chorobe</strong> — svepomocna org pro rodiny</li>
+<li><strong>EURORDIS</strong> — Evropska organizace pro vzacna onemocneni</li>
+<li><strong>Narodni koordinacni centrum pro vzacna onemocneni</strong> (NKCVO)</li>
+</ul>
+
+<h3>Prakticka podpora</h3>
+<ul>
+<li>Prispevek na peci (zakon 108/2006 Sb.) — 4 stupne</li>
+<li>Invalidni duchod — pri ztrate pracovni schopnosti</li>
+<li>Prukaz ZTP/P — parkovani, slevy, pruvodce</li>
+<li>Osobni asistence — pomoc v kazdodennim zivote</li>
+</ul>
+
+<h3>Vyzkum a nadeje</h3>
+<ul>
+<li>Genova terapie — vyzkum zamireny na ztiseni vadneho genu</li>
+<li>ASO (antisense oligonukleotidy) — klinicke studie probihaji</li>
+<li>Registr pacientu <strong>Enroll-HD</strong> — mezinarodni studie, ucast mozna i v CR</li>
+</ul>
+
+<p class="key-point">💡 <strong>Nadeje:</strong> Vyzkum HD rychle postupuje. I kdyz lecba zatim neexistuje, klinicke studie prinaseji realne vysledky. Ucast v registru Enroll-HD pomaha budoucim pacientum.</p>""",
+                        "key_points": [
+                            "Hlavni centrum pro HD v CR: FN Motol (prof. Klempir)",
+                            "Spolecnost pro pomoc pri HD — svepomocna organizace",
+                            "Prispevek na peci, invalidni duchod, prukaz ZTP/P",
+                            "Genova terapie a ASO ve vyzkumu — nadeje pro budoucnost",
+                            "Registr Enroll-HD — mezinarodni studie, ucast mozna v CR"
+                        ]
+                    }
+                ]
             }
         ]
     },
@@ -1004,6 +1208,220 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
                         }
                     ]
                 }
+            },
+            {
+                "id": "als-m2",
+                "title": "Komunikace v ruznych fazich ALS",
+                "order": 2,
+                "duration_minutes": 12,
+                "icon": "🗣️",
+                "lessons": [
+                    {
+                        "id": "als-m2-l1",
+                        "title": "Jak se meni rec pri ALS",
+                        "type": "article",
+                        "content": """<h2>Komunikace pri ALS — od reci k technologiim</h2>
+
+<p>ALS postupne oslabuje svaly, vcetne tech, ktere pouzivame k mluveni. Zmeny jsou <strong>predvidatelne</strong> a pripravit se na ne DOPREDU je klicove.</p>
+
+<h3>Faze zmeny reci</h3>
+
+<h4>Faze 1: Rec je srozumitelna</h4>
+<ul>
+<li>Mirne zmeny — hlas je tissi, pomalejsi</li>
+<li>Unava hlasu ke konci dne</li>
+<li>Obcas nezretelne slabiky</li>
+<li><strong>Nyni je cas:</strong> Nahrat svuj hlas pro budouci hlasovou banku!</li>
+</ul>
+
+<h4>Faze 2: Rec je obtizne srozumitelna</h4>
+<ul>
+<li>Dysartrie — slova splyvaji, hlas je slaby</li>
+<li>Blizci rozumi, cizi lide obtizne</li>
+<li>Kratke vety, klicova slova</li>
+<li><strong>Nyni je cas:</strong> Zacit pouzivat komunikacni pomucky (tabulky, aplikace)</li>
+</ul>
+
+<h4>Faze 3: Rec neni mozna</h4>
+<ul>
+<li>Hlasova komunikace jiz neni mozna</li>
+<li><strong>Ale komunikace pokracuje!</strong></li>
+<li>Oci — sledovani pohledu (eye-tracking)</li>
+<li>Prsty — prepinace, specialni klavesnice</li>
+<li>Oci + pocitac = plna komunikace (jako Stephen Hawking)</li>
+</ul>
+
+<h3>Hlasova banka — zachrante svuj hlas</h3>
+<p><strong>Hlasova banka</strong> je nahravka vaseho hlasu, ze ktere pocitac vytvori <strong>synteticky hlas, ktery zni jako VY</strong>. Kdyz pozdeji pouzijete komunikator, bude mluvit vasim hlasem.</p>
+<ul>
+<li><strong>ModelTalker</strong> — bezplatna hlasova banka</li>
+<li><strong>Acapela my-own-voice</strong> — placena, vyssi kvalita</li>
+<li>Idealni cas: kdyz rec jeste funguje dobre (faze 1!)</li>
+<li>Clovek nahrava vety (cca 1 600 vet) — trva nekolik hodin</li>
+</ul>
+
+<p class="key-point">💡 <strong>Nejdulezitejsi rada:</strong> Neplanujtee komunikacni pomucky AZ kdyz rec selze — to je pozde. Zacnete SE PRIRAVOVAT v fazi 1, kdyz jeste mluvite dobre. Nahrajte si hlas. Vyzkousejte pomucky. Budete PRIPRAVENI.</p>""",
+                        "key_points": [
+                            "Rec se meni predvidatelne — od tissiho hlasu po nemoznost mluvit",
+                            "Hlasova banka: nahrat svuj hlas VCAS (faze 1)",
+                            "Eye-tracking umoznuje plnou komunikaci i bez reci",
+                            "Pripravit se DOPREDU — ncekat, az rec selze",
+                            "Komunikace NIKDY nekonci — jen se meni jeji forma"
+                        ]
+                    },
+                    {
+                        "id": "als-m2-l2",
+                        "title": "Asistivni technologie pro ALS",
+                        "type": "article",
+                        "content": """<h2>Technologie, ktere pomahaji komunikovat</h2>
+
+<h3>Komunikacni tabulky a knihy</h3>
+<ul>
+<li>Nejjednodussi pomucka — laminovane karty s pismeny, slovy, obrazky</li>
+<li>Ukazovani prstem, pohledem nebo kyvnutim</li>
+<li>Vzdy mit po ruce — jako "zakladni sada"</li>
+</ul>
+
+<h3>Tablety a aplikace</h3>
+<ul>
+<li><strong>Grid 3</strong> — profesionalni komunikacni software</li>
+<li><strong>Proloquo2Go</strong> — pro iPad</li>
+<li><strong>Tobii Dynavox</strong> — specialni zarizeni s eye-trackingem</li>
+<li>Bezne tablety s prizpusobenym ovladanim</li>
+</ul>
+
+<h3>Eye-tracking (sledovani pohledu oci)</h3>
+<ul>
+<li>Kamera sleduje pohyb oci a prevadi na vstup do pocitace</li>
+<li>Clovek "pise" pohledem — vybira pismena na obrazovce</li>
+<li>Rychlost: cca 8–15 slov za minutu (pomale, ale FUNGUJE)</li>
+<li><strong>Tobii</strong> — prumyslovy standard pro eye-tracking</li>
+<li>Moznost ovladat cely pocitac, email, internet</li>
+</ul>
+
+<h3>Prepinace (switches)</h3>
+<ul>
+<li>Jednoduchy tlacitko ovladane prstem, hlavou, dechem</li>
+<li>Funguje i pri minimalni pohyblivosti</li>
+<li>Scanovaci system — pocitac zvyraznuje moznosti, clovek stiskne ve spravny okamzik</li>
+</ul>
+
+<h3>Mozek-pocitac rozhrani (BCI)</h3>
+<ul>
+<li>Experimentalni technologie — cteni mozkovych vln</li>
+<li>Clovek "mysli" prikaz a pocitac reaguje</li>
+<li>Zatim ve vyzkumu, ale rychly pokrok</li>
+</ul>
+
+<p class="key-point">💡 <strong>Klicove:</strong> Technologie muze udrzet plnou komunikaci i kdyz telo selze. Ale je treba JI NACVICIT VCAS — naucit se pouzivat pomucky, kdyz jeste muzete mluvit, je MNOHOKRAT snazsi nez kdyz uz ne.</p>""",
+                        "key_points": [
+                            "Od jednoduchych tabulek po eye-tracking a BCI",
+                            "Eye-tracking: 8–15 slov/min — pomale, ale plna komunikace",
+                            "Nacvicit pouzivani pomucek VCAS — dokud rec jeste funguje",
+                            "Grid 3, Tobii Dynavox — profesionalni komunikacni systemy",
+                            "Technologie muze udrzet komunikaci az do konce"
+                        ]
+                    }
+                ],
+                "quiz": {
+                    "id": "als-m2-quiz",
+                    "title": "Overite si: Komunikace a technologie pri ALS",
+                    "questions": [
+                        {
+                            "id": "q1",
+                            "question": "Kdy je idealni cas nahrat si hlasovou banku?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Az kdyz rec uplne selze", "correct": False},
+                                {"id": "b", "text": "V rane fazi, kdyz rec jeste funguje dobre", "correct": True},
+                                {"id": "c", "text": "Hlasova banka neexistuje", "correct": False}
+                            ],
+                            "explanation": "Hlasovou banku je treba nahrat V RANE FAZI, kdyz rec jeste funguje dobre. Pozdeji uz kvalita nahravky nebude dostatecna pro vytvoreni syntetickeho hlasu."
+                        },
+                        {
+                            "id": "q2",
+                            "question": "Co je eye-tracking?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Sledovani pohybu oci kamerou — umoznuje ovladat pocitac pohledem", "correct": True},
+                                {"id": "b", "text": "Specialni bryle pro slabozrake", "correct": False},
+                                {"id": "c", "text": "Vysetreni oci u lekare", "correct": False}
+                            ],
+                            "explanation": "Eye-tracking je technologie, kde kamera sleduje pohyb oci a prevadi ho na vstup do pocitace. Clovek 'pise' pohledem — vybira pismena na obrazovce."
+                        },
+                        {
+                            "id": "q3",
+                            "question": "Konci komunikace, kdyz clovek s ALS nemuze mluvit?",
+                            "type": "true_false",
+                            "correct_answer": False,
+                            "explanation": "NE! Komunikace NIKDY nekonci. Meni se jen jeji forma — od reci pres psani, gesta, komunikacni tabulky az po eye-tracking a mozkove rozhrani."
+                        }
+                    ]
+                }
+            },
+            {
+                "id": "als-m3",
+                "title": "Kde najit pomoc v CR",
+                "order": 3,
+                "duration_minutes": 6,
+                "icon": "🏥",
+                "lessons": [
+                    {
+                        "id": "als-m3-l1",
+                        "title": "Podpora pro lidi s ALS a jejich rodiny",
+                        "type": "resources",
+                        "content": """<h2>Pomoc pro lidi s ALS v Ceske republice</h2>
+
+<h3>Specializovana centra</h3>
+<ul>
+<li><strong>ALS centrum FN Motol, Praha</strong> — hlavni centrum pro ALS v CR</li>
+<li><strong>FN Brno</strong> — Neurologicka klinika</li>
+<li><strong>FN Olomouc</strong> — Neurologicka klinika</li>
+<li>Multidisciplinarni tymy: neurolog, pneumolog, logoped, fyzioterapeut, psycholog</li>
+</ul>
+
+<h3>Organizace</h3>
+<ul>
+<li><strong>ALS Liga CR</strong> — hlavni pacientska organizace</li>
+<li><strong>Spolecnost E</strong> — podpora pro vzacna onemocneni</li>
+<li><strong>Nadace pro ALS Karla Modracheho</strong></li>
+<li><strong>EURORDIS</strong> — Evropska organizace pro vzacna onemocneni</li>
+</ul>
+
+<h3>Prakticke pomucky</h3>
+<ul>
+<li><strong>Elektricke voziky</strong> — hradene pojistovnou</li>
+<li><strong>Komunikatory</strong> — predpis od logopeda/neurologa</li>
+<li><strong>Domaci ventilace</strong> — bipap/CPAP zarizeni</li>
+<li><strong>Polohovaci postele</strong> — pomucky pro domaci peci</li>
+</ul>
+
+<h3>Financni podpora</h3>
+<ul>
+<li>Prispevek na peci — stupne I–IV (880–19 200 Kc/mesic)</li>
+<li>Prispevek na mobilitu — pro osoby s omezenou pohyblivosti</li>
+<li>Prispevek na zvlastni pomucku — komunikatory, voziky</li>
+<li>Invalidni duchod</li>
+<li>Prukaz ZTP/P</li>
+</ul>
+
+<h3>Psychologicka podpora</h3>
+<ul>
+<li>Pro pacienta: zpracovani diagnozy, uzkost, deprese</li>
+<li>Pro rodinu: pece o pecujicich, detske psychoterapie</li>
+<li>Linky duvery: 116 123, 116 111 (pro deti)</li>
+</ul>
+
+<p class="key-point">💡 <strong>Dulezite:</strong> ALS je teezke onemocneni, ale clovek NENI sam. Multidisciplinarni tym, technologie a podpora rodiny mohou vyrazne zvysit kvalitu zivota. ALS Liga CR je prvni kontakt.</p>""",
+                        "key_points": [
+                            "ALS centrum FN Motol — hlavni specialisovane pracoviste v CR",
+                            "ALS Liga CR — pacientska organizace, prvni kontakt",
+                            "Komunikatory, voziky, ventilace — hrazene pojistovnou",
+                            "Prispevky na peci, mobilitu, pomucky — financni podpora",
+                            "Psychologicka podpora pro pacienta I rodinu"
+                        ]
+                    }
+                ]
             }
         ]
     },
@@ -2965,6 +3383,138 @@ COMMUNICATION_SCENARIOS = {
                 }
             ],
             "learning_point": "NIKDY nepripiminejte smrt blizkeho — clovek s demenci ji proziva ZNOVU. Vstoupte do jeho reality, validujte emoce a presmerujte na pozitivni vzpominky."
+        }
+    ],
+    "huntington": [
+        {
+            "id": "hd-s1",
+            "title": "Partner s HD je podrazdeny",
+            "context": "Vas partner (42 let) ma Huntingtonovu chorobu v ranem stadiu. Dnes je velmi podrazdeny a kricii na vas kvuli malictkosti.",
+            "difficulty": "intermediate",
+            "character": "Partner Tomas (42 let, HD — rane stadium)",
+            "situation": "Tomas kricii: 'Proc jsi zase zapomela koupit mleko?! To nedokazes jednu vec?!' Pritom jste mleko koupili — stoji v lednici.",
+            "options": [
+                {
+                    "id": "a",
+                    "text": "Mleko je v lednici! Prestan na me kricet, neni to normalni!",
+                    "score": 20,
+                    "feedback": "Pochopitelna reakce, ale konfrontace zvysuje napeti. Tomas svou podrazdenost NEOVLADA — je to priznak HD, ne zloba.",
+                    "consequence": "Tomas jeszte vic zrudne a prasky dvermi. Oba jste rozruseni. Konfliikt eskaloval."
+                },
+                {
+                    "id": "b",
+                    "text": "Vidim, ze jsi nastvany. Pojdme se podivat do lednice spolecne — myslim, ze tam mleko je.",
+                    "score": 100,
+                    "feedback": "Vyborne! Validujete emoci (vidim, ze jsi nastvany), nehadate se o fakta, a nabizite spolecne reseni. Klidny hlas snizuje napeti.",
+                    "consequence": "Tomas vas nasleduje, vidi mleko a ukllidni se. Za chvili se omluvi. Vy vite, ze to byla HD, ne on."
+                },
+                {
+                    "id": "c",
+                    "text": "Odejit z mistnosti a nechat ho vychladnout.",
+                    "score": 60,
+                    "feedback": "Neni spatne si vzit prostor, ale Tomas muze odsunuti vnimaat jako odmitaani. Lepsi je klidne reagovat a pak navrhnout pauzu SPOLECNE.",
+                    "consequence": "Tomas se po chvili uklidni, ale citi se vinny a osamely. Vy jste se konfliktu vyhnuli, ale nepomohli."
+                }
+            ],
+            "learning_point": "Podrazdeni u HD je PRIZNAK, ne zloba. Nereagujte konfrontacne. Validujte emoci, nabidnete reseni klidne. Po zklidneeni mluvte o tom, co se stalo — BEZ obvinovani."
+        },
+        {
+            "id": "hd-s2",
+            "title": "Ditie se pta na dedicnost",
+            "context": "Vasemu synovi je 19 let. Jeho matka ma HD. Syn se pta: 'Mam se nechat testovat? Chci vedet.'",
+            "difficulty": "intermediate",
+            "character": "Syn Jakub (19 let, ohrozeny HD)",
+            "situation": "Jakub rika: 'Tati, uz to chci vedet. Budu mit Huntingtona jako mama? Chci se nechat testovat.'",
+            "options": [
+                {
+                    "id": "a",
+                    "text": "Urcite se nech testovat. Budes aspon vedet, na cem jsi.",
+                    "score": 30,
+                    "feedback": "Tlacit do testovani neni spravne. Rozhodnuti musi byt JEHO. Pozitivni vysledek muze byt devastujici — musii byt pripraven.",
+                    "consequence": "Jakub se necha testovat bez pripravy. Vysledek je pozitivni. Nedokaaze to zpracovat. Propadne depresi."
+                },
+                {
+                    "id": "b",
+                    "text": "Rozumim, ze chces vedet. Je to tvoje rozhodnuti. Pojdme nejdriv do geneticke poradny — tam ti vysvetli vsechny moznosti a pomuzou ti se pripravit.",
+                    "score": 100,
+                    "feedback": "Skvele! Respektujete jeho pranni, ale smerujete ho k profesionalnimu poradenstvi. Geneticke poradenstvi PRED testem je povinne a dulezite.",
+                    "consequence": "Jakub absolvuje geneticke poradenstvi. S psychologem se pripravi na oba vysledky. At uz se rozhodne jakkoli, bude pripraveen."
+                },
+                {
+                    "id": "c",
+                    "text": "Radsi se netestuj. K cemu ti to bude? Budes se tim jen trapit.",
+                    "score": 20,
+                    "feedback": "Chranit ditie je prirozene, ale ZAKAZOVAT mu informace neni spravne. V 19 letech ma pravo se rozhodnout sam.",
+                    "consequence": "Jakub se citi, ze mu upira kontrolu nad jeho zivotem. Necha se testovat tajne, bez podory. Cokoli zjisti, bude na to sam."
+                }
+            ],
+            "learning_point": "Rozhodnuti o genetickem testu je OSOBNI. Respektujte pranni ditete, ale smerujte k profesionalnimu genetickemu poradenstvi. Nikdy netlacte ANI jednim smerem."
+        }
+    ],
+    "als": [
+        {
+            "id": "als-s1",
+            "title": "Manzelka se nemuzze domluvit",
+            "context": "Vase manzelka (58 let) ma ALS ve strednim stadiu. Rec je tezce srozumitelna. Snazi se vam neco rict.",
+            "difficulty": "beginner",
+            "character": "Manzelka Eva (58 let, ALS — stredni stadium)",
+            "situation": "Eva rika neco, ale rozumite jen: '...te...fo...vnu...' Vypada to dulezite. Snazi se znovu a znovu, ale vy nerozumite.",
+            "options": [
+                {
+                    "id": "a",
+                    "text": "Evicko, promiun, nerozumim. Zkus to napsat na tablet.",
+                    "score": 90,
+                    "feedback": "Dobry pristup! Nabizite alternativni kanal (psani). Omluvit se za neporozumeni je spravne — ukazuje respekt.",
+                    "consequence": "Eva pomalu napise na tabletu: 'zavolej vnucce k narozeninam'. Probleem vyresen. Eva se usmiva."
+                },
+                {
+                    "id": "b",
+                    "text": "Aha, jasne! (Predstiraate, ze rozumite, abyste ji netraapili.)",
+                    "score": 10,
+                    "feedback": "Predstirrani porozumeni je NEJHORSI reakce. Eva pozna, ze nerozumite. Citi se neviditelna a bezmocna. A dulezita informace se ztrati.",
+                    "consequence": "Eva vidi, ze predstraatte. Prestane mluvit a otoci se. Vnucka nedostane prianni k narozeninam. Eva plache sama."
+                },
+                {
+                    "id": "c",
+                    "text": "Pockej, zkusime to po pismenech. Prvni pismeno? T? Te-le-fon? Telefonovat? Komu — vnucce?",
+                    "score": 100,
+                    "feedback": "Vyborne! Pomahate rozlusstit zprsvu po castech. Trpelivost, potvrzovani a postupne upresnovani je zlaty standard komunikace pri tezke dysartrii.",
+                    "consequence": "Eva kyvne: 'Ano! Zavolej vnucce!' Oba se usmivate. Spolecnoe jste to zvladli."
+                }
+            ],
+            "learning_point": "NIKDY predstirrej porozumeni. Nabidnete alternativni kanaly (psani, ukazovani, hlakovni po pismenech). Trpelivost je klicova — kazda zprava se da desifrovat."
+        },
+        {
+            "id": "als-s2",
+            "title": "Pacient odmita komunikator",
+            "context": "Pan Horak (61 let) ma ALS. Logoped mu doporucil zacit s eye-tracking komunikatorem, ale pan Horak odmita.",
+            "difficulty": "intermediate",
+            "character": "Pan Horak (61 let, ALS — stredni stadium)",
+            "situation": "Pan Horak rika (obtizne): 'Ja...nepotrebuju...ten...stroj. Jeste...mluvim.' Logoped vam rika, ze za 3–6 mesicu uz mluvit nebude.",
+            "options": [
+                {
+                    "id": "a",
+                    "text": "Pane Horaku, logoped rika, ze za pul roku nebudete mluvit. Musite se to naucit ted.",
+                    "score": 20,
+                    "feedback": "Konfrontace s prognozou je krutaa a neucinna. Pan Horak vi, co ho ceka. Odmitani je obranny mechanismus — potrebuje cas.",
+                    "consequence": "Pan Horak se rozplache a odmitne jakoukoli spoluprace. Ztraci duveru k tymu."
+                },
+                {
+                    "id": "b",
+                    "text": "Rozumim, ze jeste mluvite a nechcete pouzivat stroj. Co kdybychom to zatim jen vyzkouseli — jako pojistku? Ukazeme vam, jak funguje. Bez zavazku.",
+                    "score": 100,
+                    "feedback": "Skvele! Respektujete jeho pocity, snizujete tlak ('bez zavazku') a nabizite to jako POJISTKU, ne nahradku reci. Drobne kroky vedou k prijieti.",
+                    "consequence": "Pan Horak souhlasi s ukazkou. Kdyz vidi, ze muze ovlaadat pocitac ocima, je fasckinovan. Sam rika: 'To je jako kouzlo.'"
+                },
+                {
+                    "id": "c",
+                    "text": "Dobre, pockame. Az budete pripraven, dejte nam vedet.",
+                    "score": 40,
+                    "feedback": "Respektujete jeho pranni, ale riskujete, ze bude pozde. Ucit se pouzivat eye-tracking je SNAZSI, dokud clovek jeste mluvi. Pak muze srovnnavaat.",
+                    "consequence": "Za 4 mesice pan Horak ztrati rec. Ted se pokusi o eye-tracking — ale uceni je mnohokrat tezssi. Lituje, ze nezacal driv."
+                }
+            ],
+            "learning_point": "Nepresvedcujtee silou, ale ani necekejte prilis. Nabidnete pomucky jako POJISTKU bez zavazku. Drobne kroky — ukazka, zkouska, postepne prijieti. Cas je klicovy faktor."
         }
     ]
 }
