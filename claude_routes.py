@@ -37,10 +37,23 @@ except ImportError:
 
 # Memory persistence
 try:
-    from memory_routes import record_interaction, get_conversation_messages, get_user_context, get_personalized_system_prompt
+    from memory_routes import record_interaction, get_conversation_messages, get_user_context, get_personalized_system_prompt, detect_mood as _cl_detect_mood
     _CL_MEMORY_AVAILABLE = True
 except ImportError:
     _CL_MEMORY_AVAILABLE = False
+
+# 🎵 Text Rhythm Engine — matematika řídí styl textu
+try:
+    from text_rhythm import (
+        estimate_C_alpha_from_text as _cl_tr_estimate,
+        calculate_text_params as _cl_tr_calc,
+        build_anticipation_prompt as _cl_tr_prompt,
+        get_anticipation_metadata as _cl_tr_meta,
+        get_adjusted_generation_config as _cl_tr_gen_config
+    )
+    _CL_TEXT_RHYTHM = True
+except ImportError:
+    _CL_TEXT_RHYTHM = False
 
 # DB access for memory notes
 try:
@@ -290,6 +303,28 @@ def chat_with_radim():
         if emotional_context:
             system += f"\n\n═══ EMOČNÍ KONTEXT (aktuální stav uživatele) ═══\n{emotional_context}"
 
+        # 🎵 Text Rhythm: matematika → styl textu
+        anticipation_meta = None
+        gen_config_override = None
+        if _CL_TEXT_RHYTHM:
+            try:
+                C_val = data.get('C')
+                alpha_val = data.get('alpha')
+
+                if C_val is not None and alpha_val is not None:
+                    C = float(C_val)
+                    alpha = float(alpha_val)
+                else:
+                    mood = _cl_detect_mood(message) if _CL_MEMORY_AVAILABLE else "neutral"
+                    C, alpha = _cl_tr_estimate(message, mood)
+
+                text_result = _cl_tr_calc(C, alpha)
+                system += _cl_tr_prompt(text_result)
+                anticipation_meta = _cl_tr_meta(text_result)
+                gen_config_override = _cl_tr_gen_config(text_result)
+            except Exception as tr_err:
+                logger.warning(f"Text rhythm in claude chat (non-fatal): {tr_err}")
+
         # 📜 Build messages array with conversation history
         messages = []
         if _CL_MEMORY_AVAILABLE:
@@ -301,9 +336,10 @@ def chat_with_radim():
         messages.append({"role": "user", "content": message})
 
         # Volání Claude API
+        max_tokens = gen_config_override["max_tokens"] if gen_config_override else 1024
         api_kwargs = {
             "model": CLAUDE_MODEL,
-            "max_tokens": 1024,
+            "max_tokens": max_tokens,
             "system": system,
             "messages": messages
         }
@@ -341,12 +377,15 @@ def chat_with_radim():
         
         logger.info(f"Chat | User: {user_id} | Intent: {intent} | Memory: {_CL_MEMORY_AVAILABLE}")
         
-        return jsonify({
+        result = {
             "success": True,
             "response": text,
             "intent": intent,
             "timestamp": datetime.utcnow().isoformat()
-        })
+        }
+        if anticipation_meta:
+            result["anticipation"] = anticipation_meta
+        return jsonify(result)
         
     except Exception as e:
         logger.error(f"Chat error: {e}")

@@ -31,11 +31,25 @@ try:
     from memory_routes import (
         build_personalized_prompt as _orch_build_prompt,
         get_conversation_messages as _orch_get_history,
-        record_interaction as _orch_record
+        record_interaction as _orch_record,
+        detect_mood as _orch_detect_mood
     )
     _ORCH_MEMORY_AVAILABLE = True
 except ImportError:
     _ORCH_MEMORY_AVAILABLE = False
+
+# 🎵 Text Rhythm Engine — matematika řídí styl textu
+try:
+    from text_rhythm import (
+        estimate_C_alpha_from_text as _tr_estimate,
+        calculate_text_params as _tr_calc,
+        build_anticipation_prompt as _tr_prompt,
+        get_anticipation_metadata as _tr_meta,
+        get_adjusted_generation_config as _tr_gen_config
+    )
+    _ORCH_TEXT_RHYTHM = True
+except ImportError:
+    _ORCH_TEXT_RHYTHM = False
 
 # ============================================
 # KONFIGURACE
@@ -169,8 +183,8 @@ def extract_time(message):
 # ============================================
 # GEMINI AI CALL
 # ============================================
-def call_gemini_whatsapp(message, context=None, mode='senior', personalized_prompt='', history=None):
-    """Volání Gemini s WhatsApp promptem + personalizace + historie"""
+def call_gemini_whatsapp(message, context=None, mode='senior', personalized_prompt='', history=None, anticipation_prompt='', gen_config=None):
+    """Volání Gemini s WhatsApp promptem + personalizace + historie + rytmus"""
     if not GEMINI_API_KEY:
         return None, None
 
@@ -186,6 +200,10 @@ def call_gemini_whatsapp(message, context=None, mode='senior', personalized_prom
         if personalized_prompt:
             system += personalized_prompt
 
+        # 🎵 Add anticipation-driven text rhythm instructions
+        if anticipation_prompt:
+            system += anticipation_prompt
+
         context_text = ""
         if context:
             context_text = f"\n\nKontext:\n{json.dumps(context, ensure_ascii=False)}"
@@ -199,15 +217,19 @@ def call_gemini_whatsapp(message, context=None, mode='senior', personalized_prom
                 history_text += f"{role_label}: {msg['content']}\n"
 
         full_prompt = f"{system}{context_text}{history_text}\n\nUživatel: {message}\nRadim:"
-        
+
+        # Generation config — adjusted by Anticipation Engine
+        temperature = gen_config["temperature"] if gen_config else 0.7
+        max_tokens = gen_config["max_tokens"] if gen_config else 500
+
         response = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
             headers={"Content-Type": "application/json"},
             json={
                 "contents": [{"parts": [{"text": full_prompt}]}],
                 "generationConfig": {
-                    "temperature": 0.7,
-                    "maxOutputTokens": 500,
+                    "temperature": temperature,
+                    "maxOutputTokens": max_tokens,
                     "topP": 0.9
                 },
                 "safetySettings": [
@@ -338,7 +360,34 @@ def radim_chat():
             except Exception as mem_err:
                 print(f"Memory load warning: {mem_err}")
 
-        text_response, action_json = call_gemini_whatsapp(message, context, mode, personalized, history)
+        # 🎵 Text Rhythm: matematika → styl textu
+        anticipation_prompt = ''
+        anticipation_meta = None
+        gen_config = None
+        if _ORCH_TEXT_RHYTHM:
+            try:
+                C_val = data.get('C')
+                alpha_val = data.get('alpha')
+
+                if C_val is not None and alpha_val is not None:
+                    C = float(C_val)
+                    alpha = float(alpha_val)
+                else:
+                    # Derive from message text + mood
+                    mood = _orch_detect_mood(message) if _ORCH_MEMORY_AVAILABLE else "neutral"
+                    C, alpha = _tr_estimate(message, mood)
+
+                text_result = _tr_calc(C, alpha)
+                anticipation_prompt = _tr_prompt(text_result)
+                anticipation_meta = _tr_meta(text_result)
+                gen_config = _tr_gen_config(text_result)
+            except Exception as tr_err:
+                print(f"Text rhythm warning (non-fatal): {tr_err}")
+
+        text_response, action_json = call_gemini_whatsapp(
+            message, context, mode, personalized, history,
+            anticipation_prompt, gen_config
+        )
 
         if not text_response:
             text_response = "Promiňte, zkuste to za chvíli. 🙏"
@@ -350,14 +399,17 @@ def radim_chat():
             except Exception as rec_err:
                 print(f"Memory record warning: {rec_err}")
 
-        return jsonify({
+        result = {
             'success': True,
             'response': text_response,
             'radim_action': action_json,
             'intent': intent,
             'mode': mode,
             'timestamp': datetime.utcnow().isoformat() + 'Z'
-        })
+        }
+        if anticipation_meta:
+            result['anticipation'] = anticipation_meta
+        return jsonify(result)
         
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
