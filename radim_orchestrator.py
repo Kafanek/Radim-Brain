@@ -45,11 +45,33 @@ try:
         calculate_text_params as _tr_calc,
         build_anticipation_prompt as _tr_prompt,
         get_anticipation_metadata as _tr_meta,
-        get_adjusted_generation_config as _tr_gen_config
+        get_adjusted_generation_config as _tr_gen_config,
+        enforce_crisis_limits as _tr_enforce
     )
     _ORCH_TEXT_RHYTHM = True
 except ImportError:
     _ORCH_TEXT_RHYTHM = False
+
+# 🏠 System Prompt v3.0 — domácí asistent s časovým kontextem
+try:
+    from radim_system_prompt import get_radim_prompt as _sys_get_prompt
+    _ORCH_SYS_PROMPT = True
+except ImportError:
+    _ORCH_SYS_PROMPT = False
+
+# 📋 Task Service — úkoly a léky s persistencí
+try:
+    from task_service import (
+        create_task as _ts_create,
+        get_tasks as _ts_get,
+        complete_task as _ts_complete,
+        log_medication as _ts_log_med,
+        get_medication_history as _ts_med_history,
+        build_tasks_context as _ts_context
+    )
+    _ORCH_TASK_SERVICE = True
+except ImportError:
+    _ORCH_TASK_SERVICE = False
 
 # ============================================
 # KONFIGURACE
@@ -60,7 +82,80 @@ WP_USER = os.environ.get('WP_USER')
 WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD')
 
 # ============================================
-# RADIM WHATSAPP SYSTEM PROMPT
+# ČESKÉ STÁTNÍ SVÁTKY
+# ============================================
+_CZECH_HOLIDAYS = {
+    (1, 1): "Nový rok / Den obnovy samostatného českého státu",
+    (5, 1): "Svátek práce",
+    (5, 8): "Den vítězství",
+    (7, 5): "Den slovanských věrozvěstů Cyrila a Metoděje",
+    (7, 6): "Den upálení mistra Jana Husa",
+    (9, 28): "Den české státnosti",
+    (10, 28): "Den vzniku samostatného československého státu",
+    (11, 17): "Den boje za svobodu a demokracii",
+    (12, 24): "Štědrý den",
+    (12, 25): "1. svátek vánoční",
+    (12, 26): "2. svátek vánoční",
+}
+
+def _build_time_context():
+    """Sestaví časový kontext pro system prompt (den, hodina, svátek)."""
+    try:
+        now = datetime.now()
+        hour = now.hour
+
+        if 5 <= hour < 12:
+            time_of_day = "Je ráno"
+        elif 12 <= hour < 18:
+            time_of_day = "Je odpoledne"
+        elif 18 <= hour < 22:
+            time_of_day = "Je večer"
+        else:
+            time_of_day = "Je noc"
+
+        day_names = ['pondělí', 'úterý', 'středa', 'čtvrtek', 'pátek', 'sobota', 'neděle']
+        month_names = ['ledna', 'února', 'března', 'dubna', 'května', 'června',
+                       'července', 'srpna', 'září', 'října', 'listopadu', 'prosince']
+
+        # Jmeniny — reuse z claude_routes pokud dostupné
+        nameday = "neznámý"
+        try:
+            from claude_routes import NAMEDAY_CALENDAR
+            nameday = NAMEDAY_CALENDAR.get(now.month, {}).get(now.day, "neznámý")
+        except ImportError:
+            pass
+
+        # Státní svátky
+        holiday = _CZECH_HOLIDAYS.get((now.month, now.day), "")
+        holiday_note = f"\nDnes je státní svátek: {holiday}." if holiday else ""
+
+        return (f"{time_of_day}. Dnes je {day_names[now.weekday()]} "
+                f"{now.day}. {month_names[now.month - 1]} {now.year}. "
+                f"Svátek má {nameday}.{holiday_note}")
+    except Exception as e:
+        print(f"Time context warning: {e}")
+        return ""
+
+def _get_dynamic_system_prompt(mode='senior'):
+    """Dynamický system prompt s časovým kontextem a rolí asistenta."""
+    if _ORCH_SYS_PROMPT:
+        try:
+            user_type = 'senior' if mode == 'senior' else mode
+            if mode == 'rodina':
+                user_type = 'caregiver'
+            elif mode == 'technik':
+                user_type = 'academic'
+            return _sys_get_prompt(
+                mode='full',
+                user_type=user_type,
+                time_context=_build_time_context()
+            )
+        except Exception as e:
+            print(f"Dynamic prompt warning: {e}")
+    return RADIM_WHATSAPP_PROMPT  # Fallback na starý statický prompt
+
+# ============================================
+# RADIM WHATSAPP SYSTEM PROMPT (fallback)
 # ============================================
 RADIM_WHATSAPP_PROMPT = """Jsem Radim.
 
@@ -135,30 +230,37 @@ Pokud akce není potřeba, nepřidávej nic.
 # INTENT DETECTION
 # ============================================
 TASK_KEYWORDS = ['připomeň', 'nastav', 'úkol', 'připomínka', 'nezapomeň', 'zapiš', 'naplánuj']
-HEALTH_KEYWORDS = ['bolí', 'nemohu', 'špatně', 'léky', 'doktor', 'nemocnice', 'unavený']
+MEDICATION_KEYWORDS = ['lék', 'léky', 'tableta', 'tablety', 'prášek', 'prášky', 'prednison',
+                       'vzal jsem', 'bral jsem', 'zapomněl', 'medikace', 'dávka', 'dávku',
+                       'ibuprofen', 'paralen', 'aspirin', 'inzulín']
+HEALTH_KEYWORDS = ['bolí', 'nemohu', 'špatně', 'doktor', 'nemocnice', 'unavený']
 SAFETY_KEYWORDS = ['spadl', 'pád', 'nemohu dýchat', 'bolest na hrudi', 'záchranka', '155', '112', 'panika']
 STORY_KEYWORDS = ['příběh', 'story', 'instagram', 'facebook', 'pozvánka']
 
 def detect_intent(message):
-    """Detekce záměru ze zprávy"""
+    """Detekce záměru ze zprávy — safety > medication > health > task > story > chat"""
     msg_lower = message.lower()
-    
+
     for word in SAFETY_KEYWORDS:
         if word in msg_lower:
             return 'safety'
-    
+
+    for word in MEDICATION_KEYWORDS:
+        if word in msg_lower:
+            return 'medication'
+
     for word in HEALTH_KEYWORDS:
         if word in msg_lower:
             return 'health'
-    
+
     for word in TASK_KEYWORDS:
         if word in msg_lower:
             return 'task'
-    
+
     for word in STORY_KEYWORDS:
         if word in msg_lower:
             return 'story'
-    
+
     return 'chat'
 
 def extract_time(message):
@@ -189,12 +291,8 @@ def call_gemini_whatsapp(message, context=None, mode='senior', personalized_prom
         return None, None
 
     try:
-        system = RADIM_WHATSAPP_PROMPT
-
-        if mode == 'rodina':
-            system += "\n\nREŽIM RODINA: Odpovídej stručně a informativně."
-        elif mode == 'technik':
-            system += "\n\nREŽIM TECHNIK: Odpovídej technicky."
+        # 🏠 Dynamický system prompt s časem, rolí, kontextem
+        system = _get_dynamic_system_prompt(mode)
 
         # 🧠 Add personalized prompt from memory (name, interests, style, mood)
         if personalized_prompt:
@@ -360,6 +458,15 @@ def radim_chat():
             except Exception as mem_err:
                 print(f"Memory load warning: {mem_err}")
 
+        # 📋 Load pending tasks context for AI awareness
+        if _ORCH_TASK_SERVICE:
+            try:
+                tasks_ctx = _ts_context(user_id)
+                if tasks_ctx:
+                    personalized += tasks_ctx
+            except Exception as tc_err:
+                print(f"Tasks context warning: {tc_err}")
+
         # 🎵 Text Rhythm: matematika → styl textu
         anticipation_prompt = ''
         anticipation_meta = None
@@ -373,9 +480,19 @@ def radim_chat():
                     C = float(C_val)
                     alpha = float(alpha_val)
                 else:
-                    # Derive from message text + mood
+                    # Derive from message text + mood + personalized baseline
                     mood = _orch_detect_mood(message) if _ORCH_MEMORY_AVAILABLE else "neutral"
-                    C, alpha = _tr_estimate(message, mood)
+                    baseline_C = None
+                    if _ORCH_MEMORY_AVAILABLE:
+                        try:
+                            from memory_routes import _db_load_profile
+                            _prof = _db_load_profile(user_id)
+                            baseline_C = _prof.get('baseline_C')
+                            if baseline_C is not None:
+                                baseline_C = float(baseline_C)
+                        except Exception:
+                            pass
+                    C, alpha = _tr_estimate(message, mood, user_baseline_C=baseline_C)
 
                 text_result = _tr_calc(C, alpha)
                 anticipation_prompt = _tr_prompt(text_result)
@@ -391,6 +508,46 @@ def radim_chat():
 
         if not text_response:
             text_response = "Promiňte, zkuste to za chvíli. 🙏"
+
+        # ✂️ Crisis enforcement: hard limit na počet vět (ALERT/CRISIS)
+        if _ORCH_TEXT_RHYTHM and anticipation_meta and text_response != "Promiňte, zkuste to za chvíli. 🙏":
+            try:
+                text_response = _tr_enforce(text_response, {
+                    'state': anticipation_meta.get('state', 'HARMONY'),
+                    'params': anticipation_meta.get('text_params', {})
+                })
+            except Exception:
+                pass  # Non-fatal — AI instrukce stačí jako fallback
+
+        # 📋 Process AI actions (create_task, log_health from ---RADIM_ACTION---)
+        if action_json and _ORCH_TASK_SERVICE:
+            try:
+                action_type = action_json.get('type', 'none')
+                payload = action_json.get('payload', {})
+
+                if action_type == 'create_task':
+                    task = _ts_create(
+                        user_id=user_id,
+                        title=payload.get('title', 'Připomínka od Radima'),
+                        task_type=payload.get('task_type', 'reminder'),
+                        scheduled_time=payload.get('time') or extract_time(message),
+                        scheduled_date=payload.get('date'),
+                        description=payload.get('description')
+                    )
+                    if task:
+                        action_json['created_task'] = task
+                        print(f"📋 AI created task: #{task['id']} '{task['title']}'")
+
+                elif action_type == 'log_health':
+                    _ts_log_med(
+                        user_id=user_id,
+                        medication_name=payload.get('medication', payload.get('name', 'nespecifikováno')),
+                        dosage=payload.get('dosage'),
+                        notes=payload.get('notes', message[:200])
+                    )
+                    print(f"💊 AI logged medication for {user_id}")
+            except Exception as act_err:
+                print(f"Action processing warning: {act_err}")
 
         # 🧠 Record interaction to memory (save history + update learning)
         if _ORCH_MEMORY_AVAILABLE and text_response != "Promiňte, zkuste to za chvíli. 🙏":
@@ -414,29 +571,101 @@ def radim_chat():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@radim_bp.route('/api/radim/tasks', methods=['GET', 'POST', 'OPTIONS'])
+@radim_bp.route('/api/radim/tasks', methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
 @require_auth
 def radim_tasks():
-    """Task management endpoint"""
+    """📋 Task management endpoint — reálná persistentní implementace"""
     if request.method == 'OPTIONS':
         return '', 204
-    
+
+    auth_user = getattr(g, 'auth_user', None) or {}
+    user_id = str(auth_user.get('id', '')) or request.args.get('user_id', 'default-senior')
+
+    if not _ORCH_TASK_SERVICE:
+        return jsonify({'success': False, 'error': 'Task service unavailable'}), 503
+
     if request.method == 'GET':
-        user_id = request.args.get('user_id', 'default-senior')
-        return jsonify({'success': True, 'tasks': [], 'count': 0, 'user_id': user_id})
-    
+        status = request.args.get('status')
+        task_type = request.args.get('type')
+        date_filter = request.args.get('date')
+        tasks = _ts_get(user_id, status=status, task_type=task_type, date_filter=date_filter)
+        return jsonify({'success': True, 'tasks': tasks, 'count': len(tasks), 'user_id': user_id})
+
     elif request.method == 'POST':
-        data = request.json
+        data = request.json or {}
+        task = _ts_create(
+            user_id=user_id,
+            title=data.get('title', 'Nový úkol'),
+            task_type=data.get('type', 'reminder'),
+            scheduled_time=data.get('time'),
+            scheduled_date=data.get('date'),
+            recurrence=data.get('recurrence', 'once'),
+            priority=data.get('priority', 'normal'),
+            description=data.get('description'),
+            metadata=data.get('metadata')
+        )
+        if task:
+            return jsonify({'success': True, 'task': task, 'message': 'Úkol vytvořen ✅'})
+        return jsonify({'success': False, 'error': 'Nepodařilo se vytvořit úkol'}), 500
+
+    elif request.method == 'PUT':
+        data = request.json or {}
+        task_id = data.get('task_id') or data.get('id')
+        if not task_id:
+            return jsonify({'success': False, 'error': 'task_id je povinné'}), 400
+        ok = _ts_complete(task_id, user_id)
+        return jsonify({'success': ok, 'message': 'Úkol splněn ✅' if ok else 'Chyba při splnění'})
+
+    elif request.method == 'DELETE':
+        data = request.json or {}
+        task_id = data.get('task_id') or data.get('id')
+        if not task_id:
+            return jsonify({'success': False, 'error': 'task_id je povinné'}), 400
+        from task_service import delete_task as _ts_delete
+        ok = _ts_delete(task_id, user_id)
+        return jsonify({'success': ok, 'message': 'Úkol smazán' if ok else 'Chyba'})
+
+
+@radim_bp.route('/api/radim/medications', methods=['GET', 'POST', 'OPTIONS'])
+@require_auth
+def radim_medications():
+    """💊 Medication tracking endpoint"""
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    auth_user = getattr(g, 'auth_user', None) or {}
+    user_id = str(auth_user.get('id', '')) or request.args.get('user_id', 'default-senior')
+
+    if not _ORCH_TASK_SERVICE:
+        return jsonify({'success': False, 'error': 'Task service unavailable'}), 503
+
+    if request.method == 'GET':
+        days = request.args.get('days', 7, type=int)
+        history = _ts_med_history(user_id, days=days)
+        med_tasks = _ts_get(user_id, task_type='medication')
         return jsonify({
             'success': True,
-            'task': {
-                'id': 1,
-                'title': data.get('title', 'Nový úkol'),
-                'type': data.get('type', 'reminder'),
-                'time': data.get('time'),
-                'status': 'pending'
-            },
-            'message': 'Úkol vytvořen ✅'
+            'medications': med_tasks,
+            'history': history,
+            'count': len(med_tasks),
+            'timestamp': datetime.utcnow().isoformat() + 'Z'
+        })
+
+    elif request.method == 'POST':
+        data = request.json or {}
+        name = data.get('name', data.get('medication_name', ''))
+        if not name:
+            return jsonify({'success': False, 'error': 'Název léku je povinný'}), 400
+        ok = _ts_log_med(
+            user_id=user_id,
+            medication_name=name,
+            task_id=data.get('task_id'),
+            dosage=data.get('dosage'),
+            notes=data.get('notes')
+        )
+        return jsonify({
+            'success': ok,
+            'message': f'Lék {name} zaznamenán ✅' if ok else 'Chyba při záznamu'
         })
 
 @radim_bp.route('/api/radim/stories/templates', methods=['GET', 'OPTIONS'])

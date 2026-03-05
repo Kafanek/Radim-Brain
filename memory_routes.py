@@ -489,7 +489,8 @@ def get_user_context(user_id: str) -> dict:
         "top_interests": [t[0] for t in top_topics],
         "interaction_count": learning.get("interaction_count", 0),
         "last_mood": learning.get("last_mood", "neutral"),
-        "recent_history": history
+        "recent_history": history,
+        "_raw_profile": profile  # v230: plný profil pro léky, kontakty, rutinu
     }
 
     return context
@@ -562,6 +563,29 @@ def build_personalized_prompt(user_id: str) -> str:
     # Počet interakcí
     if ctx["interaction_count"] > 10:
         parts.append(f"- Známý uživatel ({ctx['interaction_count']} interakcí) - můžeš odkazovat na předchozí konverzace")
+
+    # v230: Léky a denní rutina
+    profile = ctx.get("_raw_profile", {})
+    meds_list = profile.get("medications_list")
+    if meds_list and isinstance(meds_list, list) and len(meds_list) > 0:
+        parts.append(f"- Léky: {', '.join(meds_list)}")
+        med_times = profile.get("medication_times")
+        if med_times and isinstance(med_times, dict):
+            for period, meds in med_times.items():
+                if meds:
+                    parts.append(f"  - {period}: {', '.join(meds) if isinstance(meds, list) else meds}")
+        parts.append("  → Pokud se uživatel ptá na léky, znáš jeho medikaci.")
+
+    routine = profile.get("daily_routine_notes")
+    if routine:
+        parts.append(f"- Denní rutina: {routine}")
+
+    emergency = profile.get("emergency_contacts")
+    if emergency and isinstance(emergency, list) and len(emergency) > 0:
+        contacts_str = ", ".join(
+            f"{c.get('name', '?')} ({c.get('phone', '?')})" for c in emergency[:3]
+        )
+        parts.append(f"- Nouzové kontakty: {contacts_str}")
 
     parts.append("═══════════════════════════════════════════════════════════════")
 
@@ -664,7 +688,13 @@ def save_profile(user_id):
     # Validace
     allowed_fields = ["name", "age_group", "hearing", "vision", "memory_support",
                       "communication_style", "preferred_length", "character", "tone",
-                      "communication_needs", "mobility"]
+                      "communication_needs", "mobility",
+                      # v230: Domácí asistent — léky, kontakty, rutina
+                      "medications_list",       # ["Prednison 5mg", "Vasoretic"]
+                      "medication_times",       # {"ráno": ["Prednison"], "večer": ["Vasoretic"]}
+                      "emergency_contacts",     # [{"name": "Eva", "phone": "+420..."}]
+                      "daily_routine_notes",    # "Vstává v 7, obědvá v 12, spát ve 22"
+                      "baseline_C"]             # Personalizované C baseline (float)
 
     profile = _db_load_profile(user_id)
 

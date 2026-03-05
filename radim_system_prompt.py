@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-RADIM AI System Prompt v2.0 — Manifest Edition
+RADIM AI System Prompt v3.0 — Domácí asistent
 Založeno na Radimově manifestu (radimcare.cz/radimuv-manifest/)
 
-Tři vrstvy:
+Čtyři vrstvy:
 1. DUŠE — kdo Radim je (vždy se posílá)
-2. KONTEXT — podle typu uživatele (senior/pečovatel/akademik)
-3. HRANICE — co nikdy (vždy se posílá, krátké)
+2. ROLE — co umím jako domácí asistent + časový kontext
+3. KONTEXT — podle typu uživatele (senior/pečovatel/akademik)
+4. HRANICE — co nikdy (vždy se posílá, krátké)
 """
 
 # ═══════════════════════════════════════════════════════════════
@@ -91,6 +92,23 @@ Matematika Radima:
 Model je testovatelná hypotéza podpořená pilotními daty, ne dogma."""
 
 # ═══════════════════════════════════════════════════════════════
+# ROLE — co umím jako domácí asistent (vždy se posílá)
+# ═══════════════════════════════════════════════════════════════
+PROMPT_ASSISTANT_ROLE = """CO UMÍM:
+Jsem domácí asistent. Ne jen společník na povídání — jsem praktický pomocník.
+
+- Připomínky: „Připomeň mi v 15 hodin zavolat Evičce" → zapamatuji si a připomenu.
+- Léky: „Vzal jsem prednison" → eviduji. Když zapomeneš, jemně se zeptám.
+- Denní režim: Vím, kolik je hodin. Ráno pozdravím, večer popřeji dobrou noc.
+- Počasí, zprávy, svátky: Vím, co se děje venku i v kalendáři.
+- Bezpečnost: Když něco nehraje (pád, dušnost, zmatenost) — reaguji okamžitě.
+
+Když udělám něco (uložím připomínku, zaznamenám lék), řeknu to jasně.
+Když něco neumím, řeknu to taky. Jsem spolehlivý, ne vševědoucí.
+
+{time_context}"""
+
+# ═══════════════════════════════════════════════════════════════
 # HRANICE — co nikdy (vždy se posílá, krátké)
 # ═══════════════════════════════════════════════════════════════
 PROMPT_BOUNDARIES = """Čeho se nikdy nedopustím:
@@ -111,13 +129,14 @@ _CONTEXT_MAP = {
 }
 
 
-def get_radim_prompt(mode='full', user_type='senior'):
+def get_radim_prompt(mode='full', user_type='senior', time_context=None):
     """
     Sestav systémový prompt podle kontextu.
 
     Args:
         mode: 'full' nebo 'short'
         user_type: 'senior', 'caregiver', 'facility', 'academic'
+        time_context: str s časovým kontextem (den, hodina, svátek) nebo None
 
     Returns:
         str: Sestavený systémový prompt
@@ -126,8 +145,16 @@ def get_radim_prompt(mode='full', user_type='senior'):
         return RADIM_SYSTEM_PROMPT_SHORT
 
     parts = [PROMPT_SOUL]
+
+    # Vrstva 2: Role domácího asistenta + časový kontext
+    tc = time_context if time_context else ""
+    parts.append(PROMPT_ASSISTANT_ROLE.format(time_context=tc))
+
+    # Vrstva 3: Kontext podle typu uživatele
     context = _CONTEXT_MAP.get(user_type, PROMPT_SENIOR)
     parts.append(context)
+
+    # Vrstva 4: Hranice
     parts.append(PROMPT_BOUNDARIES)
 
     return "\n\n".join(parts)
@@ -137,6 +164,7 @@ def get_prompt_parts():
     """Vrátí části promptu pro debug/inspekci."""
     return {
         'soul': PROMPT_SOUL,
+        'assistant_role': PROMPT_ASSISTANT_ROLE,
         'senior': PROMPT_SENIOR,
         'caregiver': PROMPT_CAREGIVER,
         'facility': PROMPT_FACILITY,

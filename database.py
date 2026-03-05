@@ -364,6 +364,37 @@ def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_memory_history_user ON memory_history(user_id);
             CREATE INDEX IF NOT EXISTS idx_memory_history_ts ON memory_history(created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS radim_tasks (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                task_type TEXT NOT NULL DEFAULT 'reminder',
+                description TEXT,
+                scheduled_time TIME,
+                scheduled_date DATE,
+                recurrence TEXT DEFAULT 'once',
+                status TEXT DEFAULT 'pending',
+                priority TEXT DEFAULT 'normal',
+                completed_at TIMESTAMP,
+                metadata JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS radim_medication_log (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                task_id INTEGER REFERENCES radim_tasks(id),
+                medication_name TEXT NOT NULL,
+                dosage TEXT,
+                taken_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                notes TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_radim_tasks_user ON radim_tasks(user_id);
+            CREATE INDEX IF NOT EXISTS idx_radim_tasks_status ON radim_tasks(user_id, status);
+            CREATE INDEX IF NOT EXISTS idx_radim_medlog_user ON radim_medication_log(user_id);
         ''')
 
         # Upsert Radim AI assistant
@@ -495,6 +526,37 @@ def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_memory_history_user ON memory_history(user_id);
             CREATE INDEX IF NOT EXISTS idx_memory_history_ts ON memory_history(created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS radim_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                task_type TEXT NOT NULL DEFAULT 'reminder',
+                description TEXT,
+                scheduled_time TEXT,
+                scheduled_date TEXT,
+                recurrence TEXT DEFAULT 'once',
+                status TEXT DEFAULT 'pending',
+                priority TEXT DEFAULT 'normal',
+                completed_at TIMESTAMP,
+                metadata TEXT DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS radim_medication_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                task_id INTEGER REFERENCES radim_tasks(id),
+                medication_name TEXT NOT NULL,
+                dosage TEXT,
+                taken_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                notes TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_radim_tasks_user ON radim_tasks(user_id);
+            CREATE INDEX IF NOT EXISTS idx_radim_tasks_status ON radim_tasks(user_id, status);
+            CREATE INDEX IF NOT EXISTS idx_radim_medlog_user ON radim_medication_log(user_id);
         ''')
 
         db.execute('''
@@ -506,7 +568,7 @@ def init_db():
     db.close()
 
     db_type = "PostgreSQL" if USE_POSTGRES else "SQLite"
-    print(f"✅ Databáze inicializována ({db_type}, v3.2)")
+    print(f"✅ Databáze inicializována ({db_type}, v3.3 — tasks+medications)")
 
 
 def is_postgres():

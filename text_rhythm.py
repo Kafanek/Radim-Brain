@@ -118,15 +118,21 @@ _TEXT_PARAMS = {
 # HLAVNÍ FUNKCE
 # ============================================================================
 
-def estimate_C_alpha_from_text(message: str, mood: str = "neutral") -> Tuple[float, float]:
+def estimate_C_alpha_from_text(message: str, mood: str = "neutral",
+                                user_baseline_C: float = None) -> Tuple[float, float]:
     """
     Odvod C a α z textu zprávy a detekované nálady.
     Fallback, když klient nepošle explicitní C/α.
 
+    Args:
+        message: Text zprávy uživatele
+        mood: Detekovaná nálada ("neutral", "anxious", "sad", "happy")
+        user_baseline_C: Personalizované baseline C z profilu (None = default 5.0)
+
     Returns:
         (C, alpha) tuple
     """
-    C = 5.0   # Výchozí: harmonie
+    C = user_baseline_C if user_baseline_C is not None else 5.0
     alpha = 0.2
 
     text_lower = message.lower()
@@ -300,3 +306,52 @@ def get_adjusted_generation_config(text_result: Dict[str, Any]) -> Dict[str, Any
         "max_tokens": params.get("max_tokens", 500),
         "temperature": params.get("temperature_hint", 0.7),
     }
+
+
+def enforce_crisis_limits(text: str, text_result: Dict[str, Any]) -> str:
+    """
+    Hard enforcement limitů textu PO generování AI odpovědi.
+
+    AI je instruováno dodržovat limity, ale toto garantuje:
+    - ALERT: max 3 věty
+    - CRISIS: max 1 věta, max 8 slov
+
+    V HARMONY režimu se neomezuje — AI má svobodu.
+
+    Args:
+        text: Vygenerovaný text od AI
+        text_result: Výstup z calculate_text_params()
+
+    Returns:
+        Oříznutý text respektující limity stavu
+    """
+    import re
+
+    state = text_result.get("state", "HARMONY")
+
+    if state == "HARMONY":
+        return text  # Žádné omezení
+
+    params = text_result.get("params", {})
+    max_sentences = params.get("max_sentences", 5)
+    max_words = params.get("max_words_per_sentence", 20)
+
+    # Rozděl na věty
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+
+    if len(sentences) > max_sentences:
+        sentences = sentences[:max_sentences]
+        logger.info(f"✂️ Crisis enforcement: trimmed to {max_sentences} sentence(s) [{state}]")
+
+    if state == "CRISIS":
+        # Jedna věta, max 8 slov
+        first = sentences[0] if sentences else text
+        words = first.split()
+        if len(words) > max_words:
+            first = ' '.join(words[:max_words])
+            if not first.endswith(('.', '!', '?')):
+                first += '.'
+            logger.info(f"✂️ Crisis enforcement: trimmed to {max_words} words")
+        return first
+
+    return ' '.join(sentences)
