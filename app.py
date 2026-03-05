@@ -81,6 +81,14 @@ except ImportError:
     LIBRARY_AVAILABLE = False
     print("⚠️ Library routes not available")
 
+# 🎓 Import Education / Rare Diseases API
+try:
+    from education_routes import education_bp
+    EDUCATION_AVAILABLE = True
+except ImportError:
+    EDUCATION_AVAILABLE = False
+    print("⚠️ Education routes not available")
+
 # ============================================
 # FLASK APP SETUP
 # ============================================
@@ -117,6 +125,11 @@ if DASHBOARD_AVAILABLE:
 if LIBRARY_AVAILABLE:
     app.register_blueprint(library_bp)
     print("✅ Library routes registered: /kal/library/*")
+
+# 🎓 Register Education Blueprint
+if EDUCATION_AVAILABLE:
+    app.register_blueprint(education_bp)
+    print("✅ Education routes registered: /api/education/*")
 
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
