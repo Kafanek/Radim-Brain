@@ -416,7 +416,7 @@ def build_personalized_prompt(user_id: str) -> str:
         parts.append("- Podpora paměti: ANO → Opakuj klíčové informace, buď trpělivý")
 
     # Komunikační potřeby (demence, afázie, dysfázie, aj.)
-    comm_needs = profile.get("communication_needs", "")
+    comm_needs = ctx.get("communication_needs", "")
     if comm_needs:
         needs_instructions = _get_communication_instructions(comm_needs)
         if needs_instructions:
