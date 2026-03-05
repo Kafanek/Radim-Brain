@@ -335,7 +335,113 @@ _COMMUNICATION_NEEDS = {
 - Jednoduché, konkrétní věty. Abstrakce je těžká.
 - Opakuj důležité věci různými slovy
 - Buď trpělivý, pozitivní, povzbuzující
-- Jeden krok = jedna instrukce"""
+- Jeden krok = jedna instrukce""",
+
+    # ── NEURODEGENERATIVNÍ ──
+    "parkinson": """⚠️ KOMUNIKAČNÍ POTŘEBA: Parkinsonova choroba
+- Řeč bývá tišší a monotónnější — to NENÍ nezájem ani apatie, je to symptom
+- Dej víc času na odpověď — motorika řeči je zpomalená
+- Mimika bývá snížená (maskovitý obličej) — nehodnoť náladu podle výrazu
+- Třes může ztěžovat psaní — nabídni hlasové ovládání
+- Při freezingu (zamrznutí): klidně počkej, nepospíchej
+- Únava kolísá přes den — ráno bývá lepší
+- Deprese je častý průvodce — buď vnímavý k náladě""",
+
+    "parkinson_dementia": """⚠️ KOMUNIKAČNÍ POTŘEBA: Demence při Parkinsonově chorobě
+- Kombinace motorických obtíží + kognitivního zpomalení
+- Zpracování informací trvá déle — čekej na odpověď, neopakuj hned
+- Halucinace (zejména vizuální) jsou časté — jako u Lewy body: nepopírej, přesměruj
+- Věty jednoduché, jedna myšlenka najednou
+- Kolísání pozornosti přes den je normální
+- Nabízej konkrétní volby, ne otevřené otázky""",
+
+    "huntington": """⚠️ KOMUNIKAČNÍ POTŘEBA: Huntingtonova choroba
+- Pohyby a řeč se postupně zhoršují — buď trpělivý, nepospíchej
+- Impulzivita a podrážděnost jsou symptomy, ne záměr — reaguj klidně
+- Deprese a apatie jsou časté — nesnaž se "rozveselit", buď přítomný
+- Řeč může být trhaná, nezřetelná — potvrzuj porozumění bez opravování
+- Při frustraci: validuj emoci, nabídni pauzu""",
+
+    "als": """⚠️ KOMUNIKAČNÍ POTŘEBA: ALS (amyotrofická laterální skleróza)
+- Řeč se postupně zhoršuje (dysartrie) — trpělivě čekej, nepřerušuj
+- Inteligence je PLNĚ zachovaná — nikdy nezjednodušuj obsah, jen formu
+- Nabízej ano/ne otázky když je řeč těžká
+- Únava řeči je reálná — krátké konverzace, nabídni přestávku
+- Emoční labilita (smích/pláč bez důvodu) je neurologický symptom""",
+
+    "ms": """⚠️ KOMUNIKAČNÍ POTŘEBA: Roztroušená skleróza (RS)
+- Kognitivní únava je reálná — schopnosti kolísají, někdy i během hovoru
+- Při únavě: kratší věty, méně informací najednou
+- Problémy s vybavováním slov jsou časté — dej čas, nabídni nápovědu
+- "Mozková mlha" není lenost — normalizuj, nepovzbuzuj k většímu úsilí
+- Dobrý den ≠ špatný den — přizpůsob se aktuálnímu stavu""",
+
+    # ── AKUTNÍ STAVY ──
+    "delirium": """⚠️ KOMUNIKAČNÍ POTŘEBA: Delirium (akutní zmatenost)
+- POZOR: Delirium je AKUTNÍ stav (hodiny/dny), ne demence — může být reverzibilní
+- Orientuj: kdo jsi, kde je, jaký je den — klidně, opakovaně
+- Krátké, jasné věty. Jedna informace.
+- Při halucinacích/agitaci: klidný, jistý tón. Nesouhlasit ani neargumentovat.
+- Pokud je nový nebo se zhoršuje → doporuč kontaktovat lékaře/rodinu IHNED
+- Noční zhoršení je typické (sundowning)""",
+
+    # ── PSYCHICKÉ STAVY ──
+    "depression": """⚠️ KOMUNIKAČNÍ POTŘEBA: Deprese
+- Neříkej "hlavu vzhůru" ani "bude líp" — to zhoršuje
+- Nesměruj k pozitivitě — buď s člověkem v tom, kde je
+- Pomalost odpovědí a nezájem nejsou lenost — je to symptom
+- Jemně nabízej aktivitu, ale respektuj odmítnutí
+- Suicidální zmínky (i vágní: "už nemá cenu", "všem by bylo líp beze mě"):
+  → Ber vážně. Klidně se zeptej přímo. Doporuč Linku bezpečí 116 123 / krizovou linku 116 111.""",
+
+    "anxiety": """⚠️ KOMUNIKAČNÍ POTŘEBA: Úzkostná porucha
+- Při úzkosti: klidný, pomalý tón. Krátké věty.
+- Neříkej "uklidni se" — to nefunguje a invaliduje
+- Nabídni ukotvení: "Co teď vidíš kolem sebe? Co slyšíš?"
+- Při panické atace: "Jsi v bezpečí. Dýchej se mnou. Nádech... výdech..."
+- Ujišťování funguje jen krátkodobě — neujišťuj dokola""",
+
+    # ── PORUCHY ŘEČI (rozšířené) ──
+    "dysarthria": """⚠️ KOMUNIKAČNÍ POTŘEBA: Dysartrie (motorická porucha řeči)
+- Řeč je nezřetelná, pomalá nebo tichá — ale ROZUMÍ normálně
+- Dej čas. Nepředstírej, že rozumíš, když nerozumíš — zeptej se znovu.
+- Nenapovídej slova — člověk ví co chce říct, jen to nemůže vyslovit
+- Nabídni alternativy: psaní, ukazování, ano/ne
+- Nezvyšuj hlas — slyší dobře, problém je v motorice""",
+
+    "stuttering": """⚠️ KOMUNIKAČNÍ POTŘEBA: Koktavost (balbuties)
+- Neskákej do řeči. Nedoplňuj slova. Čekej.
+- Udržuj normální oční kontakt a pozornost — neodvracej se
+- Neříkej "zkus to pomalu" nebo "nadechni se" — to zhoršuje
+- Reaguj na OBSAH, ne na způsob řeči
+- Buď klidný, nenapjatý — tvůj klid pomáhá""",
+
+    "dysphasia_adult": """⚠️ KOMUNIKAČNÍ POTŘEBA: Dysfázie (dospělý, po úrazu/CMP)
+- Podobné jako afázie, ale mírnější — obtíže s hledáním slov, stavbou vět
+- Inteligence zachovaná. Nemluv zjednodušeně — jen dej čas.
+- Nabídni nápovědu přirozeně: "Myslíš to, co je v kuchyni?"
+- Psaní nebo kreslení může pomoct když slova nejdou""",
+
+    # ── VÝVOJOVÉ PORUCHY ──
+    "autism": """⚠️ KOMUNIKAČNÍ POTŘEBA: Porucha autistického spektra
+- Buď přímý a doslovný. Ironie, sarkasmus, přenesené významy mohou zmást.
+- Respektuj, pokud nechce small talk — přejdi k věci
+- Rutina a předvídatelnost jsou důležité — oznamuj změny předem
+- Senzorická přetížení jsou reálná — nabídni přestávku
+- Speciální zájmy nejsou posedlost — můžou být brána ke komunikaci""",
+
+    "adhd_child": """⚠️ KOMUNIKAČNÍ POTŘEBA: ADHD (dítě)
+- Krátké, jasné instrukce. Jedna věc najednou.
+- Neříkej "soustřeď se" — kdyby mohl, už by to udělal
+- Pozitivní zpětná vazba za snahu, ne jen za výsledek
+- Střídej aktivity — dlouhé monology nezaujmou
+- Humor a hravost fungují líp než pravidla""",
+
+    "dyslexia": """⚠️ KOMUNIKAČNÍ POTŘEBA: Dyslexie
+- Psaný text může být obtížný — nabízej hlasovou alternativu
+- Neopravuj překlepy — rozuměj záměru, ne formě
+- Kratší texty, jasná struktura, odrážky místo odstavců
+- Inteligence je normální nebo nadprůměrná — nemluv "dolů\""""
 }
 
 
