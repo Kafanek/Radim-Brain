@@ -1086,6 +1086,9 @@ def submit_quiz(course_id, module_id):
     if passed and module_id not in EDUCATION_PROGRESS[progress_key][course_id]["completed_modules"]:
         EDUCATION_PROGRESS[progress_key][course_id]["completed_modules"].append(module_id)
 
+    # 🧠 Adaptivní vyhodnocení — automaticky po každém kvízu
+    adaptive_result = _evaluate_and_adapt(user_id, course_id, module_id, score)
+
     # Motivační zpráva
     if score == 100:
         message = "Výborně! Perfektní skóre! Máte skvělé znalosti."
@@ -1104,6 +1107,14 @@ def submit_quiz(course_id, module_id):
         "passed": passed,
         "message": message,
         "results": results,
+        "adaptive": {
+            "level": adaptive_result["level"],
+            "avg_score": adaptive_result["avg_score"],
+            "badges": adaptive_result["badges"],
+            "strengths": adaptive_result["strengths"],
+            "weaknesses": adaptive_result["weaknesses"],
+            "recommended_next": adaptive_result.get("recommended_courses", [])[:2]
+        },
         "timestamp": now_iso()
     })
 
@@ -1334,5 +1345,409 @@ def get_communication_needs():
         "success": True,
         "mapping": course_to_needs,
         "description": "Mapování vzdělávacích kurzů na komunikační potřeby (z memory_routes)",
+        "timestamp": now_iso()
+    })
+
+
+# ============================================
+# 🎓 ADAPTIVE EVALUATION — vyhodnocení po adaptaci
+# ============================================
+
+# Uživatelské adaptivní profily
+ADAPTIVE_PROFILES = {}
+
+
+def _get_adaptive_profile(user_id):
+    """Získat nebo vytvořit adaptivní profil uživatele"""
+    if user_id not in ADAPTIVE_PROFILES:
+        ADAPTIVE_PROFILES[user_id] = {
+            "user_id": user_id,
+            "level": "beginner",           # beginner, intermediate, advanced
+            "total_score": 0,
+            "total_quizzes": 0,
+            "avg_score": 0,
+            "strengths": [],               # témata kde >80 %
+            "weaknesses": [],              # témata kde <60 %
+            "recommended_courses": [],
+            "completed_courses": [],
+            "badges": [],
+            "streak_days": 0,
+            "last_activity": None,
+            "communication_adaptation": None,  # napojení na memory_routes profil
+            "teacher_notes": []
+        }
+    return ADAPTIVE_PROFILES[user_id]
+
+
+def _evaluate_and_adapt(user_id, course_id, module_id, score):
+    """Adaptivní vyhodnocení — přizpůsobí doporučení na základě výsledků"""
+    profile = _get_adaptive_profile(user_id)
+    profile["total_quizzes"] += 1
+    profile["total_score"] += score
+    profile["avg_score"] = round(profile["total_score"] / profile["total_quizzes"])
+    profile["last_activity"] = now_iso()
+
+    course = EDUCATION_COURSES.get(course_id, {})
+    topic = course.get("category", course_id)
+
+    # Silné a slabé stránky
+    if score >= 80 and topic not in profile["strengths"]:
+        profile["strengths"].append(topic)
+        if topic in profile["weaknesses"]:
+            profile["weaknesses"].remove(topic)
+    elif score < 60 and topic not in profile["weaknesses"]:
+        profile["weaknesses"].append(topic)
+
+    # Úroveň
+    avg = profile["avg_score"]
+    if avg >= 85 and profile["total_quizzes"] >= 5:
+        profile["level"] = "advanced"
+    elif avg >= 60 and profile["total_quizzes"] >= 3:
+        profile["level"] = "intermediate"
+    else:
+        profile["level"] = "beginner"
+
+    # Odznaky
+    if score == 100 and "perfektni_score" not in profile["badges"]:
+        profile["badges"].append("perfektni_score")
+    if profile["total_quizzes"] >= 5 and "pilny_student" not in profile["badges"]:
+        profile["badges"].append("pilny_student")
+    if profile["total_quizzes"] >= 10 and "mistr_vzdelavani" not in profile["badges"]:
+        profile["badges"].append("mistr_vzdelavani")
+    if len(profile["strengths"]) >= 2 and "znalec" not in profile["badges"]:
+        profile["badges"].append("znalec")
+
+    # Doporučení dalších kurzů
+    profile["recommended_courses"] = []
+    for cid, c in EDUCATION_COURSES.items():
+        if cid not in profile.get("completed_courses", []):
+            # Priorita: kurzy ze slabých stránek
+            if c["category"] in profile["weaknesses"]:
+                profile["recommended_courses"].insert(0, {
+                    "id": cid, "title": c["title"], "reason": "Posílení slabší oblasti"
+                })
+            elif c["category"] not in profile["strengths"]:
+                profile["recommended_courses"].append({
+                    "id": cid, "title": c["title"], "reason": "Nové téma k prozkoumání"
+                })
+
+    return profile
+
+
+@education_bp.route('/api/education/evaluate', methods=['POST'])
+def evaluate_user():
+    """Celkové adaptivní vyhodnocení uživatele"""
+    data = request.json or {}
+    user_id = data.get('userId', 'anonymous')
+
+    profile = _get_adaptive_profile(user_id)
+
+    # Napojení na memory_routes komunikační profil
+    communication_info = None
+    try:
+        from memory_routes import get_user_context
+        ctx = get_user_context(user_id)
+        if ctx:
+            communication_info = {
+                "communication_needs": ctx.get("communication_needs"),
+                "preferred_length": ctx.get("preferred_length", "medium"),
+                "interaction_count": ctx.get("interaction_count", 0),
+                "last_mood": ctx.get("last_mood", "neutral")
+            }
+            profile["communication_adaptation"] = communication_info
+    except Exception:
+        pass
+
+    # Hodnocení
+    evaluation = {
+        "level": profile["level"],
+        "level_label": {
+            "beginner": "Začátečník",
+            "intermediate": "Pokročilý",
+            "advanced": "Expert"
+        }.get(profile["level"], "Začátečník"),
+        "total_quizzes": profile["total_quizzes"],
+        "avg_score": profile["avg_score"],
+        "strengths": profile["strengths"],
+        "weaknesses": profile["weaknesses"],
+        "badges": profile["badges"],
+        "badge_labels": {
+            "perfektni_score": {"name": "Perfektní skóre", "icon": "⭐", "desc": "100 % v kvízu"},
+            "pilny_student": {"name": "Pilný student", "icon": "📚", "desc": "5+ kvízů"},
+            "mistr_vzdelavani": {"name": "Mistr vzdělávání", "icon": "🎓", "desc": "10+ kvízů"},
+            "znalec": {"name": "Znalec", "icon": "🧠", "desc": "Expert ve 2+ oblastech"}
+        },
+        "recommended_next": profile["recommended_courses"][:3],
+        "communication_adaptation": communication_info,
+        "teacher_notes": profile.get("teacher_notes", []),
+        "message": _get_evaluation_message(profile)
+    }
+
+    return jsonify({
+        "success": True,
+        "user_id": user_id,
+        "evaluation": evaluation,
+        "timestamp": now_iso()
+    })
+
+
+def _get_evaluation_message(profile):
+    """Personalizovaná zpráva podle úrovně"""
+    avg = profile["avg_score"]
+    quizzes = profile["total_quizzes"]
+
+    if quizzes == 0:
+        return "Ještě jste nezačali žádný kvíz. Zkuste kurz Disfázie — je skvělý start!"
+    if avg >= 90:
+        return f"Výborně! Váš průměr {avg} % ukazuje skvělé porozumění. Jste na cestě stát se expertem."
+    if avg >= 70:
+        return f"Dobrá práce! Průměr {avg} %. Doporučujeme zopakovat oblasti, kde máte méně jistoty."
+    if avg >= 50:
+        return f"Průměr {avg} % — základ je položen. Projděte si lekce znovu, kvízy můžete opakovat."
+    return f"Průměr {avg} %. Nevadí! Učení je cesta. Projděte si lekce v klidu znovu."
+
+
+# ============================================
+# 👩‍🏫 TEACHER / TUTOR SYSTEM
+# ============================================
+
+# Registrovaní učitelé / tutoři
+TEACHERS = {
+    "radim-tutor": {
+        "id": "radim-tutor",
+        "name": "Radim Učitel",
+        "role": "AI Tutor",
+        "specialization": ["disfázie", "komunikace", "vzácná onemocnění"],
+        "avatar": "🤖",
+        "description": "AI asistent specializovaný na vzdělávání o komunikačních potřebách"
+    }
+}
+
+TEACHER_ASSIGNMENTS = {}  # {user_id: teacher_id}
+
+
+@education_bp.route('/api/education/teachers', methods=['GET'])
+def list_teachers():
+    """Seznam dostupných učitelů/tutorů"""
+    return jsonify({
+        "success": True,
+        "teachers": list(TEACHERS.values()),
+        "timestamp": now_iso()
+    })
+
+
+@education_bp.route('/api/education/teacher/assign', methods=['POST'])
+def assign_teacher():
+    """Přiřadit učitele k uživateli"""
+    data = request.json or {}
+    user_id = data.get('userId', 'anonymous')
+    teacher_id = data.get('teacherId', 'radim-tutor')
+
+    if teacher_id not in TEACHERS:
+        return jsonify({"success": False, "error": "Učitel nenalezen"}), 404
+
+    TEACHER_ASSIGNMENTS[user_id] = teacher_id
+    teacher = TEACHERS[teacher_id]
+
+    return jsonify({
+        "success": True,
+        "message": f"Učitel {teacher['name']} byl přiřazen",
+        "teacher": teacher,
+        "user_id": user_id,
+        "timestamp": now_iso()
+    })
+
+
+@education_bp.route('/api/education/teacher/note', methods=['POST'])
+def add_teacher_note():
+    """Učitel přidá poznámku k profilu studenta"""
+    data = request.json or {}
+    user_id = data.get('userId')
+    note_text = data.get('note', '')
+    teacher_id = data.get('teacherId', 'radim-tutor')
+
+    if not user_id or not note_text:
+        return jsonify({"success": False, "error": "userId a note jsou vyžadovány"}), 400
+
+    profile = _get_adaptive_profile(user_id)
+    note = {
+        "teacher_id": teacher_id,
+        "teacher_name": TEACHERS.get(teacher_id, {}).get("name", "Neznámý"),
+        "text": note_text,
+        "timestamp": now_iso()
+    }
+    profile.setdefault("teacher_notes", []).append(note)
+
+    return jsonify({
+        "success": True,
+        "message": "Poznámka uložena",
+        "note": note,
+        "timestamp": now_iso()
+    })
+
+
+@education_bp.route('/api/education/teacher/review/<user_id>', methods=['GET'])
+def teacher_review(user_id):
+    """Učitelský přehled studenta — profil, výsledky, doporučení"""
+    profile = _get_adaptive_profile(user_id)
+    progress = EDUCATION_PROGRESS.get(user_id, {})
+
+    # Spočítat detailní přehled
+    course_details = []
+    for cid, cprog in progress.items():
+        course = EDUCATION_COURSES.get(cid)
+        if not course:
+            continue
+        total_modules = len(course.get("modules", []))
+        completed = len(cprog.get("completed_modules", []))
+        course_details.append({
+            "course_id": cid,
+            "course_title": course["title"],
+            "total_modules": total_modules,
+            "completed_modules": completed,
+            "percent": round((completed / total_modules) * 100) if total_modules > 0 else 0,
+            "quiz_scores": cprog.get("quiz_scores", {}),
+            "completed_lessons": cprog.get("completed_lessons", []),
+            "started_at": cprog.get("started_at"),
+            "last_activity": cprog.get("last_activity")
+        })
+
+    # Generovat automatické doporučení
+    auto_recommendations = []
+    if profile["avg_score"] < 60 and profile["total_quizzes"] > 0:
+        auto_recommendations.append("Student potřebuje zopakovat základy. Doporučit modul 1 znovu.")
+    if profile["total_quizzes"] == 0:
+        auto_recommendations.append("Student ještě nezačal žádný kvíz. Motivovat k prvnímu pokusu.")
+    for weakness in profile.get("weaknesses", []):
+        auto_recommendations.append(f"Slabší oblast: {weakness} — zopakovat příslušné lekce.")
+    if profile["avg_score"] >= 85:
+        auto_recommendations.append("Výborný student. Doporučit pokročilejší materiály.")
+
+    return jsonify({
+        "success": True,
+        "student": {
+            "user_id": user_id,
+            "level": profile["level"],
+            "avg_score": profile["avg_score"],
+            "total_quizzes": profile["total_quizzes"],
+            "strengths": profile["strengths"],
+            "weaknesses": profile["weaknesses"],
+            "badges": profile["badges"]
+        },
+        "courses": course_details,
+        "teacher_notes": profile.get("teacher_notes", []),
+        "auto_recommendations": auto_recommendations,
+        "assigned_teacher": TEACHERS.get(TEACHER_ASSIGNMENTS.get(user_id)),
+        "timestamp": now_iso()
+    })
+
+
+# ============================================
+# 📰 NEWS INTEGRATION — zprávy pro vzdělávání
+# ============================================
+
+HEALTH_NEWS_CACHE = {"articles": [], "updated": None}
+
+
+@education_bp.route('/api/education/news', methods=['GET'])
+def education_news():
+    """Zdravotní a vzdělávací zprávy relevantní ke kurzům"""
+    category = request.args.get('category', 'health')
+
+    # Statické zprávy — vždy dostupné, bez auth
+    static_news = {
+        "health": [
+            {
+                "title": "Disfázie po CMP — důležitost včasné rehabilitace",
+                "description": "Logopedická péče v prvních 6 měsících po cévní mozkové příhodě výrazně zvyšuje šanci na zotavení řeči. Čím dříve rehabilitace začne, tím lepší výsledky.",
+                "source": "Asociace klinických logopedů ČR",
+                "category": "health",
+                "relevance": "dysphasia",
+                "url": None
+            },
+            {
+                "title": "Huntingtonova choroba — nové výzkumy genové terapie",
+                "description": "Vědci z Univerzity Karlovy publikovali nové poznatky o možnostech genové terapie u Huntingtonovy choroby. Výzkum je stále v rané fázi, ale výsledky jsou slibné.",
+                "source": "Akademie věd ČR",
+                "category": "science",
+                "relevance": "huntington",
+                "url": None
+            },
+            {
+                "title": "Komunikační pomůcky pro seniory — co je nového",
+                "description": "Nová generace tabletů a aplikací usnadňuje komunikaci lidem s poruchami řeči. Augmentativní komunikace je stále dostupnější.",
+                "source": "SAAK",
+                "category": "technology",
+                "relevance": "als,dysphasia",
+                "url": None
+            },
+            {
+                "title": "FAST test zachraňuje životy — naučte se ho",
+                "description": "Face, Arms, Speech, Time — jednoduchý test, který pozná cévní mozkovou příhodu. Každá minuta se počítá. Pokud vidíte příznaky, volejte 155.",
+                "source": "MZ ČR",
+                "category": "health",
+                "relevance": "dysphasia",
+                "url": None
+            },
+            {
+                "title": "ALS Ice Bucket Challenge — 10 let poté",
+                "description": "Virální kampaň přinesla miliardy na výzkum ALS. Co se díky tomu změnilo a jaké nové léky jsou ve vývoji.",
+                "source": "ALS Liga",
+                "category": "health",
+                "relevance": "als",
+                "url": None
+            }
+        ],
+        "politics": [
+            {
+                "title": "Vláda schválila vyšší příspěvek na péči",
+                "description": "Příspěvek na péči se zvyšuje o 10 % pro osoby se stupněm III a IV. Změna platí od července.",
+                "source": "MPSV",
+                "category": "politics",
+                "relevance": "general",
+                "url": None
+            },
+            {
+                "title": "Nový zákon o sociálních službách",
+                "description": "Ministerstvo práce připravuje novelu zákona o sociálních službách. Rozšíří se nabídka terénních služeb pro seniory.",
+                "source": "ČTK",
+                "category": "politics",
+                "relevance": "general",
+                "url": None
+            }
+        ],
+        "sports": [
+            {
+                "title": "Pohyb jako prevence — sport pro seniory",
+                "description": "Pravidelný pohyb snižuje riziko demence o 30 %. Stačí 30 minut chůze denně.",
+                "source": "FTVS UK",
+                "category": "sports",
+                "relevance": "general",
+                "url": None
+            },
+            {
+                "title": "Český paralympijský tým — inspirace pro všechny",
+                "description": "Čeští paralympionici ukazují, že handicap není překážka. Příběhy odhodlání a vítězství.",
+                "source": "Paralympijský výbor",
+                "category": "sports",
+                "relevance": "general",
+                "url": None
+            }
+        ]
+    }
+
+    articles = static_news.get(category, static_news["health"])
+
+    # Pokud je relevance filtr
+    relevance = request.args.get('relevance')
+    if relevance:
+        articles = [a for a in articles if relevance in (a.get("relevance") or "")]
+
+    return jsonify({
+        "success": True,
+        "category": category,
+        "count": len(articles),
+        "articles": articles,
+        "categories_available": list(static_news.keys()),
         "timestamp": now_iso()
     })

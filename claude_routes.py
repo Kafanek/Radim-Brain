@@ -418,7 +418,7 @@ def chat_with_radim():
         })
 
 @claude_bp.route('/news', methods=['POST'])
-@require_auth
+@optional_auth
 def get_news():
     """📰 Získat aktuální české zprávy"""
     category = 'general'
@@ -725,7 +725,7 @@ FORMÁT (pouze JSON):
         })
 
 @claude_bp.route('/dashboard-data', methods=['GET'])
-@require_auth
+@optional_auth
 def get_dashboard_data():
     """📊 Všechna data pro dashboard"""
     info = get_today_info()
