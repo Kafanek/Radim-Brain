@@ -51,6 +51,11 @@ LAMBDA_C = 0.3   # EMA faktor pro trend C
 LAMBDA_ALPHA = 0.3  # EMA faktor pro trend α
 GAMMA = 0.5   # Faktor pro predikci α
 
+# Baseline C/α per modality (shared defaults for consistency)
+BASELINE_AMBIENT = {'C': 5.0, 'alpha': 0.0}    # Voice runtime — resting state, no stress
+BASELINE_PHONE = {'C': 5.0, 'alpha': 0.2}      # Phone call — slight initial tension
+BASELINE_CHAT = {'C': 5.0, 'alpha': 0.1}       # Text chat — minimal stress
+
 # Koeficienty pro řízení řeči
 K_EMP = 0.15   # Koeficient empatie
 K_RATE = 0.02  # Koeficient tempa

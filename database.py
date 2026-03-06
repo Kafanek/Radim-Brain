@@ -438,11 +438,25 @@ def init_db():
                 UNIQUE(user_id, lesson_id)
             );
 
+            CREATE TABLE IF NOT EXISTS voice_sessions (
+                session_id TEXT PRIMARY KEY,
+                state TEXT DEFAULT 'idle',
+                C REAL DEFAULT 5.0,
+                kappa REAL DEFAULT 0.8,
+                alpha REAL DEFAULT 0.0,
+                last_tts_text TEXT DEFAULT '',
+                conversation JSONB DEFAULT '[]',
+                wake_count INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE INDEX IF NOT EXISTS idx_edu_progress_user ON education_progress(user_id);
             CREATE INDEX IF NOT EXISTS idx_edu_progress_course ON education_progress(user_id, course_id);
             CREATE INDEX IF NOT EXISTS idx_edu_assignments_student ON education_assignments(student_id);
             CREATE INDEX IF NOT EXISTS idx_edu_assignments_teacher ON education_assignments(teacher_id);
             CREATE INDEX IF NOT EXISTS idx_edu_lesson_user ON education_lesson_progress(user_id);
+            CREATE INDEX IF NOT EXISTS idx_voice_sessions_updated ON voice_sessions(updated_at);
         ''')
 
         # Upsert Radim AI assistant
@@ -648,11 +662,25 @@ def init_db():
                 UNIQUE(user_id, lesson_id)
             );
 
+            CREATE TABLE IF NOT EXISTS voice_sessions (
+                session_id TEXT PRIMARY KEY,
+                state TEXT DEFAULT 'idle',
+                C REAL DEFAULT 5.0,
+                kappa REAL DEFAULT 0.8,
+                alpha REAL DEFAULT 0.0,
+                last_tts_text TEXT DEFAULT '',
+                conversation TEXT DEFAULT '[]',
+                wake_count INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE INDEX IF NOT EXISTS idx_edu_progress_user ON education_progress(user_id);
             CREATE INDEX IF NOT EXISTS idx_edu_progress_course ON education_progress(user_id, course_id);
             CREATE INDEX IF NOT EXISTS idx_edu_assignments_student ON education_assignments(student_id);
             CREATE INDEX IF NOT EXISTS idx_edu_assignments_teacher ON education_assignments(teacher_id);
             CREATE INDEX IF NOT EXISTS idx_edu_lesson_user ON education_lesson_progress(user_id);
+            CREATE INDEX IF NOT EXISTS idx_voice_sessions_updated ON voice_sessions(updated_at);
         ''')
 
         db.execute('''
@@ -664,7 +692,7 @@ def init_db():
     db.close()
 
     db_type = "PostgreSQL" if USE_POSTGRES else "SQLite"
-    print(f"✅ Databáze inicializována ({db_type}, v3.4 — education+assignments)")
+    print(f"✅ Databáze inicializována ({db_type}, v3.5 — voice_sessions)")
 
 
 def is_postgres():

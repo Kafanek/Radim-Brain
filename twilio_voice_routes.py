@@ -496,6 +496,12 @@ def twilio_voice_webhook():
         print(f"📞 Incoming call: {caller} → {called} (SID: {call_sid})")
 
         # Register active call (with C/α tracking for Anticipation Engine)
+        # Use shared baseline from Anticipation Engine
+        try:
+            from anticipation_routes import BASELINE_PHONE
+            _bl = BASELINE_PHONE
+        except ImportError:
+            _bl = {'C': 5.0, 'alpha': 0.2}
         caller_data = known_callers.get(caller, {})
         active_calls[call_sid] = {
             "from": caller,
@@ -504,8 +510,8 @@ def twilio_voice_webhook():
             "history": [],
             "caller_name": "",
             "status": "active",
-            "C": 5.0,       # Initial consciousness load (HARMONY)
-            "alpha": 0.2,   # Initial stress level (low)
+            "C": _bl['C'],
+            "alpha": _bl['alpha'],
             "user_id": caller_data.get("user_id")  # v231: link to task/profile data
         }
 

@@ -43,23 +43,103 @@ STATES = {
     'SPEAKING': 'speaking'
 }
 
-# In-memory session storage (pro produkci použít Redis)
-sessions = {}
+# Session storage: in-memory cache backed by PostgreSQL
+_sessions_cache = {}
+
+
+def _load_session_from_db(session_id):
+    """Load session from DB, return dict or None."""
+    try:
+        from database import get_db, close_db
+        db = get_db()
+        row = db.execute(
+            'SELECT state, "C", kappa, alpha, last_tts_text, conversation, wake_count, created_at '
+            'FROM voice_sessions WHERE session_id = %s',
+            (session_id,)
+        ).fetchone()
+        close_db()
+        if row:
+            conv = row['conversation']
+            if isinstance(conv, str):
+                conv = json.loads(conv)
+            return {
+                'state': row['state'] or STATES['IDLE'],
+                'C': float(row['C'] or 5.0),
+                'kappa': float(row['kappa'] or 0.8),
+                'alpha': float(row['alpha'] or 0.0),
+                'last_tts_text': row['last_tts_text'] or '',
+                'conversation': conv if conv else [],
+                'wake_count': int(row['wake_count'] or 0),
+                'created': str(row['created_at'] or datetime.now().isoformat()),
+            }
+    except Exception as e:
+        logger.warning(f"DB load session {session_id} (non-fatal): {e}")
+    return None
+
+
+def save_session(session_id):
+    """Persist session to DB (call after key changes)."""
+    session = _sessions_cache.get(session_id)
+    if not session:
+        return
+    try:
+        from database import get_db, close_db, is_postgres
+        db = get_db()
+        conv_json = json.dumps(session['conversation'][-50:])  # Keep last 50 messages
+        if is_postgres():
+            db.execute(
+                'INSERT INTO voice_sessions (session_id, state, "C", kappa, alpha, last_tts_text, conversation, wake_count, updated_at) '
+                'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP) '
+                'ON CONFLICT (session_id) DO UPDATE SET '
+                'state=EXCLUDED.state, "C"=EXCLUDED."C", kappa=EXCLUDED.kappa, alpha=EXCLUDED.alpha, '
+                'last_tts_text=EXCLUDED.last_tts_text, conversation=EXCLUDED.conversation, '
+                'wake_count=EXCLUDED.wake_count, updated_at=CURRENT_TIMESTAMP',
+                (session_id, session['state'], session['C'], session['kappa'],
+                 session['alpha'], session['last_tts_text'], conv_json, session['wake_count'])
+            )
+        else:
+            db.execute(
+                'INSERT OR REPLACE INTO voice_sessions '
+                '(session_id, state, C, kappa, alpha, last_tts_text, conversation, wake_count, updated_at) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
+                (session_id, session['state'], session['C'], session['kappa'],
+                 session['alpha'], session['last_tts_text'], conv_json, session['wake_count'])
+            )
+        db.commit()
+        close_db()
+    except Exception as e:
+        logger.warning(f"DB save session {session_id} (non-fatal): {e}")
+
 
 def get_session(session_id):
-    """Získat nebo vytvořit session"""
-    if session_id not in sessions:
-        sessions[session_id] = {
-            'state': STATES['IDLE'],
-            'C': 5.0,           # Míra zatížení
-            'kappa': 0.8,       # Koherence
-            'alpha': 0.0,       # Regulační zásah
-            'last_tts_text': '',
-            'conversation': [],
-            'wake_count': 0,
-            'created': datetime.now().isoformat()
-        }
-    return sessions[session_id]
+    """Get or create session (cache + DB backed)."""
+    if session_id not in _sessions_cache:
+        # Try loading from DB first
+        db_session = _load_session_from_db(session_id)
+        if db_session:
+            _sessions_cache[session_id] = db_session
+        else:
+            # Use shared baseline from Anticipation Engine
+            try:
+                from anticipation_routes import BASELINE_AMBIENT
+                _bl = BASELINE_AMBIENT
+            except ImportError:
+                _bl = {'C': 5.0, 'alpha': 0.0}
+            _sessions_cache[session_id] = {
+                'state': STATES['IDLE'],
+                'C': _bl['C'],
+                'kappa': 0.8,
+                'alpha': _bl['alpha'],
+                'last_tts_text': '',
+                'conversation': [],
+                'wake_count': 0,
+                'created': datetime.now().isoformat(),
+            }
+    return _sessions_cache[session_id]
+
+
+# Legacy alias
+sessions = _sessions_cache
 
 # ============================================
 # MATEMATICKÝ ENGINE
@@ -346,7 +426,11 @@ def compute_metrics():
         session['C'] = C
         session['kappa'] = kappa
         session['alpha'] = alpha
-        
+
+        # Persist to DB on significant state changes
+        if should_respond or system_state != 'HARMONIE':
+            save_session(session_id)
+
         return jsonify({
             'C': round(C, 2),
             'kappa': round(kappa, 3),
@@ -414,7 +498,11 @@ def update_state():
                 new_state = STATES['IDLE']
         
         session['state'] = new_state
-        
+
+        # Persist on state transitions
+        if current_state != new_state:
+            save_session(session_id)
+
         return jsonify({
             'previous_state': current_state,
             'current_state': new_state,
@@ -680,6 +768,7 @@ def voice_chat():
         session['last_tts_text'] = response_text
         session['conversation'].append({'role': 'user', 'content': messages[-1].get('content', '')})
         session['conversation'].append({'role': 'assistant', 'content': response_text})
+        save_session(session_id)  # Persist after each chat exchange
 
         # ============================================
         # ANTICIPATION ENGINE: Adaptive TTS params

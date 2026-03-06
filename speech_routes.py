@@ -81,6 +81,17 @@ def synthesize_speech():
         
         azure_voice = CZECH_VOICES.get(voice_name, CZECH_VOICES['antonin'])
 
+        # Emotion → SSML style mapping
+        emotion = data.get('emotion', 'friendly')
+        emotion_styles = {
+            'friendly': ('friendly', '1.2'),
+            'calm': ('calm', '1.0'),
+            'cheerful': ('cheerful', '1.3'),
+            'empathetic': ('empathetic', '1.1'),
+            'serious': ('serious', '0.9'),
+        }
+        style, styledegree = emotion_styles.get(emotion, ('friendly', '1.2'))
+
         # Anticipation Engine: if C and alpha provided, compute adaptive params
         C_val = data.get('C')
         alpha_val = data.get('alpha')
@@ -90,6 +101,11 @@ def synthesize_speech():
             if ant_result:
                 rate, pitch, ant_state, _ = ant_result
                 senior_mode = False  # Don't override with defaults
+                # Override style based on anticipation state
+                if ant_state == 'CRISIS':
+                    style, styledegree = 'calm', '1.0'
+                elif ant_state == 'ALERT':
+                    style, styledegree = 'empathetic', '1.1'
 
         if senior_mode:
             rate = SENIOR_DEFAULTS['rate']
@@ -106,7 +122,7 @@ def synthesize_speech():
         ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
                xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="cs-CZ">
             <voice name="{azure_voice}">
-                <mstts:express-as style="friendly" styledegree="1.2">
+                <mstts:express-as style="{style}" styledegree="{styledegree}">
                     <prosody rate="{rate}" pitch="{pitch}" volume="{SENIOR_DEFAULTS['volume']}">
                         {safe_text}
                     </prosody>
@@ -179,6 +195,17 @@ def synthesize_stream():
         
         azure_voice = CZECH_VOICES.get(voice_name, CZECH_VOICES['antonin'])
         
+        # Emotion → SSML style mapping
+        emotion = data.get('emotion', 'friendly') if data else 'friendly'
+        emotion_styles = {
+            'friendly': ('friendly', '1.2'),
+            'calm': ('calm', '1.0'),
+            'cheerful': ('cheerful', '1.3'),
+            'empathetic': ('empathetic', '1.1'),
+            'serious': ('serious', '0.9'),
+        }
+        style, styledegree = emotion_styles.get(emotion, ('friendly', '1.2'))
+
         # Anticipation Engine adaptive params
         rate = SENIOR_DEFAULTS['rate']
         pitch = SENIOR_DEFAULTS['pitch']
@@ -187,14 +214,21 @@ def synthesize_stream():
         if C_val is not None and alpha_val is not None and _SPEECH_ANT_AVAILABLE:
             ant_result = _get_anticipation_tts(float(C_val), float(alpha_val))
             if ant_result:
-                rate, pitch, _, _ = ant_result
+                rate, pitch, ant_state, _ = ant_result
+                if ant_state == 'CRISIS':
+                    style, styledegree = 'calm', '1.0'
+                elif ant_state == 'ALERT':
+                    style, styledegree = 'empathetic', '1.1'
 
         safe_text = xml_escape(text)
-        ssml = f'''<speak version="1.0" xml:lang="cs-CZ">
+        ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
+               xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="cs-CZ">
             <voice name="{azure_voice}">
-                <prosody rate="{rate}" pitch="{pitch}">
-                    {safe_text}
-                </prosody>
+                <mstts:express-as style="{style}" styledegree="{styledegree}">
+                    <prosody rate="{rate}" pitch="{pitch}">
+                        {safe_text}
+                    </prosody>
+                </mstts:express-as>
             </voice>
         </speak>'''
 
