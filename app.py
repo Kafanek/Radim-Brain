@@ -89,6 +89,14 @@ except ImportError:
     EDUCATION_AVAILABLE = False
     print("⚠️ Education routes not available")
 
+# 📧 Import Email Routes (SMTP via Wedos)
+try:
+    from email_routes import email_bp
+    EMAIL_AVAILABLE = True
+except ImportError:
+    EMAIL_AVAILABLE = False
+    print("⚠️ Email routes not available")
+
 # ============================================
 # FLASK APP SETUP
 # ============================================
@@ -130,6 +138,11 @@ if LIBRARY_AVAILABLE:
 if EDUCATION_AVAILABLE:
     app.register_blueprint(education_bp)
     print("✅ Education routes registered: /api/education/*")
+
+# 📧 Register Email Blueprint
+if EMAIL_AVAILABLE:
+    app.register_blueprint(email_bp)
+    print("✅ Email routes registered: /api/email/*")
 
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
