@@ -13,10 +13,53 @@ import time
 import json
 import logging
 import requests as http_requests
+from datetime import datetime
 from xml.sax.saxutils import escape as xml_escape
 from flask import Blueprint, request, jsonify, Response
 
 logger = logging.getLogger(__name__)
+
+# Nameday calendar (reuse from claude_routes if available)
+_VOICE_NAMEDAY = None
+def _get_nameday():
+    global _VOICE_NAMEDAY
+    if _VOICE_NAMEDAY is None:
+        try:
+            from claude_routes import NAMEDAY_CALENDAR
+            _VOICE_NAMEDAY = NAMEDAY_CALENDAR
+        except ImportError:
+            _VOICE_NAMEDAY = {}
+    now = datetime.now()
+    return _VOICE_NAMEDAY.get(now.month, {}).get(now.day, "")
+
+
+def _build_voice_time_context():
+    """Build time context for phone calls (date, nameday, time of day)."""
+    try:
+        now = datetime.now()
+        hour = now.hour
+        if 5 <= hour < 12:
+            time_of_day = "ráno"
+        elif 12 <= hour < 18:
+            time_of_day = "odpoledne"
+        elif 18 <= hour < 22:
+            time_of_day = "večer"
+        else:
+            time_of_day = "noc"
+
+        day_names = ['pondělí', 'úterý', 'středa', 'čtvrtek', 'pátek', 'sobota', 'neděle']
+        month_names = ['ledna', 'února', 'března', 'dubna', 'května', 'června',
+                       'července', 'srpna', 'září', 'října', 'listopadu', 'prosince']
+        nameday = _get_nameday()
+        return {
+            "time_of_day": time_of_day,
+            "day_name": day_names[now.weekday()],
+            "date_str": f"{now.day}. {month_names[now.month - 1]}",
+            "nameday": nameday,
+            "hour": hour,
+        }
+    except Exception:
+        return {"time_of_day": "den", "day_name": "", "date_str": "", "nameday": "", "hour": 12}
 
 # Flask Blueprint
 twilio_bp = Blueprint('twilio_voice', __name__, url_prefix='/api/twilio')
@@ -340,7 +383,15 @@ def get_ai_response_for_call(user_text, call_sid, user_id=None):
             except Exception:
                 pass
 
+    # Time context for phone prompt
+    tc = _build_voice_time_context()
+    time_line = f"Je {tc['time_of_day']}. Dnes je {tc['day_name']} {tc['date_str']}."
+    if tc["nameday"]:
+        time_line += f" Svátek má {tc['nameday']}."
+
     system_prompt = f"""Jsi RADIM - AI asistent pro seniory. {name_ctx}Právě vedeš telefonní hovor.
+
+{time_line}
 
 PRAVIDLA PRO TELEFONNÍ HOVOR:
 - Odpovídej KRÁTCE (max 2-3 věty), protože to je telefonní hovor, ne chat
@@ -350,6 +401,8 @@ PRAVIDLA PRO TELEFONNÍ HOVOR:
 - Pokud senior chce zavolat někomu (dcera, syn, doktor), řekni "Rozumím, přepojím vás."
 - NIKDY neříkej "jako AI" nebo "jako chatbot" — jsi Radim, asistent
 - Pokud se ptá na úkoly, léky nebo připomínky, odpověz podle kontextu níže
+- UŽ JSI POZDRAVIL a řekl datum a svátek — NEOPAKUJ pozdrav ani datum. Pokračuj v konverzaci přirozeně.
+- Pokud uživatel řekne jen "ahoj" nebo "dobrý den", zeptej se jak se má nebo co potřebuje — ale NEŘÍKEJ znovu datum ani svátek.
 
 12 hodnot: empatie, respekt, trpělivost, důstojnost, naslouchání, konkrétní pomoc.
 Smlouva: "Jsem zde, abych naslouchal, ne abych soudil."{extra_ctx}"""
@@ -456,13 +509,31 @@ def twilio_voice_webhook():
             "user_id": caller_data.get("user_id")  # v231: link to task/profile data
         }
 
-        # Personalized greeting
+        # Build time-aware, consistent greeting
         caller_name = caller_data.get("name", "")
         if caller_name:
             active_calls[call_sid]["caller_name"] = caller_name
-            greeting = f"Dobrý den, {caller_name}! Tady Radim. Jak vám mohu pomoci?"
+
+        tc = _build_voice_time_context()
+
+        # Time-appropriate greeting word
+        if tc["hour"] < 12:
+            greet_word = "Dobré ráno"
+        elif tc["hour"] < 18:
+            greet_word = "Dobré odpoledne"
         else:
-            greeting = "Dobrý den, tady Radim. Jsem váš asistent. Jak vám mohu pomoci?"
+            greet_word = "Dobrý večer"
+
+        # Build one natural greeting with date + nameday (no overlap later)
+        name_part = f", {caller_name}" if caller_name else ""
+        date_part = f"Dnes je {tc['day_name']} {tc['date_str']}."
+        nameday_part = f" Svátek má {tc['nameday']}." if tc["nameday"] else ""
+        greeting = f"{greet_word}{name_part}, tady Radim. {date_part}{nameday_part} Jak se máte?"
+
+        # Save greeting to history so Claude knows what was already said
+        active_calls[call_sid]["history"].append({
+            "role": "assistant", "content": greeting
+        })
 
         say_greeting = twiml_say(greeting)
         say_listen = twiml_say("Poslouchám vás.")

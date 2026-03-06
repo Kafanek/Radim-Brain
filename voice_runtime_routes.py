@@ -545,7 +545,12 @@ def get_voice_ai_response(messages, context=None):
     now = datetime.now()
     day_names = ['pondělí', 'úterý', 'středa', 'čtvrtek', 'pátek', 'sobota', 'neděle']
     month_names = ['ledna', 'února', 'března', 'dubna', 'května', 'června', 'července', 'srpna', 'září', 'října', 'listopadu', 'prosince']
-    nameday = 'Marika' if now.month == 1 and now.day == 31 else 'Neznámý'
+    # Use real nameday calendar
+    try:
+        from claude_routes import NAMEDAY_CALENDAR
+        nameday = NAMEDAY_CALENDAR.get(now.month, {}).get(now.day, 'Neznámý')
+    except ImportError:
+        nameday = 'Neznámý'
     date_str = f"{day_names[now.weekday()]}, {now.day}. {month_names[now.month-1]} {now.year}"
     
     system_prompt = VOICE_SYSTEM_PROMPT.format(date=date_str, nameday=nameday)
