@@ -3866,3 +3866,748 @@ def answer_scenario(scenario_id):
         "is_best_answer": chosen["score"] == 100,
         "timestamp": now_iso()
     })
+
+
+# ============================================
+# 🏫 TEACHER DASHBOARD — Phase 2
+# ============================================
+# Human teacher/logoped endpoints for managing students.
+# All @require_auth + @require_teacher secured.
+# Teacher sees ONLY their assigned students.
+
+from auth_middleware import require_auth, require_teacher, optional_auth
+
+
+def _get_teacher_id():
+    """Get current teacher's user_id from JWT"""
+    user = getattr(g, 'auth_user', {})
+    return str(user.get('id', user.get('user_id', '')))
+
+
+def _get_teacher_students(teacher_id):
+    """Get all students assigned to this teacher"""
+    try:
+        db = get_connection()
+        from database import is_postgres
+        if is_postgres():
+            rows = db.execute(
+                "SELECT student_id FROM education_assignments WHERE teacher_id = %s AND status = 'active'",
+                (teacher_id,)
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT student_id FROM education_assignments WHERE teacher_id = ? AND status = 'active'",
+                (teacher_id,)
+            ).fetchall()
+        db.close()
+        return [r['student_id'] for r in rows]
+    except Exception as e:
+        print(f"⚠️ get teacher students error: {e}")
+        return []
+
+
+def _verify_teacher_student(teacher_id, student_id):
+    """Verify teacher has access to this student"""
+    students = _get_teacher_students(teacher_id)
+    return student_id in students
+
+
+@education_bp.route('/api/education/teacher-dashboard', methods=['GET'])
+@require_auth
+@require_teacher
+def teacher_dashboard():
+    """Přehled učitele — počet studentů, průměrné skóre, nedávná aktivita, pending úkoly"""
+    teacher_id = _get_teacher_id()
+    students = _get_teacher_students(teacher_id)
+
+    # Aggregate stats
+    total_score = 0
+    total_quizzes = 0
+    student_summaries = []
+    for sid in students:
+        profile = _get_adaptive_profile(sid)
+        total_score += profile["avg_score"] * profile["total_quizzes"]
+        total_quizzes += profile["total_quizzes"]
+        student_summaries.append({
+            "student_id": sid,
+            "level": profile["level"],
+            "avg_score": profile["avg_score"],
+            "total_quizzes": profile["total_quizzes"]
+        })
+
+    avg_class_score = round(total_score / total_quizzes, 1) if total_quizzes > 0 else 0
+
+    # Pending tasks count
+    pending_tasks = 0
+    try:
+        db = get_connection()
+        from database import is_postgres
+        if is_postgres():
+            row = db.execute(
+                "SELECT COUNT(*) as cnt FROM education_teacher_tasks WHERE teacher_id = %s AND status = 'submitted'",
+                (teacher_id,)
+            ).fetchone()
+        else:
+            row = db.execute(
+                "SELECT COUNT(*) as cnt FROM education_teacher_tasks WHERE teacher_id = ? AND status = 'submitted'",
+                (teacher_id,)
+            ).fetchone()
+        db.close()
+        pending_tasks = row['cnt'] if row else 0
+    except Exception:
+        pass
+
+    return jsonify({
+        "success": True,
+        "teacher_id": teacher_id,
+        "total_students": len(students),
+        "avg_class_score": avg_class_score,
+        "total_quizzes_taken": total_quizzes,
+        "pending_tasks_to_grade": pending_tasks,
+        "students_preview": student_summaries[:5],
+        "timestamp": now_iso()
+    })
+
+
+@education_bp.route('/api/education/teacher-dashboard/students', methods=['GET'])
+@require_auth
+@require_teacher
+def teacher_dashboard_students():
+    """Seznam studentů přiřazených k učiteli"""
+    teacher_id = _get_teacher_id()
+    students = _get_teacher_students(teacher_id)
+
+    result = []
+    for sid in students:
+        profile = _get_adaptive_profile(sid)
+        progress = _db_get_progress(sid)
+
+        # Completion %
+        total_modules = 0
+        completed_modules = 0
+        last_activity = None
+        for cid, cprog in progress.items():
+            course = EDUCATION_COURSES.get(cid)
+            if course:
+                total_modules += len(course.get("modules", []))
+                completed_modules += len(cprog.get("completed_modules", []))
+                la = cprog.get("last_activity")
+                if la and (not last_activity or la > last_activity):
+                    last_activity = la
+
+        completion_pct = round((completed_modules / total_modules) * 100) if total_modules > 0 else 0
+
+        result.append({
+            "student_id": sid,
+            "level": profile["level"],
+            "avg_score": profile["avg_score"],
+            "total_quizzes": profile["total_quizzes"],
+            "strengths": profile["strengths"],
+            "weaknesses": profile["weaknesses"],
+            "completion_percent": completion_pct,
+            "last_activity": last_activity
+        })
+
+    # Sort: least active first (struggling students on top)
+    result.sort(key=lambda x: x["avg_score"])
+
+    return jsonify({
+        "success": True,
+        "teacher_id": teacher_id,
+        "students": result,
+        "total": len(result),
+        "timestamp": now_iso()
+    })
+
+
+@education_bp.route('/api/education/teacher-dashboard/student/<student_id>', methods=['GET'])
+@require_auth
+@require_teacher
+def teacher_dashboard_student_detail(student_id):
+    """Detail studenta — profil, výsledky kvízů, AI doporučení"""
+    teacher_id = _get_teacher_id()
+    if not _verify_teacher_student(teacher_id, student_id):
+        return jsonify({"success": False, "error": "Student vám není přiřazen"}), 403
+
+    # Reuse existing teacher_review logic
+    profile = _get_adaptive_profile(student_id)
+    progress = _db_get_progress(student_id)
+
+    course_details = []
+    for cid, cprog in progress.items():
+        course = EDUCATION_COURSES.get(cid)
+        if not course:
+            continue
+        total_modules = len(course.get("modules", []))
+        completed = len(cprog.get("completed_modules", []))
+        course_details.append({
+            "course_id": cid,
+            "course_title": course["title"],
+            "total_modules": total_modules,
+            "completed_modules": completed,
+            "percent": round((completed / total_modules) * 100) if total_modules > 0 else 0,
+            "quiz_scores": cprog.get("quiz_scores", {}),
+            "completed_lessons": cprog.get("completed_lessons", []),
+            "last_activity": cprog.get("last_activity")
+        })
+
+    # AI recommendations
+    auto_recommendations = []
+    if profile["avg_score"] < 60 and profile["total_quizzes"] > 0:
+        auto_recommendations.append("Student potřebuje zopakovat základy.")
+    if profile["total_quizzes"] == 0:
+        auto_recommendations.append("Student ještě nezačal žádný kvíz. Motivovat k prvnímu pokusu.")
+    for weakness in profile.get("weaknesses", []):
+        auto_recommendations.append(f"Slabší oblast: {weakness}")
+    if profile["avg_score"] >= 85:
+        auto_recommendations.append("Výborný student. Doporučit pokročilejší materiály.")
+
+    # Tasks for this student
+    tasks = []
+    try:
+        db = get_connection()
+        from database import is_postgres
+        if is_postgres():
+            rows = db.execute(
+                "SELECT id, title, task_type, status, grade, due_date, created_at FROM education_teacher_tasks "
+                "WHERE student_id = %s AND teacher_id = %s ORDER BY created_at DESC LIMIT 20",
+                (student_id, teacher_id)
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT id, title, task_type, status, grade, due_date, created_at FROM education_teacher_tasks "
+                "WHERE student_id = ? AND teacher_id = ? ORDER BY created_at DESC LIMIT 20",
+                (student_id, teacher_id)
+            ).fetchall()
+        db.close()
+        tasks = [dict(r) for r in rows]
+    except Exception:
+        pass
+
+    return jsonify({
+        "success": True,
+        "student": {
+            "user_id": student_id,
+            "level": profile["level"],
+            "avg_score": profile["avg_score"],
+            "total_quizzes": profile["total_quizzes"],
+            "strengths": profile["strengths"],
+            "weaknesses": profile["weaknesses"],
+            "badges": profile["badges"]
+        },
+        "courses": course_details,
+        "tasks": tasks,
+        "teacher_notes": profile.get("teacher_notes", []),
+        "ai_recommendations": auto_recommendations,
+        "timestamp": now_iso()
+    })
+
+
+@education_bp.route('/api/education/teacher-dashboard/student/<student_id>/task', methods=['POST'])
+@require_auth
+@require_teacher
+def teacher_create_task(student_id):
+    """Učitel zadá úkol studentovi"""
+    teacher_id = _get_teacher_id()
+    if not _verify_teacher_student(teacher_id, student_id):
+        return jsonify({"success": False, "error": "Student vám není přiřazen"}), 403
+
+    data = request.json or {}
+    title = data.get('title', '').strip()
+    if not title:
+        return jsonify({"success": False, "error": "title je vyžadováno"}), 400
+
+    description = data.get('description', '')
+    task_type = data.get('task_type', 'homework')
+    course_id = data.get('course_id')
+    module_id = data.get('module_id')
+    due_date = data.get('due_date')
+
+    valid_types = ('homework', 'reading', 'quiz', 'scenario', 'exercise')
+    if task_type not in valid_types:
+        task_type = 'homework'
+
+    try:
+        db = get_connection()
+        from database import is_postgres
+        if is_postgres():
+            row = db.execute(
+                '''INSERT INTO education_teacher_tasks
+                   (teacher_id, student_id, title, description, task_type, course_id, module_id, due_date)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                   RETURNING id''',
+                (teacher_id, student_id, title, description, task_type, course_id, module_id, due_date)
+            ).fetchone()
+            task_id = row['id'] if row else None
+        else:
+            cursor = db.execute(
+                '''INSERT INTO education_teacher_tasks
+                   (teacher_id, student_id, title, description, task_type, course_id, module_id, due_date)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                (teacher_id, student_id, title, description, task_type, course_id, module_id, due_date)
+            )
+            task_id = cursor.lastrowid
+        db.commit()
+        db.close()
+    except Exception as e:
+        return jsonify({"success": False, "error": f"DB error: {e}"}), 500
+
+    # SocketIO notification (if available)
+    try:
+        from flask import current_app
+        socketio = current_app.extensions.get('socketio')
+        if socketio:
+            socketio.emit('education_new_task', {
+                'task_id': task_id,
+                'title': title,
+                'task_type': task_type,
+                'teacher_id': teacher_id,
+                'due_date': due_date
+            }, room=f'user_{student_id}')
+    except Exception:
+        pass
+
+    return jsonify({
+        "success": True,
+        "message": f"Úkol '{title}' zadán",
+        "task_id": task_id,
+        "student_id": student_id,
+        "timestamp": now_iso()
+    }), 201
+
+
+@education_bp.route('/api/education/teacher-dashboard/student/<student_id>/tasks', methods=['GET'])
+@require_auth
+@require_teacher
+def teacher_get_student_tasks(student_id):
+    """Seznam úkolů pro studenta (filtr: status)"""
+    teacher_id = _get_teacher_id()
+    if not _verify_teacher_student(teacher_id, student_id):
+        return jsonify({"success": False, "error": "Student vám není přiřazen"}), 403
+
+    status_filter = request.args.get('status')
+
+    try:
+        db = get_connection()
+        from database import is_postgres
+        if status_filter:
+            if is_postgres():
+                rows = db.execute(
+                    "SELECT * FROM education_teacher_tasks WHERE student_id = %s AND teacher_id = %s AND status = %s ORDER BY created_at DESC",
+                    (student_id, teacher_id, status_filter)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT * FROM education_teacher_tasks WHERE student_id = ? AND teacher_id = ? AND status = ? ORDER BY created_at DESC",
+                    (student_id, teacher_id, status_filter)
+                ).fetchall()
+        else:
+            if is_postgres():
+                rows = db.execute(
+                    "SELECT * FROM education_teacher_tasks WHERE student_id = %s AND teacher_id = %s ORDER BY created_at DESC",
+                    (student_id, teacher_id)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT * FROM education_teacher_tasks WHERE student_id = ? AND teacher_id = ? ORDER BY created_at DESC",
+                    (student_id, teacher_id)
+                ).fetchall()
+        db.close()
+
+        tasks = []
+        for r in rows:
+            task = dict(r)
+            # Parse student_submission if string
+            sub = task.get('student_submission')
+            if isinstance(sub, str):
+                try:
+                    task['student_submission'] = json.loads(sub)
+                except Exception:
+                    task['student_submission'] = {}
+            # Serialize dates
+            for k in ('created_at', 'updated_at', 'due_date'):
+                if task.get(k) and hasattr(task[k], 'isoformat'):
+                    task[k] = task[k].isoformat()
+            tasks.append(task)
+
+    except Exception as e:
+        return jsonify({"success": False, "error": f"DB error: {e}"}), 500
+
+    return jsonify({
+        "success": True,
+        "tasks": tasks,
+        "total": len(tasks),
+        "student_id": student_id,
+        "timestamp": now_iso()
+    })
+
+
+@education_bp.route('/api/education/teacher-dashboard/task/<int:task_id>/grade', methods=['PUT'])
+@require_auth
+@require_teacher
+def teacher_grade_task(task_id):
+    """Učitel ohodnotí odevzdaný úkol"""
+    teacher_id = _get_teacher_id()
+    data = request.json or {}
+    grade = data.get('grade', '').strip()
+    feedback = data.get('feedback', '').strip()
+
+    if not grade:
+        return jsonify({"success": False, "error": "grade je vyžadováno"}), 400
+
+    try:
+        db = get_connection()
+        from database import is_postgres
+        # Verify task belongs to this teacher
+        if is_postgres():
+            row = db.execute(
+                "SELECT id, student_id, status FROM education_teacher_tasks WHERE id = %s AND teacher_id = %s",
+                (task_id, teacher_id)
+            ).fetchone()
+        else:
+            row = db.execute(
+                "SELECT id, student_id, status FROM education_teacher_tasks WHERE id = ? AND teacher_id = ?",
+                (task_id, teacher_id)
+            ).fetchone()
+
+        if not row:
+            db.close()
+            return jsonify({"success": False, "error": "Úkol nenalezen nebo vám nepatří"}), 404
+
+        student_id = row['student_id']
+
+        if is_postgres():
+            db.execute(
+                "UPDATE education_teacher_tasks SET grade = %s, teacher_feedback = %s, status = 'graded', updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+                (grade, feedback, task_id)
+            )
+        else:
+            db.execute(
+                "UPDATE education_teacher_tasks SET grade = ?, teacher_feedback = ?, status = 'graded', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (grade, feedback, task_id)
+            )
+        db.commit()
+        db.close()
+    except Exception as e:
+        return jsonify({"success": False, "error": f"DB error: {e}"}), 500
+
+    # SocketIO notification
+    try:
+        from flask import current_app
+        socketio = current_app.extensions.get('socketio')
+        if socketio:
+            socketio.emit('education_task_graded', {
+                'task_id': task_id,
+                'grade': grade,
+                'feedback': feedback
+            }, room=f'user_{student_id}')
+    except Exception:
+        pass
+
+    return jsonify({
+        "success": True,
+        "message": f"Úkol ohodnocen: {grade}",
+        "task_id": task_id,
+        "grade": grade,
+        "timestamp": now_iso()
+    })
+
+
+@education_bp.route('/api/education/teacher-dashboard/assign-student', methods=['POST'])
+@require_auth
+@require_teacher
+def teacher_assign_student():
+    """Přiřadit studenta k učiteli (human teacher)"""
+    teacher_id = _get_teacher_id()
+    data = request.json or {}
+    student_id = data.get('student_id', '').strip()
+
+    if not student_id:
+        return jsonify({"success": False, "error": "student_id je vyžadováno"}), 400
+
+    # Check if already assigned
+    if _verify_teacher_student(teacher_id, student_id):
+        return jsonify({"success": False, "error": "Student je již přiřazen"}), 409
+
+    _db_assign_teacher(student_id, teacher_id, 'human')
+
+    return jsonify({
+        "success": True,
+        "message": f"Student {student_id} přiřazen",
+        "teacher_id": teacher_id,
+        "student_id": student_id,
+        "timestamp": now_iso()
+    }), 201
+
+
+@education_bp.route('/api/education/teacher-dashboard/analytics', methods=['GET'])
+@require_auth
+@require_teacher
+def teacher_analytics():
+    """Class analytics — průměrné skóre podle kurzu, nejslabší témata"""
+    teacher_id = _get_teacher_id()
+    students = _get_teacher_students(teacher_id)
+
+    if not students:
+        return jsonify({
+            "success": True,
+            "message": "Žádní studenti",
+            "analytics": {},
+            "timestamp": now_iso()
+        })
+
+    # Per-course stats
+    course_stats = {}
+    all_weaknesses = {}
+    top_students = []
+    struggling_students = []
+
+    for sid in students:
+        profile = _get_adaptive_profile(sid)
+        progress = _db_get_progress(sid)
+
+        for cid, cprog in progress.items():
+            if cid not in course_stats:
+                course_stats[cid] = {"scores": [], "completions": 0, "total": 0}
+            course = EDUCATION_COURSES.get(cid)
+            if course:
+                total_m = len(course.get("modules", []))
+                completed_m = len(cprog.get("completed_modules", []))
+                course_stats[cid]["total"] += 1
+                if completed_m >= total_m:
+                    course_stats[cid]["completions"] += 1
+                for mid, sc in cprog.get("quiz_scores", {}).items():
+                    if isinstance(sc, (int, float)):
+                        course_stats[cid]["scores"].append(sc)
+
+        for w in profile.get("weaknesses", []):
+            all_weaknesses[w] = all_weaknesses.get(w, 0) + 1
+
+        entry = {"student_id": sid, "avg_score": profile["avg_score"], "level": profile["level"]}
+        if profile["avg_score"] >= 80:
+            top_students.append(entry)
+        elif profile["avg_score"] < 50 and profile["total_quizzes"] > 0:
+            struggling_students.append(entry)
+
+    # Summarize
+    course_summary = {}
+    for cid, stats in course_stats.items():
+        course = EDUCATION_COURSES.get(cid, {})
+        avg = round(sum(stats["scores"]) / len(stats["scores"]), 1) if stats["scores"] else 0
+        course_summary[cid] = {
+            "title": course.get("title", cid),
+            "avg_quiz_score": avg,
+            "students_enrolled": stats["total"],
+            "students_completed": stats["completions"],
+            "completion_rate": round((stats["completions"] / stats["total"]) * 100) if stats["total"] > 0 else 0
+        }
+
+    # Weaknesses sorted by frequency
+    weakest_topics = sorted(all_weaknesses.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    return jsonify({
+        "success": True,
+        "analytics": {
+            "total_students": len(students),
+            "courses": course_summary,
+            "weakest_topics": [{"topic": t, "count": c} for t, c in weakest_topics],
+            "top_students": sorted(top_students, key=lambda x: x["avg_score"], reverse=True)[:5],
+            "struggling_students": sorted(struggling_students, key=lambda x: x["avg_score"])[:5]
+        },
+        "timestamp": now_iso()
+    })
+
+
+# ============================================
+# 📋 STUDENT TASK ENDPOINTS — Phase 2
+# ============================================
+
+@education_bp.route('/api/education/my-tasks', methods=['GET'])
+@require_auth
+def student_my_tasks():
+    """Student vidí svoje úkoly"""
+    user = getattr(g, 'auth_user', {})
+    student_id = str(user.get('id', user.get('user_id', '')))
+
+    if not student_id:
+        return jsonify({"success": False, "error": "Neplatný uživatel"}), 401
+
+    status_filter = request.args.get('status')
+
+    try:
+        db = get_connection()
+        from database import is_postgres
+        if status_filter:
+            if is_postgres():
+                rows = db.execute(
+                    "SELECT id, title, description, task_type, course_id, module_id, due_date, status, grade, teacher_feedback, created_at "
+                    "FROM education_teacher_tasks WHERE student_id = %s AND status = %s ORDER BY created_at DESC",
+                    (student_id, status_filter)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT id, title, description, task_type, course_id, module_id, due_date, status, grade, teacher_feedback, created_at "
+                    "FROM education_teacher_tasks WHERE student_id = ? AND status = ? ORDER BY created_at DESC",
+                    (student_id, status_filter)
+                ).fetchall()
+        else:
+            if is_postgres():
+                rows = db.execute(
+                    "SELECT id, title, description, task_type, course_id, module_id, due_date, status, grade, teacher_feedback, created_at "
+                    "FROM education_teacher_tasks WHERE student_id = %s ORDER BY created_at DESC",
+                    (student_id,)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT id, title, description, task_type, course_id, module_id, due_date, status, grade, teacher_feedback, created_at "
+                    "FROM education_teacher_tasks WHERE student_id = ? ORDER BY created_at DESC",
+                    (student_id,)
+                ).fetchall()
+        db.close()
+
+        tasks = []
+        for r in rows:
+            task = dict(r)
+            for k in ('created_at', 'due_date'):
+                if task.get(k) and hasattr(task[k], 'isoformat'):
+                    task[k] = task[k].isoformat()
+            tasks.append(task)
+
+    except Exception as e:
+        return jsonify({"success": False, "error": f"DB error: {e}"}), 500
+
+    return jsonify({
+        "success": True,
+        "tasks": tasks,
+        "total": len(tasks),
+        "timestamp": now_iso()
+    })
+
+
+@education_bp.route('/api/education/my-tasks/<int:task_id>/submit', methods=['POST'])
+@require_auth
+def student_submit_task(task_id):
+    """Student odevzdá úkol"""
+    user = getattr(g, 'auth_user', {})
+    student_id = str(user.get('id', user.get('user_id', '')))
+    data = request.json or {}
+    submission = data.get('submission', {})
+
+    if not student_id:
+        return jsonify({"success": False, "error": "Neplatný uživatel"}), 401
+
+    try:
+        db = get_connection()
+        from database import is_postgres
+        # Verify task belongs to student
+        if is_postgres():
+            row = db.execute(
+                "SELECT id, teacher_id, status FROM education_teacher_tasks WHERE id = %s AND student_id = %s",
+                (task_id, student_id)
+            ).fetchone()
+        else:
+            row = db.execute(
+                "SELECT id, teacher_id, status FROM education_teacher_tasks WHERE id = ? AND student_id = ?",
+                (task_id, student_id)
+            ).fetchone()
+
+        if not row:
+            db.close()
+            return jsonify({"success": False, "error": "Úkol nenalezen"}), 404
+
+        if row['status'] == 'graded':
+            db.close()
+            return jsonify({"success": False, "error": "Úkol je již ohodnocen"}), 400
+
+        teacher_id = row['teacher_id']
+        submission_json = json.dumps(submission)
+
+        if is_postgres():
+            db.execute(
+                "UPDATE education_teacher_tasks SET student_submission = %s, status = 'submitted', updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+                (submission_json, task_id)
+            )
+        else:
+            db.execute(
+                "UPDATE education_teacher_tasks SET student_submission = ?, status = 'submitted', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (submission_json, task_id)
+            )
+        db.commit()
+        db.close()
+    except Exception as e:
+        return jsonify({"success": False, "error": f"DB error: {e}"}), 500
+
+    # SocketIO notification to teacher
+    try:
+        from flask import current_app
+        socketio = current_app.extensions.get('socketio')
+        if socketio:
+            socketio.emit('education_task_submitted', {
+                'task_id': task_id,
+                'student_id': student_id
+            }, room=f'user_{teacher_id}')
+    except Exception:
+        pass
+
+    return jsonify({
+        "success": True,
+        "message": "Úkol odevzdán",
+        "task_id": task_id,
+        "timestamp": now_iso()
+    })
+
+
+@education_bp.route('/api/education/my-teacher', methods=['GET'])
+@require_auth
+def student_my_teacher():
+    """Student vidí svého učitele (human nebo AI) + poznámky"""
+    user = getattr(g, 'auth_user', {})
+    student_id = str(user.get('id', user.get('user_id', '')))
+
+    if not student_id:
+        return jsonify({"success": False, "error": "Neplatný uživatel"}), 401
+
+    # Get all assignments (human + AI)
+    try:
+        db = get_connection()
+        from database import is_postgres
+        if is_postgres():
+            rows = db.execute(
+                "SELECT teacher_id, teacher_type, created_at FROM education_assignments WHERE student_id = %s AND status = 'active' ORDER BY created_at DESC",
+                (student_id,)
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT teacher_id, teacher_type, created_at FROM education_assignments WHERE student_id = ? AND status = 'active' ORDER BY created_at DESC",
+                (student_id,)
+            ).fetchall()
+        db.close()
+    except Exception:
+        rows = []
+
+    teachers = []
+    for r in rows:
+        t = {
+            "teacher_id": r['teacher_id'],
+            "teacher_type": r['teacher_type'],
+            "assigned_at": r['created_at'].isoformat() if hasattr(r['created_at'], 'isoformat') else str(r['created_at'])
+        }
+        # If AI teacher, add info from TEACHERS dict
+        if r['teacher_type'] == 'ai':
+            ai_info = TEACHERS.get(r['teacher_id'], {})
+            t["name"] = ai_info.get("name", r['teacher_id'])
+            t["specialization"] = ai_info.get("specialization", [])
+        else:
+            t["name"] = f"Učitel #{r['teacher_id']}"
+        teachers.append(t)
+
+    # Teacher notes from profile
+    profile = _get_adaptive_profile(student_id)
+    notes = profile.get("teacher_notes", [])
+
+    return jsonify({
+        "success": True,
+        "teachers": teachers,
+        "teacher_notes": notes[-10:],  # last 10 notes
+        "timestamp": now_iso()
+    })

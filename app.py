@@ -1613,6 +1613,28 @@ def handle_mark_read(data):
     if conversation_id:
         emit('messages_read', data, room=conversation_id, include_self=False)
 
+
+# ============================================
+# 🎓 EDUCATION SOCKETIO — Teacher ↔ Student
+# ============================================
+
+@socketio.on('join_education')
+def handle_join_education(data):
+    """Student/teacher joins their education room for notifications"""
+    user_id = data.get('userId')
+    if user_id:
+        join_room(f'user_{user_id}')
+        print(f"🎓 User {user_id} joined education room")
+
+
+@socketio.on('leave_education')
+def handle_leave_education(data):
+    """Leave education notification room"""
+    user_id = data.get('userId')
+    if user_id:
+        leave_room(f'user_{user_id}')
+
+
 # ============================================
 # STUB ENDPOINTS (prevent 404/CORS errors in frontend)
 # ============================================

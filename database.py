@@ -451,12 +451,33 @@ def init_db():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
+            CREATE TABLE IF NOT EXISTS education_teacher_tasks (
+                id SERIAL PRIMARY KEY,
+                teacher_id TEXT NOT NULL,
+                student_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT,
+                task_type TEXT DEFAULT 'homework',
+                course_id TEXT,
+                module_id TEXT,
+                due_date DATE,
+                status TEXT DEFAULT 'assigned',
+                grade TEXT,
+                teacher_feedback TEXT,
+                student_submission JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE INDEX IF NOT EXISTS idx_edu_progress_user ON education_progress(user_id);
             CREATE INDEX IF NOT EXISTS idx_edu_progress_course ON education_progress(user_id, course_id);
             CREATE INDEX IF NOT EXISTS idx_edu_assignments_student ON education_assignments(student_id);
             CREATE INDEX IF NOT EXISTS idx_edu_assignments_teacher ON education_assignments(teacher_id);
             CREATE INDEX IF NOT EXISTS idx_edu_lesson_user ON education_lesson_progress(user_id);
             CREATE INDEX IF NOT EXISTS idx_voice_sessions_updated ON voice_sessions(updated_at);
+            CREATE INDEX IF NOT EXISTS idx_teacher_tasks_student ON education_teacher_tasks(student_id);
+            CREATE INDEX IF NOT EXISTS idx_teacher_tasks_teacher ON education_teacher_tasks(teacher_id);
+            CREATE INDEX IF NOT EXISTS idx_teacher_tasks_status ON education_teacher_tasks(student_id, status);
         ''')
 
         # Upsert Radim AI assistant
@@ -675,12 +696,33 @@ def init_db():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
+            CREATE TABLE IF NOT EXISTS education_teacher_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                teacher_id TEXT NOT NULL,
+                student_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT,
+                task_type TEXT DEFAULT 'homework',
+                course_id TEXT,
+                module_id TEXT,
+                due_date TEXT,
+                status TEXT DEFAULT 'assigned',
+                grade TEXT,
+                teacher_feedback TEXT,
+                student_submission TEXT DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE INDEX IF NOT EXISTS idx_edu_progress_user ON education_progress(user_id);
             CREATE INDEX IF NOT EXISTS idx_edu_progress_course ON education_progress(user_id, course_id);
             CREATE INDEX IF NOT EXISTS idx_edu_assignments_student ON education_assignments(student_id);
             CREATE INDEX IF NOT EXISTS idx_edu_assignments_teacher ON education_assignments(teacher_id);
             CREATE INDEX IF NOT EXISTS idx_edu_lesson_user ON education_lesson_progress(user_id);
             CREATE INDEX IF NOT EXISTS idx_voice_sessions_updated ON voice_sessions(updated_at);
+            CREATE INDEX IF NOT EXISTS idx_teacher_tasks_student ON education_teacher_tasks(student_id);
+            CREATE INDEX IF NOT EXISTS idx_teacher_tasks_teacher ON education_teacher_tasks(teacher_id);
+            CREATE INDEX IF NOT EXISTS idx_teacher_tasks_status ON education_teacher_tasks(student_id, status);
         ''')
 
         db.execute('''
@@ -692,7 +734,7 @@ def init_db():
     db.close()
 
     db_type = "PostgreSQL" if USE_POSTGRES else "SQLite"
-    print(f"✅ Databáze inicializována ({db_type}, v3.5 — voice_sessions)")
+    print(f"✅ Databáze inicializována ({db_type}, v3.6 — teacher_tasks)")
 
 
 def is_postgres():
