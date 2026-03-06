@@ -9,6 +9,7 @@ from flask import Blueprint, request, jsonify, g
 from datetime import datetime
 import json
 from database import get_connection
+from auth_middleware import require_auth, require_teacher, optional_auth
 
 education_bp = Blueprint('education', __name__)
 
@@ -3921,8 +3922,6 @@ def answer_scenario(scenario_id):
 # ============================================
 # 🔔 TEACHER NOTIFICATION HELPER
 # ============================================
-
-from auth_middleware import require_auth, require_teacher, optional_auth
 
 
 def _notify_teacher(student_id, event, data):
