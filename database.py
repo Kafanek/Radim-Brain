@@ -481,6 +481,48 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_teacher_tasks_student ON education_teacher_tasks(student_id);
             CREATE INDEX IF NOT EXISTS idx_teacher_tasks_teacher ON education_teacher_tasks(teacher_id);
             CREATE INDEX IF NOT EXISTS idx_teacher_tasks_status ON education_teacher_tasks(student_id, status);
+
+            -- ============================================
+            -- Telemedicine v3.7
+            -- ============================================
+            CREATE TABLE IF NOT EXISTS telemedicine_consultations (
+                id SERIAL PRIMARY KEY,
+                teacher_id TEXT NOT NULL,
+                student_id TEXT NOT NULL,
+                scheduled_date DATE NOT NULL,
+                scheduled_time TIME NOT NULL,
+                duration_minutes INTEGER DEFAULT 30,
+                status TEXT DEFAULT 'requested',
+                room_code TEXT,
+                jitsi_url TEXT,
+                complaint TEXT,
+                findings TEXT,
+                recommendations TEXT,
+                notes JSONB DEFAULT '{}',
+                consultation_type TEXT DEFAULT 'video',
+                cancel_reason TEXT,
+                email_sent INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS telemedicine_availability (
+                id SERIAL PRIMARY KEY,
+                teacher_id TEXT NOT NULL,
+                day_of_week INTEGER,
+                specific_date DATE,
+                start_time TIME NOT NULL,
+                end_time TIME NOT NULL,
+                slot_duration_minutes INTEGER DEFAULT 30,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_telemed_teacher ON telemedicine_consultations(teacher_id);
+            CREATE INDEX IF NOT EXISTS idx_telemed_student ON telemedicine_consultations(student_id);
+            CREATE INDEX IF NOT EXISTS idx_telemed_date ON telemedicine_consultations(scheduled_date, scheduled_time);
+            CREATE INDEX IF NOT EXISTS idx_telemed_status ON telemedicine_consultations(status);
+            CREATE INDEX IF NOT EXISTS idx_telemed_avail ON telemedicine_availability(teacher_id);
         ''')
 
         # Upsert Radim AI assistant
@@ -729,6 +771,46 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_teacher_tasks_student ON education_teacher_tasks(student_id);
             CREATE INDEX IF NOT EXISTS idx_teacher_tasks_teacher ON education_teacher_tasks(teacher_id);
             CREATE INDEX IF NOT EXISTS idx_teacher_tasks_status ON education_teacher_tasks(student_id, status);
+
+            -- Telemedicine v3.7
+            CREATE TABLE IF NOT EXISTS telemedicine_consultations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                teacher_id TEXT NOT NULL,
+                student_id TEXT NOT NULL,
+                scheduled_date TEXT NOT NULL,
+                scheduled_time TEXT NOT NULL,
+                duration_minutes INTEGER DEFAULT 30,
+                status TEXT DEFAULT 'requested',
+                room_code TEXT,
+                jitsi_url TEXT,
+                complaint TEXT,
+                findings TEXT,
+                recommendations TEXT,
+                notes TEXT DEFAULT '{}',
+                consultation_type TEXT DEFAULT 'video',
+                cancel_reason TEXT,
+                email_sent INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS telemedicine_availability (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                teacher_id TEXT NOT NULL,
+                day_of_week INTEGER,
+                specific_date TEXT,
+                start_time TEXT NOT NULL,
+                end_time TEXT NOT NULL,
+                slot_duration_minutes INTEGER DEFAULT 30,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_telemed_teacher ON telemedicine_consultations(teacher_id);
+            CREATE INDEX IF NOT EXISTS idx_telemed_student ON telemedicine_consultations(student_id);
+            CREATE INDEX IF NOT EXISTS idx_telemed_date ON telemedicine_consultations(scheduled_date, scheduled_time);
+            CREATE INDEX IF NOT EXISTS idx_telemed_status ON telemedicine_consultations(status);
+            CREATE INDEX IF NOT EXISTS idx_telemed_avail ON telemedicine_availability(teacher_id);
         ''')
 
         db.execute('''
@@ -740,7 +822,7 @@ def init_db():
     db.close()
 
     db_type = "PostgreSQL" if USE_POSTGRES else "SQLite"
-    print(f"✅ Databáze inicializována ({db_type}, v3.6 — teacher_tasks)")
+    print(f"✅ Databáze inicializována ({db_type}, v3.7 — telemedicine)")
 
 
 def is_postgres():

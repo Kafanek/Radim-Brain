@@ -89,6 +89,14 @@ except ImportError:
     EDUCATION_AVAILABLE = False
     print("⚠️ Education routes not available")
 
+# 🏥 Import Telemedicine Routes
+try:
+    from telemedicine_routes import telemedicine_bp, get_upcoming_consultations_for_reminder
+    TELEMEDICINE_AVAILABLE = True
+except ImportError:
+    TELEMEDICINE_AVAILABLE = False
+    print("⚠️ Telemedicine routes not available")
+
 # 📧 Import Email Routes (SMTP via Wedos)
 try:
     from email_routes import email_bp
@@ -138,6 +146,11 @@ if LIBRARY_AVAILABLE:
 if EDUCATION_AVAILABLE:
     app.register_blueprint(education_bp)
     print("✅ Education routes registered: /api/education/*")
+
+# 🏥 Register Telemedicine Blueprint
+if TELEMEDICINE_AVAILABLE:
+    app.register_blueprint(telemedicine_bp)
+    print("✅ Telemedicine routes registered: /api/telemedicine/*")
 
 # 📧 Register Email Blueprint
 if EMAIL_AVAILABLE:
@@ -291,11 +304,40 @@ try:
             except Exception as e:
                 print(f"⏰ Scheduler error (non-fatal): {e}")
 
+    # 🏥 Telemedicine consultation reminders (15 min before)
+    def _check_consultation_reminders():
+        """Every 5 min: notify upcoming consultations starting within 15 min."""
+        if not TELEMEDICINE_AVAILABLE:
+            return
+        try:
+            upcoming = get_upcoming_consultations_for_reminder(window_minutes=15)
+            for c in upcoming:
+                cid = c.get('id')
+                teacher_id = c.get('teacher_id')
+                student_id = c.get('student_id')
+                mins = c.get('minutes_until', '?')
+                reminder_data = {
+                    'consultation_id': cid,
+                    'minutes_until': mins,
+                    'scheduled_time': str(c.get('scheduled_time', '')),
+                    'message': f'Konzultace začíná za {mins} minut'
+                }
+                # Notify both parties
+                socketio.emit('telemedicine_reminder', reminder_data, room=f'user_{teacher_id}')
+                socketio.emit('telemedicine_reminder', reminder_data, room=f'user_{student_id}')
+                print(f"🏥 Telemed reminder: consultation #{cid} in {mins} min → teacher {teacher_id}, student {student_id}")
+            if upcoming:
+                print(f"🏥 Telemed scheduler: {len(upcoming)} reminders sent")
+        except Exception as e:
+            print(f"🏥 Telemed scheduler error (non-fatal): {e}")
+
     scheduler = BackgroundScheduler(daemon=True)
     scheduler.add_job(_check_reminders, 'interval', minutes=5, id='radim_reminders')
+    scheduler.add_job(_check_consultation_reminders, 'interval', minutes=5, id='telemed_reminders')
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
     print("✅ APScheduler started: reminder check every 5 min")
+    print("✅ APScheduler started: telemed reminders every 5 min")
 
 except ImportError:
     print("⚠️ APScheduler not installed — reminders will not auto-send")
