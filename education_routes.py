@@ -2427,6 +2427,23 @@ def submit_quiz(course_id, module_id):
     # 🧠 Adaptivní vyhodnocení — automaticky po každém kvízu
     adaptive_result = _evaluate_and_adapt(user_id, course_id, module_id, score)
 
+    # 🔔 Notify teacher about quiz completion
+    _notify_teacher(user_id, 'education_student_completed', {
+        'type': 'quiz',
+        'course_id': course_id,
+        'module_id': module_id,
+        'score': score,
+        'passed': passed
+    })
+    # Alert teacher if student is struggling (score < 50%)
+    if score < 50:
+        _notify_teacher(user_id, 'education_student_struggling', {
+            'type': 'low_quiz_score',
+            'course_id': course_id,
+            'module_id': module_id,
+            'score': score
+        })
+
     # Motivační zpráva
     if score == 100:
         message = "Výborně! Perfektní skóre! Máte skvělé znalosti."
@@ -2564,6 +2581,15 @@ def lesson_progress_sync():
             db.close()
         except Exception as e:
             print(f"⚠️ lesson progress save error: {e}")
+
+        # 🔔 Notify teacher when lesson completed
+        if completed:
+            _notify_teacher(user_id, 'education_student_completed', {
+                'type': 'lesson',
+                'lesson_id': lesson_id,
+                'category': category,
+                'score': score
+            })
 
         return jsonify({"success": True, "message": "Lesson progress saved", "timestamp": now_iso()})
 
@@ -2943,6 +2969,15 @@ def evaluate_user():
         "message": _get_evaluation_message(profile)
     }
 
+    # 🔔 Alert teacher if student is struggling
+    if profile["total_quizzes"] > 0 and profile["avg_score"] < 50:
+        _notify_teacher(user_id, 'education_student_struggling', {
+            'type': 'low_avg_score',
+            'avg_score': profile["avg_score"],
+            'total_quizzes': profile["total_quizzes"],
+            'weaknesses': profile["weaknesses"]
+        })
+
     return jsonify({
         "success": True,
         "user_id": user_id,
@@ -3094,19 +3129,21 @@ def _db_get_teacher_assignment(user_id):
 
 
 def _db_assign_teacher(user_id, teacher_id, teacher_type='ai'):
-    """Assign teacher to student in DB"""
+    """Assign teacher to student in DB (upsert — handles unique constraint)"""
     try:
         db = get_connection()
         from database import is_postgres
         if is_postgres():
             db.execute(
                 '''INSERT INTO education_assignments (student_id, teacher_id, teacher_type, status)
-                   VALUES (%s, %s, %s, 'active')''',
+                   VALUES (%s, %s, %s, 'active')
+                   ON CONFLICT (student_id, teacher_id) WHERE status = 'active'
+                   DO UPDATE SET teacher_type = EXCLUDED.teacher_type''',
                 (user_id, teacher_id, teacher_type)
             )
         else:
             db.execute(
-                '''INSERT INTO education_assignments (student_id, teacher_id, teacher_type, status)
+                '''INSERT OR IGNORE INTO education_assignments (student_id, teacher_id, teacher_type, status)
                    VALUES (?, ?, ?, 'active')''',
                 (user_id, teacher_id, teacher_type)
             )
@@ -3164,10 +3201,15 @@ def get_teacher_detail(teacher_id):
 
 
 @education_bp.route('/api/education/teacher/assign', methods=['POST'])
+@optional_auth
 def assign_teacher():
-    """Přiřadit učitele k uživateli"""
+    """Přiřadit AI učitele k uživateli"""
     data = request.json or {}
-    user_id = data.get('userId', 'anonymous')
+    # Use auth user_id if available, fallback to body
+    auth_user = getattr(g, 'auth_user', None)
+    user_id = str(auth_user.get('id', '')) if auth_user else data.get('userId', 'anonymous')
+    if not user_id:
+        user_id = data.get('userId', 'anonymous')
     teacher_id = data.get('teacherId', 'radim-tutor')
 
     if teacher_id not in TEACHERS:
@@ -3854,6 +3896,14 @@ def answer_scenario(scenario_id):
         "answer": answer_id
     })
 
+    # 🔔 Notify teacher about scenario completion
+    _notify_teacher(user_id, 'education_student_completed', {
+        'type': 'scenario',
+        'scenario_id': scenario_id,
+        'score': chosen["score"],
+        'is_best': chosen["score"] == 100
+    })
+
     return jsonify({
         "success": True,
         "scenario_id": scenario_id,
@@ -3869,13 +3919,48 @@ def answer_scenario(scenario_id):
 
 
 # ============================================
+# 🔔 TEACHER NOTIFICATION HELPER
+# ============================================
+
+from auth_middleware import require_auth, require_teacher, optional_auth
+
+
+def _notify_teacher(student_id, event, data):
+    """Send SocketIO notification to student's teacher(s).
+    Non-blocking, non-fatal — education flow continues even if notification fails."""
+    try:
+        from flask import current_app
+        socketio = current_app.extensions.get('socketio')
+        if not socketio:
+            return
+
+        # Find teacher(s) for this student
+        db = get_connection()
+        from database import is_postgres
+        if is_postgres():
+            rows = db.execute(
+                "SELECT teacher_id FROM education_assignments WHERE student_id = %s AND status = 'active'",
+                (student_id,)
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT teacher_id FROM education_assignments WHERE student_id = ? AND status = 'active'",
+                (student_id,)
+            ).fetchall()
+        db.close()
+
+        for row in rows:
+            socketio.emit(event, {**data, 'student_id': student_id}, room=f'user_{row["teacher_id"]}')
+    except Exception:
+        pass  # Never break education flow for notification failure
+
+
+# ============================================
 # 🏫 TEACHER DASHBOARD — Phase 2
 # ============================================
 # Human teacher/logoped endpoints for managing students.
 # All @require_auth + @require_teacher secured.
 # Teacher sees ONLY their assigned students.
-
-from auth_middleware import require_auth, require_teacher, optional_auth
 
 
 def _get_teacher_id():

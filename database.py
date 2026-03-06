@@ -425,6 +425,9 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_edu_assignments_unique
+                ON education_assignments(student_id, teacher_id) WHERE status = 'active';
+
             CREATE TABLE IF NOT EXISTS education_lesson_progress (
                 id SERIAL PRIMARY KEY,
                 user_id TEXT NOT NULL,
@@ -669,6 +672,9 @@ def init_db():
                 notes TEXT DEFAULT '{}',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_edu_assignments_unique
+                ON education_assignments(student_id, teacher_id) WHERE status = 'active';
 
             CREATE TABLE IF NOT EXISTS education_lesson_progress (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
