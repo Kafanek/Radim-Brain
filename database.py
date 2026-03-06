@@ -395,6 +395,54 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_radim_tasks_user ON radim_tasks(user_id);
             CREATE INDEX IF NOT EXISTS idx_radim_tasks_status ON radim_tasks(user_id, status);
             CREATE INDEX IF NOT EXISTS idx_radim_medlog_user ON radim_medication_log(user_id);
+
+            CREATE TABLE IF NOT EXISTS education_progress (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                course_id TEXT,
+                module_id TEXT,
+                lesson_id TEXT,
+                action TEXT NOT NULL,
+                score REAL,
+                data JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS education_profiles (
+                user_id TEXT PRIMARY KEY,
+                level TEXT DEFAULT 'beginner',
+                data JSONB DEFAULT '{}',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS education_assignments (
+                id SERIAL PRIMARY KEY,
+                student_id TEXT NOT NULL,
+                teacher_id TEXT NOT NULL,
+                teacher_type TEXT DEFAULT 'human',
+                status TEXT DEFAULT 'active',
+                notes JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS education_lesson_progress (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                lesson_id TEXT NOT NULL,
+                category TEXT,
+                score REAL DEFAULT 0,
+                completed INTEGER DEFAULT 0,
+                answers JSONB DEFAULT '[]',
+                time_spent INTEGER DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, lesson_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_edu_progress_user ON education_progress(user_id);
+            CREATE INDEX IF NOT EXISTS idx_edu_progress_course ON education_progress(user_id, course_id);
+            CREATE INDEX IF NOT EXISTS idx_edu_assignments_student ON education_assignments(student_id);
+            CREATE INDEX IF NOT EXISTS idx_edu_assignments_teacher ON education_assignments(teacher_id);
+            CREATE INDEX IF NOT EXISTS idx_edu_lesson_user ON education_lesson_progress(user_id);
         ''')
 
         # Upsert Radim AI assistant
@@ -557,6 +605,54 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_radim_tasks_user ON radim_tasks(user_id);
             CREATE INDEX IF NOT EXISTS idx_radim_tasks_status ON radim_tasks(user_id, status);
             CREATE INDEX IF NOT EXISTS idx_radim_medlog_user ON radim_medication_log(user_id);
+
+            CREATE TABLE IF NOT EXISTS education_progress (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                course_id TEXT,
+                module_id TEXT,
+                lesson_id TEXT,
+                action TEXT NOT NULL,
+                score REAL,
+                data TEXT DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS education_profiles (
+                user_id TEXT PRIMARY KEY,
+                level TEXT DEFAULT 'beginner',
+                data TEXT DEFAULT '{}',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS education_assignments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id TEXT NOT NULL,
+                teacher_id TEXT NOT NULL,
+                teacher_type TEXT DEFAULT 'human',
+                status TEXT DEFAULT 'active',
+                notes TEXT DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS education_lesson_progress (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                lesson_id TEXT NOT NULL,
+                category TEXT,
+                score REAL DEFAULT 0,
+                completed INTEGER DEFAULT 0,
+                answers TEXT DEFAULT '[]',
+                time_spent INTEGER DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, lesson_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_edu_progress_user ON education_progress(user_id);
+            CREATE INDEX IF NOT EXISTS idx_edu_progress_course ON education_progress(user_id, course_id);
+            CREATE INDEX IF NOT EXISTS idx_edu_assignments_student ON education_assignments(student_id);
+            CREATE INDEX IF NOT EXISTS idx_edu_assignments_teacher ON education_assignments(teacher_id);
+            CREATE INDEX IF NOT EXISTS idx_edu_lesson_user ON education_lesson_progress(user_id);
         ''')
 
         db.execute('''
@@ -568,7 +664,7 @@ def init_db():
     db.close()
 
     db_type = "PostgreSQL" if USE_POSTGRES else "SQLite"
-    print(f"✅ Databáze inicializována ({db_type}, v3.3 — tasks+medications)")
+    print(f"✅ Databáze inicializována ({db_type}, v3.4 — education+assignments)")
 
 
 def is_postgres():

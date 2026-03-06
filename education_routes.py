@@ -5,9 +5,10 @@
 # Endpoints: /api/education/*
 # Focus: Disfázie, vzácné neurodegenerativní a vývojové poruchy
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from datetime import datetime
 import json
+from database import get_connection
 
 education_bp = Blueprint('education', __name__)
 
@@ -2077,10 +2078,99 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
 }
 
 # ============================================
-# PROGRESS TRACKING (v paměti, DB v produkci)
+# PROGRESS TRACKING — DB persistence
 # ============================================
 
-EDUCATION_PROGRESS = {}
+def _db_save_progress(user_id, course_id, module_id=None, lesson_id=None, action='view', score=None, data=None):
+    """Save education progress event to DB"""
+    try:
+        db = get_connection()
+        db.execute(
+            '''INSERT INTO education_progress (user_id, course_id, module_id, lesson_id, action, score, data)
+               VALUES (?, ?, ?, ?, ?, ?, ?)''',
+            (user_id, course_id, module_id, lesson_id, action, score, json.dumps(data or {}))
+        )
+        db.commit()
+        db.close()
+    except Exception as e:
+        print(f"⚠️ education progress save error: {e}")
+
+
+def _db_get_progress(user_id):
+    """Reconstruct progress dict from DB events"""
+    try:
+        db = get_connection()
+        rows = db.execute(
+            '''SELECT course_id, module_id, lesson_id, action, score, data, created_at
+               FROM education_progress WHERE user_id = ? ORDER BY created_at ASC''',
+            (user_id,)
+        ).fetchall()
+        db.close()
+
+        progress = {}
+        for row in rows:
+            cid = row['course_id']
+            if cid not in progress:
+                progress[cid] = {
+                    "completed_modules": [],
+                    "completed_lessons": [],
+                    "quiz_scores": {},
+                    "started_at": str(row['created_at']),
+                    "last_activity": str(row['created_at'])
+                }
+            p = progress[cid]
+            p["last_activity"] = str(row['created_at'])
+
+            action = row['action']
+            mid = row['module_id']
+            lid = row['lesson_id']
+
+            if action == 'complete_lesson' and lid and lid not in p["completed_lessons"]:
+                p["completed_lessons"].append(lid)
+            elif action == 'complete_module' and mid and mid not in p["completed_modules"]:
+                p["completed_modules"].append(mid)
+            elif action == 'quiz_submit' and mid:
+                try:
+                    extra = json.loads(row['data']) if isinstance(row['data'], str) else (row['data'] or {})
+                except Exception:
+                    extra = {}
+                p["quiz_scores"][mid] = {
+                    "score": row['score'] or 0,
+                    "correct": extra.get("correct", 0),
+                    "total": extra.get("total", 0),
+                    "passed": (row['score'] or 0) >= 60,
+                    "completed_at": str(row['created_at'])
+                }
+                if (row['score'] or 0) >= 60 and mid not in p["completed_modules"]:
+                    p["completed_modules"].append(mid)
+            elif action == 'scenario':
+                try:
+                    extra = json.loads(row['data']) if isinstance(row['data'], str) else (row['data'] or {})
+                except Exception:
+                    extra = {}
+                key = f"scenario_{extra.get('scenario_id', mid)}"
+                p[key] = extra
+
+            if mid:
+                p["last_module"] = mid
+            if lid:
+                p["last_lesson"] = lid
+
+        return progress
+    except Exception as e:
+        print(f"⚠️ education progress load error: {e}")
+        return {}
+
+
+def _db_count_active_learners():
+    """Count distinct users with education progress"""
+    try:
+        db = get_connection()
+        row = db.execute('SELECT COUNT(DISTINCT user_id) as cnt FROM education_progress').fetchone()
+        db.close()
+        return row['cnt'] if row else 0
+    except Exception:
+        return 0
 
 # ============================================
 # ENDPOINTS
@@ -2327,23 +2417,12 @@ def submit_quiz(course_id, module_id):
     score = round((correct_count / total) * 100) if total > 0 else 0
     passed = score >= 60
 
-    # Uložit do progress
-    progress_key = f"{user_id}"
-    if progress_key not in EDUCATION_PROGRESS:
-        EDUCATION_PROGRESS[progress_key] = {}
-    if course_id not in EDUCATION_PROGRESS[progress_key]:
-        EDUCATION_PROGRESS[progress_key][course_id] = {"completed_modules": [], "quiz_scores": {}}
-
-    EDUCATION_PROGRESS[progress_key][course_id]["quiz_scores"][module_id] = {
-        "score": score,
+    # Uložit do DB
+    _db_save_progress(user_id, course_id, module_id, None, 'quiz_submit', score, {
         "correct": correct_count,
         "total": total,
-        "passed": passed,
-        "completed_at": now_iso()
-    }
-
-    if passed and module_id not in EDUCATION_PROGRESS[progress_key][course_id]["completed_modules"]:
-        EDUCATION_PROGRESS[progress_key][course_id]["completed_modules"].append(module_id)
+        "passed": passed
+    })
 
     # 🧠 Adaptivní vyhodnocení — automaticky po každém kvízu
     adaptive_result = _evaluate_and_adapt(user_id, course_id, module_id, score)
@@ -2392,27 +2471,17 @@ def handle_progress():
         if not course_id:
             return jsonify({"success": False, "error": "courseId je vyžadováno"}), 400
 
-        if user_id not in EDUCATION_PROGRESS:
-            EDUCATION_PROGRESS[user_id] = {}
-        if course_id not in EDUCATION_PROGRESS[user_id]:
-            EDUCATION_PROGRESS[user_id][course_id] = {
-                "completed_modules": [],
-                "completed_lessons": [],
-                "quiz_scores": {},
-                "started_at": now_iso()
-            }
+        # Map 'complete' action to specific DB action
+        db_action = action
+        if action == 'complete' and lesson_id:
+            db_action = 'complete_lesson'
+        elif action == 'complete' and module_id:
+            db_action = 'complete_module'
 
-        progress = EDUCATION_PROGRESS[user_id][course_id]
+        _db_save_progress(user_id, course_id, module_id, lesson_id, db_action)
 
-        if action == "complete" and lesson_id:
-            if lesson_id not in progress.get("completed_lessons", []):
-                progress.setdefault("completed_lessons", []).append(lesson_id)
-
-        progress["last_activity"] = now_iso()
-        if module_id:
-            progress["last_module"] = module_id
-        if lesson_id:
-            progress["last_lesson"] = lesson_id
+        # Return current progress
+        progress = _db_get_progress(user_id).get(course_id, {})
 
         return jsonify({
             "success": True,
@@ -2423,7 +2492,7 @@ def handle_progress():
 
     # GET
     user_id = request.args.get('userId', 'anonymous')
-    progress = EDUCATION_PROGRESS.get(user_id, {})
+    progress = _db_get_progress(user_id)
 
     # Spočítat celkový pokrok
     summary = {}
@@ -2449,6 +2518,84 @@ def handle_progress():
         "courses_started": len(summary),
         "timestamp": now_iso()
     })
+
+
+@education_bp.route('/api/education/lesson-progress', methods=['GET', 'POST'])
+def lesson_progress_sync():
+    """Sync frontend lesson/quiz progress with backend DB.
+    POST: save lesson progress from frontend (lessons-module, quiz-module)
+    GET: load all lesson progress for user
+    """
+    if request.method == 'POST':
+        data = request.json or {}
+        user_id = data.get('userId', 'anonymous')
+        lesson_id = data.get('lessonId')
+        category = data.get('category', '')
+        score = data.get('score', 0)
+        completed = 1 if data.get('completed', False) else 0
+        answers = data.get('answers', [])
+        time_spent = data.get('timeSpent', 0)
+
+        if not lesson_id:
+            return jsonify({"success": False, "error": "lessonId je vyžadováno"}), 400
+
+        try:
+            db = get_connection()
+            from database import is_postgres
+            if is_postgres():
+                db.execute(
+                    '''INSERT INTO education_lesson_progress (user_id, lesson_id, category, score, completed, answers, time_spent, updated_at)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                       ON CONFLICT (user_id, lesson_id) DO UPDATE SET
+                           score = GREATEST(education_lesson_progress.score, EXCLUDED.score),
+                           completed = GREATEST(education_lesson_progress.completed, EXCLUDED.completed),
+                           answers = EXCLUDED.answers,
+                           time_spent = education_lesson_progress.time_spent + EXCLUDED.time_spent,
+                           updated_at = CURRENT_TIMESTAMP''',
+                    (user_id, lesson_id, category, score, completed, json.dumps(answers), time_spent)
+                )
+            else:
+                db.execute(
+                    '''INSERT OR REPLACE INTO education_lesson_progress (user_id, lesson_id, category, score, completed, answers, time_spent, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)''',
+                    (user_id, lesson_id, category, score, completed, json.dumps(answers), time_spent)
+                )
+            db.commit()
+            db.close()
+        except Exception as e:
+            print(f"⚠️ lesson progress save error: {e}")
+
+        return jsonify({"success": True, "message": "Lesson progress saved", "timestamp": now_iso()})
+
+    # GET
+    user_id = request.args.get('userId', 'anonymous')
+    try:
+        db = get_connection()
+        rows = db.execute(
+            'SELECT lesson_id, category, score, completed, answers, time_spent, updated_at FROM education_lesson_progress WHERE user_id = ?',
+            (user_id,)
+        ).fetchall()
+        db.close()
+
+        progress = {}
+        for row in rows:
+            try:
+                answers = json.loads(row['answers']) if isinstance(row['answers'], str) else (row['answers'] or [])
+            except Exception:
+                answers = []
+            progress[row['lesson_id']] = {
+                "category": row['category'],
+                "score": row['score'],
+                "completed": bool(row['completed']),
+                "answers": answers,
+                "timeSpent": row['time_spent'],
+                "updatedAt": str(row['updated_at'])
+            }
+    except Exception as e:
+        print(f"⚠️ lesson progress load error: {e}")
+        progress = {}
+
+    return jsonify({"success": True, "user_id": user_id, "progress": progress, "timestamp": now_iso()})
 
 
 @education_bp.route('/api/education/search', methods=['GET'])
@@ -2555,7 +2702,7 @@ def education_stats():
             "total_quizzes": total_quizzes,
             "total_questions": total_questions,
             "categories": categories,
-            "active_learners": len(EDUCATION_PROGRESS),
+            "active_learners": _db_count_active_learners(),
             "available_courses": [
                 {"id": c["id"], "title": c["title"], "icon": c["icon"]}
                 for c in EDUCATION_COURSES.values()
@@ -2614,30 +2761,79 @@ def get_communication_needs():
 # 🎓 ADAPTIVE EVALUATION — vyhodnocení po adaptaci
 # ============================================
 
-# Uživatelské adaptivní profily
-ADAPTIVE_PROFILES = {}
+# Uživatelské adaptivní profily — DB persistence
+
+_DEFAULT_PROFILE = {
+    "level": "beginner",
+    "total_score": 0,
+    "total_quizzes": 0,
+    "avg_score": 0,
+    "strengths": [],
+    "weaknesses": [],
+    "recommended_courses": [],
+    "completed_courses": [],
+    "badges": [],
+    "streak_days": 0,
+    "last_activity": None,
+    "communication_adaptation": None,
+    "teacher_notes": []
+}
 
 
 def _get_adaptive_profile(user_id):
-    """Získat nebo vytvořit adaptivní profil uživatele"""
-    if user_id not in ADAPTIVE_PROFILES:
-        ADAPTIVE_PROFILES[user_id] = {
-            "user_id": user_id,
-            "level": "beginner",           # beginner, intermediate, advanced
-            "total_score": 0,
-            "total_quizzes": 0,
-            "avg_score": 0,
-            "strengths": [],               # témata kde >80 %
-            "weaknesses": [],              # témata kde <60 %
-            "recommended_courses": [],
-            "completed_courses": [],
-            "badges": [],
-            "streak_days": 0,
-            "last_activity": None,
-            "communication_adaptation": None,  # napojení na memory_routes profil
-            "teacher_notes": []
-        }
-    return ADAPTIVE_PROFILES[user_id]
+    """Získat nebo vytvořit adaptivní profil uživatele (z DB)"""
+    try:
+        db = get_connection()
+        row = db.execute(
+            'SELECT level, data FROM education_profiles WHERE user_id = ?',
+            (user_id,)
+        ).fetchone()
+        db.close()
+
+        if row:
+            try:
+                data = json.loads(row['data']) if isinstance(row['data'], str) else (row['data'] or {})
+            except Exception:
+                data = {}
+            profile = {**_DEFAULT_PROFILE, **data}
+            profile["user_id"] = user_id
+            profile["level"] = row['level'] or profile.get("level", "beginner")
+            return profile
+    except Exception as e:
+        print(f"⚠️ education profile load error: {e}")
+
+    # New profile
+    profile = {**_DEFAULT_PROFILE, "user_id": user_id}
+    return profile
+
+
+def _save_adaptive_profile(user_id, profile):
+    """Uložit adaptivní profil do DB"""
+    try:
+        data = {k: v for k, v in profile.items() if k not in ('user_id', 'level')}
+        db = get_connection()
+        # Upsert
+        from database import is_postgres
+        if is_postgres():
+            db.execute(
+                '''INSERT INTO education_profiles (user_id, level, data, updated_at)
+                   VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                   ON CONFLICT (user_id) DO UPDATE SET
+                       level = EXCLUDED.level,
+                       data = EXCLUDED.data,
+                       updated_at = CURRENT_TIMESTAMP''',
+                (user_id, profile.get("level", "beginner"), json.dumps(data))
+            )
+        else:
+            db.execute(
+                '''INSERT OR REPLACE INTO education_profiles (user_id, level, data, updated_at)
+                   VALUES (?, ?, ?, CURRENT_TIMESTAMP)''',
+                (user_id, profile.get("level", "beginner"), json.dumps(data))
+            )
+        db.commit()
+        db.close()
+    except Exception as e:
+        print(f"⚠️ education profile save error: {e}")
 
 
 def _evaluate_and_adapt(user_id, course_id, module_id, score):
@@ -2691,6 +2887,9 @@ def _evaluate_and_adapt(user_id, course_id, module_id, score):
                 profile["recommended_courses"].append({
                     "id": cid, "title": c["title"], "reason": "Nové téma k prozkoumání"
                 })
+
+    # Persist to DB
+    _save_adaptive_profile(user_id, profile)
 
     return profile
 
@@ -2880,7 +3079,41 @@ TEACHERS = {
     }
 }
 
-TEACHER_ASSIGNMENTS = {}  # {user_id: teacher_id}
+def _db_get_teacher_assignment(user_id):
+    """Get assigned teacher_id for user from DB"""
+    try:
+        db = get_connection()
+        row = db.execute(
+            "SELECT teacher_id FROM education_assignments WHERE student_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+            (user_id,)
+        ).fetchone()
+        db.close()
+        return row['teacher_id'] if row else None
+    except Exception:
+        return None
+
+
+def _db_assign_teacher(user_id, teacher_id, teacher_type='ai'):
+    """Assign teacher to student in DB"""
+    try:
+        db = get_connection()
+        from database import is_postgres
+        if is_postgres():
+            db.execute(
+                '''INSERT INTO education_assignments (student_id, teacher_id, teacher_type, status)
+                   VALUES (%s, %s, %s, 'active')''',
+                (user_id, teacher_id, teacher_type)
+            )
+        else:
+            db.execute(
+                '''INSERT INTO education_assignments (student_id, teacher_id, teacher_type, status)
+                   VALUES (?, ?, ?, 'active')''',
+                (user_id, teacher_id, teacher_type)
+            )
+        db.commit()
+        db.close()
+    except Exception as e:
+        print(f"⚠️ teacher assign error: {e}")
 
 
 @education_bp.route('/api/education/teachers', methods=['GET'])
@@ -2940,7 +3173,7 @@ def assign_teacher():
     if teacher_id not in TEACHERS:
         return jsonify({"success": False, "error": "Učitel nenalezen"}), 404
 
-    TEACHER_ASSIGNMENTS[user_id] = teacher_id
+    _db_assign_teacher(user_id, teacher_id, 'ai')
     teacher = TEACHERS[teacher_id]
 
     return jsonify({
@@ -2971,6 +3204,7 @@ def add_teacher_note():
         "timestamp": now_iso()
     }
     profile.setdefault("teacher_notes", []).append(note)
+    _save_adaptive_profile(user_id, profile)
 
     return jsonify({
         "success": True,
@@ -2984,7 +3218,7 @@ def add_teacher_note():
 def teacher_review(user_id):
     """Učitelský přehled studenta — profil, výsledky, doporučení"""
     profile = _get_adaptive_profile(user_id)
-    progress = EDUCATION_PROGRESS.get(user_id, {})
+    progress = _db_get_progress(user_id)
 
     # Spočítat detailní přehled
     course_details = []
@@ -3018,7 +3252,7 @@ def teacher_review(user_id):
         auto_recommendations.append("Výborný student. Doporučit pokročilejší materiály.")
 
     # Doporučení na základě přiřazeného učitele
-    assigned_tid = TEACHER_ASSIGNMENTS.get(user_id)
+    assigned_tid = _db_get_teacher_assignment(user_id)
     if assigned_tid == "dysphasia-child-tutor":
         auto_recommendations.append("🗣️ Specialistka: Zkontrolovat IVP dítěte a spolupráci s SPC.")
         auto_recommendations.append("🗣️ Tip: Využít cvičení 'Pojmenuj obrázek' a 'Rýmy a říkanky'.")
@@ -3044,7 +3278,7 @@ def teacher_review(user_id):
         "courses": course_details,
         "teacher_notes": profile.get("teacher_notes", []),
         "auto_recommendations": auto_recommendations,
-        "assigned_teacher": TEACHERS.get(TEACHER_ASSIGNMENTS.get(user_id)),
+        "assigned_teacher": TEACHERS.get(_db_get_teacher_assignment(user_id)),
         "timestamp": now_iso()
     })
 
@@ -3614,16 +3848,11 @@ def answer_scenario(scenario_id):
             "is_chosen": opt["id"] == answer_id
         })
 
-    # Ulozit do progress
-    key = f"scenario_{scenario_id}"
-    if user_id not in EDUCATION_PROGRESS:
-        EDUCATION_PROGRESS[user_id] = {}
-    EDUCATION_PROGRESS[user_id][key] = {
+    # Ulozit do progress (DB)
+    _db_save_progress(user_id, 'scenarios', scenario_id, None, 'scenario', chosen["score"], {
         "scenario_id": scenario_id,
-        "answer": answer_id,
-        "score": chosen["score"],
-        "timestamp": now_iso()
-    }
+        "answer": answer_id
+    })
 
     return jsonify({
         "success": True,

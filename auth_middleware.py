@@ -133,6 +133,32 @@ def require_premium(f):
     return decorated
 
 
+def require_teacher(f):
+    """
+    Decorator: Vyžaduje roli učitele (teacher, spc_supervisor, administrator).
+    Musí být použit PO @require_auth.
+
+    Použití:
+        @app.route('/api/education/teacher/dashboard')
+        @require_auth
+        @require_teacher
+        def teacher_dashboard():
+            ...
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        user = getattr(g, 'auth_user', {})
+        if user.get('role') not in ('teacher', 'spc_supervisor', 'administrator'):
+            return jsonify({
+                "success": False,
+                "error": "Tato funkce vyžaduje roli učitele",
+                "code": "teacher_required"
+            }), 403
+
+        return f(*args, **kwargs)
+    return decorated
+
+
 def optional_auth(f):
     """
     Decorator: JWT je volitelný — pokud je přítomen, ověří se.
