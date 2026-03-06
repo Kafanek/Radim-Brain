@@ -1620,11 +1620,29 @@ def handle_mark_read(data):
 
 @socketio.on('join_education')
 def handle_join_education(data):
-    """Student/teacher joins their education room for notifications"""
+    """Student/teacher joins their education room for notifications.
+    Requires JWT token for verification — prevents room spoofing."""
+    token = data.get('token', '')
     user_id = data.get('userId')
-    if user_id:
-        join_room(f'user_{user_id}')
-        print(f"🎓 User {user_id} joined education room")
+    if not user_id or not token:
+        emit('education_error', {'error': 'userId and token required'})
+        return
+    # Verify JWT matches the claimed userId
+    try:
+        from auth_middleware import decode_jwt
+        payload = decode_jwt(token)
+        if not payload:
+            emit('education_error', {'error': 'Invalid token'})
+            return
+        token_user_id = str(payload.get('user', {}).get('id', ''))
+        if token_user_id != str(user_id):
+            emit('education_error', {'error': 'Token userId mismatch'})
+            return
+    except Exception:
+        emit('education_error', {'error': 'Auth verification failed'})
+        return
+    join_room(f'user_{user_id}')
+    print(f"🎓 User {user_id} joined education room (verified)")
 
 
 @socketio.on('leave_education')
