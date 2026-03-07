@@ -2924,12 +2924,28 @@ def get_quiz(course_id, module_id):
             "type": q["type"]
         }
         if q["type"] == "single_choice":
-            safe_q["options"] = [{"id": o["id"], "text": o["text"]} for o in q["options"]]
+            opts = q.get("options", [])
+            if opts and isinstance(opts[0], dict):
+                # Old format: [{"id": "a", "text": "...", "correct": True}]
+                safe_q["options"] = [{"id": o["id"], "text": o["text"]} for o in opts]
+            else:
+                # New format: ["option1", "option2", ...] with "correct": index
+                safe_q["options"] = [{"id": i, "text": o} for i, o in enumerate(opts)]
         elif q["type"] == "true_false":
             safe_q["options"] = [
                 {"id": "true", "text": "Ano, je to pravda"},
                 {"id": "false", "text": "Ne, není to pravda"}
             ]
+        elif q["type"] == "matching":
+            # Show left items, user must match with right items
+            pairs = q.get("pairs", [])
+            safe_q["left_items"] = [p["left"] for p in pairs]
+            safe_q["right_items"] = sorted([p["right"] for p in pairs])  # shuffled order
+        elif q["type"] == "ordering":
+            import random as _rnd
+            items = list(q.get("options", q.get("correct_order", [])))
+            # Provide items in scrambled order for the user to reorder
+            safe_q["items"] = items  # frontend can shuffle
         safe_quiz["questions"].append(safe_q)
 
     return jsonify({
@@ -2968,11 +2984,22 @@ def submit_quiz(course_id, module_id):
         is_correct = False
 
         if q["type"] == "single_choice":
-            correct_option = next((o for o in q["options"] if o.get("correct")), None)
-            is_correct = user_answer == correct_option["id"] if correct_option else False
+            opts = q.get("options", [])
+            if opts and isinstance(opts[0], dict):
+                # Old format: [{"id": "a", "text": "...", "correct": True}]
+                correct_option = next((o for o in opts if o.get("correct")), None)
+                is_correct = user_answer == correct_option["id"] if correct_option else False
+            else:
+                # New format: ["opt1", "opt2"] with "correct": index
+                is_correct = user_answer == q.get("correct")
         elif q["type"] == "true_false":
-            expected = "true" if q["correct_answer"] else "false"
-            is_correct = user_answer == expected
+            # Support both "correct_answer" (old) and "correct" (new) keys
+            expected_val = q.get("correct_answer", q.get("correct"))
+            if isinstance(user_answer, bool):
+                is_correct = user_answer == expected_val
+            else:
+                expected = "true" if expected_val else "false"
+                is_correct = user_answer == expected
         elif q["type"] == "matching":
             # user_answer should be dict: {"left_value": "right_value", ...}
             if isinstance(user_answer, dict):
