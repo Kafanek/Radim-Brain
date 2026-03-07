@@ -761,7 +761,57 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
                             "FAST test: Face, Arms, Speech, Time — při podezření na CMP volejte 155"
                         ]
                     }
-                ]
+                ],
+                "quiz": {
+                    "id": "dysphasia-m5-quiz",
+                    "title": "Kvíz: Kde hledat pomoc",
+                    "passing_score": 60,
+                    "questions": [
+                        {
+                            "id": "dys-m5-q1",
+                            "type": "single_choice",
+                            "question": "Jaký odborník je první kontakt pro logopedickou rehabilitaci disfázie?",
+                            "options": ["Neurolog", "Klinický logoped", "Psycholog", "Praktický lékař"],
+                            "correct": 1,
+                            "explanation": "Klinický logoped je primární odborník pro diagnostiku a rehabilitaci disfázie."
+                        },
+                        {
+                            "id": "dys-m5-q2",
+                            "type": "true_false",
+                            "question": "FAST test slouží k rozpoznání podezření na cévní mozkovou příhodu.",
+                            "correct": True,
+                            "explanation": "FAST = Face, Arms, Speech, Time — rychlý test pro rozpoznání CMP."
+                        },
+                        {
+                            "id": "dys-m5-q3",
+                            "type": "matching",
+                            "question": "Spoj organizaci s její oblastí pomoci:",
+                            "pairs": [
+                                {"left": "Cerebrum", "right": "Osoby po poranění mozku"},
+                                {"left": "Ictus", "right": "Pacienti po CMP"},
+                                {"left": "SAAK", "right": "Augmentativní komunikace"},
+                                {"left": "Asociace klinických logopedů", "right": "Seznam odborníků"}
+                            ],
+                            "explanation": "Každá organizace se zaměřuje na specifickou oblast pomoci."
+                        },
+                        {
+                            "id": "dys-m5-q4",
+                            "type": "ordering",
+                            "question": "Seřaďte písmena FAST testu ve správném pořadí:",
+                            "options": ["Face (obličej)", "Arms (ruce)", "Speech (řeč)", "Time (čas — volejte 155)"],
+                            "correct_order": ["Face (obličej)", "Arms (ruce)", "Speech (řeč)", "Time (čas — volejte 155)"],
+                            "explanation": "FAST: Face → Arms → Speech → Time."
+                        },
+                        {
+                            "id": "dys-m5-q5",
+                            "type": "single_choice",
+                            "question": "Které telefonní číslo voláte při podezření na CMP?",
+                            "options": ["112", "155", "116 123", "158"],
+                            "correct": 1,
+                            "explanation": "155 je číslo Zdravotnické záchranné služby — při CMP každá minuta se počítá!"
+                        }
+                    ]
+                }
             },
             {
                 "id": "dysphasia-m6",
@@ -1318,7 +1368,56 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
                             "Registr Enroll-HD — mezinarodni studie, ucast mozna v CR"
                         ]
                     }
-                ]
+                ],
+                "quiz": {
+                    "id": "huntington-m3-quiz",
+                    "title": "Kvíz: Kde najít pomoc v ČR",
+                    "passing_score": 60,
+                    "questions": [
+                        {
+                            "id": "hunt-m3-q1",
+                            "type": "single_choice",
+                            "question": "Které nemocniční centrum je hlavní specializované pracoviště pro HD v ČR?",
+                            "options": ["FN Brno", "FN Motol, Praha", "FN Olomouc", "VFN Praha"],
+                            "correct": 1,
+                            "explanation": "FN Motol v Praze (prof. Klempíř) je hlavní centrum pro Huntingtonovu chorobu v ČR."
+                        },
+                        {
+                            "id": "hunt-m3-q2",
+                            "type": "true_false",
+                            "question": "Průkaz ZTP/P umožňuje mimo jiné parkování na vyhrazených místech a bezplatného průvodce.",
+                            "correct": True,
+                            "explanation": "Průkaz ZTP/P přináší výhody: parkování, slevy v dopravě, nárok na průvodce."
+                        },
+                        {
+                            "id": "hunt-m3-q3",
+                            "type": "matching",
+                            "question": "Přiřaďte organizaci k jejímu zaměření:",
+                            "pairs": [
+                                {"left": "Společnost pro pomoc při HD", "right": "Svépomocná organizace pro rodiny"},
+                                {"left": "EURORDIS", "right": "Evropská organizace pro vzácná onemocnění"},
+                                {"left": "NKCVO", "right": "Koordinační centrum pro vzácná onemocnění"},
+                                {"left": "Enroll-HD", "right": "Mezinárodní registr pacientů"}
+                            ],
+                            "explanation": "Každá organizace má specifické zaměření v oblasti HD."
+                        },
+                        {
+                            "id": "hunt-m3-q4",
+                            "type": "single_choice",
+                            "question": "Jaký typ moderní terapie je ve výzkumu zaměřen na ztišení vadného genu pro HD?",
+                            "options": ["Chemoterapie", "Genová terapie", "Radioterapie", "Fyzioterapie"],
+                            "correct": 1,
+                            "explanation": "Genová terapie se zaměřuje na ztišení nebo opravu vadného genu huntingtin."
+                        },
+                        {
+                            "id": "hunt-m3-q5",
+                            "type": "true_false",
+                            "question": "Příspěvek na péči má v ČR 4 stupně podle míry závislosti.",
+                            "correct": True,
+                            "explanation": "Zákon 108/2006 Sb. stanoví 4 stupně příspěvku na péči: lehká, středně těžká, těžká a úplná závislost."
+                        }
+                    ]
+                }
             }
         ]
     },
@@ -1680,7 +1779,57 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
                             "Psychologicka podpora pro pacienta I rodinu"
                         ]
                     }
-                ]
+                ],
+                "quiz": {
+                    "id": "als-m3-quiz",
+                    "title": "Kvíz: Kde najít pomoc v ČR",
+                    "passing_score": 60,
+                    "questions": [
+                        {
+                            "id": "als-m3-q1",
+                            "type": "single_choice",
+                            "question": "Která organizace je hlavní pacientskou organizací pro lidi s ALS v ČR?",
+                            "options": ["Cerebrum", "ALS Liga ČR", "Společnost E", "EURORDIS"],
+                            "correct": 1,
+                            "explanation": "ALS Liga ČR je hlavní pacientská organizace a první kontakt pro pacienty a rodiny."
+                        },
+                        {
+                            "id": "als-m3-q2",
+                            "type": "true_false",
+                            "question": "Komunikátory pro pacienty s ALS mohou být hrazeny zdravotní pojišťovnou na předpis od logopeda nebo neurologa.",
+                            "correct": True,
+                            "explanation": "Komunikátory patří mezi speciální pomůcky, které mohou být hrazeny pojišťovnou."
+                        },
+                        {
+                            "id": "als-m3-q3",
+                            "type": "matching",
+                            "question": "Přiřaďte typ podpory ke správné kategorii:",
+                            "pairs": [
+                                {"left": "Příspěvek na péči", "right": "Finanční podpora 880–19 200 Kč/měs"},
+                                {"left": "Průkaz ZTP/P", "right": "Slevy a průvodce"},
+                                {"left": "Domácí ventilace", "right": "Technická pomůcka"},
+                                {"left": "Linka 116 123", "right": "Psychologická podpora"}
+                            ],
+                            "explanation": "Různé typy podpory pokrývají finanční, technickou i psychologickou pomoc."
+                        },
+                        {
+                            "id": "als-m3-q4",
+                            "type": "single_choice",
+                            "question": "Které specializované centrum je hlavním pracovištěm pro ALS v ČR?",
+                            "options": ["FN Brno", "FN Olomouc", "ALS centrum FN Motol", "VFN Královské Vinohrady"],
+                            "correct": 2,
+                            "explanation": "ALS centrum FN Motol v Praze je hlavní specializované pracoviště pro ALS v ČR."
+                        },
+                        {
+                            "id": "als-m3-q5",
+                            "type": "ordering",
+                            "question": "Seřaďte členy multidisciplinárního týmu pro ALS podle pořadí, jak je pacient typicky potřebuje:",
+                            "options": ["Neurolog (diagnostika)", "Fyzioterapeut (pohyblivost)", "Logoped (komunikace)", "Pneumolog (dýchání)"],
+                            "correct_order": ["Neurolog (diagnostika)", "Fyzioterapeut (pohyblivost)", "Logoped (komunikace)", "Pneumolog (dýchání)"],
+                            "explanation": "ALS začíná diagnostikou u neurologa, pak řeší pohyblivost, později komunikaci a nakonec dýchání."
+                        }
+                    ]
+                }
             }
         ]
     },
@@ -2275,7 +2424,56 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                             "Pečovatel TAKÉ potřebuje péči — není slabost požádat o pomoc"
                         ]
                     }
-                ]
+                ],
+                "quiz": {
+                    "id": "dementia-m5-quiz",
+                    "title": "Kvíz: Kde hledat pomoc v ČR",
+                    "passing_score": 60,
+                    "questions": [
+                        {
+                            "id": "dem-m5-q1",
+                            "type": "single_choice",
+                            "question": "Jak se nazývají specializovaná pracoviště pro diagnostiku demence?",
+                            "options": ["Rehabilitační centra", "Memory kliniky", "Neurochirurgická oddělení", "Onkologická centra"],
+                            "correct": 1,
+                            "explanation": "Memory kliniky jsou specializovaná pracoviště zaměřená na diagnostiku a léčbu poruch paměti a demencí."
+                        },
+                        {
+                            "id": "dem-m5-q2",
+                            "type": "true_false",
+                            "question": "Česká alzheimerovská společnost (ČALS) nabízí poradenství a svépomocné skupiny pro rodiny.",
+                            "correct": True,
+                            "explanation": "ČALS (alzheimer.cz) je hlavní organizace pro pomoc rodinám lidí s demencí v ČR."
+                        },
+                        {
+                            "id": "dem-m5-q3",
+                            "type": "matching",
+                            "question": "Přiřaďte službu k jejímu popisu:",
+                            "pairs": [
+                                {"left": "Denní stacionář", "right": "Péče přes den — pečovatel si odpočine"},
+                                {"left": "Respitní péče", "right": "Krátkodobé umístění pro odpočinek rodiny"},
+                                {"left": "Pečovatelská služba", "right": "Pomoc v domácnosti"},
+                                {"left": "Příspěvek na péči", "right": "Finanční podpora ve 4 stupních"}
+                            ],
+                            "explanation": "Různé služby zajišťují podporu jak pro osobu s demencí, tak pro pečovatele."
+                        },
+                        {
+                            "id": "dem-m5-q4",
+                            "type": "single_choice",
+                            "question": "Jaké telefonní číslo je linka ČALS pro poradenství?",
+                            "options": ["116 123", "155", "283 880 346", "112"],
+                            "correct": 2,
+                            "explanation": "ČALS linka 283 880 346 poskytuje specifické poradenství pro rodiny lidí s demencí."
+                        },
+                        {
+                            "id": "dem-m5-q5",
+                            "type": "true_false",
+                            "question": "Požádat o pomoc jako pečovatel je projevem slabosti.",
+                            "correct": False,
+                            "explanation": "Požádat o pomoc NENÍ slabost! Pečovatel potřebuje péči stejně jako nemocný. Využívejte respitní péči a svépomocné skupiny."
+                        }
+                    ]
+                }
             },
             {
                 "id": "dementia-m6",
