@@ -2012,11 +2012,13 @@ def health():
         blueprints['library'] = {'prefix': '/kal/library/*', 'version': '1.0.0', 'status': 'active'}
     if EDUCATION_AVAILABLE:
         blueprints['education'] = {'prefix': '/api/education/*', 'version': '1.0.0', 'status': 'active'}
+    if TELEMEDICINE_AVAILABLE:
+        blueprints['telemedicine'] = {'prefix': '/api/telemedicine/*', 'version': '1.0.0', 'status': 'active'}
 
     return jsonify({
         'status': 'healthy',
         'service': 'Radim Brain + Chat',
-        'version': '3.3.0',
+        'version': '3.4.0',
         'auth': 'JWT (WordPress)',
         'gdpr': True,
         'timestamp': now_iso(),
