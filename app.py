@@ -325,7 +325,11 @@ try:
                 # Notify both parties
                 socketio.emit('telemedicine_reminder', reminder_data, room=f'user_{teacher_id}')
                 socketio.emit('telemedicine_reminder', reminder_data, room=f'user_{student_id}')
-                print(f"🏥 Telemed reminder: consultation #{cid} in {mins} min → teacher {teacher_id}, student {student_id}")
+                # Multi-party: also notify additional participants
+                for pid in c.get('participant_ids', []):
+                    if pid != teacher_id and pid != student_id:
+                        socketio.emit('telemedicine_reminder', reminder_data, room=f'user_{pid}')
+                print(f"🏥 Telemed reminder: consultation #{cid} in {mins} min → teacher {teacher_id}, student {student_id}, +{len(c.get('participant_ids', []))} participants")
             if upcoming:
                 print(f"🏥 Telemed scheduler: {len(upcoming)} reminders sent")
         except Exception as e:

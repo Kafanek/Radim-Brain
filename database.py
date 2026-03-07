@@ -518,12 +518,37 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
+            -- Multiparty telemedicine v3.8
+            CREATE TABLE IF NOT EXISTS telemedicine_participants (
+                id SERIAL PRIMARY KEY,
+                consultation_id INTEGER NOT NULL REFERENCES telemedicine_consultations(id) ON DELETE CASCADE,
+                user_id TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'specialist',
+                specialty TEXT,
+                status TEXT DEFAULT 'invited',
+                notes_contribution TEXT,
+                joined_at TIMESTAMP,
+                left_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(consultation_id, user_id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_telemed_teacher ON telemedicine_consultations(teacher_id);
             CREATE INDEX IF NOT EXISTS idx_telemed_student ON telemedicine_consultations(student_id);
             CREATE INDEX IF NOT EXISTS idx_telemed_date ON telemedicine_consultations(scheduled_date, scheduled_time);
             CREATE INDEX IF NOT EXISTS idx_telemed_status ON telemedicine_consultations(status);
             CREATE INDEX IF NOT EXISTS idx_telemed_avail ON telemedicine_availability(teacher_id);
+            CREATE INDEX IF NOT EXISTS idx_telemed_part_consult ON telemedicine_participants(consultation_id);
+            CREATE INDEX IF NOT EXISTS idx_telemed_part_user ON telemedicine_participants(user_id);
+            CREATE INDEX IF NOT EXISTS idx_telemed_part_status ON telemedicine_participants(user_id, status);
         ''')
+
+        # v3.8 migration: add multiparty columns to existing table
+        try:
+            db.execute("ALTER TABLE telemedicine_consultations ADD COLUMN IF NOT EXISTS title TEXT")
+            db.execute("ALTER TABLE telemedicine_consultations ADD COLUMN IF NOT EXISTS is_multiparty INTEGER DEFAULT 0")
+        except Exception:
+            pass
 
         # Upsert Radim AI assistant
         db.execute('''
@@ -806,12 +831,40 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
+            -- Multiparty telemedicine v3.8
+            CREATE TABLE IF NOT EXISTS telemedicine_participants (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                consultation_id INTEGER NOT NULL REFERENCES telemedicine_consultations(id) ON DELETE CASCADE,
+                user_id TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'specialist',
+                specialty TEXT,
+                status TEXT DEFAULT 'invited',
+                notes_contribution TEXT,
+                joined_at TIMESTAMP,
+                left_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(consultation_id, user_id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_telemed_teacher ON telemedicine_consultations(teacher_id);
             CREATE INDEX IF NOT EXISTS idx_telemed_student ON telemedicine_consultations(student_id);
             CREATE INDEX IF NOT EXISTS idx_telemed_date ON telemedicine_consultations(scheduled_date, scheduled_time);
             CREATE INDEX IF NOT EXISTS idx_telemed_status ON telemedicine_consultations(status);
             CREATE INDEX IF NOT EXISTS idx_telemed_avail ON telemedicine_availability(teacher_id);
+            CREATE INDEX IF NOT EXISTS idx_telemed_part_consult ON telemedicine_participants(consultation_id);
+            CREATE INDEX IF NOT EXISTS idx_telemed_part_user ON telemedicine_participants(user_id);
+            CREATE INDEX IF NOT EXISTS idx_telemed_part_status ON telemedicine_participants(user_id, status);
         ''')
+
+        # v3.8 migration: add multiparty columns to existing table
+        for col_sql in [
+            "ALTER TABLE telemedicine_consultations ADD COLUMN title TEXT",
+            "ALTER TABLE telemedicine_consultations ADD COLUMN is_multiparty INTEGER DEFAULT 0",
+        ]:
+            try:
+                db.execute(col_sql)
+            except Exception:
+                pass
 
         db.execute('''
             INSERT OR REPLACE INTO chat_users (id, name, role, online, settings)
@@ -822,7 +875,7 @@ def init_db():
     db.close()
 
     db_type = "PostgreSQL" if USE_POSTGRES else "SQLite"
-    print(f"✅ Databáze inicializována ({db_type}, v3.7 — telemedicine)")
+    print(f"✅ Databáze inicializována ({db_type}, v3.8 — multiparty telemedicine)")
 
 
 def is_postgres():
