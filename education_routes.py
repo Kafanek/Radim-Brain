@@ -5356,8 +5356,15 @@ def get_certificate(user_id, course_id):
         quiz = m.get("quiz")
         has_quiz = quiz is not None
 
-        # Score for this module
-        mod_score = quiz_scores.get(mid)
+        # Score for this module — quiz_scores stores dicts or numbers
+        mod_score_raw = quiz_scores.get(mid)
+        if isinstance(mod_score_raw, dict):
+            mod_score = mod_score_raw.get("score")
+        elif isinstance(mod_score_raw, (int, float)):
+            mod_score = mod_score_raw
+        else:
+            mod_score = None
+
         if has_quiz:
             if mod_score is not None and isinstance(mod_score, (int, float)):
                 passed = mod_score >= 60
@@ -5451,7 +5458,14 @@ def get_quiz_result(user_id, course_id, module_id):
     progress = _db_get_progress(user_id)
     course_progress = progress.get(course_id, {})
     quiz_scores = course_progress.get("quiz_scores", {})
-    score = quiz_scores.get(module_id)
+    score_data = quiz_scores.get(module_id)
+    # quiz_scores stores dicts: {"score": 83, "correct": 5, "total": 6, "passed": True}
+    if isinstance(score_data, dict):
+        score = score_data.get("score")
+    elif isinstance(score_data, (int, float)):
+        score = score_data
+    else:
+        score = None
 
     profile = _get_adaptive_profile(user_id)
 
