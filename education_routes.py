@@ -1,7 +1,7 @@
 # ============================================
 # 🎓 RADIM EDUCATION API BLUEPRINT
 # ============================================
-# Version: 1.0.0 — Vzdělávací modul: Vzácná onemocnění
+# Version: 2.0.0 — Vzdělávací modul: 80+ kvízových otázek, matching/ordering, certifikáty
 # Endpoints: /api/education/*
 # Focus: Disfázie, vzácné neurodegenerativní a vývojové poruchy
 
@@ -148,6 +148,37 @@ EDUCATION_COURSES = {
                                 {"id": "c", "text": "Asi 80 %", "correct": False}
                             ],
                             "explanation": "Přibližně 30–40 % lidí po cévní mozkové příhodě má nějakou formu poruchy řeči. Je to velmi častý následek."
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Spojte správně pojmy s jejich definicí:",
+                            "type": "matching",
+                            "pairs": [
+                                {"left": "Disfázie", "right": "Částečná porucha řeči"},
+                                {"left": "Afázie", "right": "Úplná ztráta řeči"},
+                                {"left": "Dysartrie", "right": "Porucha motoriky řeči"},
+                                {"left": "Dysfagie", "right": "Porucha polykání"}
+                            ],
+                            "explanation": "Disfázie = částečná porucha řeči, afázie = úplná ztráta, dysartrie = motorický problém svalů, dysfagie = polykání (úplně jiný problém!)."
+                        },
+                        {
+                            "id": "q5",
+                            "question": "Jaká je nejčastější příčina získané disfázie u dospělých?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Stres a přepracování", "correct": False},
+                                {"id": "b", "text": "Cévní mozková příhoda (CMP)", "correct": True},
+                                {"id": "c", "text": "Nedostatek vitamínů", "correct": False},
+                                {"id": "d", "text": "Stárnutí", "correct": False}
+                            ],
+                            "explanation": "CMP (mrtvice) je příčinou cca 80 % případů získané disfázie. Další příčiny zahrnují úrazy hlavy, nádory mozku a záněty."
+                        },
+                        {
+                            "id": "q6",
+                            "question": "Vývojová disfázie postihuje chlapce a dívky stejně často.",
+                            "type": "true_false",
+                            "correct_answer": False,
+                            "explanation": "Chlapci jsou postiženi 2–3× častěji než dívky. Důvody nejsou zcela jasné, ale souvisí s rozdíly ve vývoji mozku."
                         }
                     ]
                 }
@@ -287,6 +318,42 @@ Ty řekneš: <em>"Ano! Kočka je tam venku na zahradě!"</em><br>
                                 {"id": "c", "text": "Nikdy — dítě z toho vyroste samo", "correct": False}
                             ],
                             "explanation": "Čím dříve začne logopedická péče, tím lepší výsledky. Zlaté okno je od 2–3 let. Čekání 'až z toho vyroste' může zmeškat nejlepší období pro intervenci."
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Seřaďte kroky správné komunikace s dítětem s disfázií:",
+                            "type": "ordering",
+                            "correct_order": [
+                                "Zkraťte větu na jednu instrukci",
+                                "Počkejte na odpověď (počítejte do 10)",
+                                "Zrcadlete a rozšiřte odpověď dítěte",
+                                "Pochvalte snahu komunikovat"
+                            ],
+                            "explanation": "Správný postup: 1) krátká instrukce, 2) trpělivé čekání, 3) zrcadlení odpovědi, 4) pochvala. Nikdy nespěchejte a neopravujte přímo."
+                        },
+                        {
+                            "id": "q5",
+                            "question": "Co NENÍ typickým projevem vývojové disfázie?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Pozdní začátek řeči", "correct": False},
+                                {"id": "b", "text": "Snížená inteligence", "correct": True},
+                                {"id": "c", "text": "Malá slovní zásoba", "correct": False},
+                                {"id": "d", "text": "Záměny hlásek", "correct": False}
+                            ],
+                            "explanation": "Inteligence je při vývojové disfázii VŽDY zachovaná. To je jeden z nejdůležitějších faktů — disfázie NENÍ mentální postižení."
+                        },
+                        {
+                            "id": "q6",
+                            "question": "Přiřaďte správné a nesprávné reakce:",
+                            "type": "matching",
+                            "pairs": [
+                                {"left": "Správně: Zrcadlení", "right": "Dítě: 'kočka tam' → Vy: 'Ano, kočka je na zahradě!'"},
+                                {"left": "Správně: Pochvala snahy", "right": "'Super, že jsi mi to řekl!'"},
+                                {"left": "Špatně: Přímá oprava", "right": "'Neříká se kolomobil, říká se automobil'"},
+                                {"left": "Špatně: Srovnávání", "right": "'Tvůj kamarád už mluví líp'"}
+                            ],
+                            "explanation": "Zrcadlení a pochvala podporují komunikaci. Přímé opravy a srovnávání dítě frustrují a blokují."
                         }
                     ]
                 }
@@ -489,6 +556,36 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
                                 {"id": "c", "text": "Zlepšení je možné i po letech", "correct": True}
                             ],
                             "explanation": "Mozek je pozoruhodně plastický. I když je 'zlaté okno' v prvních 6 měsících, zlepšení je prokazatelně možné i po mnoha letech. Nikdy není pozdě začít nebo pokračovat."
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Spojte typ disfázie s jeho popisem:",
+                            "type": "matching",
+                            "pairs": [
+                                {"left": "Brocova (expresivní)", "right": "Rozumí dobře, ale těžko tvoří slova a věty"},
+                                {"left": "Wernickeho (receptivní)", "right": "Mluví plynule, ale nerozumí a slova nemají smysl"},
+                                {"left": "Smíšená (globální)", "right": "Obtíže jak s produkcí, tak s porozuměním řeči"}
+                            ],
+                            "explanation": "Brocova = problém s tvorbou řeči (levý čelní lalok), Wernickeho = problém s porozuměním (levý spánkový lalok), smíšená = postiženy obě oblasti."
+                        },
+                        {
+                            "id": "q5",
+                            "question": "Rehabilitace řeči je nejúčinnější v prvních 6 měsících po CMP.",
+                            "type": "true_false",
+                            "correct_answer": True,
+                            "explanation": "Ano, prvních 6 měsíců je tzv. 'zlaté okno', kdy je mozek nejplastičtější. ALE — zlepšení je možné i po letech, takže rehabilitace má smysl vždy."
+                        },
+                        {
+                            "id": "q6",
+                            "question": "Jaká je nejlepší reakce, když osoba s expresivní disfázií nemůže najít slovo a začíná být frustrovaná?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Říct: 'Uklidněte se a zkuste to znovu.'", "correct": False},
+                                {"id": "b", "text": "Rychle říct slovo za ni, ať se netrápí", "correct": False},
+                                {"id": "c", "text": "Klidně říct: 'Máme čas. Můžete to ukázat, nakreslit, nebo zkusíme jinak?'", "correct": True},
+                                {"id": "d", "text": "Změnit téma, aby na to zapomněla", "correct": False}
+                            ],
+                            "explanation": "Nabídněte alternativní způsoby komunikace (gesta, kreslení, psaní) a dejte najevo klid a trpělivost. Nikdy netlačte, neříkejte slovo za člověka a neměňte téma bez souhlasu."
                         }
                     ]
                 }
@@ -569,6 +666,36 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
                                 {"id": "c", "text": "Psaní zpráv", "correct": False}
                             ],
                             "explanation": "Telefonování je nejtěžší, protože chybí vizuální kanál — mimika, gesta, ukazování. Při osobním kontaktu může člověk využít všechny dostupné kanály."
+                        },
+                        {
+                            "id": "q3",
+                            "question": "Na návštěvě u lékaře s manželem, který má disfázii. Lékař se ptá manžela na příznaky, ale mluví jen na vás. Co uděláte?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Odpovíte za manžela — je to rychlejší a přesnější", "correct": False},
+                                {"id": "b", "text": "Požádáte lékaře, aby se obracel přímo na manžela, a nabídnete se jako podpora", "correct": True},
+                                {"id": "c", "text": "Nic neřeknete, ať to lékař vyřeší sám", "correct": False}
+                            ],
+                            "explanation": "Vždy komunikujte S člověkem, ne přes něj. I u lékaře má pacient právo být přímým účastníkem rozhovoru. Vy jste podpora, ne náhrada."
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Seřaďte kroky správného postupu při komunikaci s dospělým s disfázií:",
+                            "type": "ordering",
+                            "correct_order": [
+                                "Navažte oční kontakt a získejte pozornost",
+                                "Mluvte pomalu, klidně a v krátkých větách",
+                                "Počkejte na odpověď — dejte dostatek času",
+                                "Pokud nerozumíte, požádejte o zopakování nebo nabídněte alternativu (psaní, ukazování)"
+                            ],
+                            "explanation": "Klíčový je postup: pozornost → pomalá řeč → trpělivost → alternativní kanály. Nikdy nespěchejte."
+                        },
+                        {
+                            "id": "q5",
+                            "question": "S člověkem s disfázií je nejlepší mluvit hlasitěji, aby lépe rozuměl.",
+                            "type": "true_false",
+                            "correct_answer": False,
+                            "explanation": "NE! Hlasitější řeč nepomůže — problém není ve sluchu, ale ve zpracování řeči v mozku. Místo hlasitosti pomozte pomalejší řečí, kratšími větami a vizuální podporou."
                         }
                     ]
                 }
@@ -823,6 +950,25 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
                                 {"id": "c", "text": "Nehodnotit vubec a dat automaticky jednicku", "correct": False}
                             ],
                             "explanation": "Spravny pristup je hodnotit OBSAH a MYSLENKY ditete, ne jazykovou formu (krome hodin cestiny). Dite s disfazii muze mit skvele napady, i kdyz je vyjadri s gramatickymi chybami."
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Jaky je nejdulezitejsi princip pri zapojeni ditete s disfazii do kolektivu?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Osvobodit dite od vsech skupinovych aktivit", "correct": False},
+                                {"id": "b", "text": "Vysvetlit spoluzakum, co disfazie je, a zapojit dite do aktivit, kde vynikne", "correct": True},
+                                {"id": "c", "text": "Nechat dite, at si poradi samo — otuzuje to", "correct": False},
+                                {"id": "d", "text": "Preradit dite do specialni skoly", "correct": False}
+                            ],
+                            "explanation": "Klicove je informovat spoluzaky primerenou formou a najit aktivity, kde dite vynikne (sport, kresleni, hudba). Dite s disfazii patri do bezne skoly s podporou."
+                        },
+                        {
+                            "id": "q5",
+                            "question": "Dite s disfazii by nemelo mit ve skole zadne ulehceni — musí se naucit zvladat stejne naroky jako ostatni.",
+                            "type": "true_false",
+                            "correct_answer": False,
+                            "explanation": "NE! Dite s disfazii ma ze zakona narok na IVP s upravami (vice casu, jiny zpusob hodnoceni). Nejde o snizovani naroku, ale o prizpusobeni FORMY — obsah zustava stejny."
                         }
                     ]
                 }
@@ -916,6 +1062,37 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
                                 {"id": "c", "text": "Poruchy polykání", "correct": False}
                             ],
                             "explanation": "Psychiatrické příznaky jako deprese a podrážděnost se často objevují roky před viditelnými pohybovými obtížemi. Proto je důležité být na ně pozorný."
+                        },
+                        {
+                            "id": "q3",
+                            "question": "Spojte správně:",
+                            "type": "matching",
+                            "pairs": [
+                                {"left": "Genetická příčina HD", "right": "Mutace genu HTT na chromozomu 4"},
+                                {"left": "Typ dědičnosti", "right": "Autozomálně dominantní (50% šance)"},
+                                {"left": "Typický věk nástupu", "right": "30–50 let"},
+                                {"left": "Klíčový protein", "right": "Huntingtin"}
+                            ],
+                            "explanation": "HD je způsobena mutací genu HTT. Dědí se autozomálně dominantně — každé dítě postiženého rodiče má 50% šanci."
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Huntingtonova choroba se dá v současnosti vyléčit.",
+                            "type": "true_false",
+                            "correct_answer": False,
+                            "explanation": "Bohužel zatím neexistuje lék. Léčba je symptomatická — zmírňuje příznaky (mimovolní pohyby, deprese, úzkost). Probíhá intenzivní výzkum genové terapie."
+                        },
+                        {
+                            "id": "q5",
+                            "question": "Které z těchto příznaků NEJSOU typické pro Huntingtonovu chorobu?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Mimovolní pohyby (chorea)", "correct": False},
+                                {"id": "b", "text": "Změny osobnosti a nálad", "correct": False},
+                                {"id": "c", "text": "Ztráta zraku", "correct": True},
+                                {"id": "d", "text": "Potíže s polykáním", "correct": False}
+                            ],
+                            "explanation": "HD se projevuje motoricky (chorea, dystonie), psychicky (deprese, agrese) a kognitivně. Zrak nebývá přímo postižen."
                         }
                     ]
                 }
@@ -1067,6 +1244,25 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
                                 {"id": "c", "text": "Ano, kvuli detem", "correct": False}
                             ],
                             "explanation": "Rozhodnuti o genetickem testu je hluboce osobni. Neexistuje 'spravna' volba — nekteri lide chteji vedet, jini ne. Oba pristupy jsou legitimni a je treba je respektovat."
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Seřaďte správný postup při komunikaci s osobou s HD, která je podrážděná:",
+                            "type": "ordering",
+                            "correct_order": [
+                                "Zůstaňte klidní — nedávejte najevo frustraci",
+                                "Validujte emoci: 'Vidím, že jsi naštvaný'",
+                                "Nabídněte konkrétní řešení klidným hlasem",
+                                "Po zklidnění mluvte o tom, co se stalo — bez obviňování"
+                            ],
+                            "explanation": "Podrážděnost u HD je PŘÍZNAK nemoci. Klid → validace → řešení → pozdější rozbor. Nikdy nereagujte konfrontačně."
+                        },
+                        {
+                            "id": "q5",
+                            "question": "Rozhodnutí o genetickém testování na HD by mělo být vždy osobním rozhodnutím dotyčného.",
+                            "type": "true_false",
+                            "correct_answer": True,
+                            "explanation": "Ano! Genetické testování je vždy DOBROVOLNÉ. Nikdy netlačte ani jedním směrem. Před testem je povinné genetické poradenství."
                         }
                     ]
                 }
@@ -1207,6 +1403,48 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
                                 {"id": "c", "text": "Schopnost pohybu", "correct": False}
                             ],
                             "explanation": "ALS postihuje motorické neurony (svaly), ale kognitivní funkce — inteligence, paměť, vnímání a emoce — zůstávají plně zachovány."
+                        },
+                        {
+                            "id": "q2",
+                            "question": "ALS primárně postihuje:",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Smyslové orgány (zrak, sluch)", "correct": False},
+                                {"id": "b", "text": "Motorické neurony (nervové buňky ovládající svaly)", "correct": True},
+                                {"id": "c", "text": "Krevní oběh", "correct": False},
+                                {"id": "d", "text": "Kosti a klouby", "correct": False}
+                            ],
+                            "explanation": "ALS = Amyotrofická laterální skleróza. Postihuje motorické neurony — nervové buňky, které ovládají svaly. Inteligence a smysly zůstávají zachované."
+                        },
+                        {
+                            "id": "q3",
+                            "question": "Spojte správně pojmy související s ALS:",
+                            "type": "matching",
+                            "pairs": [
+                                {"left": "Eye-tracking komunikátor", "right": "Zařízení ovládané pohybem očí"},
+                                {"left": "Dysartrie", "right": "Porucha motoriky řeči (svaly)"},
+                                {"left": "Augmentativní komunikace", "right": "Podpůrné prostředky pro dorozumívání"},
+                                {"left": "Respirační selhání", "right": "Nejčastější příčina úmrtí u ALS"}
+                            ],
+                            "explanation": "Eye-tracking umožňuje komunikaci pohybem očí. Dysartrie ztěžuje řeč. Augmentativní komunikace zahrnuje všechny podpůrné prostředky."
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Inteligence lidí s ALS je zachována po celou dobu onemocnění.",
+                            "type": "true_false",
+                            "correct_answer": True,
+                            "explanation": "ANO! To je klíčové — ALS postihuje svaly, ale myšlení, paměť a osobnost zůstávají. Člověk je 'uvězněný' v nefunkčním těle. Proto je komunikace tak důležitá."
+                        },
+                        {
+                            "id": "q5",
+                            "question": "Jaký je typický průběh ALS?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Náhlý nástup, rychlé uzdravení", "correct": False},
+                                {"id": "b", "text": "Postupná ztráta svalové síly, průměrně 2–5 let", "correct": True},
+                                {"id": "c", "text": "Střídání zhoršení a zlepšení", "correct": False}
+                            ],
+                            "explanation": "ALS je progresivní — postupně oslabuje svaly. Průměrná délka přežití je 2–5 let od diagnózy, ale někteří žijí mnohem déle (Stephen Hawking: 55 let!)."
                         }
                     ]
                 }
@@ -1357,6 +1595,25 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
                             "type": "true_false",
                             "correct_answer": False,
                             "explanation": "NE! Komunikace NIKDY nekonci. Meni se jen jeji forma — od reci pres psani, gesta, komunikacni tabulky az po eye-tracking a mozkove rozhrani."
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Seřaďte fáze komunikačních pomůcek u ALS od nejranějších po nejpokročilejší:",
+                            "type": "ordering",
+                            "correct_order": [
+                                "Zpomalení řeči, důraz na artikulaci",
+                                "Tabulka s písmeny a obrázky",
+                                "Tablet nebo počítač s hlasovým výstupem",
+                                "Eye-tracking komunikátor ovládaný očima"
+                            ],
+                            "explanation": "S progresí ALS se mění komunikační potřeby: nejdřív úprava řeči → papírové pomůcky → digitální pomůcky → eye-tracking. Důležité je začít VČAS!"
+                        },
+                        {
+                            "id": "q5",
+                            "question": "Nejhorší reakce na nesrozumitelnou řeč osoby s ALS je předstírat, že rozumíte.",
+                            "type": "true_false",
+                            "correct_answer": True,
+                            "explanation": "ANO! Předstírání porozumění je nejhorší — osoba to pozná a cítí se neviditelná. Vždy řekněte upřímně, že nerozumíte, a nabídněte alternativu."
                         }
                     ]
                 }
@@ -1525,6 +1782,25 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
                                 {"id": "c", "text": "Vaskulární demence", "correct": False}
                             ],
                             "explanation": "Frontotemporální demence typicky začíná změnami osobnosti a chování — ztráta empatie, nevhodné chování — zatímco paměť může být dlouho zachovaná."
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Spojte typ demence s jeho hlavní charakteristikou:",
+                            "type": "matching",
+                            "pairs": [
+                                {"left": "Alzheimerova choroba", "right": "Nejčastější typ, postupná ztráta paměti"},
+                                {"left": "Vaskulární demence", "right": "Způsobena poruchami krevního oběhu v mozku"},
+                                {"left": "Lewy body demence", "right": "Zrakové halucinace, kolísání pozornosti"},
+                                {"left": "Frontotemporální demence", "right": "Změny osobnosti a chování jako první příznak"}
+                            ],
+                            "explanation": "Každý typ demence má odlišný průběh a projevy. Správná diagnóza je klíčová pro vhodnou léčbu a péči."
+                        },
+                        {
+                            "id": "q5",
+                            "question": "Demence je normální součástí stárnutí.",
+                            "type": "true_false",
+                            "correct_answer": False,
+                            "explanation": "NE! Demence NENÍ normální stárnutí. Je to onemocnění mozku. Zapomínání klíčů je normální — zapomínání, k čemu klíče slouží, už ne."
                         }
                     ]
                 }
@@ -1635,6 +1911,35 @@ Nepředstírejte, že rozumíte, když nerozumíte — je to horší než se zep
                             "type": "true_false",
                             "correct_answer": True,
                             "explanation": "Ano! I v pokročilém stádiu člověk vnímá emoce — laskavý dotek a klidný hlas ho uklidní. Emocionální vnímání přetrvává nejdéle."
+                        },
+                        {
+                            "id": "q3",
+                            "question": "Seřaďte stádia Alzheimerovy choroby od nejranějšího po nejpokročilejší:",
+                            "type": "ordering",
+                            "correct_order": [
+                                "Mírné: zapomínání jmen, hledání slov, dezorientace v novém prostředí",
+                                "Střední: potřeba pomoci s oblékáním, nepoznává blízké, bloudění",
+                                "Těžké: úplná závislost na péči, ztráta řeči, neschopnost samostatného pohybu"
+                            ],
+                            "explanation": "Alzheimer postupuje od mírných potíží s pamětí přes střední stádium (potřeba pomoci) až po těžké stádium (úplná závislost). Průběh trvá průměrně 8–12 let."
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Jak nejlépe reagovat, když osoba s Alzheimerem opakovaně klade stejnou otázku?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Odpovědět trpělivě pokaždé znovu, jako by to slyšeli poprvé", "correct": True},
+                                {"id": "b", "text": "Říct: 'To jsi se už ptal/a, odpověděl/a jsem ti'", "correct": False},
+                                {"id": "c", "text": "Ignorovat opakované otázky", "correct": False}
+                            ],
+                            "explanation": "Osoba s demencí si opravdu nepamatuje, že se ptala. Pro ni je to poprvé. Trpělivá odpověď snižuje úzkost a dává pocit bezpečí."
+                        },
+                        {
+                            "id": "q5",
+                            "question": "Člověku s demencí v pozdním stádiu je nejlepší připomínat, že jeho blízcí již nežijí.",
+                            "type": "true_false",
+                            "correct_answer": False,
+                            "explanation": "NIKDY! Každé sdělení o smrti blízkého prožívá člověk s demencí ZNOVU, jako by to slyšel poprvé. Je lepší vstoupit do jeho reality a přesměrovat na pozitivní vzpomínky."
                         }
                     ]
                 }
@@ -1743,6 +2048,36 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                                 {"id": "c", "text": "Vaskulární demence", "correct": True}
                             ],
                             "explanation": "Vaskulární demence vzniká kvůli cévním problémům, které lze předcházet — kontrola krevního tlaku, cukrovky, cholesterolu a pravidelný pohyb."
+                        },
+                        {
+                            "id": "q3",
+                            "question": "Proč jsou neuroleptika nebezpečná u demence s Lewyho tělísky?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Mohou způsobit závažnou alergickou reakci", "correct": False},
+                                {"id": "b", "text": "Mohou výrazně zhoršit příznaky a být život ohrožující", "correct": True},
+                                {"id": "c", "text": "Nemají žádný účinek", "correct": False}
+                            ],
+                            "explanation": "⚠️ KRITICKÉ: Neuroleptika mohou u Lewy body demence způsobit neuroleptický maligní syndrom — potenciálně smrtelnou reakci. Vždy informujte lékaře o typu demence!"
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Při vizuálních halucinacích u Lewy body demence je nejlepší halucinaci popřít — 'Tam nikdo není'.",
+                            "type": "true_false",
+                            "correct_answer": False,
+                            "explanation": "NE! Popírání zvyšuje úzkost. Správně: validujte EMOCI ('vidím, že vás to znepokojuje'), nepopírejte realitu, a přesměrujte pozornost (změna místnosti, činnost)."
+                        },
+                        {
+                            "id": "q5",
+                            "question": "Přiřaďte typ demence ke správnému popisu:",
+                            "type": "matching",
+                            "pairs": [
+                                {"left": "Lewy body demence", "right": "Zrakové halucinace + parkinsonismus"},
+                                {"left": "Vaskulární demence", "right": "Skokovité zhoršování, často po mini-mrtvicích"},
+                                {"left": "Frontotemporální demence", "right": "Změny chování, ztráta empatie"},
+                                {"left": "Parkinsonova demence", "right": "Demence vznikající u pacientů s Parkinsonem"}
+                            ],
+                            "explanation": "Každý typ má specifické projevy. Lewy body = halucinace, vaskulární = skoky, frontotemporální = osobnost, Parkinson demence = u existujícího Parkinsona."
                         }
                     ]
                 }
@@ -1859,6 +2194,25 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                                 {"id": "c", "text": "Oslabené obličejové svaly — emoce cítí, ale nedokáže je vyjádřit", "correct": True}
                             ],
                             "explanation": "Maskový obličej (hypomimie) je příznak Parkinsona — obličejové svaly jsou oslabeny. Člověk CÍTÍ emoce plně, jen je nedokáže vyjádřit mimikou."
+                        },
+                        {
+                            "id": "q3",
+                            "question": "Který typ demence se typicky projevuje NEJDŘÍVE změnami osobnosti a chování, nikoliv pamětí?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Alzheimerova choroba", "correct": False},
+                                {"id": "b", "text": "Frontotemporální demence (FTD)", "correct": True},
+                                {"id": "c", "text": "Vaskulární demence", "correct": False},
+                                {"id": "d", "text": "Lewy body demence", "correct": False}
+                            ],
+                            "explanation": "FTD je unikátní tím, že první příznaky jsou změny chování a osobnosti — ne paměti. Člověk může být hrubý, ztratit empatii, nebo se chovat nevhodně."
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Frontotemporální demence postihuje nejčastěji lidi nad 80 let.",
+                            "type": "true_false",
+                            "correct_answer": False,
+                            "explanation": "NE! FTD má typicky RANĚJŠÍ nástup než Alzheimer — často mezi 45–65 lety. To ji dělá obzvlášť tragickou pro rodiny."
                         }
                     ]
                 }
@@ -2070,6 +2424,25 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                                 {"id": "c", "text": "Mel by prestst pecovat a najit profesioonala", "correct": False}
                             ],
                             "explanation": "Pocit viny je u pecovatelu zcela normalni a NENI to selhani. Spravna reakce je priznat si unavu, pozadat o pomoc a pravidelne vyuzivat respitni peci."
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Seřaďte kroky prevence vyhoření pečujícího:",
+                            "type": "ordering",
+                            "correct_order": [
+                                "Přijměte, že nemůžete vše zvládnout sami",
+                                "Požádejte rodinu nebo služby o pravidelnou výpomoc",
+                                "Najděte si alespoň jednu aktivitu jen pro sebe",
+                                "Pravidelně konzultujte svůj stav s odborníkem (psycholog, podpůrná skupina)"
+                            ],
+                            "explanation": "Prevence vyhoření vyžaduje systém: přijetí limitů → delegování → vlastní aktivity → profesionální podpora. Pečující musí pečovat i o sebe."
+                        },
+                        {
+                            "id": "q5",
+                            "question": "Pečující, který občas cítí hněv nebo frustraci vůči osobě s demencí, je špatný pečující.",
+                            "type": "true_false",
+                            "correct_answer": False,
+                            "explanation": "NE! Hněv a frustrace jsou NORMÁLNÍ emoce. Každý pečující je zažívá. Důležité je tyto emoce rozpoznat, nejednat pod jejich vlivem, a vyhledat podporu."
                         }
                     ]
                 }
@@ -2402,6 +2775,19 @@ def submit_quiz(course_id, module_id):
         elif q["type"] == "true_false":
             expected = "true" if q["correct_answer"] else "false"
             is_correct = user_answer == expected
+        elif q["type"] == "matching":
+            # user_answer should be dict: {"left_value": "right_value", ...}
+            if isinstance(user_answer, dict):
+                correct_pairs = {p["left"]: p["right"] for p in q.get("pairs", [])}
+                is_correct = user_answer == correct_pairs
+            else:
+                is_correct = False
+        elif q["type"] == "ordering":
+            # user_answer should be list of items in user's order
+            if isinstance(user_answer, list):
+                is_correct = user_answer == q.get("correct_order", [])
+            else:
+                is_correct = False
 
         if is_correct:
             correct_count += 1
@@ -4867,5 +5253,306 @@ def student_my_teacher():
         "success": True,
         "teachers": teachers,
         "teacher_notes": notes[-10:],  # last 10 notes
+        "timestamp": now_iso()
+    })
+
+
+# ============================================
+# 📋 CONVENIENCE LISTING ENDPOINTS — v252
+# ============================================
+
+
+@education_bp.route('/api/education/courses/<course_id>/modules', methods=['GET'])
+def list_course_modules(course_id):
+    """Seznam modulů kurzu (bez obsahu lekcí — compact)"""
+    course = EDUCATION_COURSES.get(course_id)
+    if not course:
+        return jsonify({"success": False, "error": f"Kurz '{course_id}' nenalezen"}), 404
+
+    modules = []
+    for m in course.get("modules", []):
+        quiz = m.get("quiz")
+        modules.append({
+            "id": m["id"],
+            "title": m["title"],
+            "order": m.get("order", 0),
+            "duration_minutes": m.get("duration_minutes", 0),
+            "icon": m.get("icon", "📚"),
+            "lessons_count": len(m.get("lessons", [])),
+            "has_quiz": quiz is not None,
+            "quiz_questions_count": len(quiz.get("questions", [])) if quiz else 0
+        })
+
+    return jsonify({
+        "success": True,
+        "course_id": course_id,
+        "course_title": course["title"],
+        "modules": modules,
+        "total_modules": len(modules),
+        "timestamp": now_iso()
+    })
+
+
+@education_bp.route('/api/education/courses/<course_id>/modules/<module_id>/lessons', methods=['GET'])
+def list_module_lessons(course_id, module_id):
+    """Seznam lekcí modulu (bez plného HTML obsahu — compact)"""
+    course = EDUCATION_COURSES.get(course_id)
+    if not course:
+        return jsonify({"success": False, "error": f"Kurz '{course_id}' nenalezen"}), 404
+
+    module = next((m for m in course.get("modules", []) if m["id"] == module_id), None)
+    if not module:
+        return jsonify({"success": False, "error": f"Modul '{module_id}' nenalezen"}), 404
+
+    lessons = []
+    for l in module.get("lessons", []):
+        lessons.append({
+            "id": l["id"],
+            "title": l["title"],
+            "type": l.get("type", "article"),
+            "key_points": l.get("key_points", []),
+            "has_content": bool(l.get("content"))
+        })
+
+    return jsonify({
+        "success": True,
+        "course_id": course_id,
+        "module_id": module_id,
+        "module_title": module["title"],
+        "lessons": lessons,
+        "total_lessons": len(lessons),
+        "timestamp": now_iso()
+    })
+
+
+# ============================================
+# 🎓 CERTIFICATE ENDPOINT — v252
+# ============================================
+
+
+@education_bp.route('/api/education/certificate/<user_id>/<course_id>', methods=['GET'])
+def get_certificate(user_id, course_id):
+    """Certifikát o dokončení kurzu — ověří, že student prošel všechny moduly"""
+    course = EDUCATION_COURSES.get(course_id)
+    if not course:
+        return jsonify({"success": False, "error": f"Kurz '{course_id}' nenalezen"}), 404
+
+    modules = course.get("modules", [])
+    progress = _db_get_progress(user_id)
+    course_progress = progress.get(course_id, {})
+    quiz_scores = course_progress.get("quiz_scores", {})
+    completed_modules = course_progress.get("completed_modules", [])
+    completed_lessons = course_progress.get("completed_lessons", [])
+
+    # Check each module
+    module_results = []
+    all_passed = True
+    total_score = 0
+    quizzes_taken = 0
+    missing_modules = []
+
+    for m in modules:
+        mid = m["id"]
+        quiz = m.get("quiz")
+        has_quiz = quiz is not None
+
+        # Score for this module
+        mod_score = quiz_scores.get(mid)
+        if has_quiz:
+            if mod_score is not None and isinstance(mod_score, (int, float)):
+                passed = mod_score >= 60
+                total_score += mod_score
+                quizzes_taken += 1
+            else:
+                passed = False
+                missing_modules.append({"module_id": mid, "title": m["title"], "reason": "Kvíz nebyl dokončen"})
+        else:
+            # Module without quiz — check if lessons completed
+            passed = mid in completed_modules
+
+        if not passed:
+            all_passed = False
+            if has_quiz and mod_score is not None and mod_score < 60:
+                missing_modules.append({"module_id": mid, "title": m["title"], "reason": f"Skóre {mod_score}% (minimum 60%)"})
+
+        module_results.append({
+            "module_id": mid,
+            "title": m["title"],
+            "quiz_score": mod_score,
+            "passed": passed
+        })
+
+    avg_score = round(total_score / quizzes_taken, 1) if quizzes_taken > 0 else 0
+    profile = _get_adaptive_profile(user_id)
+
+    # Count total lessons
+    total_lessons = sum(len(m.get("lessons", [])) for m in modules)
+
+    if all_passed:
+        cert_date = now_iso()[:10].replace('-', '')
+        certificate_id = f"CERT-{course_id.upper()[:3]}-{str(user_id)[:8]}-{cert_date}"
+
+        return jsonify({
+            "success": True,
+            "eligible": True,
+            "certificate": {
+                "certificate_id": certificate_id,
+                "user_id": user_id,
+                "course_id": course_id,
+                "course_title": course["title"],
+                "completed_at": now_iso(),
+                "all_modules_completed": True,
+                "avg_quiz_score": avg_score,
+                "total_lessons": total_lessons,
+                "total_quizzes": quizzes_taken,
+                "level": profile["level"],
+                "badges_earned": profile.get("badges", []),
+                "modules": module_results
+            },
+            "timestamp": now_iso()
+        })
+    else:
+        return jsonify({
+            "success": True,
+            "eligible": False,
+            "message": "Kurz ještě není dokončen",
+            "missing": missing_modules,
+            "progress": {
+                "modules_passed": sum(1 for r in module_results if r["passed"]),
+                "modules_total": len(modules),
+                "avg_quiz_score": avg_score,
+                "quizzes_taken": quizzes_taken,
+                "modules": module_results
+            },
+            "timestamp": now_iso()
+        })
+
+
+# ============================================
+# 📊 QUIZ RESULT + ADAPTIVE RECOMMENDATIONS — v252
+# ============================================
+
+
+@education_bp.route('/api/education/quiz-result/<user_id>/<course_id>/<module_id>', methods=['GET'])
+def get_quiz_result(user_id, course_id, module_id):
+    """Detailní výsledek kvízu s adaptivními doporučeními"""
+    course = EDUCATION_COURSES.get(course_id)
+    if not course:
+        return jsonify({"success": False, "error": f"Kurz '{course_id}' nenalezen"}), 404
+
+    module = next((m for m in course.get("modules", []) if m["id"] == module_id), None)
+    if not module:
+        return jsonify({"success": False, "error": f"Modul '{module_id}' nenalezen"}), 404
+
+    quiz = module.get("quiz")
+    if not quiz:
+        return jsonify({"success": False, "error": "Tento modul nemá kvíz"}), 404
+
+    progress = _db_get_progress(user_id)
+    course_progress = progress.get(course_id, {})
+    quiz_scores = course_progress.get("quiz_scores", {})
+    score = quiz_scores.get(module_id)
+
+    profile = _get_adaptive_profile(user_id)
+
+    # Find module position
+    module_ids = [m["id"] for m in course.get("modules", [])]
+    current_idx = module_ids.index(module_id) if module_id in module_ids else 0
+
+    # Adaptive recommendations
+    recommendations = []
+    next_module = None
+
+    if score is None:
+        recommendations.append({
+            "type": "start",
+            "message": "Ještě jste neabsolvovali tento kvíz. Projděte si nejdřív lekce a pak zkuste kvíz.",
+            "action": "study_lessons",
+            "target": module_id
+        })
+    elif score < 60:
+        # Failed — recommend reviewing lessons
+        recommendations.append({
+            "type": "review",
+            "message": f"Skóre {score}% — doporučujeme si projít lekce znovu a zkusit kvíz později.",
+            "action": "review_lessons",
+            "target": module_id
+        })
+        # Highlight weak areas from quiz questions
+        weak_topics = module.get("lessons", [])
+        for lesson in weak_topics:
+            recommendations.append({
+                "type": "lesson",
+                "message": f"Zopakujte: {lesson['title']}",
+                "action": "study_lesson",
+                "target": lesson["id"]
+            })
+    elif score < 90:
+        # Passed but room for improvement
+        recommendations.append({
+            "type": "good",
+            "message": f"Dobré skóre {score}%! Můžete pokračovat dál nebo si zkusit zlepšit výsledek.",
+            "action": "continue"
+        })
+        if current_idx + 1 < len(module_ids):
+            next_mid = module_ids[current_idx + 1]
+            next_mod = next((m for m in course["modules"] if m["id"] == next_mid), None)
+            if next_mod:
+                next_module = {"module_id": next_mid, "title": next_mod["title"]}
+                recommendations.append({
+                    "type": "next",
+                    "message": f"Pokračujte na: {next_mod['title']}",
+                    "action": "next_module",
+                    "target": next_mid
+                })
+    else:
+        # Excellent!
+        recommendations.append({
+            "type": "excellent",
+            "message": f"Výborné skóre {score}%! Skvělé zvládnutí tématu.",
+            "action": "continue"
+        })
+        if current_idx + 1 < len(module_ids):
+            next_mid = module_ids[current_idx + 1]
+            next_mod = next((m for m in course["modules"] if m["id"] == next_mid), None)
+            if next_mod:
+                next_module = {"module_id": next_mid, "title": next_mod["title"]}
+                recommendations.append({
+                    "type": "next",
+                    "message": f"Pokračujte na pokročilejší téma: {next_mod['title']}",
+                    "action": "next_module",
+                    "target": next_mid
+                })
+        # Suggest other courses
+        for other_cid, other_course in EDUCATION_COURSES.items():
+            if other_cid != course_id:
+                other_progress = progress.get(other_cid, {})
+                if not other_progress.get("completed_modules"):
+                    recommendations.append({
+                        "type": "explore",
+                        "message": f"Vyzkoušejte další kurz: {other_course['title']}",
+                        "action": "new_course",
+                        "target": other_cid
+                    })
+                    break
+
+    return jsonify({
+        "success": True,
+        "user_id": user_id,
+        "course_id": course_id,
+        "module_id": module_id,
+        "module_title": module["title"],
+        "quiz_title": quiz["title"],
+        "score": score,
+        "passed": score is not None and score >= 60,
+        "total_questions": len(quiz["questions"]),
+        "question_types": list(set(q["type"] for q in quiz["questions"])),
+        "next_module": next_module,
+        "recommendations": recommendations,
+        "profile": {
+            "level": profile["level"],
+            "avg_score": profile["avg_score"],
+            "badges": profile.get("badges", [])
+        },
         "timestamp": now_iso()
     })
