@@ -213,16 +213,9 @@ def extract_text_from_response(response):
     return "\n".join(text_parts)
 
 def get_greeting():
-    """Získat pozdrav podle denní doby"""
-    hour = datetime.now().hour
-    if 5 <= hour < 12:
-        return "Dobré ráno! ☀️"
-    elif 12 <= hour < 18:
-        return "Dobré odpoledne! 🌤️"
-    elif 18 <= hour < 22:
-        return "Dobrý večer! 🌙"
-    else:
-        return "Dobrou noc! 🌟"
+    """Získat pozdrav podle denní doby — delegates to radim_shared"""
+    from radim_shared import get_greeting as _shared_greeting
+    return _shared_greeting(with_emoji=True)
 
 # ============================================================================
 # ROUTES
@@ -233,9 +226,7 @@ def health_check():
     """Health check for Claude AI service"""
     return jsonify({
         "status": "healthy" if ANTHROPIC_API_KEY else "degraded",
-        "service": "Claude AI for RadimCare",
-        "model": CLAUDE_MODEL,
-        "anthropic_configured": bool(ANTHROPIC_API_KEY),
+        "service": "claude-ai",
         "timestamp": datetime.utcnow().isoformat()
     })
 
@@ -418,7 +409,7 @@ def chat_with_radim():
         })
 
 @claude_bp.route('/news', methods=['POST'])
-@optional_auth
+@require_auth
 def get_news():
     """📰 Získat aktuální české zprávy"""
     category = 'general'
@@ -521,7 +512,7 @@ Dnešní datum: {info['date']}"""
         })
 
 @claude_bp.route('/weather', methods=['GET'])
-@optional_auth
+@require_auth
 def get_weather():
     """🌤️ Získat aktuální počasí"""
     location = request.args.get('location', 'Praha')
@@ -725,7 +716,7 @@ FORMÁT (pouze JSON):
         })
 
 @claude_bp.route('/dashboard-data', methods=['GET'])
-@optional_auth
+@require_auth
 def get_dashboard_data():
     """📊 Všechna data pro dashboard"""
     info = get_today_info()
@@ -839,7 +830,6 @@ Kontext: Péče o seniory. Buď citlivý k implicitním emocím."""
             "success": True,
             "emotions": analyze_emotions_local(text if text else ''),
             "source": "fallback",
-            "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
         })
 
@@ -964,7 +954,7 @@ def get_consciousness_state():
         logger.error(f"Consciousness state error: {e}")
         return jsonify({
             "success": False,
-            "error": str(e),
+            "error": "Interní chyba služby",
             "harmony": 0.5,
             "crisis_level": 0,
             "speech_params": {"rate": 0.9, "pitch": 0, "pause_ms": 300, "empathy_level": 0.5},
@@ -1010,7 +1000,7 @@ def save_memory_note():
 
     except Exception as e:
         logger.error(f"Memory save error: {e}")
-        return jsonify({"success": False, "error": str(e)})
+        return jsonify({"success": False, "error": "Nepodařilo se uložit vzpomínku"})
 
 
 @claude_bp.route('/memory/recall', methods=['POST'])
@@ -1041,7 +1031,7 @@ def recall_memory():
 
     except Exception as e:
         logger.error(f"Memory recall error: {e}")
-        return jsonify({"success": False, "error": str(e), "memories": []})
+        return jsonify({"success": False, "error": "Nepodařilo se vybavit vzpomínky", "memories": []})
 
 
 # ============================================================================

@@ -1,5 +1,5 @@
 # ============================================
-# 🔐 AUTH MIDDLEWARE v1.0.0
+# 🔐 AUTH MIDDLEWARE v1.1.0
 # JWT ověření pro Radim Brain API
 # Token pochází z WordPress (radimcare.cz)
 # ============================================
@@ -10,11 +10,20 @@ import hmac
 import hashlib
 import base64
 import time
+import logging
 from functools import wraps
 from flask import request, jsonify, g
 
+logger = logging.getLogger(__name__)
+
 # JWT secret — musí být STEJNÝ jako KAFANEK_JWT_SECRET v wp-config.php
-WP_JWT_SECRET = os.environ.get('WP_JWT_SECRET', 'change-this-secret-key')
+WP_JWT_SECRET = os.environ.get('WP_JWT_SECRET')
+if not WP_JWT_SECRET:
+    logger.warning("⚠️ WP_JWT_SECRET not set — JWT auth will reject all tokens!")
+    WP_JWT_SECRET = None  # Forces all decode_jwt() calls to return None
+
+# Maximum token lifetime (30 days)
+MAX_TOKEN_AGE = 30 * 24 * 3600
 
 
 def _base64url_decode(data):
@@ -36,6 +45,9 @@ def decode_jwt(token):
     Vrací payload dict nebo None.
     """
     try:
+        if not WP_JWT_SECRET:
+            return None  # No secret configured — reject all tokens
+
         parts = token.split('.')
         if len(parts) != 3:
             return None
@@ -55,8 +67,13 @@ def decode_jwt(token):
         payload = json.loads(_base64url_decode(payload_b64))
 
         # Zkontroluj expiraci
-        if 'exp' in payload and payload['exp'] < time.time():
-            return None
+        now = time.time()
+        if 'exp' in payload:
+            if payload['exp'] < now:
+                return None  # Token expired
+            if payload['exp'] - now > MAX_TOKEN_AGE:
+                return None  # Token too long-lived (>30 days)
+        # Tokens without exp are accepted (WordPress compatibility)
 
         return payload
 

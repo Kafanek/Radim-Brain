@@ -155,42 +155,13 @@ def _fetch_weather_context():
 
 
 def _build_time_context():
-    """Sestaví časový kontext pro system prompt (den, hodina, svátek, počasí)."""
+    """Sestaví časový kontext pro system prompt — delegates to radim_shared + adds weather."""
     try:
-        now = datetime.now()
-        hour = now.hour
-
-        if 5 <= hour < 12:
-            time_of_day = "Je ráno"
-        elif 12 <= hour < 18:
-            time_of_day = "Je odpoledne"
-        elif 18 <= hour < 22:
-            time_of_day = "Je večer"
-        else:
-            time_of_day = "Je noc"
-
-        day_names = ['pondělí', 'úterý', 'středa', 'čtvrtek', 'pátek', 'sobota', 'neděle']
-        month_names = ['ledna', 'února', 'března', 'dubna', 'května', 'června',
-                       'července', 'srpna', 'září', 'října', 'listopadu', 'prosince']
-
-        # Jmeniny — reuse z claude_routes pokud dostupné
-        nameday = "neznámý"
-        try:
-            from claude_routes import NAMEDAY_CALENDAR
-            nameday = NAMEDAY_CALENDAR.get(now.month, {}).get(now.day, "neznámý")
-        except ImportError:
-            pass
-
-        # Státní svátky
-        holiday = _CZECH_HOLIDAYS.get((now.month, now.day), "")
-        holiday_note = f"\nDnes je státní svátek: {holiday}." if holiday else ""
-
-        # Počasí
+        from radim_shared import build_time_context_string
+        base = build_time_context_string()
+        # Orchestrator adds weather context on top
         weather = _fetch_weather_context()
-
-        return (f"{time_of_day}. Dnes je {day_names[now.weekday()]} "
-                f"{now.day}. {month_names[now.month - 1]} {now.year}. "
-                f"Svátek má {nameday}.{holiday_note}{weather}")
+        return f"{base}{weather}"
     except Exception as e:
         print(f"Time context warning: {e}")
         return ""

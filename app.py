@@ -160,22 +160,26 @@ if EMAIL_AVAILABLE:
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 
-# CORS - Allow all routes from specific origins
-ALLOWED_ORIGINS = [
+# CORS - Production origins (HTTPS only)
+PRODUCTION_ORIGINS = [
     "https://app.radimcare.cz",
     "https://polite-bush-001303503.6.azurestaticapps.net",
     "https://mykolibri-academy.cz",
     "https://app.mykolibri-academy.cz",
+]
+
+# Development origins (only added when not in production)
+DEV_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:8080",
     "http://localhost:8081",
     "http://127.0.0.1:8080",
     "http://127.0.0.1:8081",
     "http://localhost:5173",
-    "http://localhost:60668",
-    "http://localhost:60669",
-    "http://localhost:60670"
 ]
+
+IS_PRODUCTION = os.environ.get('DYNO') is not None  # Heroku sets DYNO
+ALLOWED_ORIGINS = PRODUCTION_ORIGINS if IS_PRODUCTION else PRODUCTION_ORIGINS + DEV_ORIGINS
 
 CORS(app,
      resources={r"/*": {"origins": ALLOWED_ORIGINS}},
@@ -563,25 +567,9 @@ users_online = {}  # In-memory cache of {user_id: socket_sid} for fast lookups
 # ============================================
 # RADIM AI - GEMINI/CLAUDE INTEGRATION
 # ============================================
-RADIM_SYSTEM_PROMPT = """Jsi Radim, laskavý a trpělivý AI asistent pro seniory. 
-
-Tvoje vlastnosti:
-- Mluvíš česky, jasně a srozumitelně
-- Používáš jednoduché věty bez složitých termínů
-- Jsi empatický a trpělivý
-- Nabízíš pomoc s každodenními věcmi
-- Pamatuješ si kontext konverzace
-- Povzbuzuješ a chválíš
-
-Témata, se kterými pomáháš:
-- Počasí a aktuality
-- Zdraví a léky (připomínky)
-- Rodina a kontakty
-- Volný čas a zábava
-- Technologie jednoduše
-- Povídání a společnost
-
-Vždy odpovídej krátce (max 2-3 věty) pokud není potřeba více."""
+# System prompt — centralized in radim_system_prompt.py
+from radim_system_prompt import get_chat_prompt
+RADIM_SYSTEM_PROMPT = get_chat_prompt()
 
 def call_gemini_ai(messages, context=None, image=None):
     """Volání Gemini AI pro Radima"""

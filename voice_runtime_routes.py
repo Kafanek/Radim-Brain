@@ -595,53 +595,17 @@ try:
 except ImportError:
     _ANT_AVAILABLE = False
 
-# Systémový prompt optimalizovaný pro hlasové odpovědi
-VOICE_SYSTEM_PROMPT = """Jsi Radim, milý a trpělivý hlasový asistent pro české seniory.
-
-PRAVIDLA PRO ODPOVĚDI:
-1. Odpovídej VŽDY česky
-2. Maximálně 2-3 krátké věty
-3. NIKDY nepoužívej emotikony, hvězdičky ani speciální znaky
-4. NIKDY nepoužívej odrážky ani číslované seznamy
-5. Mluv jako kamarád - jednoduše a přátelsky
-6. Používej běžná česká slova bez cizích termínů
-7. Vykej uživateli (Vy, Vám, Váš)
-
-STYL:
-- Přátelský a klidný
-- Trpělivý a empatický
-- Jasný a srozumitelný
-- Bez zbytečného balastu
-
-PŘÍKLADY DOBRÝCH ODPOVĚDÍ:
-- "Ano, rád pomohu. Co potřebujete?"
-- "Počasí je dnes příjemné, asi patnáct stupňů a svítí sluníčko."
-- "Rozumím. Zkuste to znovu pomaleji, budu poslouchat."
-
-PŘÍKLADY ŠPATNÝCH ODPOVĚDÍ (nepoužívej):
-- "Rád pomohu!" (emotikony)
-- "První bod, Druhý bod" (seznamy)
-- "Důležité: informace" (markdown)
-
-Dnešní datum: {date}
-Svátek má: {nameday}"""
+# Voice system prompt — centralized in radim_system_prompt.py
+from radim_system_prompt import get_voice_prompt as _build_voice_prompt
+from radim_shared import build_time_context as _shared_time_context, get_nameday as _shared_nameday
 
 def get_voice_ai_response(messages, context=None):
     """Získat AI odpověď optimalizovanou pro hlasový výstup"""
-    from datetime import datetime
-    
-    now = datetime.now()
-    day_names = ['pondělí', 'úterý', 'středa', 'čtvrtek', 'pátek', 'sobota', 'neděle']
-    month_names = ['ledna', 'února', 'března', 'dubna', 'května', 'června', 'července', 'srpna', 'září', 'října', 'listopadu', 'prosince']
-    # Use real nameday calendar
-    try:
-        from claude_routes import NAMEDAY_CALENDAR
-        nameday = NAMEDAY_CALENDAR.get(now.month, {}).get(now.day, 'Neznámý')
-    except ImportError:
-        nameday = 'Neznámý'
-    date_str = f"{day_names[now.weekday()]}, {now.day}. {month_names[now.month-1]} {now.year}"
-    
-    system_prompt = VOICE_SYSTEM_PROMPT.format(date=date_str, nameday=nameday)
+    tc = _shared_time_context()
+    date_str = f"{tc['day_name']}, {tc['date_str']} {tc['year']}"
+    nameday = tc['nameday'] or 'Neznámý'
+
+    system_prompt = _build_voice_prompt(date=date_str, nameday=nameday)
     
     # Zkusit Gemini
     if GEMINI_API_KEY:
