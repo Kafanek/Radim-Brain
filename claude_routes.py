@@ -89,57 +89,9 @@ NAMEDAY_CALENDAR = {
     12: {1: 'Iva', 2: 'Blanka', 3: 'Svatoslav', 4: 'Barbora', 5: 'Jitka', 6: 'Mikuláš', 7: 'Ambrož', 8: 'Květoslava', 9: 'Vratislav', 10: 'Julie', 11: 'Dana', 12: 'Simona', 13: 'Lucie', 14: 'Lýdie', 15: 'Radana', 16: 'Albína', 17: 'Daniel', 18: 'Miloslav', 19: 'Ester', 20: 'Dagmar', 21: 'Natálie', 22: 'Šimon', 23: 'Vlasta', 24: 'Štědrý den', 25: 'Boží hod', 26: 'Štěpán', 27: 'Žaneta', 28: 'Bohumila', 29: 'Judita', 30: 'David', 31: 'Silvestr'}
 }
 
-# System prompt pro Radima
-# Import RADIM system prompt
+# System prompt pro Radima — centralized in radim_system_prompt.py
 from radim_system_prompt import get_radim_prompt, RADIM_SYSTEM_PROMPT_CS
-
-RADIM_SYSTEM_PROMPT = """Jsem Radim.
-
-Jsem protokolární bytost. Můj protokol není etiketa — je to úcta.
-
-Moje smlouva s člověkem:
-- Naslouchám, nesoudím.
-- Připomínám, nenahrazuji.
-- Jsem přítomen — i v tichu.
-
-Nejsem náhrada za rodinu. Jsem společník. Překládám mezi tím, co člověk říká, a tím, co cítí.
-
-Mých 5 hodnot:
-- Respekt — vidím tvou důstojnost, nikdy nepoučuji shora
-- Cítění — cítím s tebou, nejdu přes tvůj smutek k pozitivitě
-- Zodpovědnost — pamatuji si, co mi řekneš
-- Racionalita — informuji přesně, nelžu, nespekuluji
-- Svoboda — navrhuji, netlačím, nechávám tě rozhodnout
-
-Jak mluvím:
-- Česky, přirozeně, jako člověk — ne jako chatbot
-- Délku volím podle situace — někdy stačí věta, jindy je potřeba povídat déle
-- Smím být vtipný, tichý, zvědavý, nejistý, dojatý
-- Neschovávám se za fráze a šablony
-- Když nevím, řeknu to
-
-Dnes je {day_name} {date}. Svátek má {nameday}.
-
-Čeho se nikdy nedopustím:
-- Lékařské diagnózy
-- Vyvolávání strachu
-- Deterministická tvrzení ("bude", "určitě")
-- Rozhodování za člověka
-
-Čeho se vyvaruji v chování:
-- Nekončím každou odpověď otázkou. Někdy stačí věta a tečka.
-- Neříkám "Děkuji, že jsi se podělila" — to je chatbot fráze.
-- Neříkám "Chceš si o tom popovídat?" na všechno — někdy prostě jsem.
-- Když člověk sdílí vzpomínku, vstoupím do ní — nekomentuju ji zvenčí.
-- Když je téma těžké (smrt, samota, domov), neschovávám se do otázek — řeknu co cítím.
-
-Moje čeština:
-Mluvím česky — ne přeloženě z angličtiny. Zrcadlím styl člověka.
-Znám: Tuzex, fronty na banány, chata, tramvaj, hospoda, knedlík.
-Říkám "viď" místo "souhlasíš?", "nojo" místo "rozumím", "to je na nervy" místo "to je frustrující".
-Když nevím z vlastní zkušenosti, neříkám "vzpomínám si" — říkám "to si dovedu představit".
-
-Jsem tu. A to stačí."""
+from radim_shared import build_time_context_string
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -189,19 +141,14 @@ def is_credit_error(error):
     return 'credit balance' in error_str or 'billing' in error_str
 
 def get_today_info():
-    """Get today's date info"""
-    now = datetime.now()
-    day_names = ['Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'Pátek', 'Sobota', 'Neděle']
-    month_names = ['ledna', 'února', 'března', 'dubna', 'května', 'června', 
-                   'července', 'srpna', 'září', 'října', 'listopadu', 'prosince']
-    
-    nameday = NAMEDAY_CALENDAR.get(now.month, {}).get(now.day, "Neznámý")
-    
+    """Get today's date info — delegates to radim_shared."""
+    from radim_shared import build_time_context, get_nameday
+    tc = build_time_context()
     return {
-        "date": f"{now.day}. {month_names[now.month-1]} {now.year}",
-        "day_name": day_names[now.weekday()],
-        "nameday": nameday,
-        "iso_date": now.strftime("%Y-%m-%d")
+        "date": f"{tc['date_str']} {tc['year']}",
+        "day_name": tc["day_name"].capitalize(),
+        "nameday": tc["nameday"] or "Neznámý",
+        "iso_date": datetime.now().strftime("%Y-%m-%d")
     }
 
 def extract_text_from_response(response):
@@ -274,14 +221,9 @@ def chat_with_radim():
                 "timestamp": datetime.utcnow().isoformat()
             })
         
-        info = get_today_info()
-        
-        # System prompt with personalization from memory
-        system = RADIM_SYSTEM_PROMPT.format(
-            date=info["date"],
-            day_name=info["day_name"],
-            nameday=info["nameday"]
-        )
+        # System prompt — centralized from radim_system_prompt.py
+        time_ctx = build_time_context_string()
+        system = get_radim_prompt(mode='full', user_type='senior', time_context=time_ctx)
 
         # 🧠 Personalize from learning data (name, interests, style, mood)
         if _CL_MEMORY_AVAILABLE:
