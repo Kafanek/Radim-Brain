@@ -289,10 +289,11 @@ def get_brain_speech_for_user(user_id):
         if not row:
             return None
 
-        C_val, E_val, R_val, S_val, alpha_val, mode, coherence = row
-        C_val = float(C_val or 5.0)
-        alpha_val = float(alpha_val or 0.0)
-        mode = mode or "HARMONY"
+        # RealDictCursor returns dict with lowercase keys
+        C_val = float(row.get('c', row.get('C', 5.0)) or 5.0)
+        alpha_val = float(row.get('alpha', 0.0) or 0.0)
+        mode = row.get('mode', 'HARMONY') or "HARMONY"
+        coherence = row.get('coherence', 0.5)
 
         # Load per-user adaptation adjustments
         adapt = _db_load_adaptation(user_id)
