@@ -4792,6 +4792,22 @@ def education_news():
                 "category": "health",
                 "relevance": "dysphasia",
                 "url": None
+            },
+            {
+                "title": "Společnost Parkinson otevírá nové regionální kluby",
+                "description": "Pacientská organizace rozšiřuje síť svépomocných klubů po celé ČR. Setkání nabízí podporu, informace a společnost pro lidi s Parkinsonem a jejich rodiny.",
+                "source": "Společnost Parkinson, z.s.",
+                "category": "health",
+                "relevance": "parkinson",
+                "url": None
+            },
+            {
+                "title": "Tanec a tai chi prokazatelně pomáhají při Parkinsonově chorobě",
+                "description": "Studie potvrzují, že pravidelný tanec (zejm. tango) a tai chi zlepšují rovnováhu, snižují riziko pádů a zpomalují progresi motorických příznaků.",
+                "source": "Movement Disorders Journal",
+                "category": "science",
+                "relevance": "parkinson",
+                "url": None
             }
         ],
         "politics": [
@@ -4809,22 +4825,6 @@ def education_news():
                 "source": "ČTK",
                 "category": "politics",
                 "relevance": "general",
-                "url": None
-            },
-            {
-                "title": "Společnost Parkinson otevírá nové regionální kluby",
-                "description": "Pacientská organizace rozšiřuje síť svépomocných klubů po celé ČR. Setkání nabízí podporu, informace a společnost pro lidi s Parkinsonem a jejich rodiny.",
-                "source": "Společnost Parkinson, z.s.",
-                "category": "health",
-                "relevance": "parkinson",
-                "url": None
-            },
-            {
-                "title": "Tanec a tai chi prokazatelně pomáhají při Parkinsonově chorobě",
-                "description": "Studie potvrzují, že pravidelný tanec (zejm. tango) a tai chi zlepšují rovnováhu, snižují riziko pádů a zpomalují progresi motorických příznaků.",
-                "source": "Movement Disorders Journal",
-                "category": "science",
-                "relevance": "parkinson",
                 "url": None
             }
         ],
