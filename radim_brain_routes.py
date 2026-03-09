@@ -147,7 +147,7 @@ except ImportError:
 
 # Database (for brain persistence)
 try:
-    from database import get_db, is_postgres
+    from database import get_connection, is_postgres
     DB_AVAILABLE = True
 except ImportError:
     DB_AVAILABLE = False
@@ -185,12 +185,13 @@ def _db_load_adaptation(user_id):
     if not DB_AVAILABLE or not user_id:
         return dict(_ADAPTATION_DEFAULTS)
     try:
-        db = get_db()
+        db = get_connection()
         ph = "%s" if is_postgres() else "?"
         row = db.execute(
             f"SELECT reward_sum, interactions, speech_rate_adjust, pause_adjust_ms, style, intervention_level FROM brain_adaptation WHERE user_id = {ph}",
             (user_id,)
         ).fetchone()
+        db.close()
         if row:
             return {
                 "reward_sum": row[0],
@@ -210,7 +211,7 @@ def _db_save_adaptation(user_id, state):
     if not DB_AVAILABLE or not user_id:
         return
     try:
-        db = get_db()
+        db = get_connection()
         if is_postgres():
             db.execute('''
                 INSERT INTO brain_adaptation (user_id, reward_sum, interactions, speech_rate_adjust, pause_adjust_ms, style, intervention_level, updated_at)
@@ -234,6 +235,7 @@ def _db_save_adaptation(user_id, state):
                   state["speech_rate_adjust"], state["pause_adjust_ms"],
                   state["style"], state["intervention_level"]))
         db.commit()
+        db.close()
     except Exception as e:
         print(f"Brain DB save warning: {e}")
 
@@ -243,7 +245,7 @@ def _db_save_brain_state(user_id, psi, alpha, mode, coherence, source="chat"):
     if not DB_AVAILABLE or not user_id:
         return
     try:
-        db = get_db()
+        db = get_connection()
         if is_postgres():
             db.execute('''
                 INSERT INTO brain_states (user_id, C, E, R, S, alpha, mode, coherence, source, created_at)
@@ -257,6 +259,7 @@ def _db_save_brain_state(user_id, psi, alpha, mode, coherence, source="chat"):
             ''', (user_id, psi["C"], psi["E"], psi["R"], psi["S"],
                   alpha, mode, coherence, source))
         db.commit()
+        db.close()
     except Exception as e:
         print(f"Brain state save warning: {e}")
 
