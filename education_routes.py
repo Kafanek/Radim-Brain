@@ -2646,6 +2646,719 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                 }
             }
         ]
+    },
+
+    # ============================================
+    # KURZ 5: PARKINSONOVA CHOROBA (v256)
+    # ============================================
+    "parkinson": {
+        "id": "parkinson",
+        "title": "Parkinsonova choroba — komplexní průvodce",
+        "subtitle": "Od prvních příznaků po každodenní péči a komunikaci",
+        "icon": "🤲",
+        "category": "Neurodegenerativní",
+        "difficulty": "intermediate",
+        "duration_minutes": 50,
+        "tags": ["Parkinson", "neurodegenerace", "tremor", "dopamin", "komunikace", "pečovatel", "vzácné onemocnění"],
+        "description": "Komplexní průvodce Parkinsonovou chorobou — co je to, jak se projevuje, jak komunikovat s nemocným a kde v ČR najít pomoc. Pro pečovatele, rodiny i zdravotníky.",
+        "target_audience": ["pečovatelé", "rodina", "zdravotníci", "sociální pracovníci"],
+        "learning_objectives": [
+            "Pochopíte podstatu Parkinsonovy choroby a úlohu dopaminu",
+            "Rozpoznáte 4 hlavní motorické příznaky",
+            "Porozumíte nemotorickým příznakům (deprese, poruchy spánku, halucinace)",
+            "Naučíte se komunikovat s člověkem se změněnou řečí a mimikou",
+            "Budete vědět, kde v ČR najít odbornou pomoc a podporu"
+        ],
+        "modules": [
+            # ---- MODUL 1: Co je Parkinsonova choroba? ----
+            {
+                "id": "parkinson-m1",
+                "title": "Co je Parkinsonova choroba?",
+                "order": 1,
+                "duration_minutes": 10,
+                "icon": "📖",
+                "lessons": [
+                    {
+                        "id": "parkinson-m1-l1",
+                        "title": "Základy Parkinsonovy choroby",
+                        "type": "article",
+                        "content": """Parkinsonova choroba je druhé nejčastější neurodegenerativní onemocnění na světě — hned po Alzheimerově chorobě. Poprvé ji popsal londýnský lékař James Parkinson v roce 1817.
+
+V České republice žije přibližně 20 000 – 25 000 lidí s Parkinsonovou chorobou. Typicky se objevuje mezi 55. a 65. rokem života, ale může přijít i dříve (tzv. Young Onset Parkinson).
+
+**Co se děje v mozku?**
+
+V hloubi mozku existuje oblast zvaná substantia nigra (černá substance). Zde se vyrábí dopamin — důležitý neurotransmiter, který řídí pohyby, motivaci a pocit odměny. U Parkinsonovy choroby tyto buňky postupně odumírají. Když mozek ztratí 60–80 % dopaminových neuronů, začnou se objevovat viditelné příznaky.
+
+Parkinsonova choroba NENÍ jen „třes". Je to komplexní onemocnění, které postihuje pohyb, náladu, spánek, trávení i myšlení. Není vyléčitelná, ale správná léčba umožňuje roky kvalitního života.""",
+                        "key_points": [
+                            "Druhé nejčastější neurodegenerativní onemocnění po Alzheimeru",
+                            "Podstatou je nedostatek dopaminu v substantia nigra",
+                            "V ČR žije 20–25 tisíc lidí s Parkinsonem",
+                            "Není to jen třes — je to komplexní onemocnění postihující pohyb, náladu i myšlení",
+                            "Není vyléčitelný, ale správná léčba umožňuje roky kvalitního života"
+                        ]
+                    },
+                    {
+                        "id": "parkinson-m1-l2",
+                        "title": "Jak Parkinsonova choroba vzniká a kdo je ohrožen?",
+                        "type": "article",
+                        "content": """Většina případů Parkinsonovy choroby je idiopatických — to znamená, že přesnou příčinu neznáme. Asi 10–15 % případů má genetickou složku.
+
+**Rizikové faktory:**
+• Věk — hlavní rizikový faktor (nejčastěji po 55. roce)
+• Pohlaví — muži onemocní 1,5× častěji než ženy
+• Vystavení pesticidům a herbicidům
+• Opakovaná poranění hlavy
+
+**Co se děje na buněčné úrovni?**
+
+V nervových buňkách se hromadí abnormální shluky bílkoviny alpha-synuklein — říkáme jim Lewyho tělíska. Tato tělíska poškozují a nakonec zabíjejí nervové buňky.
+
+Příznaky se objeví až při ztrátě 60–80 % dopaminových neuronů. To znamená, že nemoc tiše probíhá roky, než si jí všimneme.
+
+**Zajímavost — osa střevo–mozek:**
+
+Nejnovější výzkumy ukazují, že Parkinsonova choroba může začínat v trávicím traktu. Alpha-synuklein byl nalezen v nervových buňkách střev, možná ještě před tím, než se objeví v mozku. Proto je zácpa tak častým raným příznakem.""",
+                        "key_points": [
+                            "Většina případů je idiopatických (příčina neznámá)",
+                            "Hlavní rizikový faktor je věk; muži onemocní 1,5× častěji",
+                            "Lewyho tělíska — shluky bílkoviny alpha-synuklein poškozují neurony",
+                            "Příznaky se objeví až při ztrátě 60–80 % dopaminových neuronů",
+                            "Výzkum ukazuje možnou souvislost s trávicím traktem (osa střevo–mozek)"
+                        ]
+                    }
+                ],
+                "quiz": {
+                    "id": "parkinson-m1-quiz",
+                    "title": "Ověřte si: Co je Parkinsonova choroba?",
+                    "questions": [
+                        {
+                            "id": "q1",
+                            "question": "Která látka v mozku chybí při Parkinsonově chorobě?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Serotonin", "correct": False},
+                                {"id": "b", "text": "Dopamin", "correct": True},
+                                {"id": "c", "text": "Adrenalin", "correct": False},
+                                {"id": "d", "text": "Melatonin", "correct": False}
+                            ],
+                            "explanation": "Dopamin je neurotransmiter vyráběný v substantia nigra. Při Parkinsonově chorobě buňky produkující dopamin postupně odumírají."
+                        },
+                        {
+                            "id": "q2",
+                            "question": "Parkinsonova choroba je nejčastější neurodegenerativní onemocnění na světě.",
+                            "type": "true_false",
+                            "correct_answer": False,
+                            "explanation": "Parkinsonova choroba je DRUHÉ nejčastější — po Alzheimerově chorobě."
+                        },
+                        {
+                            "id": "q3",
+                            "question": "Kolik lidí v ČR přibližně žije s Parkinsonovou chorobou?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Asi 5 000", "correct": False},
+                                {"id": "b", "text": "Asi 20 000 – 25 000", "correct": True},
+                                {"id": "c", "text": "Více než 100 000", "correct": False}
+                            ],
+                            "explanation": "V České republice žije přibližně 20 000 – 25 000 lidí s diagnostikovanou Parkinsonovou chorobou."
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Spojte správně pojmy s jejich definicí:",
+                            "type": "matching",
+                            "pairs": [
+                                {"left": "Dopamin", "right": "Neurotransmiter pro pohyb a motivaci"},
+                                {"left": "Substantia nigra", "right": "Oblast mozku postižená u Parkinsona"},
+                                {"left": "Lewyho tělíska", "right": "Patologické shluky bílkovin v nervových buňkách"},
+                                {"left": "Alpha-synuklein", "right": "Bílkovina tvořící Lewyho tělíska"}
+                            ],
+                            "explanation": "Dopamin se vyrábí v substantia nigra. Lewyho tělíska tvořená alpha-synukleinem poškozují neurony produkující dopamin."
+                        },
+                        {
+                            "id": "q5",
+                            "question": "Ve kterém věku se Parkinsonova choroba nejčastěji objeví?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "30–40 let", "correct": False},
+                                {"id": "b", "text": "55–65 let", "correct": True},
+                                {"id": "c", "text": "Nad 80 let", "correct": False}
+                            ],
+                            "explanation": "Typický nástup je mezi 55. a 65. rokem, ale existuje i Young Onset Parkinson (před 50. rokem)."
+                        },
+                        {
+                            "id": "q6",
+                            "question": "Příznaky Parkinsona se objeví už při malé ztrátě dopaminových neuronů (asi 10 %).",
+                            "type": "true_false",
+                            "correct_answer": False,
+                            "explanation": "Příznaky se objeví teprve při ztrátě 60–80 % dopaminových neuronů. Nemoc proto tiše probíhá roky, než si jí všimneme."
+                        }
+                    ]
+                }
+            },
+
+            # ---- MODUL 2: Motorické příznaky ----
+            {
+                "id": "parkinson-m2",
+                "title": "Motorické příznaky",
+                "order": 2,
+                "duration_minutes": 10,
+                "icon": "🏃",
+                "lessons": [
+                    {
+                        "id": "parkinson-m2-l1",
+                        "title": "Čtyři hlavní motorické příznaky",
+                        "type": "article",
+                        "content": """Parkinsonova choroba má 4 hlavní motorické příznaky, známé pod zkratkou TRAP:
+
+**1. Tremor (klidový třes)**
+Rytmický třes, typicky v klidu. Často začíná na jedné ruce — tzv. „počítání peněz" (pill-rolling). Třes se zhoršuje při stresu a únavě, naopak mizí při cíleném pohybu a ve spánku. Důležité: 20–30 % lidí s Parkinsonem třes NIKDY nevyvine!
+
+**2. Rigidita (ztuhlost)**
+Svaly jsou trvale napjaté — jako ohýbání olověné trubky. Lékař při vyšetření cítí „ozubené kolečko" — drobné, trhavé odpory. Rigidita způsobuje bolest, omezenou pohyblivost a únavu.
+
+**3. Bradykineze (zpomalení pohybu)**
+Často nejvíce omezující příznak. Pohyby jsou pomalé, malé a vyčerpávající. Projevuje se: malé písmo (mikrografie), tichý hlas, pomalá chůze, ztráta souhybu paží, obtížné vstávání ze židle.
+
+**4. Posturální nestabilita**
+Přichází typicky v pozdějších stádiích. Problémy s rovnováhou, riziko pádů, freezing (náhlé „zamrznutí" při chůzi — nohy jako přilepené k podlaze).
+
+**Asymetrický začátek** je typický — příznaky začínají na jedné straně těla a postupně se rozšiřují na obě.""",
+                        "key_points": [
+                            "4 hlavní příznaky: tremor, rigidita, bradykineze, posturální nestabilita",
+                            "Třes NENÍ povinný — 20–30 % lidí s Parkinsonem nikdy netřese",
+                            "Bradykineze (zpomalení) je často nejvíce omezující",
+                            "Příznaky začínají typicky na jedné straně těla",
+                            "Freezing (zamrznutí) = náhlé zastavení pohybu, zejména při chůzi"
+                        ]
+                    },
+                    {
+                        "id": "parkinson-m2-l2",
+                        "title": "Jak motorické příznaky ovlivňují každodenní život",
+                        "type": "article",
+                        "content": """Motorické příznaky Parkinsona mění každodenní život — zapínání knoflíků, jedení, chůze dveřmi. Zde jsou nejčastější problémy a jak pomoci:
+
+**Freezing (zamrznutí při chůzi)**
+Člověk se náhle zastaví — nohy „přilepené" k podlaze. Pomáhají:
+• Vizuální podněty — laserový ukazatel na botě, barevná páska na podlaze
+• Zvukové podněty — metronom, počítání „raz, dva, tři"
+• Mentální triky — „a… TEĎ krok!"
+
+**On/off fenomén**
+Léky (L-DOPA) mají časově omezený účinek. V „on" fázi se člověk cítí relativně dobře, v „off" fázi se příznaky vrátí. Proto je důležité plánovat aktivity na dobu, kdy léky fungují.
+
+**Festinace a mikrografie**
+Festinace = drobný, šouravý, zrychlující se krok — riziko pádu vpřed. Mikrografie = písmo se postupně zmenšuje. Obojí je projev bradykineze.
+
+**Prevence pádů**
+Pády jsou u Parkinsona velmi časté a nebezpečné. Pomáhá: pravidelné cvičení (tai chi!), odstranění překážek doma, kvalitní obuv, madla v koupelně, dobré osvětlení.""",
+                        "key_points": [
+                            "Freezing = náhlé zamrznutí při chůzi; pomáhají vizuální a zvukové podněty",
+                            "On/off fenomén: kolísání účinnosti léků během dne",
+                            "Prevence pádů: pravidelné cvičení, odstranění překážek doma, kvalitní obuv",
+                            "Mikrografie (drobné písmo) je častým projevem bradykineze",
+                            "Plánujte náročné aktivity na dobu, kdy léky fungují nejlépe"
+                        ]
+                    }
+                ],
+                "quiz": {
+                    "id": "parkinson-m2-quiz",
+                    "title": "Ověřte si: Motorické příznaky",
+                    "questions": [
+                        {
+                            "id": "q1",
+                            "question": "Spojte motorický příznak s jeho popisem:",
+                            "type": "matching",
+                            "pairs": [
+                                {"left": "Tremor", "right": "Klidový třes, typicky začíná na jedné ruce"},
+                                {"left": "Rigidita", "right": "Ztuhlost svalů, 'ozubené kolečko'"},
+                                {"left": "Bradykineze", "right": "Zpomalení a zmenšení pohybů"},
+                                {"left": "Posturální nestabilita", "right": "Nestabilita při stoji a chůzi"}
+                            ],
+                            "explanation": "TRAP: Tremor (třes), Rigidita (ztuhlost), Akineze/bradykineze (zpomalení), Posturální nestabilita (rovnováha)."
+                        },
+                        {
+                            "id": "q2",
+                            "question": "Každý člověk s Parkinsonem trpí třesem.",
+                            "type": "true_false",
+                            "correct_answer": False,
+                            "explanation": "20–30 % lidí s Parkinsonem třes nikdy nevyvine. Parkinson se může projevovat zejména ztuhlostí a zpomalením."
+                        },
+                        {
+                            "id": "q3",
+                            "question": "Co je freezing (zamrznutí)?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Náhlá neschopnost začít nebo pokračovat v kroku", "correct": True},
+                                {"id": "b", "text": "Zamrznutí končetin chladem", "correct": False},
+                                {"id": "c", "text": "Ztráta vědomí", "correct": False}
+                            ],
+                            "explanation": "Freezing je náhlé 'přilepení' nohou k podlaze — člověk chce jít, ale nohy neposlouchají. Pomáhají vizuální a zvukové podněty."
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Seřaďte strategie pomoci při freezingu od nejjednodušší:",
+                            "type": "ordering",
+                            "correct_order": [
+                                "Řekněte klidně: 'a… TEĎ krok!'",
+                                "Počítejte 'raz, dva, tři' a nakročte",
+                                "Položte na zem barevnou pásku jako cíl",
+                                "Použijte laserový ukazatel na botě"
+                            ],
+                            "explanation": "Postupujeme od nejjednodušší (slovní pobídka) po technické pomůcky (laser). Vizuální a zvukové podněty pomáhají překonat freezing."
+                        },
+                        {
+                            "id": "q5",
+                            "question": "Který motorický příznak bývá nejvíce omezující v každodenním životě?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Tremor (třes)", "correct": False},
+                                {"id": "b", "text": "Bradykineze — zpomalení pohybů", "correct": True},
+                                {"id": "c", "text": "Rigidita (ztuhlost)", "correct": False}
+                            ],
+                            "explanation": "Bradykineze (zpomalení pohybů) je často nejvíce omezující — ztěžuje oblékání, jedení, chůzi a ovlivňuje i řeč."
+                        }
+                    ]
+                }
+            },
+
+            # ---- MODUL 3: Nemotorické příznaky ----
+            {
+                "id": "parkinson-m3",
+                "title": "Nemotorické příznaky",
+                "order": 3,
+                "duration_minutes": 10,
+                "icon": "🧠",
+                "lessons": [
+                    {
+                        "id": "parkinson-m3-l1",
+                        "title": "Skryté příznaky: deprese, spánek, autonomní dysfunkce",
+                        "type": "article",
+                        "content": """Parkinsonova choroba NENÍ jen o pohybu. Nemotorické příznaky mohou být stejně omezující — a často se objeví ROKY před třesem a ztuhlostí.
+
+**Deprese a úzkost (40–50 % pacientů)**
+Deprese u Parkinsona NENÍ jen „špatná nálada" — je to přímý důsledek změn v mozku (nedostatek dopaminu a serotoninu). Je to nejčastěji neléčený příznak! Každý, kdo pečuje o člověka s Parkinsonem, by měl vědět, že apatie a stažení se MOHOU být příznakem nemoci, ne lenost.
+
+**Poruchy spánku**
+• REM porucha chování — člověk „hraje" své sny: křičí, praští, kope ve spánku. Může to být jeden z prvních příznaků, i roky před diagnózou.
+• Nadměrná denní ospalost — usínání přes den
+• Nespavost — obtížné usínání, časté buzení
+
+**Autonomní dysfunkce**
+• Zácpa — jeden z nejčasnějších příznaků (často roky před třesem)
+• Ortostatická hypotenze — závratě při vstávání (pokles krevního tlaku)
+• Poruchy močení, nadměrné pocení
+
+**Ztráta čichu (hyposmie)**
+Jeden z nejranějších signálů — může se objevit 5–10 let před motorickými příznaky.""",
+                        "key_points": [
+                            "Nemotorické příznaky se ČASTO objeví DŘÍVE než motorické",
+                            "Deprese postihuje 40–50 % lidí s Parkinsonem — není to 'špatná nálada', je to součást nemoci",
+                            "Zácpa je jedním z nejčasnějších příznaků (roky před třesem)",
+                            "Porucha čichu (hyposmie) může být prvním signálem",
+                            "Poruchy REM spánku (vykřikování, praštění ve spánku) — důležitý varovný příznak"
+                        ]
+                    },
+                    {
+                        "id": "parkinson-m3-l2",
+                        "title": "Kognitivní změny a halucinace",
+                        "type": "article",
+                        "content": """**Kognitivní změny**
+
+Zpomalené myšlení u Parkinsona NENÍ hloupost — mozek potřebuje více času na zpracování informací. Člověk má problémy s plánováním, organizací a pozorností, ale paměť bývá zachována déle než u Alzheimera.
+
+Až 80 % lidí s Parkinsonem rozvine v pozdějších stádiích demenci. Rozdíl oproti Alzheimeru: u Parkinsona jsou dříve postiženy exekutivní funkce (plánování, rozhodování), zatímco paměť je relativně zachována.
+
+**Halucinace**
+
+Vizuální halucinace jsou u Parkinsona časté — člověk vidí lidi, zvířata nebo předměty, které tam nejsou. Zpočátku mohou být mírné (tzv. „průchodové halucinace" — záblesk osoby na okraji zorného pole), později se mohou stát výraznější.
+
+Halucinace jsou často vedlejším účinkem dopaminergních léků — paradoxně léky, které pomáhají s pohybem, mohou způsobit halucinace.
+
+**Jak reagovat na halucinace?**
+✅ Validujte emoci: „Vidím, že se bojíš. Jsem tady s tebou."
+✅ Přesměrujte pozornost: „Pojďme se podívat na zahradu."
+❌ NEŘÍKEJTE: „To tam nic není!" nebo „To se ti zdá!"
+❌ Nepopírejte, neargumentujte — to zvyšuje úzkost.
+
+Vztah k Lewy body demenci: Pokud se kognitivní příznaky a halucinace objeví BEZ předchozích pohybových příznaků — jde spíše o demenci s Lewyho tělísky. Pokud přijdou PO motorických příznacích Parkinsona — mluvíme o Parkinsonově chorobě s demencí.""",
+                        "key_points": [
+                            "Zpomalené myšlení NENÍ hloupost — mozek potřebuje více času",
+                            "Až 80 % lidí s Parkinsonem rozvine v pozdních stádiích demenci",
+                            "Halucinace (vidiny) jsou časté — často vedlejší účinek léků",
+                            "U halucinací: nepopirejte, nepotvrzujte, validujte emoci a přesměrujte",
+                            "Rozdíl od Alzheimera: paměť bývá zachována déle, problémy jsou s plánováním a pozorností"
+                        ]
+                    }
+                ],
+                "quiz": {
+                    "id": "parkinson-m3-quiz",
+                    "title": "Ověřte si: Nemotorické příznaky",
+                    "questions": [
+                        {
+                            "id": "q1",
+                            "question": "Které nemotorické příznaky se mohou objevit ROKY před třesem?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Halucinace a poruchy řeči", "correct": False},
+                                {"id": "b", "text": "Zácpa, ztráta čichu, poruchy spánku", "correct": True},
+                                {"id": "c", "text": "Poruchy polykání a řeči", "correct": False}
+                            ],
+                            "explanation": "Zácpa, ztráta čichu a poruchy REM spánku patří mezi nejranější příznaky — mohou se objevit 5–10 let před motorickými příznaky."
+                        },
+                        {
+                            "id": "q2",
+                            "question": "Kolik procent lidí s Parkinsonem trpí depresí?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Asi 5 %", "correct": False},
+                                {"id": "b", "text": "40–50 %", "correct": True},
+                                {"id": "c", "text": "Více než 90 %", "correct": False}
+                            ],
+                            "explanation": "Deprese postihuje 40–50 % lidí s Parkinsonem. Není to jen 'špatná nálada' — je to přímý důsledek změn v mozku."
+                        },
+                        {
+                            "id": "q3",
+                            "question": "Spojte příznak se správnou kategorií:",
+                            "type": "matching",
+                            "pairs": [
+                                {"left": "Zácpa", "right": "Autonomní dysfunkce"},
+                                {"left": "Deprese", "right": "Psychiatrický příznak"},
+                                {"left": "Živé sny s křikem", "right": "Porucha REM spánku"},
+                                {"left": "Ztráta čichu", "right": "Senzorický příznak"}
+                            ],
+                            "explanation": "Nemotorické příznaky se dělí na autonomní (zácpa, hypotenze), psychiatrické (deprese, úzkost), spánkové (REM porucha) a senzorické (čich, bolest)."
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Správná reakce na halucinace u Parkinsona je říct: 'To tam nic není, to se vám zdá.'",
+                            "type": "true_false",
+                            "correct_answer": False,
+                            "explanation": "Nepopirejte halucinace — zvyšuje to úzkost. Správně: validujte emoci ('vidím, že se bojíš') a přesměrujte pozornost."
+                        },
+                        {
+                            "id": "q5",
+                            "question": "V jakém procentu případů se u Parkinsona v pozdních stádiích rozvine demence?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Přibližně 20 %", "correct": False},
+                                {"id": "b", "text": "Přibližně 50 %", "correct": False},
+                                {"id": "c", "text": "Přibližně 80 %", "correct": True}
+                            ],
+                            "explanation": "Až 80 % lidí s Parkinsonem rozvine v pozdějších stádiích demenci, i když její průběh je odlišný od Alzheimera."
+                        },
+                        {
+                            "id": "q6",
+                            "question": "Seřaďte typický časový průběh nemotorických příznaků:",
+                            "type": "ordering",
+                            "correct_order": [
+                                "Zácpa a ztráta čichu (roky před diagnózou)",
+                                "Deprese a úzkost",
+                                "Kognitivní zpomalení",
+                                "Halucinace a demence"
+                            ],
+                            "explanation": "Nemotorické příznaky mají typický průběh: nejdříve senzorické a autonomní (čich, zácpa), pak psychiatrické, nakonec kognitivní."
+                        }
+                    ]
+                }
+            },
+
+            # ---- MODUL 4: Komunikace a každodenní život ----
+            {
+                "id": "parkinson-m4",
+                "title": "Komunikace a každodenní život",
+                "order": 4,
+                "duration_minutes": 10,
+                "icon": "🗣️",
+                "lessons": [
+                    {
+                        "id": "parkinson-m4-l1",
+                        "title": "Změny řeči a mimiky",
+                        "type": "article",
+                        "content": """Parkinsonova choroba výrazně ovlivňuje komunikaci — a to způsobem, který okolí často špatně interpretuje.
+
+**Hypofonie (tichý hlas)**
+Hlas se stává tichým, monotónním, dýchavičným. Důležité: člověk si často NEUVĚDOMUJE, že mluví tiše — jeho vnitřní vnímání hlasitosti neodpovídá realitě. Proto NEŘÍKEJTE „mluv hlasitěji!" — to nefunguje a frustruje.
+
+**Hypomimie (maskový obličej)**
+Obličejové svaly jsou oslabeny — člověk CÍTÍ emoce, ale nedokáže je VYJÁDŘIT mimikou. Úsměv, překvapení, radost — vše je uvnitř, ale obličej zůstává nehybný. Rodina si často myslí: „Je mu to jedno" nebo „Nebaví ho to." To je MYLNÉ. Maskový obličej je příznak nemoci, ne lhostejnost.
+
+**LSVT LOUD — řešení pro hlas**
+Lee Silverman Voice Treatment je vědecky ověřený logopedický program. Princip je jednoduchý: „MYSLI NAHLAS!" (THINK LOUD!). 4 týdny intenzivního cvičení mohou výrazně zlepšit hlasitost a srozumitelnost řeči.
+
+**Jak komunikovat s člověkem s Parkinsonem?**
+✅ Přistupte blíže — nesedejte daleko
+✅ Ztište TV/rádio před rozhovorem
+✅ Dívejte se z očí do očí
+✅ Dejte čas na odpověď — nepřerušujte
+✅ Pokud nerozumíte: „Promiň, neslyšel/a jsem. Povíš mi to znovu?"
+❌ NEŘÍKEJTE: „Proč mluvíš tak tiše?" nebo „Mluv hlasitěji!" """,
+                        "key_points": [
+                            "Hypofonie = tichý, monotónní hlas. Člověk si NEUVĚDOMUJE, že mluví tiše",
+                            "Maskový obličej (hypomimie) NEZNAMENÁ lhostejnost — cítí emoce, jen je nemůže vyjádřit",
+                            "LSVT LOUD = účinný logopedický program pro zlepšení hlasu",
+                            "Přistupte blíže, redukujte hluk, dívejte se z očí do očí",
+                            "Neptejte se 'proč mluvíš tak tiše?' — spíše 'promiň, neslyšel/a jsem'"
+                        ]
+                    },
+                    {
+                        "id": "parkinson-m4-l2",
+                        "title": "Praktické tipy pro každodenní život",
+                        "type": "article",
+                        "content": """**Polykání (dysfagie)**
+Potíže s polykáním jsou u Parkinsona časté a mohou být nebezpečné — riziko aspirace (vdechnutí) jídla do plic. Doporučení:
+• Jezte vsedě, vzpřímeně
+• Malá sousta, důkladně žvýkejte
+• Nepospíchejte — žádné „jez rychleji!"
+• Hustší tekutiny jsou bezpečnější než řídké
+• Při opakovaném kašlání při jídle — návštěva logopeda!
+
+**Oblékání**
+Suchý zip místo knoflíků, elastický pásek místo opasku, oblékání vsedě, boty bez zavazování (slip-on).
+
+**Jedení**
+Těžší příbory (snižují třes), protiskluzové podložky pod talíř, hrnek s velkým uchem, nástavce na příbory.
+
+**Koupelna**
+Madla u toalety a ve sprše, protiskluzová podložka, zvýšená toaleta, sedátko do sprchy.
+
+**Cvičení jako „lék"**
+Fyzická aktivita PROKAZATELNĚ zpomaluje progresi Parkinsona:
+• 🥊 Boxing (Rock Steady Boxing) — zlepšuje koordinaci a sílu
+• 🩰 Tanec (zejména tango!) — zlepšuje rovnováhu a chůzi
+• 🧘 Tai chi — snižuje riziko pádů
+• 🚶 Nordic walking — bezpečná chůze s oporou
+• 🏊 Plavání — šetrné k kloubům
+
+Plánujte cvičení a náročné aktivity na dobu, kdy léky fungují nejlépe (období „on").""",
+                        "key_points": [
+                            "Dysfagie (porucha polykání) může být nebezpečná — aspirace jídla do plic",
+                            "Suchý zip místo knoflíků, elastický pásek místo opasku",
+                            "Těžší příbory a protiskluzové podložky pomohou při jídle",
+                            "Fyzická aktivita je KLÍČOVÁ: tanec, tai chi, boxing — prokazatelně pomáhají",
+                            "Plánujte náročné aktivity na dobu, kdy léky fungují nejlépe"
+                        ]
+                    }
+                ],
+                "quiz": {
+                    "id": "parkinson-m4-quiz",
+                    "title": "Ověřte si: Komunikace a každodenní život",
+                    "questions": [
+                        {
+                            "id": "q1",
+                            "question": "Co znamená hypomimie u Parkinsona?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Snížená mimika obličeje — člověk cítí emoce, ale nemůže je vyjádřit", "correct": True},
+                                {"id": "b", "text": "Člověk necítí žádné emoce", "correct": False},
+                                {"id": "c", "text": "Projev deprese", "correct": False},
+                                {"id": "d", "text": "Ztráta zraku", "correct": False}
+                            ],
+                            "explanation": "Hypomimie (maskový obličej) znamená oslabenou mimiku. Člověk CÍTÍ emoce plně — jen je nedokáže VYJÁDŘIT obličejem."
+                        },
+                        {
+                            "id": "q2",
+                            "question": "Člověk s Parkinsonem mluví tiše naschvál, aby na sebe upozornil.",
+                            "type": "true_false",
+                            "correct_answer": False,
+                            "explanation": "Hypofonie je příznak Parkinsona — člověk si často NEUVĚDOMUJE, že mluví tiše. Jeho vnitřní vnímání hlasitosti neodpovídá realitě."
+                        },
+                        {
+                            "id": "q3",
+                            "question": "Jak se jmenuje účinný logopedický program pro zlepšení hlasu při Parkinsonu?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "LSVT LOUD", "correct": True},
+                                {"id": "b", "text": "FAST metoda", "correct": False},
+                                {"id": "c", "text": "Bobath koncept", "correct": False}
+                            ],
+                            "explanation": "LSVT LOUD (Lee Silverman Voice Treatment) je vědecky ověřený logopedický program. Princip: 'MYSLI NAHLAS!' — 4 týdny intenzivního cvičení."
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Spojte pomůcku s problémem, který řeší:",
+                            "type": "matching",
+                            "pairs": [
+                                {"left": "Těžké příbory", "right": "Třes rukou při jídle"},
+                                {"left": "Suchý zip", "right": "Obtížné zapínání knoflíků"},
+                                {"left": "Protiskluzová podložka", "right": "Ujíždějící talíře po stole"},
+                                {"left": "Madla v koupelně", "right": "Riziko pádu"}
+                            ],
+                            "explanation": "Jednoduché pomůcky mohou výrazně zlepšit samostatnost — těžší příbory tlumí třes, suchý zip nahrazuje knoflíky."
+                        },
+                        {
+                            "id": "q5",
+                            "question": "Seřaďte správný postup, když člověku s Parkinsonem nerozumíte:",
+                            "type": "ordering",
+                            "correct_order": [
+                                "Přibližte se a navažte oční kontakt",
+                                "Ztište okolní hluk (TV, rádio)",
+                                "Požádejte o zopakování klidným tónem",
+                                "Pokud stále nerozumíte, nabídněte alternativu (napsat, ukázat)"
+                            ],
+                            "explanation": "Správný postup: přiblížit se → ztišit hluk → požádat o zopakování BEZ výčitek → nabídnout alternativu."
+                        }
+                    ]
+                }
+            },
+
+            # ---- MODUL 5: Péče, zdroje a podpora v ČR ----
+            {
+                "id": "parkinson-m5",
+                "title": "Péče, zdroje a podpora v ČR",
+                "order": 5,
+                "duration_minutes": 10,
+                "icon": "🏥",
+                "lessons": [
+                    {
+                        "id": "parkinson-m5-l1",
+                        "title": "Léčba a rehabilitace",
+                        "type": "article",
+                        "content": """Parkinsonova choroba zatím nemá lék, který by ji vyléčil. Ale máme velmi účinné nástroje, jak příznaky zmírnit a kvalitu života zachovat.
+
+**L-DOPA (levodopa) — zlatý standard**
+Nejúčinnější lék. V mozku se přeměňuje na dopamin — přesně to, co chybí. Účinkuje nejlépe na bradykinezi a rigiditu. Při dlouhodobém užívání se mohou objevit komplikace (dyskineze — mimovolní pohyby, on/off kolísání).
+
+**Další léky:**
+• Dopaminoví agonisté (pramipexol, ropinirol) — napodobují dopamin
+• MAO-B inhibitory — zpomalují rozklad dopaminu
+• COMT inhibitory — prodlužují účinek L-DOPA
+
+**Hluboká mozková stimulace (DBS)**
+Chirurgický zákrok, při kterém se do mozku zavedou elektrody. Pomáhá, když léky přestanou stačit. NEVYLÉČÍ Parkinsona, ale může výrazně zmírnit třes, ztuhlost a dyskineze.
+
+**Rehabilitace — stejně důležitá jako léky!**
+• Fyzioterapie — pohyb, rovnováha, prevence pádů
+• Ergoterapie — nácvik každodenních činností
+• Logopedie — LSVT LOUD pro hlas, cvičení polykání
+• Psychologická podpora — deprese, úzkost, kognitivní trénink
+
+**Multidisciplinární tým** je ideál: neurolog + fyzioterapeut + logoped + ergoterapeut + psycholog. Všichni spolupracují na jednom cíli — kvalita života.""",
+                        "key_points": [
+                            "L-DOPA (levodopa) je základní a nejúčinnější lék — přeměna na dopamin v mozku",
+                            "Hluboká mozková stimulace (DBS) může pomoci, když léky nestačí",
+                            "Fyzioterapie, ergoterapie a logopedie jsou nedílnou součástí léčby",
+                            "Pohyb je 'lék': tanec, tai chi, boxing, chůze — prokazatelně zpomalují progresi",
+                            "Multidisciplinární tým (neurolog + fyzioterapeut + logoped + psycholog) je ideál"
+                        ]
+                    },
+                    {
+                        "id": "parkinson-m5-l2",
+                        "title": "Kde najít pomoc v České republice",
+                        "type": "resources",
+                        "content": """**Společnost Parkinson, z.s.**
+Hlavní pacientská organizace v ČR. Nabízí:
+• Regionální kluby po celé ČR — setkání, podpora, informace
+• Poradenství pro pacienty a rodiny
+• Vzdělávací akce a konference
+• Web: www.parkinson-cz.net
+
+**Extrapyramidová centra (specializovaná péče):**
+• FN Motol, Praha — Neurologická klinika
+• VFN Praha 2 — 1. neurologická klinika
+• FN Brno — Neurologická klinika
+• FN Olomouc — Neurologická klinika
+• FN Ostrava — Neurologická klinika
+
+**Sociální podpora:**
+• Příspěvek na péči (zákon 108/2006 Sb.) — 4 stupně podle závislosti
+• Průkaz ZTP/P — parkování, slevy na dopravu
+• Invalidní důchod — při snížené pracovní schopnosti
+• Respitní péče — odlehčovací služby pro pečující
+
+**Péče o pečujícího**
+Syndrom vyhoření je u pečujících o člověka s Parkinsonem velmi reálný. Příznaky: vyčerpání, podrážděnost, pocit beznaděje, ztráta zájmů, zdravotní problémy.
+
+Nestydíte se požádat o pomoc! Možnosti:
+• Svépomocné skupiny (Společnost Parkinson)
+• Psychologická podpora — právo každého pečujícího
+• Respitní péče — odpočinek pro pečujícího
+• Linka důvěry: 116 123 (nonstop, zdarma)
+
+💛 Pečovat o sebe NENÍ sobectví — je to nutnost. Nemůžete pomáhat druhým, když sami padáte na kolena.""",
+                        "key_points": [
+                            "Společnost Parkinson, z.s. — první kontakt, regionální kluby po celé ČR",
+                            "Extrapyramidová centra ve fakultních nemocnicích — specializovaná péče",
+                            "Příspěvek na péči, průkaz ZTP/P, invalidní důchod — právo každého pacienta",
+                            "Péče o pečujícího: syndrom vyhoření je reálný — respitní péče, psycholog, svépomocné skupiny",
+                            "Nestydíte se požádat o pomoc — pečovat o sebe je nutnost, ne sobectví"
+                        ]
+                    }
+                ],
+                "quiz": {
+                    "id": "parkinson-m5-quiz",
+                    "title": "Ověřte si: Péče a podpora",
+                    "questions": [
+                        {
+                            "id": "q1",
+                            "question": "Který lék je základem léčby Parkinsonovy choroby?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Aspirin", "correct": False},
+                                {"id": "b", "text": "L-DOPA (levodopa)", "correct": True},
+                                {"id": "c", "text": "Antibiotika", "correct": False},
+                                {"id": "d", "text": "Ibuprofen", "correct": False}
+                            ],
+                            "explanation": "L-DOPA (levodopa) je zlatý standard léčby. V mozku se přeměňuje na dopamin — přesně to, co u Parkinsona chybí."
+                        },
+                        {
+                            "id": "q2",
+                            "question": "Hluboká mozková stimulace (DBS) Parkinsonovu chorobu zcela vyléčí.",
+                            "type": "true_false",
+                            "correct_answer": False,
+                            "explanation": "DBS Parkinsona NEVYLÉČÍ — ale může výrazně zmírnit příznaky (třes, ztuhlost, dyskineze), když léky přestanou stačit."
+                        },
+                        {
+                            "id": "q3",
+                            "question": "Která organizace je hlavní pacientskou organizací pro Parkinson v ČR?",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "ALS Liga", "correct": False},
+                                {"id": "b", "text": "Společnost Parkinson, z.s.", "correct": True},
+                                {"id": "c", "text": "Cerebrum", "correct": False},
+                                {"id": "d", "text": "EURORDIS", "correct": False}
+                            ],
+                            "explanation": "Společnost Parkinson, z.s. je hlavní pacientská organizace v ČR — nabízí regionální kluby, poradenství a vzdělávací akce."
+                        },
+                        {
+                            "id": "q4",
+                            "question": "Spojte typ podpory se správným popisem:",
+                            "type": "matching",
+                            "pairs": [
+                                {"left": "Příspěvek na péči", "right": "Finanční pomoc podle stupně závislosti"},
+                                {"left": "Respitní péče", "right": "Odlehčovací služba pro pečujícího"},
+                                {"left": "DBS", "right": "Chirurgická léčba elektrodami v mozku"},
+                                {"left": "LSVT LOUD", "right": "Logopedický program pro zlepšení hlasu"}
+                            ],
+                            "explanation": "Příspěvek na péči pomáhá finančně, respitní péče dává pečujícímu odpočinek, DBS je operativní léčba, LSVT LOUD zlepšuje řeč."
+                        },
+                        {
+                            "id": "q5",
+                            "question": "Pečující, který cítí vyčerpání a podrážděnost, by měl:",
+                            "type": "single_choice",
+                            "options": [
+                                {"id": "a", "text": "Víc se snažit a nevzdávat to", "correct": False},
+                                {"id": "b", "text": "Vyhledat pomoc — psycholog, svépomocná skupina, respitní péče", "correct": True},
+                                {"id": "c", "text": "Skrývat své emoce, aby neznepokojil rodinu", "correct": False}
+                            ],
+                            "explanation": "Syndrom vyhoření je reálný! Pečovat o sebe NENÍ sobectví — bez pomoci se stav pečujícího i pacienta zhorší."
+                        },
+                        {
+                            "id": "q6",
+                            "question": "Seřaďte členy multidisciplinárního týmu podle typického pořadí zapojení:",
+                            "type": "ordering",
+                            "correct_order": [
+                                "Neurolog (diagnostika, léky)",
+                                "Fyzioterapeut (pohyb, rovnováha)",
+                                "Logoped (řeč, polykání)",
+                                "Psycholog (deprese, pečující)"
+                            ],
+                            "explanation": "Neurolog stanoví diagnózu a léčbu, pak se postupně zapojují další odborníci podle potřeb pacienta."
+                        }
+                    ]
+                }
+            }
+        ]
     }
 }
 
@@ -3361,7 +4074,8 @@ def get_communication_needs():
         "huntington": ["huntington"],
         "als": ["als"],
         "dementia": ["alzheimer", "alzheimer_early", "alzheimer_middle", "alzheimer_late",
-                      "lewy_body", "vascular", "frontotemporal", "parkinson_dementia"]
+                      "lewy_body", "vascular", "frontotemporal", "parkinson_dementia"],
+        "parkinson": ["parkinson", "parkinson_dementia", "parkinson_motor", "parkinson_communication"]
     }
 
     if need_type:
@@ -3723,6 +4437,50 @@ TEACHERS = {
                 "Rutina a stabilní prostředí snižují úzkost"
             ]
         }
+    },
+
+    # ---- AI UČITEL 4: Dr. Radim Parkinson (v256) ----
+    "parkinson-tutor": {
+        "id": "parkinson-tutor",
+        "name": "Dr. Radim Parkinson",
+        "role": "Specialista na Parkinsonovu chorobu",
+        "specialization": ["Parkinsonova choroba", "motorické poruchy", "hypofonie", "dopamin"],
+        "avatar": "🤲",
+        "description": "AI specialista na Parkinsonovu chorobu. Pomáhá pečovatelům a rodinám porozumět příznakům, komunikačním změnám a možnostem léčby.",
+        "target_groups": ["pečovatelé", "rodina", "zdravotníci"],
+        "parkinson_guide": {
+            "stages": {
+                "early": {
+                    "name": "Rané stádium",
+                    "motor": "Mírný klidový třes (často jednostranný), ztuhlost, zpomalení",
+                    "non_motor": "Deprese, zácpa, ztráta čichu, poruchy spánku",
+                    "communication": "Mírná hypofonie, bez zásadních omezení",
+                    "tip": "Zahajte LSVT LOUD, pravidelný pohyb, nastavte dobré návyky"
+                },
+                "middle": {
+                    "name": "Střední stádium",
+                    "motor": "Oboustranné příznaky, freezing, on/off kolísání",
+                    "non_motor": "Kognitivní zpomalení, halucinace, denní ospalost",
+                    "communication": "Tichý monotónní hlas, snížená mimika, zhoršené polykání",
+                    "tip": "Upravit prostředí, prevence pádů, logoped, ergoterapie"
+                },
+                "late": {
+                    "name": "Pokročilé stádium",
+                    "motor": "Výrazně omezená pohyblivost, časté pády, ztuhlé celé tělo",
+                    "non_motor": "Demence (až 80 %), těžké halucinace, apatie",
+                    "communication": "Řeč může být těžce srozumitelná, dysfagie",
+                    "tip": "Multidisciplinární péče, respitní služby, komunikační pomůcky"
+                }
+            },
+            "communication_rules": [
+                "Přistupte blíže — nesedejte od stolu daleko",
+                "Ztište TV/rádio před rozhovorem",
+                "Maskový obličej NENÍ lhostejnost — cítí emoce",
+                "Dejte čas na odpověď — zpomalené myšlení není hloupost",
+                "Neptejte se 'proč mluvíš tak tiše?' — nabídněte blízkost",
+                "Halucinace: nepopirejte, validujte emoci, přesměrujte"
+            ]
+        }
     }
 }
 
@@ -3814,6 +4572,13 @@ def get_teacher_detail(teacher_id):
         result["related_communication_needs"] = [
             "alzheimer", "alzheimer_early", "alzheimer_middle", "alzheimer_late",
             "lewy_body", "vascular", "frontotemporal", "parkinson_dementia"
+        ]
+    elif teacher_id == "parkinson-tutor":
+        result["guide"] = teacher.get("parkinson_guide", {})
+        result["guide_type"] = "parkinson"
+        result["related_courses"] = ["parkinson"]
+        result["related_communication_needs"] = [
+            "parkinson", "parkinson_dementia", "parkinson_motor", "parkinson_communication"
         ]
 
     return jsonify(result)
@@ -3924,6 +4689,11 @@ def teacher_review(user_id):
         auto_recommendations.append("🧠 Tip: Procvičit komunikační pravidla pro příslušné stádium.")
         if "Demence" in profile.get("weaknesses", []):
             auto_recommendations.append("🧠 Priorita: Zopakovat rozdíly mezi typy demence a komunikační strategie.")
+    elif assigned_tid == "parkinson-tutor":
+        auto_recommendations.append("🤲 Specialista: Ověřit znalost motorických i nemotorických příznaků.")
+        auto_recommendations.append("🤲 Tip: Procvičit reakci na hypomimii a hypofonii v komunikačních scénářích.")
+        if "Parkinson" in profile.get("weaknesses", []):
+            auto_recommendations.append("🤲 Priorita: Zopakovat rozdíl mezi příznaky nemoci a 'lhostejností'.")
 
     return jsonify({
         "success": True,
@@ -4057,6 +4827,22 @@ def education_news():
                 "source": "Paralympijský výbor",
                 "category": "sports",
                 "relevance": "general",
+                "url": None
+            },
+            {
+                "title": "Společnost Parkinson otevírá nové regionální kluby",
+                "description": "Pacientská organizace rozšiřuje síť svépomocných klubů po celé ČR. Setkání nabízí podporu, informace a společnost pro lidi s Parkinsonem a jejich rodiny.",
+                "source": "Společnost Parkinson, z.s.",
+                "category": "health",
+                "relevance": "parkinson",
+                "url": None
+            },
+            {
+                "title": "Tanec a tai chi prokazatelně pomáhají při Parkinsonově chorobě",
+                "description": "Studie potvrzují, že pravidelný tanec (zejm. tango) a tai chi zlepšují rovnováhu, snižují riziko pádů a zpomalují progresi motorických příznaků.",
+                "source": "Movement Disorders Journal",
+                "category": "science",
+                "relevance": "parkinson",
                 "url": None
             }
         ]
@@ -4410,6 +5196,121 @@ COMMUNICATION_SCENARIOS = {
                 }
             ],
             "learning_point": "Nepresvedcujtee silou, ale ani necekejte prilis. Nabidnete pomucky jako POJISTKU bez zavazku. Drobne kroky — ukazka, zkouska, postepne prijieti. Cas je klicovy faktor."
+        }
+    ],
+
+    # ---- PARKINSON SCÉNÁŘE (v256) ----
+    "parkinson": [
+        {
+            "id": "park-s1",
+            "title": "Manžel mluví tiše a nerozumíte mu",
+            "context": "Pečujete o manžela Josefa (68 let) s Parkinsonovou chorobou. Při večeři vám něco říká, ale neslyšíte.",
+            "difficulty": "beginner",
+            "character": {
+                "name": "Josef",
+                "age": 68,
+                "diagnosis": "Parkinsonova choroba — střední stádium",
+                "communication_level": "Tichý, monotónní hlas (hypofonie)"
+            },
+            "situation": "Josef vám přes stůl něco říká, ale slyšíte jen tichý, mumlavý zvuk. Televize je zapnutá v pozadí.",
+            "options": [
+                {
+                    "id": "a",
+                    "text": "Josefe, mluv hlasitěji! Vždycky mumleš!",
+                    "score": 10,
+                    "feedback": "Výtka zhoršuje frustraci. Člověk s Parkinsonem NEMŮŽE snadno mluvit hlasitěji — hypofonie je příznak nemoci, ne lenost.",
+                    "consequence": "Josef se odmlčí a zbytek večeře jí v tichu. Cítí se provinile za něco, co nemůže ovlivnit."
+                },
+                {
+                    "id": "b",
+                    "text": "Vypnete TV, posadíte se blíže a řeknete: 'Josefe, promiň, neslyšela jsem. Povíš mi to znovu?'",
+                    "score": 100,
+                    "feedback": "Skvěle! Snížili jste hluk, přiblížili se a požádali o zopakování BEZ výčitek. Přesně tak se komunikuje s člověkem s hypofonií.",
+                    "consequence": "Josef vám zopakuje, co chtěl říct. Cítí se respektovaný. Komunikace plyne dál."
+                },
+                {
+                    "id": "c",
+                    "text": "Kývnete a předstíráte, že rozumíte.",
+                    "score": 10,
+                    "feedback": "Předstírání je nejhorší varianta — člověk pozná, že nerozumíte, a cítí se bezvýznamný. Ztrácí motivaci komunikovat.",
+                    "consequence": "Josef si všimne, že nerozumíte. Příště se nebude ani snažit mluvit. Postupně se izoluje."
+                }
+            ],
+            "learning_point": "Nikdy neříkejte 'mluv hlasitěji' — místo toho snižte hluk, přibližte se a požádejte o zopakování BEZ výčitek."
+        },
+        {
+            "id": "park-s2",
+            "title": "Dcera si myslí, že tatínka nebaví návštěva",
+            "context": "Navštěvujete tatínka Zdeňka (72 let) s Parkinsonem. Dcera Lucie (40 let) si stěžuje na jeho 'lhostejnost'.",
+            "difficulty": "intermediate",
+            "character": {
+                "name": "Zdeněk",
+                "age": 72,
+                "diagnosis": "Parkinsonova choroba — střední stádium",
+                "communication_level": "Výrazná hypomimie (maskový obličej)"
+            },
+            "situation": "Lucie vám říká: 'Víš co, už tam nebudu chodit. Táta se vůbec netváří, že má radost. Jen tam sedí jako socha. Je mu to jedno.'",
+            "options": [
+                {
+                    "id": "a",
+                    "text": "Máš pravdu, asi ho to nebaví.",
+                    "score": 0,
+                    "feedback": "Posilujete mylný dojem. Tatínek CÍTÍ radost, ale maskový obličej mu brání ji vyjádřit. Hypomimie je příznak nemoci, ne lhostejnost.",
+                    "consequence": "Lucie přestane chodit na návštěvy. Tatínek ztrácí kontakt s rodinou a propadá izolaci."
+                },
+                {
+                    "id": "b",
+                    "text": "Luci, tatínek má něco, čemu se říká maskový obličej. Svaly obličeje jsou ztuhlé, ale UVNITŘ cítí radost úplně stejně. Všímej si jinak — stiskne ti ruku? Kývne? Požádej ho, ať řekne, jak se cítí.",
+                    "score": 100,
+                    "feedback": "Výborně! Vysvětlujete hypomimii a učíte dceru číst jiné signály emocí — stisk ruky, slova, gesta.",
+                    "consequence": "Lucie pochopí. Při další návštěvě chytne tátu za ruku — a on ji stiskne. Říká: 'Lucko, jsem rád, že jsi přišla.' Oba pláčou štěstím."
+                },
+                {
+                    "id": "c",
+                    "text": "To je těžké. Zkus ho víc rozesmát.",
+                    "score": 30,
+                    "feedback": "Snaha o 'rozesmání' může být frustrující pro oba. Člověk s hypomimií se NEDOKÁŽE usmát, i když vnitřně chce. Lepší je pochopit příčinu.",
+                    "consequence": "Lucie se snaží dělat vtipné věci, ale táta nereaguje mimikou. Oba jsou frustrovaní."
+                }
+            ],
+            "learning_point": "Maskový obličej (hypomimie) je příznak Parkinsona, NE lhostejnost. Učte rodinu číst jiné signály: stisk ruky, hlas, slova."
+        },
+        {
+            "id": "park-s3",
+            "title": "Pacient odmítá chodit po pádu",
+            "context": "Pan Moravec (74 let) má Parkinsona ve středním stádiu. Po nedávném pádu odmítá chodit sám.",
+            "difficulty": "intermediate",
+            "character": {
+                "name": "Pan Moravec",
+                "age": 74,
+                "diagnosis": "Parkinsonova choroba — střední stádium, po pádu",
+                "communication_level": "Komunikace zachována, strach z pádu"
+            },
+            "situation": "Pan Moravec říká: 'Já už nikam nepůjdu. Minule jsem spadl a bolelo to. Radši budu sedět v křesle.'",
+            "options": [
+                {
+                    "id": "a",
+                    "text": "Pane Moravče, musíte chodit! Jinak se vám svaly oslabí.",
+                    "score": 20,
+                    "feedback": "Pravda, ale příkaz zvyšuje úzkost. Strach z pádu je u Parkinsona LEGITIMNÍ — pády jsou reálné nebezpečí. Rozkazování nepomůže.",
+                    "consequence": "Pan Moravec se cítí pod tlakem. Zkusí jít sám, aby nevzbudil nevoli — a znovu spadne. Strach se ještě prohloubí."
+                },
+                {
+                    "id": "b",
+                    "text": "Rozumím, že máte strach. Ten pád byl nepříjemný. Co kdybychom to zkusili pomalu — půjdeme spolu, já budu hned vedle. A požádáme fyzioterapeuta o cvičení na rovnováhu.",
+                    "score": 100,
+                    "feedback": "Skvěle! Validujete strach (je oprávněný), nabízíte bezpečí (společný krok) a odborné řešení (fyzioterapeut). Přesně správný postup.",
+                    "consequence": "Pan Moravec souhlasí. S oporou udělá pár kroků. Fyzioterapeut nastaví cvičení na rovnováhu. Za týden chodí sám po chodbě."
+                },
+                {
+                    "id": "c",
+                    "text": "Dobře, tak budeme chodit s chodítkem.",
+                    "score": 60,
+                    "feedback": "Dobrý nápad, ale chybí validace strachu. A chodítko by měl doporučit odborník — ne každé chodítko je vhodné pro člověka s Parkinsonem (freezing s chodítkem může být nebezpečný).",
+                    "consequence": "Pan Moravec dostane chodítko, ale při freezingu se o něj zakopne. Bez odborného vedení může být pomůcka i rizikem."
+                }
+            ],
+            "learning_point": "Strach z pádu je u Parkinsona běžný a LEGITIMNÍ. Validujte ho, nabídněte bezpečí a zapojte fyzioterapeuta. Nikdy neříkejte 'musíte chodit' bez nabídky podpory."
         }
     ]
 }

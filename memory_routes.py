@@ -355,6 +355,22 @@ _COMMUNICATION_NEEDS = {
 - Kolísání pozornosti přes den je normální
 - Nabízej konkrétní volby, ne otevřené otázky""",
 
+    "parkinson_motor": """⚠️ KOMUNIKAČNÍ POTŘEBA: Parkinson — motorické příznaky
+- Třes může být trapný — nekomentuj ho, normalizuj situaci
+- Freezing (zamrznutí): klidně počkej, nabídni ruku, nekřič 'pojďte!'
+- Zpomalení NENÍ lenost — dej čas na každý úkol
+- Unavitelnost: ranní hodiny bývají lepší (léky fungují)
+- Pády: neptej se 'jak jste to mohl/a udělat?' — validuj strach
+- On/off fenomén: nálada a schopnosti kolísají s účinkem léků""",
+
+    "parkinson_communication": """⚠️ KOMUNIKAČNÍ POTŘEBA: Parkinson — komunikace
+- Tichý hlas (hypofonie): přibliž se, neptej se 'proč mluvíš tak tiše?'
+- Monotónní hlas NENÍ nezájem — je to příznak, ne nálada
+- Maskový obličej NENÍ lhostejnost — cítí emoce, nemůže je vyjádřit
+- Dej čas na odpověď; nepřerušuj, nedoplňuj slova za něj
+- Polykání může být obtížné — nepospíchej při jídle
+- LSVT LOUD: logopedický program 'MYSLI NAHLAS!' — doporuč neurologovi""",
+
     "huntington": """⚠️ KOMUNIKAČNÍ POTŘEBA: Huntingtonova choroba
 - Pohyby a řeč se postupně zhoršují — buď trpělivý, nepospíchej
 - Impulzivita a podrážděnost jsou symptomy, ne záměr — reaguj klidně
