@@ -2683,6 +2683,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                         "id": "parkinson-m1-l1",
                         "title": "Základy Parkinsonovy choroby",
                         "type": "article",
+                        "prerequisites": [],
                         "content": """<h2>Co je Parkinsonova choroba?</h2>
 <p><strong>Parkinsonova choroba</strong> je druhé nejčastější neurodegenerativní onemocnění na světě — hned po Alzheimerově chorobě. Poprvé ji popsal londýnský lékař <em>James Parkinson</em> v roce 1817.</p>
 
@@ -2711,6 +2712,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                         "id": "parkinson-m1-l2",
                         "title": "Jak Parkinsonova choroba vzniká a kdo je ohrožen?",
                         "type": "article",
+                        "prerequisites": ["parkinson-m1-l1"],
                         "content": """<h2>Jak Parkinsonova choroba vzniká?</h2>
 <p>Většina případů Parkinsonovy choroby je <strong>idiopatických</strong> — to znamená, že přesnou příčinu neznáme. Asi 10–15 % případů má genetickou složku.</p>
 
@@ -2773,9 +2775,10 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                             "options": [
                                 {"id": "a", "text": "Asi 5 000", "correct": False},
                                 {"id": "b", "text": "Asi 20 000 – 25 000", "correct": True},
-                                {"id": "c", "text": "Více než 100 000", "correct": False}
+                                {"id": "c", "text": "Asi 50 000 – 60 000", "correct": False},
+                                {"id": "d", "text": "Více než 100 000", "correct": False}
                             ],
-                            "explanation": "V České republice žije přibližně 20 000 – 25 000 lidí s diagnostikovanou Parkinsonovou chorobou."
+                            "explanation": "V České republice žije přibližně 20 000 – 25 000 lidí s diagnostikovanou Parkinsonovou chorobou. Celosvětově je to asi 10 milionů lidí."
                         },
                         {
                             "id": "q4",
@@ -2796,9 +2799,10 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                             "options": [
                                 {"id": "a", "text": "30–40 let", "correct": False},
                                 {"id": "b", "text": "55–65 let", "correct": True},
-                                {"id": "c", "text": "Nad 80 let", "correct": False}
+                                {"id": "c", "text": "Nad 80 let", "correct": False},
+                                {"id": "d", "text": "Může se objevit v jakémkoliv věku stejně", "correct": False}
                             ],
-                            "explanation": "Typický nástup je mezi 55. a 65. rokem, ale existuje i Young Onset Parkinson (před 50. rokem)."
+                            "explanation": "Typický nástup je mezi 55. a 65. rokem. Existuje i Young-Onset Parkinson (před 50. rokem, 5–10 % případů), ale u dětí se prakticky nevyskytuje."
                         },
                         {
                             "id": "q6",
@@ -2823,6 +2827,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                         "id": "parkinson-m2-l1",
                         "title": "Čtyři hlavní motorické příznaky",
                         "type": "article",
+                        "prerequisites": ["parkinson-m1-l2"],
                         "content": """<h2>Čtyři hlavní motorické příznaky — TRAP</h2>
 <p>Parkinsonova choroba má 4 hlavní motorické příznaky, známé pod zkratkou <strong>TRAP</strong>:</p>
 
@@ -2860,6 +2865,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                         "id": "parkinson-m2-l2",
                         "title": "Jak motorické příznaky ovlivňují každodenní život",
                         "type": "article",
+                        "prerequisites": ["parkinson-m2-l1"],
                         "content": """<h2>Motorické příznaky v každodenním životě</h2>
 <p>Motorické příznaky Parkinsona mění každodenní život — zapínání knoflíků, jedení, chůze dveřmi. Zde jsou nejčastější problémy a jak pomoci:</p>
 
@@ -2928,9 +2934,10 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                             "options": [
                                 {"id": "a", "text": "Náhlá neschopnost začít nebo pokračovat v kroku", "correct": True},
                                 {"id": "b", "text": "Zamrznutí končetin chladem", "correct": False},
-                                {"id": "c", "text": "Ztráta vědomí", "correct": False}
+                                {"id": "c", "text": "Ztráta vědomí", "correct": False},
+                                {"id": "d", "text": "Porucha rovnováhy způsobená závratí", "correct": False}
                             ],
-                            "explanation": "Freezing je náhlé 'přilepení' nohou k podlaze — člověk chce jít, ale nohy neposlouchají. Pomáhají vizuální a zvukové podněty."
+                            "explanation": "Freezing je náhlé 'přilepení' nohou k podlaze — člověk chce jít, ale nohy neposlouchají. Nejčastěji se objevuje při průchodu dveřmi, při otáčení nebo na přechodu. Pomáhají vizuální a zvukové podněty (počítání, metronom)."
                         },
                         {
                             "id": "q4",
@@ -2951,9 +2958,10 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                             "options": [
                                 {"id": "a", "text": "Tremor (třes)", "correct": False},
                                 {"id": "b", "text": "Bradykineze — zpomalení pohybů", "correct": True},
-                                {"id": "c", "text": "Rigidita (ztuhlost)", "correct": False}
+                                {"id": "c", "text": "Rigidita (ztuhlost)", "correct": False},
+                                {"id": "d", "text": "Posturální nestabilita", "correct": False}
                             ],
-                            "explanation": "Bradykineze (zpomalení pohybů) je často nejvíce omezující — ztěžuje oblékání, jedení, chůzi a ovlivňuje i řeč."
+                            "explanation": "Bradykineze (zpomalení pohybů) je často nejvíce omezující — ztěžuje oblékání, jedení, chůzi, psaní i řeč. Tremor je nápadnější, ale bradykineze ovlivňuje každodenní aktivity víc."
                         }
                     ]
                 }
@@ -2971,6 +2979,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                         "id": "parkinson-m3-l1",
                         "title": "Skryté příznaky: deprese, spánek, autonomní dysfunkce",
                         "type": "article",
+                        "prerequisites": ["parkinson-m2-l2"],
                         "content": """<h2>Skryté příznaky Parkinsonovy choroby</h2>
 <p>Parkinsonova choroba <strong>NENÍ jen o pohybu</strong>. Nemotorické příznaky mohou být stejně omezující — a často se objeví <strong>ROKY před</strong> třesem a ztuhlostí.</p>
 
@@ -3017,6 +3026,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                         "id": "parkinson-m3-l2",
                         "title": "Kognitivní změny a halucinace",
                         "type": "article",
+                        "prerequisites": ["parkinson-m3-l1"],
                         "content": """<h2>Kognitivní změny a halucinace</h2>
 
 <h3>Kognitivní změny</h3>
@@ -3065,9 +3075,10 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                             "options": [
                                 {"id": "a", "text": "Halucinace a poruchy řeči", "correct": False},
                                 {"id": "b", "text": "Zácpa, ztráta čichu, poruchy spánku", "correct": True},
-                                {"id": "c", "text": "Poruchy polykání a řeči", "correct": False}
+                                {"id": "c", "text": "Poruchy polykání a řeči", "correct": False},
+                                {"id": "d", "text": "Tremor a rigidita", "correct": False}
                             ],
-                            "explanation": "Zácpa, ztráta čichu a poruchy REM spánku patří mezi nejranější příznaky — mohou se objevit 5–10 let před motorickými příznaky."
+                            "explanation": "Zácpa, ztráta čichu a poruchy REM spánku patří mezi nejranější příznaky — mohou se objevit 5–10 let PŘED motorickými příznaky (třes, rigidita)."
                         },
                         {
                             "id": "q2",
@@ -3076,9 +3087,10 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                             "options": [
                                 {"id": "a", "text": "Asi 5 %", "correct": False},
                                 {"id": "b", "text": "40–50 %", "correct": True},
-                                {"id": "c", "text": "Více než 90 %", "correct": False}
+                                {"id": "c", "text": "Asi 15–20 %", "correct": False},
+                                {"id": "d", "text": "Více než 90 %", "correct": False}
                             ],
-                            "explanation": "Deprese postihuje 40–50 % lidí s Parkinsonem. Není to jen 'špatná nálada' — je to přímý důsledek změn v mozku."
+                            "explanation": "Deprese postihuje 40–50 % lidí s Parkinsonem. Není to jen 'špatná nálada' — je to přímý důsledek změn v mozku (nedostatek dopaminu a serotoninu). Je to nejčastěji neléčený příznak!"
                         },
                         {
                             "id": "q3",
@@ -3106,9 +3118,10 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                             "options": [
                                 {"id": "a", "text": "Přibližně 20 %", "correct": False},
                                 {"id": "b", "text": "Přibližně 50 %", "correct": False},
-                                {"id": "c", "text": "Přibližně 80 %", "correct": True}
+                                {"id": "c", "text": "Přibližně 80 %", "correct": True},
+                                {"id": "d", "text": "Prakticky 100 %", "correct": False}
                             ],
-                            "explanation": "Až 80 % lidí s Parkinsonem rozvine v pozdějších stádiích demenci, i když její průběh je odlišný od Alzheimera."
+                            "explanation": "Až 80 % lidí s Parkinsonem rozvine v pozdějších stádiích demenci. Na rozdíl od Alzheimera jsou u Parkinsona nejdříve postiženy exekutivní funkce (plánování, rozhodování), zatímco paměť bývá zachována déle."
                         },
                         {
                             "id": "q6",
@@ -3138,6 +3151,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                         "id": "parkinson-m4-l1",
                         "title": "Změny řeči a mimiky",
                         "type": "article",
+                        "prerequisites": ["parkinson-m3-l2"],
                         "content": """<h2>Změny řeči a mimiky u Parkinsona</h2>
 <p>Parkinsonova choroba výrazně ovlivňuje komunikaci — a to způsobem, který okolí často špatně interpretuje.</p>
 
@@ -3182,6 +3196,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                         "id": "parkinson-m4-l2",
                         "title": "Praktické tipy pro každodenní život",
                         "type": "article",
+                        "prerequisites": ["parkinson-m4-l1"],
                         "content": """<h2>Praktické tipy pro každodenní život</h2>
 
 <h3>Polykání (dysfagie)</h3>
@@ -3225,6 +3240,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                         "id": "parkinson-m4-l3",
                         "title": "Každodenní situace s Parkinsonem",
                         "type": "scenarios",
+                        "prerequisites": ["parkinson-m4-l2"],
                         "content": """<h2>Praktické scénáře — jak reagovat?</h2>
 <p>Typické situace, se kterými se můžete setkat. Ke každé uvádíme doporučenou reakci.</p>""",
                         "scenarios": [
@@ -3244,7 +3260,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                             },
                             {
                                 "title": "Na procházce — freezing na přechodu",
-                                "situation": "Pan Kovář (73) zamrzne uprostřed přechodu pro chodce. Auta čekají, kolemjdoucí panikařf. Manželka nevf, co dělat.",
+                                "situation": "Pan Kovář (73) zamrzne uprostřed přechodu pro chodce. Auta čekají, kolemjdoucí panikaří. Manželka neví, co dělat.",
                                 "wrong_approach": "Manželka ho tahá za ruku a křičí: 'Pojďte, lidi koukaj!' Pan Kovář spadne.",
                                 "right_approach": "Manželka klidně řekne: 'Máme čas. Raz — dva — tři — krok.' Nabídne ruku jako oporu. Po několika vteřinách se nohy uvolní.",
                                 "principle": "Freezing je dočasný. Klid, počítání nahlas a nabídnutí opory pomáhají překonat 'zamrznutí'."
@@ -3311,9 +3327,10 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                             "options": [
                                 {"id": "a", "text": "LSVT LOUD", "correct": True},
                                 {"id": "b", "text": "FAST metoda", "correct": False},
-                                {"id": "c", "text": "Bobath koncept", "correct": False}
+                                {"id": "c", "text": "Bobath koncept", "correct": False},
+                                {"id": "d", "text": "Vojtova metoda", "correct": False}
                             ],
-                            "explanation": "LSVT LOUD (Lee Silverman Voice Treatment) je vědecky ověřený logopedický program. Princip: 'MYSLI NAHLAS!' — 4 týdny intenzivního cvičení."
+                            "explanation": "LSVT LOUD (Lee Silverman Voice Treatment) je vědecky ověřený logopedický program specificky pro Parkinsona. Princip: 'MYSLI NAHLAS!' — 4 týdny intenzivního cvičení (4×/týden). Bobath i Vojta jsou neurorehabilitační metody, ale nezaměřují se na hlas."
                         },
                         {
                             "id": "q4",
@@ -3355,6 +3372,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                         "id": "parkinson-m5-l1",
                         "title": "Léčba a rehabilitace",
                         "type": "article",
+                        "prerequisites": ["parkinson-m4-l3"],
                         "content": """<h2>Léčba a rehabilitace Parkinsonovy choroby</h2>
 <p>Parkinsonova choroba zatím nemá lék, který by ji vyléčil. Ale máme velmi účinné nástroje, jak příznaky zmírnit a kvalitu života zachovat.</p>
 
@@ -3394,6 +3412,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                         "id": "parkinson-m5-l2",
                         "title": "Kde najít pomoc v České republice",
                         "type": "resources",
+                        "prerequisites": ["parkinson-m5-l1"],
                         "content": """<h2>Kde najít pomoc v České republice</h2>
 
 <h3>Společnost Parkinson, z.s.</h3>
@@ -3507,9 +3526,10 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                             "options": [
                                 {"id": "a", "text": "Víc se snažit a nevzdávat to", "correct": False},
                                 {"id": "b", "text": "Vyhledat pomoc — psycholog, svépomocná skupina, respitní péče", "correct": True},
-                                {"id": "c", "text": "Skrývat své emoce, aby neznepokojil rodinu", "correct": False}
+                                {"id": "c", "text": "Skrývat své emoce, aby neznepokojil rodinu", "correct": False},
+                                {"id": "d", "text": "Přestat pečovat úplně a svěřit vše institucím", "correct": False}
                             ],
-                            "explanation": "Syndrom vyhoření je reálný! Pečovat o sebe NENÍ sobectví — bez pomoci se stav pečujícího i pacienta zhorší."
+                            "explanation": "Syndrom vyhoření je reálný! Řešením není ani 'víc se snažit', ani úplné vzdání péče. Správná odpověď je aktivně hledat podporu — psycholog, respitní péče, svépomocné skupiny. Pečovat o sebe NENÍ sobectví."
                         },
                         {
                             "id": "q6",
@@ -3521,7 +3541,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                                 "Logoped (řeč, polykání)",
                                 "Psycholog (deprese, pečující)"
                             ],
-                            "explanation": "Neurolog stanoví diagnózu a léčbu, pak se postupně zapojují další odborníci podle potřeb pacienta."
+                            "explanation": "Neurolog stanoví diagnózu a nastaví léčbu (první kontakt). Fyzioterapeut se zapojuje brzy — pohyb je klíčový od začátku. Logoped přichází, když se objeví potíže s hlasem nebo polykáním. Psycholog pomáhá s depresí (postihuje 40 % pacientů) i pečujícím s burnoutem. V praxi se tým rozšiřuje postupně podle progrese nemoci."
                         }
                     ]
                 }
@@ -3539,6 +3559,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                         "id": "parkinson-m6-l1",
                         "title": "Jak pečovat a nepřehořet",
                         "type": "article",
+                        "prerequisites": ["parkinson-m5-l2"],
                         "content": """<h2>Syndrom vyhoření u pečujících</h2>
 <p>Péče o člověka s Parkinsonovou chorobou je maraton, ne sprint. Až <strong>80 % pečujících</strong> hlásí chronický stres a příznaky vyhoření.</p>
 
@@ -3587,6 +3608,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                         "id": "parkinson-m6-l2",
                         "title": "Young-onset Parkinson — když nemoc přijde brzy",
                         "type": "article",
+                        "prerequisites": ["parkinson-m6-l1"],
                         "content": """<h2>Parkinson před padesátkou</h2>
 <p><strong>5–10 %</strong> lidí s Parkinsonovou chorobou je diagnostikováno <strong>před 50. rokem</strong> věku. Říkáme tomu Young-Onset Parkinson Disease (YOPD). Tito lidé čelí specifickým výzvám, které se liší od seniorské populace.</p>
 
@@ -3644,9 +3666,10 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                             "options": [
                                 {"id": "a", "text": "Přirozená reakce na dlouhodobou zátěž projevující se vyčerpáním a beznadějí", "correct": True},
                                 {"id": "b", "text": "Znak slabého charakteru", "correct": False},
-                                {"id": "c", "text": "Normální stav, který nevyžaduje pozornost", "correct": False}
+                                {"id": "c", "text": "Normální stav, který nevyžaduje pozornost", "correct": False},
+                                {"id": "d", "text": "Psychiatrická diagnóza vyžadující hospitalizaci", "correct": False}
                             ],
-                            "explanation": "Burnout je přirozená reakce, ne slabost. Projevuje se fyzickým, emočním a sociálním vyčerpáním a vyžaduje aktivní řešení."
+                            "explanation": "Burnout je přirozená reakce na dlouhodobou zátěž, ne slabost ani psychiatrická diagnóza. Projevuje se ve 3 rovinách: fyzické (únava, nemoci), emoční (beznaděj, pláč) a sociální (izolace). Vyžaduje aktivní řešení — podporu, odpočinek, případně psychologa."
                         },
                         {
                             "id": "q2",
@@ -3662,9 +3685,10 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                             "options": [
                                 {"id": "a", "text": "30 let", "correct": False},
                                 {"id": "b", "text": "50 let", "correct": True},
-                                {"id": "c", "text": "65 let", "correct": False}
+                                {"id": "c", "text": "65 let", "correct": False},
+                                {"id": "d", "text": "40 let", "correct": False}
                             ],
-                            "explanation": "Young-Onset Parkinson Disease (YOPD) se diagnostikuje u lidí pod 50 let. Tvoří 5–10 % všech případů."
+                            "explanation": "Young-Onset Parkinson Disease (YOPD) se diagnostikuje u lidí pod 50 let. Tvoří 5–10 % všech případů. Juvenilní forma (pod 21 let) je extrémně vzácná. YOPD má pomalejší progresi, ale častější dyskineze a výraznější psychické dopady."
                         },
                         {
                             "id": "q4",
@@ -3685,9 +3709,10 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                             "options": [
                                 {"id": "a", "text": "Více se snažit a přestat si stěžovat", "correct": False},
                                 {"id": "b", "text": "Vyhledat pomoc — psycholog, respitní péče, svépomocná skupina", "correct": True},
-                                {"id": "c", "text": "Čekat, až to přejde samo", "correct": False}
+                                {"id": "c", "text": "Čekat, až to přejde samo", "correct": False},
+                                {"id": "d", "text": "Vzít si dlouhodobé léky na uklidnění", "correct": False}
                             ],
-                            "explanation": "Vyhoření pečovatele je emergentní situace. Aktivní hledání pomoci chrání jak pečujícího, tak pacienta."
+                            "explanation": "Vyhoření pečovatele je emergentní situace. Řešením nejsou léky na uklidnění ani 'víc se snažit'. Správný přístup: aktivně hledat podporu — psycholog, respitní péče (právo pečujícího!), svépomocná skupina, Linka 116 123. Pravidlo kyslíkové masky: nejdřív sebe, pak druhé."
                         },
                         {
                             "id": "q6",
