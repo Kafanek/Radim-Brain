@@ -3921,6 +3921,7 @@ def get_course(course_id):
                     "id": l["id"],
                     "title": l["title"],
                     "type": l.get("type", "article"),
+                    "prerequisites": l.get("prerequisites", []),
                     "key_points": l.get("key_points", [])
                 }
                 for l in module.get("lessons", [])
