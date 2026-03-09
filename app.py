@@ -274,6 +274,13 @@ try:
 except ImportError:
     _APP_ANT_AVAILABLE = False
 
+# 🧠 Brain Engine — per-user speech adaptation from Ψ(t)
+try:
+    from radim_brain_routes import get_brain_speech_for_user as _app_brain_speech
+    _APP_BRAIN_AVAILABLE = True
+except ImportError:
+    _APP_BRAIN_AVAILABLE = False
+
 # 📞 Import Twilio Voice routes - Phone calls for seniors
 try:
     from twilio_voice_routes import twilio_bp
@@ -418,6 +425,19 @@ def azure_tts_proxy():
             except Exception:
                 pass  # Fall through to default rate/pitch
 
+        # 🧠 Brain Engine: override with per-user Ψ(t) speech adaptation
+        brain_speech = None
+        uid = data.get('user_id', '')
+        if uid and _APP_BRAIN_AVAILABLE:
+            try:
+                brain_speech = _app_brain_speech(str(uid))
+                if brain_speech:
+                    rate = str(brain_speech['rate'])
+                    pitch = f"{brain_speech['pitch_pct']:+d}%"
+                    ant_state = brain_speech['mode']
+            except Exception:
+                pass
+
         if not text:
             return jsonify({'error': 'Text is required'}), 400
 
@@ -466,6 +486,9 @@ def azure_tts_proxy():
                 }
             if ant_state:
                 resp_headers['X-Anticipation-State'] = ant_state
+            if brain_speech:
+                resp_headers['X-Brain-Mode'] = brain_speech['mode']
+                resp_headers['X-Brain-Coherence'] = str(brain_speech['coherence'])
             return Response(
                 response.content,
                 mimetype='audio/mpeg',

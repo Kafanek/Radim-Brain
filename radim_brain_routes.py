@@ -264,6 +264,78 @@ def _db_save_brain_state(user_id, psi, alpha, mode, coherence, source="chat"):
         print(f"Brain state save warning: {e}")
 
 
+def get_brain_speech_for_user(user_id):
+    """
+    Load latest Ψ(t) from brain_states and compute speech params for TTS.
+
+    Returns dict with rate, pitch, pause_ms, phrasing, mode, coherence
+    or None if no brain state exists for this user.
+    """
+    if not DB_AVAILABLE or not user_id:
+        return None
+    try:
+        db = get_connection()
+        if is_postgres():
+            row = db.execute(
+                "SELECT C, E, R, S, alpha, mode, coherence FROM brain_states WHERE user_id = %s ORDER BY created_at DESC LIMIT 1",
+                (user_id,)
+            ).fetchone()
+        else:
+            row = db.execute(
+                "SELECT C, E, R, S, alpha, mode, coherence FROM brain_states WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+                (user_id,)
+            ).fetchone()
+        db.close()
+        if not row:
+            return None
+
+        C_val, E_val, R_val, S_val, alpha_val, mode, coherence = row
+        C_val = float(C_val or 5.0)
+        alpha_val = float(alpha_val or 0.0)
+        mode = mode or "HARMONY"
+
+        # Load per-user adaptation adjustments
+        adapt = _db_load_adaptation(user_id)
+
+        # Speech params by mode (same logic as compute_psi_state)
+        if mode == "HARMONY":
+            rate = 1.0 + adapt["speech_rate_adjust"]
+            pause_ms = 618 + adapt["pause_adjust_ms"]
+            pitch_range_st = 12
+            phrasing = "natural"
+        elif mode == "ALERT":
+            rate = 0.85 + adapt["speech_rate_adjust"]
+            pause_ms = 1000 + adapt["pause_adjust_ms"]
+            pitch_range_st = 8
+            phrasing = "simplified"
+        else:  # CRISIS
+            rate = 0.7 + adapt["speech_rate_adjust"]
+            pause_ms = 1618 + adapt["pause_adjust_ms"]
+            pitch_range_st = 4
+            phrasing = "single_command"
+
+        rate = clamp(rate, 0.5, 1.2)
+        pause_ms = clamp(pause_ms, 200, 2500)
+
+        # Map pitch_range_st to Azure TTS pitch percentage
+        # 12st (HARMONY) → 0%, 8st (ALERT) → -3%, 4st (CRISIS) → -6%
+        pitch_pct = -round((12 - pitch_range_st) * 0.75)
+
+        return {
+            "rate": round(rate, 3),
+            "pitch_pct": pitch_pct,
+            "pause_ms": round(pause_ms),
+            "phrasing": phrasing,
+            "mode": mode,
+            "coherence": round(float(coherence or 0.5), 4),
+            "user_id": user_id,
+            "source": "brain_states"
+        }
+    except Exception as e:
+        print(f"Brain speech lookup warning: {e}")
+        return None
+
+
 # ═══════════════════════════════════════════════════════════
 # JÁDROVÉ MATEMATICKÉ FUNKCE
 # ═══════════════════════════════════════════════════════════

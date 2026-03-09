@@ -25,6 +25,13 @@ try:
 except ImportError:
     _SPEECH_ANT_AVAILABLE = False
 
+# 🧠 Brain Engine — per-user Ψ(t) speech adaptation
+try:
+    from radim_brain_routes import get_brain_speech_for_user as _speech_brain_lookup
+    _SPEECH_BRAIN_AVAILABLE = True
+except ImportError:
+    _SPEECH_BRAIN_AVAILABLE = False
+
 # Azure Speech konfigurace
 AZURE_SPEECH_KEY = os.environ.get('AZURE_SPEECH_KEY')
 AZURE_SPEECH_REGION = os.environ.get('AZURE_SPEECH_REGION', 'westeurope')
@@ -107,6 +114,28 @@ def synthesize_speech():
                 elif ant_state == 'ALERT':
                     style, styledegree = 'empathetic', '1.1'
 
+        # 🧠 Brain Engine: override with per-user Ψ(t) speech adaptation
+        brain_speech = None
+        if _SPEECH_BRAIN_AVAILABLE:
+            try:
+                auth_user = getattr(g, 'auth_user', None) or {}
+                uid = str(auth_user.get('id', '')).strip()
+                if not uid or uid == '0':
+                    uid = data.get('user_id', '')
+                if uid:
+                    brain_speech = _speech_brain_lookup(str(uid))
+                    if brain_speech:
+                        rate = str(brain_speech['rate'])
+                        pitch = f"{brain_speech['pitch_pct']:+d}%"
+                        senior_mode = False
+                        ant_state = brain_speech['mode']
+                        if brain_speech['mode'] == 'CRISIS':
+                            style, styledegree = 'calm', '1.0'
+                        elif brain_speech['mode'] == 'ALERT':
+                            style, styledegree = 'empathetic', '1.1'
+            except Exception:
+                pass
+
         if senior_mode:
             rate = SENIOR_DEFAULTS['rate']
             pitch = SENIOR_DEFAULTS['pitch']
@@ -156,6 +185,8 @@ def synthesize_speech():
                 }
                 if ant_state:
                     resp_data['anticipation_state'] = ant_state
+                if brain_speech:
+                    resp_data['brain_speech'] = brain_speech
                 return jsonify(resp_data)
             else:
                 return Response(
@@ -500,10 +531,11 @@ def get_azure_config():
 # ============================================
 # RADIM HELPER FUNCTION
 # ============================================
-def radim_speak(text, emotion='friendly', C=None, alpha=None):
+def radim_speak(text, emotion='friendly', C=None, alpha=None, user_id=None):
     """
     Helper funkce pro Radima - převede text na audio data.
     Accepts optional C/α from Anticipation Engine for adaptive speech.
+    If user_id provided, loads Brain Engine Ψ(t) speech params from DB.
     Vrací bytes audio data nebo None při chybě.
     """
     if not AZURE_SPEECH_KEY or not text:
@@ -532,6 +564,20 @@ def radim_speak(text, emotion='friendly', C=None, alpha=None):
                     style, degree = 'calm', '1.0'
                 elif ant_state == 'ALERT':
                     style, degree = 'empathetic', '1.1'
+
+        # 🧠 Brain Engine: override with per-user Ψ(t) if available
+        if user_id and _SPEECH_BRAIN_AVAILABLE:
+            try:
+                brain_speech = _speech_brain_lookup(str(user_id))
+                if brain_speech:
+                    rate = str(brain_speech['rate'])
+                    pitch = f"{brain_speech['pitch_pct']:+d}%"
+                    if brain_speech['mode'] == 'CRISIS':
+                        style, degree = 'calm', '1.0'
+                    elif brain_speech['mode'] == 'ALERT':
+                        style, degree = 'empathetic', '1.1'
+            except Exception:
+                pass
 
         safe_text = xml_escape(text)
 

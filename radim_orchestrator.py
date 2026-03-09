@@ -45,7 +45,8 @@ try:
         compute_psi_state as _brain_psi,
         reinforcement_update as _brain_reinforce,
         decision_model as _brain_decision,
-        derive_text_empathy_proxies as _brain_proxies
+        derive_text_empathy_proxies as _brain_proxies,
+        get_brain_speech_for_user as _brain_speech_for_user
     )
     _ORCH_BRAIN_AVAILABLE = True
 except ImportError:
@@ -853,12 +854,27 @@ def radim_voice_speak():
             except Exception:
                 pass  # Fall back to emotion_settings
 
+        # 🧠 Brain Engine: override with per-user Ψ(t) speech adaptation
+        brain_speech = None
+        if _ORCH_BRAIN_AVAILABLE:
+            try:
+                uid = _extract_user_id(getattr(g, 'auth_user', None), data.get('user_id'))
+                brain_speech = _brain_speech_for_user(uid)
+                if brain_speech:
+                    settings = {
+                        'rate': str(brain_speech['rate']),
+                        'pitch': f"{brain_speech['pitch_pct']:+d}%"
+                    }
+                    ant_state = brain_speech['mode']
+            except Exception:
+                pass  # Fall back to previous settings
+
         ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="cs-CZ">
             <voice name="{voice}">
                 <prosody rate="{settings['rate']}" pitch="{settings['pitch']}" volume="loud">{safe_text}</prosody>
             </voice>
         </speak>'''
-        
+
         response = requests.post(
             f"https://{AZURE_REGION}.tts.speech.microsoft.com/cognitiveservices/v1",
             headers={
@@ -869,7 +885,7 @@ def radim_voice_speak():
             data=ssml.encode('utf-8'),
             timeout=15
         )
-        
+
         if response.status_code == 200:
             audio_base64 = base64.b64encode(response.content).decode('utf-8')
             resp_data = {
@@ -881,6 +897,8 @@ def radim_voice_speak():
             }
             if ant_state:
                 resp_data['anticipation_state'] = ant_state
+            if brain_speech:
+                resp_data['brain_speech'] = brain_speech
             return jsonify(resp_data)
         
         return jsonify({'success': False, 'error': f'Azure TTS error: {response.status_code}'}), 500
