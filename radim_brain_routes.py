@@ -76,6 +76,7 @@ PELL = [0, 1, 2, 5, 12, 29, 70, 169, 408, 985, 2378]
 T1 = 12     # Práh 1: HARMONY → ALERT
 T2 = 27     # Práh 2: ALERT → CRISIS
 C_MAX = 40  # Maximum vědomí
+BRAIN_STATE_TTL_MINUTES = 30  # Brain state expiry — ignore stale states
 
 # ═══════════════════════════════════════════════════════════
 # VÁHY EMPATIE
@@ -264,12 +265,93 @@ def _db_save_brain_state(user_id, psi, alpha, mode, coherence, source="chat"):
         print(f"Brain state save warning: {e}")
 
 
+def compute_unified_speech(C, alpha, mode, user_id=None, ant_params=None):
+    """
+    Unified speech parameter computation — single source of truth.
+
+    Layer 1: Brain mode-based baseline (φ-proportioned pauses)
+    Layer 2: Anticipation Engine fine-tuning (30% blend if ant_params provided)
+    Layer 3: Per-user adaptation from brain_adaptation DB
+    Layer 4: Pitch mapping with wider range (v2.1: +2% to -10%)
+
+    Args:
+        C: consciousness level (0-40)
+        alpha: emotional activation (0-1)
+        mode: "HARMONY" | "ALERT" | "CRISIS"
+        user_id: if set, loads per-user adaptation from DB
+        ant_params: dict from Anticipation Engine {rate, pitch, pause_ms} (optional)
+
+    Returns:
+        dict: {rate, pitch_pct, pause_ms, phrasing, style, styledegree, mode}
+    """
+    # Load per-user adaptation
+    if user_id:
+        adapt = _db_load_adaptation(user_id)
+    else:
+        adapt = _adaptation_state
+
+    # === Layer 1: Brain mode-based baseline ===
+    if mode == "HARMONY":
+        rate = 1.0
+        pause_ms = 618      # φ × 382
+        pitch_st = 12
+        phrasing = "natural"
+        style = "friendly"
+        styledegree = "1.2"
+    elif mode == "ALERT":
+        rate = 0.85
+        pause_ms = 1000     # φ midpoint
+        pitch_st = 8
+        phrasing = "simplified"
+        style = "empathetic"
+        styledegree = "1.1"
+    else:  # CRISIS
+        rate = 0.7
+        pause_ms = 1618     # φ × 1000
+        pitch_st = 4
+        phrasing = "single_command"
+        style = "calm"
+        styledegree = "1.0"
+
+    # === Layer 2: Anticipation Engine fine-tuning (30% blend) ===
+    if ant_params:
+        ant_rate = float(ant_params.get('rate', 0.9))
+        ant_pause = float(ant_params.get('pause_ms', 300))
+        ant_pitch = float(ant_params.get('pitch', 0))
+        rate += (ant_rate - 0.9) * 0.3
+        pause_ms += (ant_pause - 300) * 0.3
+        pitch_st += int(ant_pitch * 0.3)
+
+    # === Layer 3: Per-user adaptation ===
+    rate += adapt["speech_rate_adjust"]
+    pause_ms += adapt["pause_adjust_ms"]
+
+    # Clamp
+    rate = clamp(rate, 0.5, 1.2)
+    pause_ms = clamp(pause_ms, 200, 2500)
+    pitch_st = clamp(pitch_st, 0, 16)
+
+    # === Layer 4: Wider pitch mapping (v2.1) ===
+    # 12st (HARMONY) → +2%, 8st (ALERT) → ~-5%, 4st (CRISIS) → ~-10%
+    pitch_pct = round(2 - (12 - pitch_st) * 1.2)
+
+    return {
+        "rate": round(rate, 3),
+        "pitch_pct": pitch_pct,
+        "pause_ms": round(pause_ms),
+        "phrasing": phrasing,
+        "style": style,
+        "styledegree": styledegree,
+        "mode": mode,
+    }
+
+
 def get_brain_speech_for_user(user_id):
     """
     Load latest Ψ(t) from brain_states and compute speech params for TTS.
 
-    Returns dict with rate, pitch, pause_ms, phrasing, mode, coherence
-    or None if no brain state exists for this user.
+    Returns dict with rate, pitch, pause_ms, phrasing, style, mode, coherence
+    or None if no fresh brain state exists (TTL: 30 min).
     """
     if not DB_AVAILABLE or not user_id:
         return None
@@ -277,13 +359,13 @@ def get_brain_speech_for_user(user_id):
         db = get_connection()
         if is_postgres():
             row = db.execute(
-                "SELECT C, E, R, S, alpha, mode, coherence FROM brain_states WHERE user_id = %s ORDER BY created_at DESC LIMIT 1",
-                (user_id,)
+                "SELECT C, E, R, S, alpha, mode, coherence FROM brain_states WHERE user_id = %s AND created_at > NOW() - INTERVAL '%s minutes' ORDER BY created_at DESC LIMIT 1",
+                (user_id, BRAIN_STATE_TTL_MINUTES)
             ).fetchone()
         else:
             row = db.execute(
-                "SELECT C, E, R, S, alpha, mode, coherence FROM brain_states WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
-                (user_id,)
+                "SELECT C, E, R, S, alpha, mode, coherence FROM brain_states WHERE user_id = ? AND created_at > datetime('now', '-' || ? || ' minutes') ORDER BY created_at DESC LIMIT 1",
+                (user_id, BRAIN_STATE_TTL_MINUTES)
             ).fetchone()
         db.close()
         if not row:
@@ -295,43 +377,12 @@ def get_brain_speech_for_user(user_id):
         mode = row.get('mode', 'HARMONY') or "HARMONY"
         coherence = row.get('coherence', 0.5)
 
-        # Load per-user adaptation adjustments
-        adapt = _db_load_adaptation(user_id)
-
-        # Speech params by mode (same logic as compute_psi_state)
-        if mode == "HARMONY":
-            rate = 1.0 + adapt["speech_rate_adjust"]
-            pause_ms = 618 + adapt["pause_adjust_ms"]
-            pitch_range_st = 12
-            phrasing = "natural"
-        elif mode == "ALERT":
-            rate = 0.85 + adapt["speech_rate_adjust"]
-            pause_ms = 1000 + adapt["pause_adjust_ms"]
-            pitch_range_st = 8
-            phrasing = "simplified"
-        else:  # CRISIS
-            rate = 0.7 + adapt["speech_rate_adjust"]
-            pause_ms = 1618 + adapt["pause_adjust_ms"]
-            pitch_range_st = 4
-            phrasing = "single_command"
-
-        rate = clamp(rate, 0.5, 1.2)
-        pause_ms = clamp(pause_ms, 200, 2500)
-
-        # Map pitch_range_st to Azure TTS pitch percentage
-        # 12st (HARMONY) → 0%, 8st (ALERT) → -3%, 4st (CRISIS) → -6%
-        pitch_pct = -round((12 - pitch_range_st) * 0.75)
-
-        return {
-            "rate": round(rate, 3),
-            "pitch_pct": pitch_pct,
-            "pause_ms": round(pause_ms),
-            "phrasing": phrasing,
-            "mode": mode,
-            "coherence": round(float(coherence or 0.5), 4),
-            "user_id": user_id,
-            "source": "brain_states"
-        }
+        # Use unified speech computation
+        speech = compute_unified_speech(C_val, alpha_val, mode, user_id=user_id)
+        speech["coherence"] = round(float(coherence or 0.5), 4)
+        speech["user_id"] = user_id
+        speech["source"] = "brain_states"
+        return speech
     except Exception as e:
         print(f"Brain speech lookup warning: {e}")
         return None
@@ -577,31 +628,8 @@ def compute_psi_state(C, alpha, voice_tone=0.5, hrv=0.5, speech_tempo=0.5, user_
     # Celková koherence systému
     coherence = (phi_index * PHI + stability * RHO + (1 - S) * DELTA) / (PHI + RHO + DELTA)
 
-    # Load adaptation state (per-user from DB or global fallback)
-    if user_id:
-        adapt = _db_load_adaptation(user_id)
-    else:
-        adapt = _adaptation_state
-
-    # Řečová adaptace (Master Prompt §8, §10)
-    if mode == "HARMONY":
-        speech_rate = 1.0 + adapt["speech_rate_adjust"]
-        pause_ms = 618 + adapt["pause_adjust_ms"]
-        pitch_range = 12
-        phrasing = "natural"
-    elif mode == "ALERT":
-        speech_rate = 0.85 + adapt["speech_rate_adjust"]
-        pause_ms = 1000 + adapt["pause_adjust_ms"]
-        pitch_range = 8
-        phrasing = "simplified"
-    else:  # CRISIS
-        speech_rate = 0.7 + adapt["speech_rate_adjust"]
-        pause_ms = 1618 + adapt["pause_adjust_ms"]
-        pitch_range = 4
-        phrasing = "single_command"
-
-    speech_rate = clamp(speech_rate, 0.5, 1.2)
-    pause_ms = clamp(pause_ms, 200, 2500)
+    # Unified speech computation (v2.1: single source of truth)
+    speech = compute_unified_speech(C, alpha, mode, user_id=user_id)
 
     # Save Ψ(t) snapshot to DB
     psi_vec = {"C": round(C, 4), "E": E, "R": R, "S": S}
@@ -623,10 +651,13 @@ def compute_psi_state(C, alpha, voice_tone=0.5, hrv=0.5, speech_tempo=0.5, user_
         },
         "empathy": empathy,
         "speech": {
-            "rate": round(speech_rate, 3),
-            "pause_ms": round(pause_ms),
-            "pitch_range_st": pitch_range,
-            "phrasing": phrasing,
+            "rate": speech["rate"],
+            "pause_ms": speech["pause_ms"],
+            "pitch_range_st": clamp(12 - round((2 - speech["pitch_pct"]) / 1.2), 0, 16),
+            "pitch_pct": speech["pitch_pct"],
+            "phrasing": speech["phrasing"],
+            "style": speech["style"],
+            "styledegree": speech["styledegree"],
             "phi_proportions": "618:1000:1618"
         },
         "response_style": {
@@ -686,7 +717,7 @@ def quasiperiodic_rhythm(omega, t_points=None):
     }
 
 
-def reinforcement_update(success, user_id=None):
+def reinforcement_update(success, user_id=None, signal_type="interaction"):
     """
     Adaptace (Master Prompt §11):
 
@@ -695,6 +726,10 @@ def reinforcement_update(success, user_id=None):
 
     Radim upravuje tempo řeči, styl komunikace, intervenci.
     Pokud user_id je zadáno, persistuje stav do PostgreSQL.
+
+    signal_type:
+        "interaction" — standard (1× multiplier)
+        "speech_feedback" — from user feedback buttons (2× multiplier)
 
     Returns:
         dict: updated adaptation state
@@ -710,20 +745,23 @@ def reinforcement_update(success, user_id=None):
     state["interactions"] += 1
 
     # Exponential moving average adaptace
-    eta = 0.1  # learning rate
+    eta = 0.15  # learning rate (v2.1: was 0.1)
+
+    # Speech feedback from user is 2× stronger signal
+    multiplier = 2.0 if signal_type == "speech_feedback" else 1.0
 
     if success:
-        state["speech_rate_adjust"] += eta * 0.02
-        state["pause_adjust_ms"] -= eta * 20
+        state["speech_rate_adjust"] += eta * 0.05 * multiplier   # v2.1: was 0.02
+        state["pause_adjust_ms"] -= eta * 50 * multiplier        # v2.1: was 20 → -5ms base
         state["intervention_level"] = max(0, state["intervention_level"] - eta * 0.05)
     else:
-        state["speech_rate_adjust"] -= eta * 0.05
-        state["pause_adjust_ms"] += eta * 50
+        state["speech_rate_adjust"] -= eta * 0.10 * multiplier   # v2.1: was 0.05
+        state["pause_adjust_ms"] += eta * 100 * multiplier       # v2.1: was 50 → +10ms base
         state["intervention_level"] = min(1, state["intervention_level"] + eta * 0.1)
 
-    # Clamp
-    state["speech_rate_adjust"] = clamp(state["speech_rate_adjust"], -0.3, 0.1)
-    state["pause_adjust_ms"] = clamp(state["pause_adjust_ms"], -200, 400)
+    # Clamp (v2.1: wider positive range, wider pause range)
+    state["speech_rate_adjust"] = clamp(state["speech_rate_adjust"], -0.3, 0.15)
+    state["pause_adjust_ms"] = clamp(state["pause_adjust_ms"], -300, 600)
 
     # Save to DB if user_id provided
     if user_id:
@@ -1195,6 +1233,78 @@ def brain_adapt():
     return jsonify({
         "success": True,
         **result,
+        "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+    })
+
+
+@radim_brain_bp.route('/feedback', methods=['POST'])
+def brain_feedback():
+    """
+    Speech feedback from frontend (v2.1).
+
+    Input:
+        user_id: string (required)
+        rating: int 1-5 (optional)
+        action: "thumbs_up" | "thumbs_down" | "replay" | "skip" (optional)
+        response_time_ms: int (optional)
+        context: string (optional)
+
+    Signal mapping:
+        thumbs_up / rating >= 4 → success (2× RL via speech_feedback)
+        thumbs_down / rating <= 2 → failure (2× RL via speech_feedback)
+        replay → failure
+        skip / rating == 3 → neutral (no RL update)
+    """
+    data = request.get_json() or {}
+    user_id = data.get('user_id')
+    if not user_id:
+        return jsonify({"success": False, "error": "user_id is required"}), 400
+
+    rating = data.get('rating')
+    action = data.get('action', '')
+    response_time_ms = data.get('response_time_ms')
+    context = data.get('context', '')
+
+    # Determine signal from action / rating
+    if action in ('thumbs_up',) or (rating and int(rating) >= 4):
+        signal = "success"
+    elif action in ('thumbs_down', 'replay') or (rating and int(rating) <= 2):
+        signal = "failure"
+    else:
+        signal = "neutral"
+
+    # Save feedback to DB
+    if DB_AVAILABLE:
+        try:
+            db = get_connection()
+            if is_postgres():
+                db.execute(
+                    "INSERT INTO brain_feedback (user_id, rating, action, response_time_ms, signal, context) VALUES (%s, %s, %s, %s, %s, %s)",
+                    (user_id, rating, action, response_time_ms, signal, context)
+                )
+            else:
+                db.execute(
+                    "INSERT INTO brain_feedback (user_id, rating, action, response_time_ms, signal, context) VALUES (?, ?, ?, ?, ?, ?)",
+                    (user_id, rating, action, response_time_ms, signal, context)
+                )
+            db.commit()
+            db.close()
+        except Exception as e:
+            print(f"Brain feedback save warning: {e}")
+
+    # Apply RL update (2× multiplier for speech_feedback)
+    rl_result = None
+    if signal != "neutral":
+        rl_result = reinforcement_update(
+            success=(signal == "success"),
+            user_id=user_id,
+            signal_type="speech_feedback"
+        )
+
+    return jsonify({
+        "success": True,
+        "signal": signal,
+        "rl_update": rl_result,
         "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
     })
 

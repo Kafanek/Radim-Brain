@@ -614,6 +614,19 @@ def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_brain_states_user ON brain_states(user_id);
             CREATE INDEX IF NOT EXISTS idx_brain_states_created ON brain_states(created_at);
+
+            -- Brain Engine v4.1 — speech feedback from users
+            CREATE TABLE IF NOT EXISTS brain_feedback (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                rating INTEGER,
+                action TEXT,
+                response_time_ms INTEGER,
+                signal TEXT,
+                context TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_brain_feedback_user ON brain_feedback(user_id);
         ''')
 
         # v3.8 migration: add multiparty columns to existing table
@@ -998,6 +1011,19 @@ def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_brain_states_user ON brain_states(user_id);
             CREATE INDEX IF NOT EXISTS idx_brain_states_created ON brain_states(created_at);
+
+            -- Brain Engine v4.1 — speech feedback from users
+            CREATE TABLE IF NOT EXISTS brain_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                rating INTEGER,
+                action TEXT,
+                response_time_ms INTEGER,
+                signal TEXT,
+                context TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_brain_feedback_user ON brain_feedback(user_id);
         ''')
 
         # v3.8 migration: add multiparty columns to existing table

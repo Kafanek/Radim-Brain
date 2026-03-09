@@ -869,9 +869,16 @@ def radim_voice_speak():
             except Exception:
                 pass  # Fall back to previous settings
 
-        ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="cs-CZ">
+        # v2.1: express-as for emotional style (style/styledegree from Brain Engine)
+        _style = brain_speech.get('style', 'friendly') if brain_speech else 'friendly'
+        _styledegree = brain_speech.get('styledegree', '1.2') if brain_speech else '1.2'
+
+        ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
+               xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="cs-CZ">
             <voice name="{voice}">
-                <prosody rate="{settings['rate']}" pitch="{settings['pitch']}" volume="loud">{safe_text}</prosody>
+                <mstts:express-as style="{_style}" styledegree="{_styledegree}">
+                    <prosody rate="{settings['rate']}" pitch="{settings['pitch']}" volume="loud">{safe_text}</prosody>
+                </mstts:express-as>
             </voice>
         </speak>'''
 

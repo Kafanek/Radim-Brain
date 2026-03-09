@@ -453,12 +453,17 @@ def azure_tts_proxy():
         if not _re.match(r'^[+-]?[0-9]+(%|Hz)$', pitch):
             pitch = '+0Hz'
 
-        # Build SSML
-        ssml = f"""<speak version='1.0' xml:lang='cs-CZ'>
+        # Build SSML (v2.1: express-as for emotional style)
+        _style = brain_speech.get('style', 'friendly') if brain_speech else 'friendly'
+        _styledegree = brain_speech.get('styledegree', '1.2') if brain_speech else '1.2'
+
+        ssml = f"""<speak version='1.0' xmlns:mstts='https://www.w3.org/2001/mstts' xml:lang='cs-CZ'>
             <voice name='{voice}'>
-                <prosody rate='{rate}' pitch='{pitch}'>
-                    {safe_text}
-                </prosody>
+                <mstts:express-as style='{_style}' styledegree='{_styledegree}'>
+                    <prosody rate='{rate}' pitch='{pitch}'>
+                        {safe_text}
+                    </prosody>
+                </mstts:express-as>
             </voice>
         </speak>"""
         
