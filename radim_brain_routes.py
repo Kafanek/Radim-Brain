@@ -145,6 +145,13 @@ try:
 except ImportError:
     SOUL_AVAILABLE = False
 
+# Database (for brain persistence)
+try:
+    from database import get_db, is_postgres
+    DB_AVAILABLE = True
+except ImportError:
+    DB_AVAILABLE = False
+
 # Local sigmoid/clamp if anticipation not available
 def _sigmoid(x, k=5, x0=0.5):
     try:
@@ -157,6 +164,101 @@ def _clamp(val, lo, hi):
 
 sigmoid = _ant_sigmoid if ANTICIPATION_AVAILABLE else _sigmoid
 clamp = _ant_clamp if ANTICIPATION_AVAILABLE else _clamp
+
+
+# ═══════════════════════════════════════════════════════════
+# DATABASE PERSISTENCE
+# ═══════════════════════════════════════════════════════════
+
+_ADAPTATION_DEFAULTS = {
+    "reward_sum": 0,
+    "interactions": 0,
+    "speech_rate_adjust": 0.0,
+    "pause_adjust_ms": 0.0,
+    "style": "warm",
+    "intervention_level": 0.5,
+}
+
+
+def _db_load_adaptation(user_id):
+    """Load per-user adaptation state from PostgreSQL, or return defaults."""
+    if not DB_AVAILABLE or not user_id:
+        return dict(_ADAPTATION_DEFAULTS)
+    try:
+        db = get_db()
+        ph = "%s" if is_postgres() else "?"
+        row = db.execute(
+            f"SELECT reward_sum, interactions, speech_rate_adjust, pause_adjust_ms, style, intervention_level FROM brain_adaptation WHERE user_id = {ph}",
+            (user_id,)
+        ).fetchone()
+        if row:
+            return {
+                "reward_sum": row[0],
+                "interactions": row[1],
+                "speech_rate_adjust": float(row[2]),
+                "pause_adjust_ms": float(row[3]),
+                "style": row[4] or "warm",
+                "intervention_level": float(row[5]),
+            }
+    except Exception as e:
+        print(f"Brain DB load warning: {e}")
+    return dict(_ADAPTATION_DEFAULTS)
+
+
+def _db_save_adaptation(user_id, state):
+    """Upsert per-user adaptation state to PostgreSQL."""
+    if not DB_AVAILABLE or not user_id:
+        return
+    try:
+        db = get_db()
+        if is_postgres():
+            db.execute('''
+                INSERT INTO brain_adaptation (user_id, reward_sum, interactions, speech_rate_adjust, pause_adjust_ms, style, intervention_level, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (user_id) DO UPDATE SET
+                    reward_sum = EXCLUDED.reward_sum,
+                    interactions = EXCLUDED.interactions,
+                    speech_rate_adjust = EXCLUDED.speech_rate_adjust,
+                    pause_adjust_ms = EXCLUDED.pause_adjust_ms,
+                    style = EXCLUDED.style,
+                    intervention_level = EXCLUDED.intervention_level,
+                    updated_at = NOW()
+            ''', (user_id, state["reward_sum"], state["interactions"],
+                  state["speech_rate_adjust"], state["pause_adjust_ms"],
+                  state["style"], state["intervention_level"]))
+        else:
+            db.execute('''
+                INSERT OR REPLACE INTO brain_adaptation (user_id, reward_sum, interactions, speech_rate_adjust, pause_adjust_ms, style, intervention_level, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            ''', (user_id, state["reward_sum"], state["interactions"],
+                  state["speech_rate_adjust"], state["pause_adjust_ms"],
+                  state["style"], state["intervention_level"]))
+        db.commit()
+    except Exception as e:
+        print(f"Brain DB save warning: {e}")
+
+
+def _db_save_brain_state(user_id, psi, alpha, mode, coherence, source="chat"):
+    """Save Psi(t) snapshot to brain_states table."""
+    if not DB_AVAILABLE or not user_id:
+        return
+    try:
+        db = get_db()
+        if is_postgres():
+            db.execute('''
+                INSERT INTO brain_states (user_id, C, E, R, S, alpha, mode, coherence, source, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            ''', (user_id, psi["C"], psi["E"], psi["R"], psi["S"],
+                  alpha, mode, coherence, source))
+        else:
+            db.execute('''
+                INSERT INTO brain_states (user_id, C, E, R, S, alpha, mode, coherence, source, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            ''', (user_id, psi["C"], psi["E"], psi["R"], psi["S"],
+                  alpha, mode, coherence, source))
+        db.commit()
+    except Exception as e:
+        print(f"Brain state save warning: {e}")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -211,8 +313,15 @@ def consciousness_equation(n, alpha):
     else:
         convergence = RHO
 
+    # Normalizace na 0-C_MAX (40) — mapujeme convergence ratio z [φ, δ] na [0, 40]
+    # φ=1.618 → C_norm=0 (harmonie), δ=2.414 → C_norm=40 (krize), ρ=2.016 → ~20 (alert)
+    span = DELTA - PHI  # ≈ 0.796
+    ratio_norm = (convergence - PHI) / span if span > 0 else 0.5
+    C_normalized = clamp(round(ratio_norm * C_MAX, 2), 0.0, C_MAX)
+
     return {
         "C_next": round(C_next, 4),
+        "C_normalized": C_normalized,
         "harmonic_component": harmonic,
         "crisis_component": crisis,
         "alpha": round(alpha, 4),
@@ -277,6 +386,48 @@ def compute_empathy(voice_tone=0.5, hrv=0.5, speech_tempo=0.5):
     }
 
 
+def derive_text_empathy_proxies(message, mood=None, alpha=0.0):
+    """
+    Odhadne voice_tone, hrv, speech_tempo z textu (bez senzorů).
+
+    Pravidla:
+        voice_tone: od mood (happy→0.9, sad→0.3, angry→0.1, neutral→0.6)
+        hrv: od délky zprávy (krátké=stres→0.3, normální→0.6, dlouhé=klid→0.8)
+        speech_tempo: od alpha (nízké α→pomalé=0.7, vysoké α→rychlé=0.3)
+
+    Returns:
+        dict: voice_tone, hrv, speech_tempo proxy values
+    """
+    # Mood → voice_tone
+    mood_map = {
+        "happy": 0.9, "calm": 0.85, "grateful": 0.85,
+        "neutral": 0.6, "confused": 0.45,
+        "sad": 0.3, "anxious": 0.2, "angry": 0.15, "crisis": 0.1
+    }
+    voice_tone = mood_map.get(mood or "neutral", 0.6)
+
+    # Message length → HRV proxy (short=stress, long=calm)
+    msg_len = len(message) if message else 0
+    if msg_len < 15:
+        hrv = 0.3       # very short = stress
+    elif msg_len < 50:
+        hrv = 0.5       # short
+    elif msg_len < 150:
+        hrv = 0.65      # normal
+    else:
+        hrv = 0.8       # long = calm elaboration
+
+    # Alpha → speech_tempo (high alpha = fast/agitated = low tempo score)
+    speech_tempo = clamp(0.8 - alpha * 0.6, 0.2, 0.9)
+
+    return {
+        "voice_tone": round(voice_tone, 3),
+        "hrv": round(hrv, 3),
+        "speech_tempo": round(speech_tempo, 3),
+        "source": "text_proxy"
+    }
+
+
 def compute_rationality(C, E, S):
     """
     Racionalita (R) — schopnost racionálního rozhodování.
@@ -307,7 +458,7 @@ def compute_stress(alpha, C):
     return round(clamp(S, 0.0, 1.0), 4)
 
 
-def compute_psi_state(C, alpha, voice_tone=0.5, hrv=0.5, speech_tempo=0.5):
+def compute_psi_state(C, alpha, voice_tone=0.5, hrv=0.5, speech_tempo=0.5, user_id=None):
     """
     Stavový vektor vědomí Ψ(t) = (C, E, R, S)
 
@@ -317,6 +468,7 @@ def compute_psi_state(C, alpha, voice_tone=0.5, hrv=0.5, speech_tempo=0.5):
         C: consciousness/load (0-40)
         alpha: emotional activation (0-1)
         voice_tone, hrv, speech_tempo: senzorové vstupy pro empatii
+        user_id: pokud zadáno, načte adaptaci z DB a uloží Ψ(t) snapshot
 
     Returns:
         dict: Ψ(t) state vector + classification + speech adaptation
@@ -340,44 +492,48 @@ def compute_psi_state(C, alpha, voice_tone=0.5, hrv=0.5, speech_tempo=0.5):
         mode = "CRISIS"
 
     # Harmonický index: jak blízko jsme φ-stavu
-    # Φ_index = 1 v harmonii, 0 v krizi
     phi_index = clamp(1.0 - (C / C_MAX), 0.0, 1.0)
 
     # RADIM stability score: blízkost k ρ-bodu
-    # ρ je rovnováha — nejstabilnější je systém kolem α≈0.5
     rho_distance = abs(alpha - 0.5)
-    stability = 1.0 - rho_distance * 2  # 1 při α=0.5, 0 při α=0 nebo α=1
+    stability = 1.0 - rho_distance * 2
 
     # Celková koherence systému
     coherence = (phi_index * PHI + stability * RHO + (1 - S) * DELTA) / (PHI + RHO + DELTA)
 
+    # Load adaptation state (per-user from DB or global fallback)
+    if user_id:
+        adapt = _db_load_adaptation(user_id)
+    else:
+        adapt = _adaptation_state
+
     # Řečová adaptace (Master Prompt §8, §10)
     if mode == "HARMONY":
-        speech_rate = 1.0 + _adaptation_state["speech_rate_adjust"]
-        pause_ms = 618 + _adaptation_state["pause_adjust_ms"]   # ψ × 1000
+        speech_rate = 1.0 + adapt["speech_rate_adjust"]
+        pause_ms = 618 + adapt["pause_adjust_ms"]
         pitch_range = 12
         phrasing = "natural"
     elif mode == "ALERT":
-        speech_rate = 0.85 + _adaptation_state["speech_rate_adjust"]
-        pause_ms = 1000 + _adaptation_state["pause_adjust_ms"]  # 1 × 1000
+        speech_rate = 0.85 + adapt["speech_rate_adjust"]
+        pause_ms = 1000 + adapt["pause_adjust_ms"]
         pitch_range = 8
         phrasing = "simplified"
     else:  # CRISIS
-        speech_rate = 0.7 + _adaptation_state["speech_rate_adjust"]
-        pause_ms = 1618 + _adaptation_state["pause_adjust_ms"]  # φ × 1000
+        speech_rate = 0.7 + adapt["speech_rate_adjust"]
+        pause_ms = 1618 + adapt["pause_adjust_ms"]
         pitch_range = 4
         phrasing = "single_command"
 
     speech_rate = clamp(speech_rate, 0.5, 1.2)
     pause_ms = clamp(pause_ms, 200, 2500)
 
+    # Save Ψ(t) snapshot to DB
+    psi_vec = {"C": round(C, 4), "E": E, "R": R, "S": S}
+    if user_id:
+        _db_save_brain_state(user_id, psi_vec, alpha, mode, coherence)
+
     return {
-        "psi": {
-            "C": round(C, 4),
-            "E": E,
-            "R": R,
-            "S": S
-        },
+        "psi": psi_vec,
         "mode": mode,
         "thresholds": {"T1": T1, "T2": T2},
         "alpha": round(alpha, 4),
@@ -454,7 +610,7 @@ def quasiperiodic_rhythm(omega, t_points=None):
     }
 
 
-def reinforcement_update(success):
+def reinforcement_update(success, user_id=None):
     """
     Adaptace (Master Prompt §11):
 
@@ -462,42 +618,52 @@ def reinforcement_update(success):
         failure → reward -1
 
     Radim upravuje tempo řeči, styl komunikace, intervenci.
+    Pokud user_id je zadáno, persistuje stav do PostgreSQL.
 
     Returns:
         dict: updated adaptation state
     """
+    # Load state: per-user from DB, or global fallback
+    if user_id:
+        state = _db_load_adaptation(user_id)
+    else:
+        state = _adaptation_state
+
     reward = 1 if success else -1
-    _adaptation_state["reward_sum"] += reward
-    _adaptation_state["interactions"] += 1
+    state["reward_sum"] += reward
+    state["interactions"] += 1
 
     # Exponential moving average adaptace
     eta = 0.1  # learning rate
 
     if success:
-        # Úspěch: mírně zvýšit tempo, snížit pauzy
-        _adaptation_state["speech_rate_adjust"] += eta * 0.02
-        _adaptation_state["pause_adjust_ms"] -= eta * 20
-        _adaptation_state["intervention_level"] = max(0, _adaptation_state["intervention_level"] - eta * 0.05)
+        state["speech_rate_adjust"] += eta * 0.02
+        state["pause_adjust_ms"] -= eta * 20
+        state["intervention_level"] = max(0, state["intervention_level"] - eta * 0.05)
     else:
-        # Neúspěch: zpomalit, prodloužit pauzy, zvýšit intervenci
-        _adaptation_state["speech_rate_adjust"] -= eta * 0.05
-        _adaptation_state["pause_adjust_ms"] += eta * 50
-        _adaptation_state["intervention_level"] = min(1, _adaptation_state["intervention_level"] + eta * 0.1)
+        state["speech_rate_adjust"] -= eta * 0.05
+        state["pause_adjust_ms"] += eta * 50
+        state["intervention_level"] = min(1, state["intervention_level"] + eta * 0.1)
 
     # Clamp
-    _adaptation_state["speech_rate_adjust"] = clamp(_adaptation_state["speech_rate_adjust"], -0.3, 0.1)
-    _adaptation_state["pause_adjust_ms"] = clamp(_adaptation_state["pause_adjust_ms"], -200, 400)
+    state["speech_rate_adjust"] = clamp(state["speech_rate_adjust"], -0.3, 0.1)
+    state["pause_adjust_ms"] = clamp(state["pause_adjust_ms"], -200, 400)
+
+    # Save to DB if user_id provided
+    if user_id:
+        _db_save_adaptation(user_id, state)
 
     return {
         "reward": reward,
-        "reward_sum": _adaptation_state["reward_sum"],
-        "interactions": _adaptation_state["interactions"],
-        "avg_reward": round(_adaptation_state["reward_sum"] / max(1, _adaptation_state["interactions"]), 4),
+        "reward_sum": state["reward_sum"],
+        "interactions": state["interactions"],
+        "avg_reward": round(state["reward_sum"] / max(1, state["interactions"]), 4),
+        "persisted": bool(user_id),
         "adaptation": {
-            "speech_rate_adjust": round(_adaptation_state["speech_rate_adjust"], 4),
-            "pause_adjust_ms": round(_adaptation_state["pause_adjust_ms"]),
-            "intervention_level": round(_adaptation_state["intervention_level"], 4),
-            "style": _adaptation_state["style"]
+            "speech_rate_adjust": round(state["speech_rate_adjust"], 4),
+            "pause_adjust_ms": round(state["pause_adjust_ms"]),
+            "intervention_level": round(state["intervention_level"], 4),
+            "style": state["style"]
         }
     }
 
@@ -681,7 +847,7 @@ def brain_health():
     """Zdraví celého RADIM Brain systému."""
     return jsonify({
         "success": True,
-        "engine": "RADIM Brain Engine v1.0.0",
+        "engine": "RADIM Brain Engine v2.0.0",
         "description": "Sjednocujici vrstva vedomi — Psi(t) = (C, E, R, S)",
         "engines": {
             "anticipation": ANTICIPATION_AVAILABLE,
@@ -782,9 +948,10 @@ def brain_state():
     hrv = clamp(float(data.get('hrv', 0.5)), 0.0, 1.0)
     speech_tempo = clamp(float(data.get('speech_tempo', 0.5)), 0.0, 1.0)
     n = int(data.get('n', 5))
+    user_id = data.get('user_id')
 
     # 1. Stavový vektor Ψ(t)
-    psi = compute_psi_state(C, alpha, voice_tone, hrv, speech_tempo)
+    psi = compute_psi_state(C, alpha, voice_tone, hrv, speech_tempo, user_id=user_id)
 
     # 2. Rovnice vědomí
     consciousness = consciousness_equation(n, alpha)
@@ -944,8 +1111,9 @@ def brain_adapt():
     data = request.get_json() or {}
     success = data.get('success', True)
     context = data.get('context', '')
+    user_id = data.get('user_id')
 
-    result = reinforcement_update(success)
+    result = reinforcement_update(success, user_id=user_id)
     result["context"] = context
 
     return jsonify({
@@ -1051,7 +1219,7 @@ def brain_architecture():
 # STARTUP
 # ═══════════════════════════════════════════════════════════
 print(f"""
-🧠 RADIM Brain Engine v1.0.0
+🧠 RADIM Brain Engine v2.0.0
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Ψ(t) = (C, E, R, S)
   C_{{n+1}} = (1-α)(F_n+L_n) + α(2P_n+P_{{n-1}})

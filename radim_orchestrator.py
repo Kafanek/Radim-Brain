@@ -39,6 +39,18 @@ try:
 except ImportError:
     _ORCH_MEMORY_AVAILABLE = False
 
+# 🧠 Brain Engine — Ψ(t) = (C, E, R, S)
+try:
+    from radim_brain_routes import (
+        compute_psi_state as _brain_psi,
+        reinforcement_update as _brain_reinforce,
+        decision_model as _brain_decision,
+        derive_text_empathy_proxies as _brain_proxies
+    )
+    _ORCH_BRAIN_AVAILABLE = True
+except ImportError:
+    _ORCH_BRAIN_AVAILABLE = False
+
 # 🎵 Text Rhythm Engine — matematika řídí styl textu
 try:
     from text_rhythm import (
@@ -492,6 +504,9 @@ def radim_chat():
         anticipation_prompt = ''
         anticipation_meta = None
         gen_config = None
+        C = 5.0      # default: klidný stav
+        alpha = 0.0   # default: bez aktivace
+        mood = "neutral"
         if _ORCH_TEXT_RHYTHM:
             try:
                 C_val = data.get('C')
@@ -521,6 +536,29 @@ def radim_chat():
                 gen_config = _tr_gen_config(text_result)
             except Exception as tr_err:
                 print(f"Text rhythm warning (non-fatal): {tr_err}")
+
+        # 🧠 Brain Engine: Ψ(t) = (C, E, R, S) — stavový vektor vědomí
+        brain_meta = None
+        if _ORCH_BRAIN_AVAILABLE:
+            try:
+                proxies = _brain_proxies(message, mood, alpha)
+                psi_state = _brain_psi(
+                    C, alpha,
+                    proxies["voice_tone"], proxies["hrv"], proxies["speech_tempo"],
+                    user_id=user_id
+                )
+                decision = _brain_decision(
+                    C, psi_state["psi"]["E"], psi_state["psi"]["R"], psi_state["psi"]["S"]
+                )
+                brain_meta = {
+                    "psi": psi_state["psi"],
+                    "mode": psi_state["mode"],
+                    "decision": decision["level"],
+                    "coherence": psi_state["coherence"]
+                }
+                personalized += f"\n\n[RADIM Brain: mode={psi_state['mode']}, coherence={psi_state['coherence']:.2f}]\n{decision['instructions']}"
+            except Exception as brain_err:
+                print(f"Brain warning (non-fatal): {brain_err}")
 
         text_response, action_json = call_gemini_whatsapp(
             message, context, mode, personalized, history,
@@ -577,6 +615,13 @@ def radim_chat():
             except Exception as rec_err:
                 print(f"Memory record warning: {rec_err}")
 
+        # 🧠 Brain reinforcement: adapt per-user after response
+        if _ORCH_BRAIN_AVAILABLE and text_response != "Promiňte, zkuste to za chvíli. 🙏":
+            try:
+                _brain_reinforce(intent != "safety", user_id=user_id)
+            except Exception:
+                pass
+
         result = {
             'success': True,
             'response': text_response,
@@ -587,6 +632,8 @@ def radim_chat():
         }
         if anticipation_meta:
             result['anticipation'] = anticipation_meta
+        if brain_meta:
+            result['brain'] = brain_meta
         return jsonify(result)
         
     except Exception as e:

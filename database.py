@@ -583,6 +583,37 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_rhythm_sessions_user ON rhythm_sessions(user_id);
             CREATE INDEX IF NOT EXISTS idx_rhythm_states_session ON rhythm_states(session_id);
             CREATE INDEX IF NOT EXISTS idx_rhythm_breakpoints_session ON rhythm_breakpoints(session_id);
+
+            -- ============================================
+            -- Brain Engine v4.0 — per-user persistence
+            -- ============================================
+            CREATE TABLE IF NOT EXISTS brain_adaptation (
+                user_id TEXT PRIMARY KEY,
+                reward_sum INTEGER DEFAULT 0,
+                interactions INTEGER DEFAULT 0,
+                speech_rate_adjust REAL DEFAULT 0.0,
+                pause_adjust_ms REAL DEFAULT 0.0,
+                style TEXT DEFAULT 'warm',
+                intervention_level REAL DEFAULT 0.5,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS brain_states (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                C REAL,
+                E REAL,
+                R REAL,
+                S REAL,
+                alpha REAL,
+                mode TEXT,
+                coherence REAL,
+                source TEXT DEFAULT 'chat',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_brain_states_user ON brain_states(user_id);
+            CREATE INDEX IF NOT EXISTS idx_brain_states_created ON brain_states(created_at);
         ''')
 
         # v3.8 migration: add multiparty columns to existing table
@@ -938,6 +969,35 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_rhythm_sessions_user ON rhythm_sessions(user_id);
             CREATE INDEX IF NOT EXISTS idx_rhythm_states_session ON rhythm_states(session_id);
             CREATE INDEX IF NOT EXISTS idx_rhythm_breakpoints_session ON rhythm_breakpoints(session_id);
+
+            -- Brain Engine v4.0 — per-user persistence
+            CREATE TABLE IF NOT EXISTS brain_adaptation (
+                user_id TEXT PRIMARY KEY,
+                reward_sum INTEGER DEFAULT 0,
+                interactions INTEGER DEFAULT 0,
+                speech_rate_adjust REAL DEFAULT 0.0,
+                pause_adjust_ms REAL DEFAULT 0.0,
+                style TEXT DEFAULT 'warm',
+                intervention_level REAL DEFAULT 0.5,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS brain_states (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                C REAL,
+                E REAL,
+                R REAL,
+                S REAL,
+                alpha REAL,
+                mode TEXT,
+                coherence REAL,
+                source TEXT DEFAULT 'chat',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_brain_states_user ON brain_states(user_id);
+            CREATE INDEX IF NOT EXISTS idx_brain_states_created ON brain_states(created_at);
         ''')
 
         # v3.8 migration: add multiparty columns to existing table
@@ -959,7 +1019,7 @@ def init_db():
     db.close()
 
     db_type = "PostgreSQL" if USE_POSTGRES else "SQLite"
-    print(f"✅ Databáze inicializována ({db_type}, v3.9 — Rhythm Return Engine)")
+    print(f"✅ Databáze inicializována ({db_type}, v4.0 — Brain Engine persistence)")
 
 
 def is_postgres():
