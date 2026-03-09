@@ -541,6 +541,48 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_telemed_part_consult ON telemedicine_participants(consultation_id);
             CREATE INDEX IF NOT EXISTS idx_telemed_part_user ON telemedicine_participants(user_id);
             CREATE INDEX IF NOT EXISTS idx_telemed_part_status ON telemedicine_participants(user_id, status);
+
+            -- ============================================
+            -- Rhythm Return Engine v3.9
+            -- ============================================
+            CREATE TABLE IF NOT EXISTS rhythm_sessions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                preferred_bpm INTEGER DEFAULT 100,
+                hy_stage TEXT,
+                started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                ended_at TIMESTAMP,
+                notes TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS rhythm_states (
+                id SERIAL PRIMARY KEY,
+                session_id TEXT,
+                M REAL NOT NULL,
+                tau REAL NOT NULL,
+                predicted_M REAL,
+                predicted_tau REAL,
+                state TEXT,
+                bpm REAL,
+                accent_pattern TEXT,
+                confidence TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS rhythm_breakpoints (
+                id SERIAL PRIMARY KEY,
+                session_id TEXT,
+                breakpoint_type TEXT,
+                direction TEXT,
+                M_before REAL,
+                M_after REAL,
+                action_taken TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_rhythm_sessions_user ON rhythm_sessions(user_id);
+            CREATE INDEX IF NOT EXISTS idx_rhythm_states_session ON rhythm_states(session_id);
+            CREATE INDEX IF NOT EXISTS idx_rhythm_breakpoints_session ON rhythm_breakpoints(session_id);
         ''')
 
         # v3.8 migration: add multiparty columns to existing table
@@ -854,6 +896,48 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_telemed_part_consult ON telemedicine_participants(consultation_id);
             CREATE INDEX IF NOT EXISTS idx_telemed_part_user ON telemedicine_participants(user_id);
             CREATE INDEX IF NOT EXISTS idx_telemed_part_status ON telemedicine_participants(user_id, status);
+
+            -- ============================================
+            -- Rhythm Return Engine v3.9
+            -- ============================================
+            CREATE TABLE IF NOT EXISTS rhythm_sessions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                preferred_bpm INTEGER DEFAULT 100,
+                hy_stage TEXT,
+                started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                ended_at TIMESTAMP,
+                notes TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS rhythm_states (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                M REAL NOT NULL,
+                tau REAL NOT NULL,
+                predicted_M REAL,
+                predicted_tau REAL,
+                state TEXT,
+                bpm REAL,
+                accent_pattern TEXT,
+                confidence TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS rhythm_breakpoints (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                breakpoint_type TEXT,
+                direction TEXT,
+                M_before REAL,
+                M_after REAL,
+                action_taken TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_rhythm_sessions_user ON rhythm_sessions(user_id);
+            CREATE INDEX IF NOT EXISTS idx_rhythm_states_session ON rhythm_states(session_id);
+            CREATE INDEX IF NOT EXISTS idx_rhythm_breakpoints_session ON rhythm_breakpoints(session_id);
         ''')
 
         # v3.8 migration: add multiparty columns to existing table
@@ -875,7 +959,7 @@ def init_db():
     db.close()
 
     db_type = "PostgreSQL" if USE_POSTGRES else "SQLite"
-    print(f"✅ Databáze inicializována ({db_type}, v3.8 — multiparty telemedicine)")
+    print(f"✅ Databáze inicializována ({db_type}, v3.9 — Rhythm Return Engine)")
 
 
 def is_postgres():

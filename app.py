@@ -244,6 +244,16 @@ from anticipation_routes import anticipation_bp
 app.register_blueprint(anticipation_bp)
 print("✅ Anticipation Engine registered: /api/anticipation/*")
 
+# 🎵 Import Rhythm Return Engine - Návrat rytmu (Parkinson)
+try:
+    from rhythm_return_routes import rhythm_return_bp
+    app.register_blueprint(rhythm_return_bp)
+    RHYTHM_RETURN_AVAILABLE = True
+    print("🎵 Rhythm Return Engine registered: /api/rhythm-return/*")
+except ImportError:
+    RHYTHM_RETURN_AVAILABLE = False
+    print("⚠️ Rhythm Return routes not available")
+
 # Anticipation functions for azure_tts_proxy
 try:
     from anticipation_routes import (
