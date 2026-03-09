@@ -254,6 +254,16 @@ except ImportError:
     RHYTHM_RETURN_AVAILABLE = False
     print("⚠️ Rhythm Return routes not available")
 
+# 🧠 Import RADIM Brain Engine - Sjednocující vrstva vědomí
+try:
+    from radim_brain_routes import radim_brain_bp
+    app.register_blueprint(radim_brain_bp)
+    RADIM_BRAIN_AVAILABLE = True
+    print("🧠 RADIM Brain Engine registered: /api/brain/*")
+except ImportError:
+    RADIM_BRAIN_AVAILABLE = False
+    print("⚠️ RADIM Brain routes not available")
+
 # Anticipation functions for azure_tts_proxy
 try:
     from anticipation_routes import (
