@@ -450,7 +450,7 @@ def azure_tts_proxy():
             voice = 'cs-CZ-AntoninNeural'
         if not _re.match(r'^[0-9.]+$', str(rate).replace('%', '')):
             rate = '0.85'
-        if not _re.match(r'^[+-]?[0-9]+Hz$', pitch):
+        if not _re.match(r'^[+-]?[0-9]+(%|Hz)$', pitch):
             pitch = '+0Hz'
 
         # Build SSML
