@@ -747,6 +747,9 @@ def voice_chat():
         if response_text is None:
             result = get_voice_ai_response(messages)
             response_text = result.get('response', '')
+        else:
+            # Intent resolved locally — build result dict
+            result = {'response': response_text, 'intent': _ir_intent, 'source': 'local', 'success': True}
 
         session['last_tts_text'] = response_text
         session['conversation'].append({'role': 'user', 'content': messages[-1].get('content', '')})
