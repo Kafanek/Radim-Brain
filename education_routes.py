@@ -2715,12 +2715,15 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
 <p>Většina případů Parkinsonovy choroby je <strong>idiopatických</strong> — to znamená, že přesnou příčinu neznáme. Asi 10–15 % případů má genetickou složku.</p>
 
 <h3>Rizikové faktory</h3>
-<ul>
-<li><strong>Věk</strong> — hlavní rizikový faktor (nejčastěji po 55. roce)</li>
-<li><strong>Pohlaví</strong> — muži onemocní 1,5× častěji než ženy</li>
-<li>Vystavení <strong>pesticidům a herbicidům</strong></li>
-<li>Opakovaná <strong>poranění hlavy</strong></li>
-</ul>
+<table>
+<tr><th>Typ faktoru</th><th>Příklad</th><th>Míra rizika</th></tr>
+<tr><td><strong>Věk</strong></td><td>Nejčastěji po 55. roce</td><td>Hlavní faktor — riziko roste s věkem</td></tr>
+<tr><td><strong>Pohlaví</strong></td><td>Muži</td><td>1,5× vyšší riziko než ženy</td></tr>
+<tr><td><strong>Genetika</strong></td><td>LRRK2, PARK2, PINK1 mutace</td><td>10–15 % případů; vyšší u Young-Onset</td></tr>
+<tr><td><strong>Environmentální</strong></td><td>Pesticidy, herbicidy, těžké kovy</td><td>Zvýšené riziko u zemědělců</td></tr>
+<tr><td><strong>Úrazy</strong></td><td>Opakovaná poranění hlavy</td><td>Mírně zvýšené riziko</td></tr>
+<tr><td><strong>Ochranné faktory</strong></td><td>Káva, nikotín, fyzická aktivita</td><td>Snižují riziko (→ výzkum)</td></tr>
+</table>
 
 <h3>Co se děje na buněčné úrovni?</h3>
 <p>V nervových buňkách se hromadí abnormální shluky bílkoviny <strong>alpha-synuklein</strong> — říkáme jim <em>Lewyho tělíska</em>. Tato tělíska poškozují a nakonec zabíjejí nervové buňky.</p>
@@ -2862,11 +2865,13 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
 
 <h3>Freezing (zamrznutí při chůzi)</h3>
 <p>Člověk se náhle zastaví — nohy „přilepené" k podlaze. Pomáhají:</p>
-<ul>
-<li><strong>Vizuální podněty</strong> — laserový ukazatel na botě, barevná páska na podlaze</li>
-<li><strong>Zvukové podněty</strong> — metronom, počítání „raz, dva, tři"</li>
-<li><strong>Mentální triky</strong> — „a… TEĎ krok!"</li>
-</ul>
+<table>
+<tr><th>Typ podnětu</th><th>Technika</th><th>Příklad</th></tr>
+<tr><td><strong>Vizuální</strong></td><td>Cíl na podlaze</td><td>Laserový ukazatel na botě, barevná páska</td></tr>
+<tr><td><strong>Zvukový</strong></td><td>Rytmus</td><td>Metronom, počítání „raz, dva, tři"</td></tr>
+<tr><td><strong>Mentální</strong></td><td>Slovní pobídka</td><td>„A… TEĎ krok!" — přeruší blok</td></tr>
+<tr><td><strong>Taktilní</strong></td><td>Dotek</td><td>Lehký dotek na rameno, nabídnutá ruka</td></tr>
+</table>
 
 <h3>On/off fenomén</h3>
 <p>Léky (L-DOPA) mají časově omezený účinek. V <strong>„on" fázi</strong> se člověk cítí relativně dobře, v <strong>„off" fázi</strong> se příznaky vrátí. Proto je důležité plánovat aktivity na dobu, kdy léky fungují.</p>
@@ -2988,7 +2993,18 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
 </ul>
 
 <h3>Ztráta čichu (hyposmie)</h3>
-<p>Jeden z nejranějších signálů — může se objevit <strong>5–10 let před</strong> motorickými příznaky.</p>""",
+<p>Jeden z nejranějších signálů — může se objevit <strong>5–10 let před</strong> motorickými příznaky.</p>
+
+<h3>Časový průběh nemotorických příznaků</h3>
+<table>
+<tr><th>Oblast</th><th>Prodromální fáze (roky před diagnózou)</th><th>Po diagnóze</th><th>Pokročilé stádium</th></tr>
+<tr><td><strong>Autonomní</strong></td><td>Zácpa, ztráta čichu</td><td>Ortostatická hypotenze</td><td>Poruchy močení, pocení</td></tr>
+<tr><td><strong>Spánek</strong></td><td>REM porucha chování</td><td>Nespavost, buzení</td><td>Nadměrná denní ospalost</td></tr>
+<tr><td><strong>Psychika</strong></td><td>Úzkost</td><td>Deprese, apatie</td><td>Halucinace, demence</td></tr>
+<tr><td><strong>Senzorické</strong></td><td>Hyposmie (čich)</td><td>Bolest, parestezie</td><td>Centrální bolest</td></tr>
+</table>
+
+<p class="key-point">💡 <strong>Klíčové:</strong> Nemotorické příznaky se vyvíjejí postupně — od prodromální fáze (roky před třesem) až po pokročilé stádium. Jejich včasné rozpoznání pomáhá dřívější diagnostice.</p>""",
                         "key_points": [
                             "Nemotorické příznaky se ČASTO objeví DŘÍVE než motorické",
                             "Deprese postihuje 40–50 % lidí s Parkinsonem — není to 'špatná nálada', je to součást nemoci",
@@ -3136,6 +3152,15 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
 <h3>LSVT LOUD — řešení pro hlas</h3>
 <p><strong>Lee Silverman Voice Treatment</strong> je vědecky ověřený logopedický program. Princip je jednoduchý: <em>„MYSLI NAHLAS!"</em> (THINK LOUD!). 4 týdny intenzivního cvičení mohou výrazně zlepšit hlasitost a srozumitelnost řeči.</p>
 
+<h3>Přehled komunikačních změn</h3>
+<table>
+<tr><th>Příznak</th><th>Co vidíte/slyšíte</th><th>Co si lidé myslí</th><th>Realita</th></tr>
+<tr><td><strong>Hypofonie</strong></td><td>Tichý, monotónní hlas</td><td>„Nechce mluvit"</td><td>Hlasivky a dýchací svaly jsou oslabeny</td></tr>
+<tr><td><strong>Hypomimie</strong></td><td>Nehybný obličej</td><td>„Je mu to jedno"</td><td>Cítí emoce, svaly je neumí vyjádřit</td></tr>
+<tr><td><strong>Dysfagie</strong></td><td>Kašle při jídle, slintání</td><td>„Jí nepořádně"</td><td>Polykací svaly nepracují správně</td></tr>
+<tr><td><strong>Mikrografie</strong></td><td>Drobné, nečitelné písmo</td><td>„Je líný psát pořádně"</td><td>Jemná motorika ruky je narušena</td></tr>
+</table>
+
 <h3>Jak komunikovat s člověkem s Parkinsonem?</h3>
 <ul>
 <li>✅ <strong>Přistupte blíže</strong> — nesedejte daleko</li>
@@ -3230,13 +3255,29 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
                                 "wrong_approach": "Pan Dvořák volá znovu a znovu, pokaždé neúspěšně. Cítí frustraci a vzdá to.",
                                 "right_approach": "Pan Dvořák si předem připraví klíčová slova na papír. Nebo požádá blízkého, aby zavolal s ním (na hlasitý odposlech). Ideálně použije e-mail nebo datovou schránku.",
                                 "principle": "Telefonování je nejtěžší forma komunikace při hypofonii. Příprava, písemná forma nebo doprovod jsou legitimní řešení."
+                            },
+                            {
+                                "title": "Young-Onset — jak říct dětem",
+                                "situation": "Tomáš (48) má Parkinsona rok. Dcera (16) viděla na internetu video o pokročilém stádiu. Přijde domů vyděšená a pláče: 'Tati, ty budeš na vozíku? Ty umřeš?'",
+                                "wrong_approach": "Tomáš řekne: 'O nic nejde, to je hloupost.' Nebo naopak dramaticky popíše budoucnost. Dcera se ještě víc uzavře.",
+                                "right_approach": "Tomáš obejme dceru a řekne: 'Mám Parkinsona, to je pravda. Ale dneska jsem tady, mám dobré léky a žiju normální život. Nemůžu slíbit, že bude všechno perfektní — ale můžu slíbit, že to zvládneme společně. Můžeš se mě zeptat na cokoliv.'",
+                                "principle": "Děti potřebují pravdivé informace přiměřené věku, ne útěšné lži. Otevřenost buduje důvěru. Nabídněte i dětského psychologa."
+                            },
+                            {
+                                "title": "Bezpečné jedení — polykací potíže",
+                                "situation": "Babička Jiřina (74) se při obědě často zakašle a jídlo jí 'padá špatně'. Rodina si toho všímá, ale Jiřina říká: 'To nic, jen jsem se zakuckala.'",
+                                "wrong_approach": "Rodina to akceptuje a nic neřeší. Nebo naopak Jiřině zakáže jíst u stolu s ostatními.",
+                                "right_approach": "Vnučka klidně řekne: 'Babi, všimli jsme si, že se při jídle často zakašleš. Mohli bychom se poradit s logopedem? Pomůže nám, jak jídlo připravit, abys jedla pohodlně a bezpečně.' Objedná logopedické vyšetření polykání.",
+                                "principle": "Dysfagie (potíže s polykáním) je vážný příznak — riziko aspirační pneumonie. Logoped naučí bezpečné techniky polykání a úpravu konzistence jídla."
                             }
                         ],
                         "key_points": [
                             "Komunikujte vždy s člověkem, ne přes něj — i když mluví tiše",
                             "Jednoduché ano/ne otázky usnadňují komunikaci u lékaře",
                             "Freezing je dočasný — klid a počítání nahlas pomáhají",
-                            "Telefonování je nejtěžší — preferujte osobní kontakt nebo písemnou formu"
+                            "Telefonování je nejtěžší — preferujte osobní kontakt nebo písemnou formu",
+                            "Dětem říkejte pravdu přiměřeně věku — otevřenost buduje důvěru",
+                            "Kašel při jídle = vážný varovný signál → objednejte logopeda"
                         ]
                     }
                 ],
@@ -3374,12 +3415,22 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
 <tr><td>FN Ostrava</td><td>Neurologická klinika</td></tr>
 </table>
 
+<h3>Důležité kontakty</h3>
+<table>
+<tr><th>Organizace / Služba</th><th>Kontakt</th><th>Co nabízí</th></tr>
+<tr><td><strong>Společnost Parkinson</strong></td><td>www.parkinson-cz.net</td><td>Kluby, poradenství, vzdělávání</td></tr>
+<tr><td><strong>Linka důvěry</strong></td><td>116 123 (nonstop, zdarma)</td><td>Krizová pomoc, psychická podpora</td></tr>
+<tr><td><strong>Pečuj doma</strong></td><td>www.pecujdoma.cz</td><td>Portál pro neformální pečující</td></tr>
+<tr><td><strong>Sociální poradna</strong></td><td>Obecní úřad s rozšířenou působností</td><td>Příspěvky, průkaz ZTP/P</td></tr>
+<tr><td><strong>Česká asociace ergoterapeutů</strong></td><td>www.ergoterapie.cz</td><td>Vyhledání ergoterapeuta</td></tr>
+</table>
+
 <h3>Sociální podpora</h3>
 <ul>
-<li><strong>Příspěvek na péči</strong> (zákon 108/2006 Sb.) — 4 stupně podle závislosti</li>
-<li><strong>Průkaz ZTP/P</strong> — parkování, slevy na dopravu</li>
-<li><strong>Invalidní důchod</strong> — při snížené pracovní schopnosti</li>
-<li><strong>Respitní péče</strong> — odlehčovací služby pro pečující</li>
+<li><strong>Příspěvek na péči</strong> (zákon 108/2006 Sb.) — 4 stupně podle závislosti (880–19 200 Kč/měsíc)</li>
+<li><strong>Průkaz ZTP/P</strong> — parkování, slevy na dopravu, doprovod zdarma</li>
+<li><strong>Invalidní důchod</strong> — při snížené pracovní schopnosti o více než 35 %</li>
+<li><strong>Respitní péče</strong> — odlehčovací služby pro pečující (právo na odpočinek!)</li>
 </ul>
 
 <h3>Péče o pečujícího</h3>
@@ -3499,6 +3550,15 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
 <li><strong>Sociální izolace</strong> — ztráta přátel, koníčků, pocit „nikdo nerozumí"</li>
 </ul>
 
+<h3>Varovné signály — poznejte burnout včas</h3>
+<table>
+<tr><th>Rovina</th><th>Varovné signály</th><th>Co pomáhá</th></tr>
+<tr><td><strong>Tělo</strong></td><td>Chronická únava, nespavost, bolesti zad a hlavy, časté nemoci</td><td>Pravidelný odpočinek, lékař, pohyb</td></tr>
+<tr><td><strong>Emoce</strong></td><td>Pláč bez důvodu, podrážděnost, pocit beznaděje, ztráta radosti</td><td>Psycholog, svépomocná skupina, Linka 116 123</td></tr>
+<tr><td><strong>Vztahy</strong></td><td>Izolace od přátel, ztráta koníčků, „nikdo nerozumí"</td><td>Respitní péče, sdílení s dalšími pečujícími</td></tr>
+<tr><td><strong>Myšlení</strong></td><td>„Měl/a bych zvládat víc", „jsem špatný/á pečovatel/ka"</td><td>Kognitivní restrukturalizace, terapie</td></tr>
+</table>
+
 <h3>Pocit viny — nejčastější past</h3>
 <p><em>„Měl/a bych zvládat víc."</em> <em>„Jak si můžu stěžovat, když on/ona trpí víc?"</em> Tyto myšlenky jsou normální, ale NEJSOU pravdivé. Požádat o pomoc není selhání — je to zodpovědnost.</p>
 
@@ -3539,13 +3599,16 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
 <tr><td>Identita</td><td>„Jsem příliš mladý/á na Parkinsona" — stigma</td></tr>
 </table>
 
-<h3>Medicínské odlišnosti</h3>
-<ul>
-<li><strong>Dyskineze</strong> (mimovolní pohyby) se objevují <strong>častěji a dříve</strong> než u starších pacientů</li>
-<li>Pomalejší progrese — ale delší průběh nemoci</li>
-<li>Deprese a úzkost bývají výraznější</li>
-<li>Genetická složka je pravděpodobnější (LRRK2, PARK2, PINK1 mutace)</li>
-</ul>
+<h3>Srovnání: Young-Onset vs. klasický Parkinson</h3>
+<table>
+<tr><th>Vlastnost</th><th>Young-Onset (pod 50 let)</th><th>Klasický (nad 60 let)</th></tr>
+<tr><td><strong>Podíl</strong></td><td>5–10 % případů</td><td>90–95 % případů</td></tr>
+<tr><td><strong>Progrese</strong></td><td>Pomalejší, ale delší průběh</td><td>Rychlejší, ale kratší průběh</td></tr>
+<tr><td><strong>Dyskineze</strong></td><td>Častější a dřívější</td><td>Méně časté, později</td></tr>
+<tr><td><strong>Genetika</strong></td><td>Vyšší pravděpodobnost (LRRK2, PARK2, PINK1)</td><td>Většinou sporadický</td></tr>
+<tr><td><strong>Psychika</strong></td><td>Výraznější deprese a úzkost</td><td>Apatie převažuje</td></tr>
+<tr><td><strong>Hlavní výzvy</strong></td><td>Kariéra, rodina, identita, stigma</td><td>Závislost, pády, demence</td></tr>
+</table>
 
 <h3>Partnerský vztah a sexuální dysfunkce</h3>
 <p>Parkinson ovlivňuje intimitu — snížené libido (vedlejší účinek i nemoci i léků), erektilní dysfunkce, únava. Otevřená komunikace s partnerem a neurologem je klíčová. Sexuální dysfunkce <strong>není tabu</strong> — je to léčitelný příznak.</p>
