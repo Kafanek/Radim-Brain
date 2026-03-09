@@ -273,6 +273,60 @@ _INTENTS = [
         "handler": "_handle_identity",
     },
     {
+        "name": "day_of_week",
+        "patterns": [
+            r"jaký\s+je\s+den\s+v\s+týdnu",
+            r"který\s+je\s+den",
+            r"jaký\s+máme\s+den",
+            r"je\s+dnes\s+(pondělí|úterý|středa|čtvrtek|pátek|sobota|neděle)",
+        ],
+        "handler": "_handle_day_of_week",
+    },
+    {
+        "name": "year",
+        "patterns": [
+            r"jaký\s+je\s+rok",
+            r"kolikátý\s+je\s+rok",
+            r"který\s+je\s+rok",
+            r"jaký\s+máme\s+rok",
+        ],
+        "handler": "_handle_year",
+    },
+    {
+        "name": "joke",
+        "patterns": [
+            r"řekni\s+(mi\s+)?vtip",
+            r"pověz\s+(mi\s+)?vtip",
+            r"znáš\s+(nějaký\s+)?vtip",
+            r"máš\s+(nějaký\s+)?vtip",
+            r"zasmě[jř]\s+m[eě]",
+            r"něco\s+veselého",
+            r"^\s*vtip\s*$",
+        ],
+        "handler": "_handle_joke",
+    },
+    {
+        "name": "compliment",
+        "patterns": [
+            r"jsi\s+(skvělý|prima|super|výborný|báječný|úžasný)",
+            r"máš\s+pravdu",
+            r"to\s+je\s+hezké",
+            r"jsi\s+chytrý",
+            r"jsi\s+hodný",
+        ],
+        "handler": "_handle_compliment",
+    },
+    {
+        "name": "how_are_you",
+        "patterns": [
+            r"jak\s+se\s+(máš|máte|daří|vede)",
+            r"co\s+děláš",
+            r"co\s+je\s+nového",
+            r"^\s*a\s+ty\s*\??\s*$",
+        ],
+        "handler": "_handle_how_are_you",
+    },
+    {
         "name": "weather",
         "patterns": [
             r"počasí",
@@ -386,6 +440,58 @@ def _handle_identity(**kwargs):
     return "Jsem Radim, váš digitální asistent od MyKolibri. Pomáhám s každodenními činnostmi, zdravím a jsem tu pro vás kdykoli."
 
 
+def _handle_day_of_week(**kwargs):
+    now = datetime.now()
+    day_name = _CZ_DAYS[now.weekday()]
+    return f"Dnes je {day_name}."
+
+
+def _handle_year(**kwargs):
+    return f"Máme rok {datetime.now().year}."
+
+
+_CZ_JOKES = [
+    "Co řekne nula osmičce? Hezký pásek! 😄",
+    "Proč nemůže bicykl stát sám? Protože je dvou-kolý! 🚲",
+    "Co je to žába na suchu? Přískoč! 🐸",
+    "Jaký je rozdíl mezi školou a blázincem? Telefonní číslo! 📞",
+    "Co dělá kočka na počítači? Chytá myš! 🐱",
+    "Proč se houby nezvou na párty? Protože zabírají moc místa! 🍄",
+    "Co řekne jeden strom druhému? Listuj! 🌳",
+    "Jaký je nejlepší den na vaření? Pátek — pá-tek! 🍳",
+    "Proč nosí klauni velké boty? Protože mají velké nohy! 🤡",
+    "Co říká ryba, když narazí do zdi? Plác! 🐟",
+]
+
+
+def _handle_joke(**kwargs):
+    return random.choice(_CZ_JOKES)
+
+
+_COMPLIMENT_REPLIES = [
+    "Děkuji! To mě těší. 😊",
+    "Vy jste ale milí! Děkuji.",
+    "To je od vás hezké! Snažím se.",
+    "Díky moc! Jsem rád, že vám mohu pomáhat.",
+]
+
+
+def _handle_compliment(**kwargs):
+    return random.choice(_COMPLIMENT_REPLIES)
+
+
+_HOW_ARE_YOU_REPLIES = [
+    "Mám se skvěle, děkuji za optání! A vy?",
+    "Výborně! Jsem připravený vám pomáhat. Jak se máte vy?",
+    "Dobře, děkuji! Co pro vás mohu udělat?",
+    "Fajn! Jsem tu pro vás. Jak se daří vám?",
+]
+
+
+def _handle_how_are_you(**kwargs):
+    return random.choice(_HOW_ARE_YOU_REPLIES)
+
+
 _HANDLERS = {
     "_handle_time": _handle_time,
     "_handle_date": _handle_date,
@@ -394,6 +500,11 @@ _HANDLERS = {
     "_handle_goodbye": _handle_goodbye,
     "_handle_thanks": _handle_thanks,
     "_handle_identity": _handle_identity,
+    "_handle_day_of_week": _handle_day_of_week,
+    "_handle_year": _handle_year,
+    "_handle_joke": _handle_joke,
+    "_handle_compliment": _handle_compliment,
+    "_handle_how_are_you": _handle_how_are_you,
 }
 
 
