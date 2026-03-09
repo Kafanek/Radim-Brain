@@ -27,6 +27,13 @@ try:
 except ImportError:
     _ORCH_ANT_AVAILABLE = False
 
+# Intent Resolver (v272 — local NLU)
+try:
+    from intent_resolver import resolve_intent as _resolve_intent
+    _INTENT_RESOLVER = True
+except ImportError:
+    _INTENT_RESOLVER = False
+
 # Memory system integration
 try:
     from memory_routes import (
@@ -561,10 +568,25 @@ def radim_chat():
             except Exception as brain_err:
                 print(f"Brain warning (non-fatal): {brain_err}")
 
-        text_response, action_json = call_gemini_whatsapp(
-            message, context, mode, personalized, history,
-            anticipation_prompt, gen_config
-        )
+        # 🎯 Intent Resolver: short-circuit simple queries locally (v272)
+        action_json = None
+        text_response = None
+        _resolved_intent = intent  # from detect_intent() above
+        if _INTENT_RESOLVER:
+            try:
+                _brain_mode = brain_meta.get("mode", "HARMONY") if brain_meta else "HARMONY"
+                _resolved_text, _resolved_intent, _resolved_meta = _resolve_intent(message, user_id, _brain_mode)
+                if _resolved_text:
+                    text_response = _resolved_text
+                    print(f"🎯 Intent '{_resolved_intent}' resolved locally for {user_id}")
+            except Exception as ir_err:
+                print(f"Intent resolver warning (non-fatal): {ir_err}")
+
+        if text_response is None:
+            text_response, action_json = call_gemini_whatsapp(
+                message, context, mode, personalized, history,
+                anticipation_prompt, gen_config
+            )
 
         if not text_response:
             text_response = "Promiňte, zkuste to za chvíli. 🙏"
@@ -627,7 +649,7 @@ def radim_chat():
             'success': True,
             'response': text_response,
             'radim_action': action_json,
-            'intent': intent,
+            'intent': _resolved_intent if _INTENT_RESOLVER else intent,
             'mode': mode,
             'timestamp': datetime.utcnow().isoformat() + 'Z'
         }

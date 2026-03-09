@@ -15,6 +15,13 @@ from auth_middleware import require_auth
 
 logger = logging.getLogger(__name__)
 
+# Intent Resolver (v272 — local NLU)
+try:
+    from intent_resolver import resolve_intent as _vr_resolve_intent
+    _VR_INTENT_RESOLVER = True
+except ImportError:
+    _VR_INTENT_RESOLVER = False
+
 voice_runtime_bp = Blueprint('voice_runtime', __name__, url_prefix='/api/voice')
 
 # ============================================
@@ -725,9 +732,21 @@ def voice_chat():
             session['alpha'] = alpha
             session['kappa'] = kappa
 
-        # Get AI response
-        result = get_voice_ai_response(messages)
-        response_text = result.get('response', '')
+        # 🎯 Intent Resolver: short-circuit simple queries locally (v272)
+        user_text = messages[-1].get('content', '') if messages else ''
+        response_text = None
+        if _VR_INTENT_RESOLVER and user_text:
+            try:
+                _ir_text, _ir_intent, _ir_meta = _vr_resolve_intent(user_text)
+                if _ir_text:
+                    response_text = _ir_text
+                    logger.info(f"Voice intent '{_ir_intent}' resolved locally")
+            except Exception as ir_err:
+                logger.warning(f"Intent resolver warning (non-fatal): {ir_err}")
+
+        if response_text is None:
+            result = get_voice_ai_response(messages)
+            response_text = result.get('response', '')
 
         session['last_tts_text'] = response_text
         session['conversation'].append({'role': 'user', 'content': messages[-1].get('content', '')})

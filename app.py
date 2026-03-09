@@ -1697,6 +1697,62 @@ def handle_mark_read(data):
 
 
 # ============================================
+# 🎤 STT STREAMING → BRAIN (v272)
+# ============================================
+
+@socketio.on('stt_interim')
+def handle_stt_interim(data):
+    """Process interim STT results for early Brain Ψ(t) estimation."""
+    try:
+        text = data.get('text', '')
+        user_id = data.get('user_id', 'anonymous')
+        is_final = data.get('is_final', False)
+
+        if not text:
+            return
+
+        # Quick C/alpha estimation from text
+        try:
+            from intent_resolver import quick_estimate_from_text, resolve_intent
+            C_est, alpha_est = quick_estimate_from_text(text)
+        except ImportError:
+            C_est, alpha_est = 5.0, 0.2
+
+        # Update early Ψ cache (no DB write for interim)
+        try:
+            from radim_brain_routes import update_early_psi
+            update_early_psi(user_id, C_est, alpha_est, is_final)
+        except ImportError:
+            pass
+
+        # Determine mode
+        mode = 'HARMONY'
+        if C_est >= 27:
+            mode = 'CRISIS'
+        elif C_est >= 12:
+            mode = 'ALERT'
+
+        # On final: check if intent can be resolved locally
+        intent_hint = None
+        if is_final:
+            try:
+                from intent_resolver import resolve_intent
+                resolved, intent_label, _ = resolve_intent(text, user_id, mode)
+                intent_hint = intent_label
+            except Exception:
+                pass
+
+        emit('brain_update', {
+            'C': round(C_est, 2),
+            'alpha': round(alpha_est, 3),
+            'mode': mode,
+            'is_final': is_final,
+            'intent_hint': intent_hint
+        })
+    except Exception as e:
+        print(f"⚠️ stt_interim error (non-fatal): {e}")
+
+# ============================================
 # 🎓 EDUCATION SOCKETIO — Teacher ↔ Student
 # ============================================
 

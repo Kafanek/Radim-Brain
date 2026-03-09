@@ -265,6 +265,54 @@ def _db_save_brain_state(user_id, psi, alpha, mode, coherence, source="chat"):
         print(f"Brain state save warning: {e}")
 
 
+# ═══════════════════════════════════════════════════════════
+# EARLY Ψ CACHE — Streaming STT → Brain (v272)
+# ═══════════════════════════════════════════════════════════
+import time as _time_module
+
+_early_psi_cache = {}
+_EARLY_PSI_TTL = 300  # 5 minutes
+
+
+def update_early_psi(user_id, C_estimate, alpha_estimate, is_final=False):
+    """Update brain state from interim STT — lightweight, no DB write for interim.
+
+    For interim results: only update in-memory cache (no DB overhead).
+    For final results: save to DB via existing compute_psi_state().
+    """
+    # Clean stale entries (> 5 min)
+    now = _time_module.time()
+    stale_keys = [k for k, v in _early_psi_cache.items() if now - v['ts'] > _EARLY_PSI_TTL]
+    for k in stale_keys:
+        del _early_psi_cache[k]
+
+    if not is_final:
+        _early_psi_cache[user_id] = {
+            'C': C_estimate,
+            'alpha': alpha_estimate,
+            'ts': now
+        }
+        return
+
+    # On final: delegate to full Ψ computation
+    try:
+        mode = "HARMONY" if C_estimate < T1 else ("ALERT" if C_estimate < T2 else "CRISIS")
+        compute_psi_state(C_estimate, 0.5, 0.5, 0.5, alpha_estimate, user_id=user_id)
+    except Exception as e:
+        print(f"Early Ψ final save warning: {e}")
+    finally:
+        # Clear interim cache for this user
+        _early_psi_cache.pop(user_id, None)
+
+
+def get_early_psi(user_id):
+    """Get cached early Ψ estimate for a user (from streaming STT)."""
+    entry = _early_psi_cache.get(user_id)
+    if entry and (_time_module.time() - entry['ts']) < _EARLY_PSI_TTL:
+        return entry
+    return None
+
+
 def compute_unified_speech(C, alpha, mode, user_id=None, ant_params=None):
     """
     Unified speech parameter computation — single source of truth.

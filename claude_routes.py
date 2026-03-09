@@ -24,6 +24,13 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Intent Resolver (v272 — local NLU)
+try:
+    from intent_resolver import resolve_intent as _cl_resolve_intent
+    _CL_INTENT_RESOLVER = True
+except ImportError:
+    _CL_INTENT_RESOLVER = False
+
 # Anticipation Engine integration
 try:
     from anticipation_routes import (
@@ -267,6 +274,25 @@ def chat_with_radim():
             except Exception as hist_err:
                 logger.warning(f"History load failed (non-fatal): {hist_err}")
         messages.append({"role": "user", "content": message})
+
+        # 🎯 Intent Resolver: short-circuit simple queries locally (v272)
+        if _CL_INTENT_RESOLVER:
+            try:
+                _ir_text, _ir_intent, _ir_meta = _cl_resolve_intent(message, user_id)
+                if _ir_text:
+                    logger.info(f"Intent '{_ir_intent}' resolved locally for user={user_id}")
+                    result = {
+                        "success": True,
+                        "response": _ir_text,
+                        "intent": _ir_intent,
+                        "source": "local",
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                    if anticipation_meta:
+                        result["anticipation"] = anticipation_meta
+                    return jsonify(result)
+            except Exception as ir_err:
+                logger.warning(f"Intent resolver warning (non-fatal): {ir_err}")
 
         # Volání Claude API
         max_tokens = gen_config_override["max_tokens"] if gen_config_override else 1024
