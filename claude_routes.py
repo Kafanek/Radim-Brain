@@ -351,9 +351,8 @@ def chat_with_radim():
         # Gemini fallback on credit/billing errors
         if is_credit_error(e):
             info = get_today_info()
-            system = RADIM_SYSTEM_PROMPT.format(
-                date=info["date"], day_name=info["day_name"], nameday=info["nameday"]
-            )
+            time_ctx = f"Dnes je {info['day_name']} {info['date']}. Svátek má {info['nameday']}."
+            system = get_radim_prompt(mode='full', user_type='senior', time_context=time_ctx)
             gemini_text = call_gemini_fallback(message, system)
             if gemini_text:
                 # Record Gemini fallback interaction too
