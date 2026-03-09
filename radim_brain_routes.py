@@ -800,7 +800,7 @@ def brain_state():
         try:
             ant_state = _ant_classify(C)
             ant_emotions = _ant_emotions(C, alpha)
-            ant_speech = _ant_speech(C, alpha)
+            ant_speech = _ant_speech(C, alpha, ant_emotions)
             anticipation = {
                 "state": ant_state,
                 "emotions": ant_emotions,
