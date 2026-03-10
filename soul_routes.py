@@ -10,6 +10,9 @@ import json
 import sqlite3
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, g
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Flask Blueprint
 soul_bp = Blueprint('soul', __name__, url_prefix='/api/soul')
@@ -62,9 +65,9 @@ def init_soul_tables():
         ''')
 
         conn.commit()
-        print("✅ Soul tables initialized")
+        logger.info("✅ Soul tables initialized")
     except Exception as e:
-        print(f"⚠️ Soul tables init error: {e}")
+        logger.error(f"⚠️ Soul tables init error: {e}")
     finally:
         if conn:
             try:
@@ -270,7 +273,7 @@ def get_stats():
         })
         
     except Exception as e:
-        print(f"Soul stats error: {e}")
+        logger.error(f"Soul stats error: {e}")
         # Return defaults on error
         return jsonify({
             "success": True,
@@ -368,7 +371,7 @@ def get_lessons():
         })
         
     except Exception as e:
-        print(f"Soul lessons error: {e}")
+        logger.error(f"Soul lessons error: {e}")
         return jsonify({
             "success": True,
             "lessons": [],
@@ -425,7 +428,7 @@ def add_lesson():
         })
         
     except Exception as e:
-        print(f"Add lesson error: {e}")
+        logger.error(f"Add lesson error: {e}")
         return jsonify({
             "success": False,
             "error": str(e)
@@ -490,7 +493,7 @@ def log_interaction():
         })
         
     except Exception as e:
-        print(f"Log interaction error: {e}")
+        logger.error(f"Log interaction error: {e}")
         return jsonify({
             "success": False,
             "error": str(e)
@@ -552,8 +555,8 @@ def get_reflection():
 # LOGGING
 # ============================================================================
 
-print("💝 Soul Blueprint loaded - /api/soul/* endpoints ready")
-print("   Values: /api/soul/values")
-print("   Stats: /api/soul/stats")
-print("   Lessons: /api/soul/lessons")
-print("   Reflection: /api/soul/reflection")
+logger.info("💝 Soul Blueprint loaded - /api/soul/* endpoints ready")
+logger.info("   Values: /api/soul/values")
+logger.info("   Stats: /api/soul/stats")
+logger.info("   Lessons: /api/soul/lessons")
+logger.info("   Reflection: /api/soul/reflection")

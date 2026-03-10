@@ -14,6 +14,8 @@ import asyncio
 import aiohttp
 import json
 import logging
+
+logger = logging.getLogger(__name__)
 import os
 import uuid
 import time
@@ -33,8 +35,8 @@ load_dotenv()
 REQUIRED_ENV = ["GEMINI_API_KEY"]
 missing = [k for k in REQUIRED_ENV if not os.getenv(k)]
 if missing:
-    print(f"⚠️  Missing ENV variables: {', '.join(missing)}")
-    print(f"💡 Check your .env file - some features may be limited")
+    logger.warning(f"⚠️  Missing ENV variables: {', '.join(missing)}")
+    logger.info(f"💡 Check your .env file - some features may be limited")
     # Note: Not raising error - system can work without Gemini in fallback mode
 
 # Import local modules
@@ -324,9 +326,9 @@ app.include_router(memories_api.router)  # 🧠 Memories API - Azure SQL Integra
 try:
     from api import brain_routes
     app.include_router(brain_routes.router)  # 🧠 Neural Network Integration
-    print("✅ KAL Brain routes loaded")
+    logger.info("✅ KAL Brain routes loaded")
 except ImportError as e:
-    print(f"⚠️ KAL Brain routes not available: {e}") 
+    logger.warning(f"⚠️ KAL Brain routes not available: {e}") 
 
 # Global services
 gemini_integration: Optional[GeminiIntegration] = None

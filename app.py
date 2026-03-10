@@ -2,6 +2,9 @@
 # EVENTLET MONKEY PATCH - MUST BE FIRST!
 # ============================================
 import eventlet
+import logging
+
+logger = logging.getLogger(__name__)
 eventlet.monkey_patch()
 
 # ============================================
@@ -39,7 +42,7 @@ try:
     MEMORY_AVAILABLE = True
 except ImportError:
     MEMORY_AVAILABLE = False
-    print("⚠️ Memory routes not available")
+    logger.warning("⚠️ Memory routes not available")
 
 # 👴 Import Seniors API
 try:
@@ -47,7 +50,7 @@ try:
     SENIORS_AVAILABLE = True
 except ImportError:
     SENIORS_AVAILABLE = False
-    print("⚠️ Seniors routes not available")
+    logger.warning("⚠️ Seniors routes not available")
 
 # 🌡️ Import IoT & Sensors API
 try:
@@ -55,7 +58,7 @@ try:
     IOT_AVAILABLE = True
 except ImportError:
     IOT_AVAILABLE = False
-    print("⚠️ IoT routes not available")
+    logger.warning("⚠️ IoT routes not available")
 
 # 🔮 Import Predict & Consciousness API
 try:
@@ -63,7 +66,7 @@ try:
     PREDICT_AVAILABLE = True
 except ImportError:
     PREDICT_AVAILABLE = False
-    print("⚠️ Predict routes not available")
+    logger.warning("⚠️ Predict routes not available")
 
 # 📊 Import Dashboard API
 try:
@@ -71,7 +74,7 @@ try:
     DASHBOARD_AVAILABLE = True
 except ImportError:
     DASHBOARD_AVAILABLE = False
-    print("⚠️ Dashboard routes not available")
+    logger.warning("⚠️ Dashboard routes not available")
 
 # 📚 Import Library / E-book API
 try:
@@ -79,7 +82,7 @@ try:
     LIBRARY_AVAILABLE = True
 except ImportError:
     LIBRARY_AVAILABLE = False
-    print("⚠️ Library routes not available")
+    logger.warning("⚠️ Library routes not available")
 
 # 🎓 Import Education / Rare Diseases API
 try:
@@ -87,7 +90,7 @@ try:
     EDUCATION_AVAILABLE = True
 except ImportError:
     EDUCATION_AVAILABLE = False
-    print("⚠️ Education routes not available")
+    logger.warning("⚠️ Education routes not available")
 
 # 🏥 Import Telemedicine Routes
 try:
@@ -95,7 +98,7 @@ try:
     TELEMEDICINE_AVAILABLE = True
 except ImportError:
     TELEMEDICINE_AVAILABLE = False
-    print("⚠️ Telemedicine routes not available")
+    logger.warning("⚠️ Telemedicine routes not available")
 
 # 📧 Import Email Routes (SMTP via Wedos)
 try:
@@ -103,7 +106,7 @@ try:
     EMAIL_AVAILABLE = True
 except ImportError:
     EMAIL_AVAILABLE = False
-    print("⚠️ Email routes not available")
+    logger.warning("⚠️ Email routes not available")
 
 # ============================================
 # FLASK APP SETUP
@@ -115,47 +118,47 @@ app.register_blueprint(radim_bp)
 
 # 🎭 Register Orchestrator Blueprint
 app.register_blueprint(orchestrator_bp)
-print("✅ Orchestrator routes registered: /api/orchestrator/*")
+logger.info("✅ Orchestrator routes registered: /api/orchestrator/*")
 
 # 👴 Register Seniors Blueprint
 if SENIORS_AVAILABLE:
     app.register_blueprint(seniors_bp)
-    print("✅ Seniors routes registered: /api/seniors/*")
+    logger.info("✅ Seniors routes registered: /api/seniors/*")
 
 # 🌡️ Register IoT Blueprint
 if IOT_AVAILABLE:
     app.register_blueprint(iot_bp)
-    print("✅ IoT routes registered: /api/iot/*")
+    logger.info("✅ IoT routes registered: /api/iot/*")
 
 # 🔮 Register Predict Blueprint
 if PREDICT_AVAILABLE:
     app.register_blueprint(predict_bp)
-    print("✅ Predict routes registered: /api/radim/predict/*, /api/consciousness/*")
+    logger.info("✅ Predict routes registered: /api/radim/predict/*, /api/consciousness/*")
 
 # 📊 Register Dashboard Blueprint
 if DASHBOARD_AVAILABLE:
     app.register_blueprint(dashboard_bp)
-    print("✅ Dashboard routes registered: /api/dashboard/*")
+    logger.info("✅ Dashboard routes registered: /api/dashboard/*")
 
 # 📚 Register Library Blueprint
 if LIBRARY_AVAILABLE:
     app.register_blueprint(library_bp)
-    print("✅ Library routes registered: /kal/library/*")
+    logger.info("✅ Library routes registered: /kal/library/*")
 
 # 🎓 Register Education Blueprint
 if EDUCATION_AVAILABLE:
     app.register_blueprint(education_bp)
-    print("✅ Education routes registered: /api/education/*")
+    logger.info("✅ Education routes registered: /api/education/*")
 
 # 🏥 Register Telemedicine Blueprint
 if TELEMEDICINE_AVAILABLE:
     app.register_blueprint(telemedicine_bp)
-    print("✅ Telemedicine routes registered: /api/telemedicine/*")
+    logger.info("✅ Telemedicine routes registered: /api/telemedicine/*")
 
 # 📧 Register Email Blueprint
 if EMAIL_AVAILABLE:
     app.register_blueprint(email_bp)
-    print("✅ Email routes registered: /api/email/*")
+    logger.info("✅ Email routes registered: /api/email/*")
 
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
@@ -227,42 +230,42 @@ app.register_blueprint(speech_bp)
 # 🤖 Import Claude AI routes - Radim s web search (nahrazuje Gemini)
 from claude_routes import claude_bp
 app.register_blueprint(claude_bp)
-print("✅ Claude AI routes registered: /api/claude/*")
+logger.info("✅ Claude AI routes registered: /api/claude/*")
 
 # 💝 Import Soul routes - Duše Radima
 from soul_routes import soul_bp
 app.register_blueprint(soul_bp)
-print("✅ Soul routes registered: /api/soul/*")
+logger.info("✅ Soul routes registered: /api/soul/*")
 
 # 🎙️ Import Voice Runtime routes - Stavový automat
 from voice_runtime_routes import voice_runtime_bp
 app.register_blueprint(voice_runtime_bp)
-print("✅ Voice Runtime routes registered: /api/voice/*")
+logger.info("✅ Voice Runtime routes registered: /api/voice/*")
 
 # 🔮 Import Anticipation Engine - Předbudoucí čas
 from anticipation_routes import anticipation_bp
 app.register_blueprint(anticipation_bp)
-print("✅ Anticipation Engine registered: /api/anticipation/*")
+logger.info("✅ Anticipation Engine registered: /api/anticipation/*")
 
 # 🎵 Import Rhythm Return Engine - Návrat rytmu (Parkinson)
 try:
     from rhythm_return_routes import rhythm_return_bp
     app.register_blueprint(rhythm_return_bp)
     RHYTHM_RETURN_AVAILABLE = True
-    print("🎵 Rhythm Return Engine registered: /api/rhythm-return/*")
+    logger.info("🎵 Rhythm Return Engine registered: /api/rhythm-return/*")
 except ImportError:
     RHYTHM_RETURN_AVAILABLE = False
-    print("⚠️ Rhythm Return routes not available")
+    logger.warning("⚠️ Rhythm Return routes not available")
 
 # 🧠 Import RADIM Brain Engine - Sjednocující vrstva vědomí
 try:
     from radim_brain_routes import radim_brain_bp
     app.register_blueprint(radim_brain_bp)
     RADIM_BRAIN_AVAILABLE = True
-    print("🧠 RADIM Brain Engine registered: /api/brain/*")
+    logger.info("🧠 RADIM Brain Engine registered: /api/brain/*")
 except ImportError:
     RADIM_BRAIN_AVAILABLE = False
-    print("⚠️ RADIM Brain routes not available")
+    logger.warning("⚠️ RADIM Brain routes not available")
 
 # Anticipation functions for azure_tts_proxy
 try:
@@ -286,15 +289,15 @@ try:
     from twilio_voice_routes import twilio_bp
     app.register_blueprint(twilio_bp)
     TWILIO_AVAILABLE = True
-    print("✅ Twilio Voice routes registered: /api/twilio/*")
+    logger.info("✅ Twilio Voice routes registered: /api/twilio/*")
 except ImportError:
     TWILIO_AVAILABLE = False
-    print("⚠️ Twilio Voice routes not available")
+    logger.warning("⚠️ Twilio Voice routes not available")
 
 # 🧠 Import Memory & Learning routes
 if MEMORY_AVAILABLE:
     app.register_blueprint(memory_bp)
-    print("✅ Memory routes registered: /api/memory/*")
+    logger.info("✅ Memory routes registered: /api/memory/*")
 
 # ============================================
 # ⏰ BACKGROUND SCHEDULER — push reminders (v231)
@@ -328,12 +331,12 @@ try:
                         data={'task_id': task.get('id'), 'type': t_type}
                     )
                     mark_task_notified(task['id'])
-                    print(f"🔔 Reminder sent: '{title}' → {uid}")
+                    logger.info(f"🔔 Reminder sent: '{title}' → {uid}")
 
                 if due:
-                    print(f"⏰ Scheduler: {len(due)} reminders sent")
+                    logger.info(f"⏰ Scheduler: {len(due)} reminders sent")
             except Exception as e:
-                print(f"⏰ Scheduler error (non-fatal): {e}")
+                logger.error(f"⏰ Scheduler error (non-fatal): {e}")
 
     # 🏥 Telemedicine consultation reminders (15 min before)
     def _check_consultation_reminders():
@@ -360,31 +363,31 @@ try:
                 for pid in c.get('participant_ids', []):
                     if pid != teacher_id and pid != student_id:
                         socketio.emit('telemedicine_reminder', reminder_data, room=f'user_{pid}')
-                print(f"🏥 Telemed reminder: consultation #{cid} in {mins} min → teacher {teacher_id}, student {student_id}, +{len(c.get('participant_ids', []))} participants")
+                logger.info(f"🏥 Telemed reminder: consultation #{cid} in {mins} min → teacher {teacher_id}, student {student_id}, +{len(c.get('participant_ids', []))} participants")
             if upcoming:
-                print(f"🏥 Telemed scheduler: {len(upcoming)} reminders sent")
+                logger.info(f"🏥 Telemed scheduler: {len(upcoming)} reminders sent")
         except Exception as e:
-            print(f"🏥 Telemed scheduler error (non-fatal): {e}")
+            logger.error(f"🏥 Telemed scheduler error (non-fatal): {e}")
 
     scheduler = BackgroundScheduler(daemon=True)
     scheduler.add_job(_check_reminders, 'interval', minutes=5, id='radim_reminders')
     scheduler.add_job(_check_consultation_reminders, 'interval', minutes=5, id='telemed_reminders')
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
-    print("✅ APScheduler started: reminder check every 5 min")
-    print("✅ APScheduler started: telemed reminders every 5 min")
+    logger.info("✅ APScheduler started: reminder check every 5 min")
+    logger.info("✅ APScheduler started: telemed reminders every 5 min")
 
 except ImportError:
-    print("⚠️ APScheduler not installed — reminders will not auto-send")
+    logger.warning("⚠️ APScheduler not installed — reminders will not auto-send")
 except Exception as sched_err:
-    print(f"⚠️ Scheduler init error: {sched_err}")
+    logger.error(f"⚠️ Scheduler init error: {sched_err}")
 
 # ============================================
 # TTS PROXY ENDPOINTS (Azure)
 # ============================================
 AZURE_TTS_KEY = os.environ.get('AZURE_TTS_KEY')
 if not AZURE_TTS_KEY:
-    print("⚠️  WARNING: AZURE_TTS_KEY not set - Azure TTS proxy will not work")
+    logger.warning("⚠️  WARNING: AZURE_TTS_KEY not set - Azure TTS proxy will not work")
 # Try eastus - Heroku has DNS timeout on EU regions
 AZURE_TTS_REGION = os.environ.get('AZURE_TTS_REGION', 'eastus')
 
@@ -482,7 +485,7 @@ def azure_tts_proxy():
         except requests.exceptions.Timeout:
             return jsonify({'error': 'Azure TTS API timeout - try again'}), 504
         except requests.exceptions.RequestException as e:
-            print(f"⚠️ app.py error: {e}")
+            logger.error(f"⚠️ app.py error: {e}")
             return jsonify({'error': 'Interní chyba serveru'}), 503
         
         if response.status_code == 200:
@@ -506,7 +509,7 @@ def azure_tts_proxy():
             return jsonify({'error': f'Azure TTS error: {response.status_code}'}), response.status_code
             
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'error': 'Interní chyba serveru'}), 500
 
 # ============================================
@@ -560,7 +563,7 @@ def elevenlabs_tts_proxy():
         except requests.exceptions.Timeout:
             return jsonify({'error': 'ElevenLabs API timeout'}), 504
         except requests.exceptions.RequestException as e:
-            print(f"⚠️ app.py error: {e}")
+            logger.error(f"⚠️ app.py error: {e}")
             return jsonify({'error': 'Interní chyba serveru'}), 503
         
         if response.status_code == 200:
@@ -577,7 +580,7 @@ def elevenlabs_tts_proxy():
             return jsonify({'error': f'ElevenLabs error: {response.status_code}', 'detail': response.text}), response.status_code
             
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/tts/health', methods=['GET'])
@@ -690,11 +693,11 @@ def call_gemini_ai(messages, context=None, image=None):
             if 'candidates' in data and data['candidates']:
                 return data['candidates'][0]['content']['parts'][0]['text'].strip()
         
-        print(f"Gemini error: {response.status_code} - {response.text}")
+        logger.error(f"Gemini error: {response.status_code} - {response.text}")
         return None
         
     except Exception as e:
-        print(f"Gemini AI error: {e}")
+        logger.error(f"Gemini AI error: {e}")
         return None
 
 def call_claude_ai(messages, context=None):
@@ -730,7 +733,7 @@ def call_claude_ai(messages, context=None):
         return None
         
     except Exception as e:
-        print(f"Claude AI error: {e}")
+        logger.error(f"Claude AI error: {e}")
         return None
 
 def get_ai_response(messages, context=None, image=None):
@@ -781,7 +784,7 @@ def upload_to_cloudinary(file_data, resource_type='auto', folder='radim-chat'):
         }
         
     except Exception as e:
-        print(f"Cloudinary error: {e}")
+        logger.error(f"Cloudinary error: {e}")
         return None
 
 # ============================================
@@ -830,7 +833,7 @@ def send_push_notification(user_id, title, body, data=None):
         return True
         
     except Exception as e:
-        print(f"Push notification error: {e}")
+        logger.error(f"Push notification error: {e}")
         return False
 
 # ============================================
@@ -856,7 +859,7 @@ def get_wp_user(email):
         return None
         
     except Exception as e:
-        print(f"WordPress API error: {e}")
+        logger.error(f"WordPress API error: {e}")
         return None
 
 def sync_wp_user(wp_user):
@@ -902,7 +905,7 @@ def sync_wp_user(wp_user):
         return user_id
         
     except Exception as e:
-        print(f"Sync WP user error: {e}")
+        logger.error(f"Sync WP user error: {e}")
         return None
 
 # ============================================
@@ -929,7 +932,7 @@ def get_conversations(user_id):
         
         return jsonify({'success': True, 'conversations': conversations})
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/chat/conversations', methods=['POST'])
@@ -962,7 +965,7 @@ def create_conversation():
         
         return jsonify({'success': True, 'conversation': conversation}), 201
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
@@ -999,7 +1002,7 @@ def get_messages(conversation_id):
         
         return jsonify({'success': True, 'messages': list(reversed(messages)), 'hasMore': len(messages) == limit})
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/chat/messages', methods=['POST'])
@@ -1125,7 +1128,7 @@ def send_message():
         
         return jsonify({'success': True, 'message': message}), 201
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/chat/messages/<message_id>/read', methods=['PATCH'])
@@ -1149,7 +1152,7 @@ def mark_as_read(message_id):
         
         return jsonify({'success': True})
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/chat/messages/<message_id>/reaction', methods=['POST'])
@@ -1183,7 +1186,7 @@ def add_reaction(message_id):
         
         return jsonify({'success': False, 'error': 'Message not found'}), 404
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
@@ -1220,7 +1223,7 @@ def get_contacts(user_id):
         
         return jsonify({'success': True, 'contacts': contacts})
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/chat/contacts', methods=['POST'])
@@ -1250,7 +1253,7 @@ def add_contact():
         
         return jsonify({'success': True, 'contact': contact}), 201
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
@@ -1304,7 +1307,7 @@ def upload_media():
         })
         
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/media/voice', methods=['POST'])
@@ -1345,7 +1348,7 @@ def upload_voice_message():
         })
         
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
@@ -1378,7 +1381,7 @@ def subscribe_push():
         
         return jsonify({'success': True, 'message': 'Subscribed to push notifications'})
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/push/unsubscribe', methods=['POST'])
@@ -1398,7 +1401,7 @@ def unsubscribe_push():
         
         return jsonify({'success': True, 'message': 'Unsubscribed from push notifications'})
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/push/vapid-key', methods=['GET'])
@@ -1425,7 +1428,7 @@ def test_push():
         
         return jsonify({'success': success})
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
@@ -1455,7 +1458,7 @@ def wp_login():
         
         return jsonify({'success': False, 'error': 'User not found'}), 404
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/wordpress/sync', methods=['POST'])
@@ -1488,7 +1491,7 @@ def wp_sync_users():
         
         return jsonify({'success': False, 'error': 'WordPress API error'}), 500
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
@@ -1499,7 +1502,7 @@ def update_daily_stats(field):
     # Whitelist allowed field names to prevent SQL injection
     ALLOWED_FIELDS = {'total_messages', 'total_users', 'ai_messages', 'voice_messages', 'active_conversations'}
     if field not in ALLOWED_FIELDS:
-        print(f"⚠️  Invalid stats field: {field}")
+        logger.warning(f"⚠️  Invalid stats field: {field}")
         return
     try:
         db = get_db()
@@ -1512,7 +1515,7 @@ def update_daily_stats(field):
         ''', (generate_id(), today))
         db.commit()
     except Exception as e:
-        print(f"Stats update error: {e}")
+        logger.error(f"Stats update error: {e}")
 
 @app.route('/api/admin/stats', methods=['GET'])
 def get_admin_stats():
@@ -1569,7 +1572,7 @@ def get_admin_stats():
             }
         })
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/admin/users', methods=['GET'])
@@ -1592,7 +1595,7 @@ def get_admin_users():
         
         return jsonify({'success': True, 'users': users})
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/admin/conversations', methods=['GET'])
@@ -1615,7 +1618,7 @@ def get_admin_conversations():
         
         return jsonify({'success': True, 'conversations': conversations})
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
@@ -1655,7 +1658,7 @@ def ai_chat():
             'provider': 'gemini' if GEMINI_API_KEY else 'claude'
         })
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
@@ -1663,7 +1666,7 @@ def ai_chat():
 # ============================================
 @socketio.on('connect')
 def handle_connect():
-    print(f'🔌 Client connected: {request.sid}')
+    logger.info(f'🔌 Client connected: {request.sid}')
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -1682,7 +1685,7 @@ def handle_disconnect():
             db.execute('UPDATE chat_users SET online = 0, last_seen = ? WHERE id = ?', (now_iso(), user_id))
             db.commit()
         except Exception as e:
-            print(f"⚠️  Error updating user offline status: {e}")
+            logger.warning(f"⚠️  Error updating user offline status: {e}")
         finally:
             if db:
                 try:
@@ -1705,7 +1708,7 @@ def handle_join(data):
             db.execute('UPDATE chat_users SET online = 1 WHERE id = ?', (user_id,))
             db.commit()
         except Exception as e:
-            print(f"⚠️  Error updating user online status: {e}")
+            logger.warning(f"⚠️  Error updating user online status: {e}")
         finally:
             if db:
                 try:
@@ -1808,7 +1811,7 @@ def handle_stt_interim(data):
             'intent_hint': intent_hint
         })
     except Exception as e:
-        print(f"⚠️ stt_interim error (non-fatal): {e}")
+        logger.error(f"⚠️ stt_interim error (non-fatal): {e}")
 
 # ============================================
 # 🎓 EDUCATION SOCKETIO — Teacher ↔ Student
@@ -1838,7 +1841,7 @@ def handle_join_education(data):
         emit('education_error', {'error': 'Auth verification failed'})
         return
     join_room(f'user_{user_id}')
-    print(f"🎓 User {user_id} joined education room (verified)")
+    logger.info(f"🎓 User {user_id} joined education room (verified)")
 
 
 @socketio.on('leave_education')
@@ -1901,7 +1904,7 @@ def kal_radim_history(user_id):
                 "milestones": []
             }), 200
     except Exception as e:
-        print(f"⚠️ kal_radim_history error: {e}")
+        logger.error(f"⚠️ kal_radim_history error: {e}")
     return jsonify({"success": True, "conversations": [], "stats": {"total_conversations": 0, "days_active": 0, "breakthrough_count": 0, "milestone_count": 0}, "recent_mood": "neutral", "progress": "start", "breakthroughs": [], "milestones": []}), 200
 
 @app.route('/kal/radim/user/register', methods=['POST', 'OPTIONS'])
@@ -1923,7 +1926,7 @@ def kal_radim_register():
                 }
                 _db_save_profile(user_id, profile)
     except Exception as e:
-        print(f"⚠️ kal_radim_register error: {e}")
+        logger.error(f"⚠️ kal_radim_register error: {e}")
     return jsonify({"success": True, "message": "User registered", "user": {"user_id": user_id}}), 200
 
 @app.route('/kal/radim/user/<user_id>', methods=['PUT', 'OPTIONS'])
@@ -1940,7 +1943,7 @@ def kal_radim_update_user(user_id):
             _db_save_profile(user_id, profile)
             return jsonify({"success": True, "user": profile}), 200
     except Exception as e:
-        print(f"⚠️ kal_radim_update_user error: {e}")
+        logger.error(f"⚠️ kal_radim_update_user error: {e}")
     return jsonify({"success": True, "user": {"user_id": user_id}}), 200
 
 @app.route('/kal/radim/insights/<user_id>')
@@ -1962,7 +1965,7 @@ def kal_radim_insights(user_id):
                 }
             }), 200
     except Exception as e:
-        print(f"⚠️ kal_radim_insights error: {e}")
+        logger.error(f"⚠️ kal_radim_insights error: {e}")
     return jsonify({"success": True, "insights": {"total_interactions": 0, "preferred_length": "medium", "communication_style": "warm", "last_mood": "neutral", "top_topics": {}, "conversation_count": 0}}), 200
 
 @app.route('/kal/radim/conversation', methods=['POST', 'OPTIONS'])
@@ -1981,7 +1984,7 @@ def kal_radim_conversation():
                 assistant_response=data.get('kafanek_reply', '')
             )
     except Exception as e:
-        print(f"⚠️ kal_radim_conversation error: {e}")
+        logger.error(f"⚠️ kal_radim_conversation error: {e}")
     return jsonify({"success": True, "conversation": {"saved": True}}), 200
 
 @app.route('/kal/radim/stats')
@@ -2011,7 +2014,7 @@ def kal_radim_stats():
                 }
             }), 200
     except Exception as e:
-        print(f"⚠️ kal_radim_stats error: {e}")
+        logger.error(f"⚠️ kal_radim_stats error: {e}")
     return jsonify({"success": True, "message": "Radim stats", "impact": {"total_users": 0, "total_conversations": 0, "active_today": 0}}), 200
 
 @app.route('/api/proxy/azure/speech-token')
@@ -2051,7 +2054,7 @@ def api_clients():
         client_id = client.get('id')
         if client_id:
             # Log sync event
-            print(f"[CLIENT SYNC] {client_id}")
+            logger.info(f"[CLIENT SYNC] {client_id}")
             
         return jsonify({
             'success': True,
@@ -2093,7 +2096,7 @@ def api_emergency():
     timestamp = data.get('timestamp', now_iso())
     
     # Log emergency event
-    print(f"[EMERGENCY] {event} from {user_id} at {timestamp}")
+    logger.info(f"[EMERGENCY] {event} from {user_id} at {timestamp}")
     
     # In production, this would:
     # 1. Send SMS/push to emergency contacts
@@ -2287,7 +2290,7 @@ def auth_data_delete():
             conn.commit()
             cursor.close()
     except Exception as e:
-        print(f"⚠️ app.py error: {e}")
+        logger.error(f"⚠️ app.py error: {e}")
         return jsonify({"success": False, "error": "Interní chyba serveru"}), 500
     finally:
         if conn:
@@ -2462,9 +2465,9 @@ with app.app_context():
         db = get_connection()
         db.execute("UPDATE chat_users SET online = 0 WHERE id != 'radim'")
         db.commit()
-        print("✅ All user online statuses reset")
+        logger.info("✅ All user online statuses reset")
     except Exception as e:
-        print(f"⚠️  Could not reset online statuses: {e}")
+        logger.warning(f"⚠️  Could not reset online statuses: {e}")
     finally:
         if db:
             try:
@@ -2474,7 +2477,7 @@ with app.app_context():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f'''
+    logger.info(f'''
 ╔═══════════════════════════════════════════════════════════╗
 ║          🌟 RADIM BRAIN + CHAT SERVER v3.1 🌟             ║
 ╠═══════════════════════════════════════════════════════════╣

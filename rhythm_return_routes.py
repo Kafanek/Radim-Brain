@@ -25,6 +25,9 @@ import math
 import uuid
 from datetime import datetime
 from flask import Blueprint, request, jsonify
+import logging
+
+logger = logging.getLogger(__name__)
 
 # --- Shared math from Anticipation Engine ---
 try:
@@ -556,7 +559,7 @@ def _db_save_session(session_id, user_id, preferred_bpm, hy_stage, notes):
         db.commit()
         return True
     except Exception as e:
-        print(f"⚠️ rhythm session save error: {e}")
+        logger.error(f"⚠️ rhythm session save error: {e}")
         return False
     finally:
         if db:
@@ -583,7 +586,7 @@ def _db_save_state(session_id, M, tau, predicted_M, predicted_tau, state, bpm, a
         db.commit()
         return True
     except Exception as e:
-        print(f"⚠️ rhythm state save error: {e}")
+        logger.error(f"⚠️ rhythm state save error: {e}")
         return False
     finally:
         if db:
@@ -609,7 +612,7 @@ def _db_save_breakpoint(session_id, bp_type, direction, M_before, M_after, actio
         db.commit()
         return True
     except Exception as e:
-        print(f"⚠️ rhythm breakpoint save error: {e}")
+        logger.error(f"⚠️ rhythm breakpoint save error: {e}")
         return False
     finally:
         if db:
@@ -648,7 +651,7 @@ def _db_get_session(session_id):
             "breakpoints": [dict(b) for b in breakpoints]
         }
     except Exception as e:
-        print(f"⚠️ rhythm session load error: {e}")
+        logger.error(f"⚠️ rhythm session load error: {e}")
         return None
     finally:
         if db:
@@ -1038,12 +1041,12 @@ def get_session(session_id):
 # STARTUP MESSAGE
 # ============================================
 
-print("🎵 Rhythm Return Engine loaded — /api/rhythm-return/* endpoints ready")
-print(f"   Predict:   POST /api/rhythm-return/predict")
-print(f"   Session:   POST /api/rhythm-return/session")
-print(f"   Update:    POST /api/rhythm-return/session/<id>/update")
-print(f"   History:   GET  /api/rhythm-return/session/<id>")
-print(f"   Constants: GET  /api/rhythm-return/constants")
-print(f"   Health:    GET  /api/rhythm-return/health")
-print(f"   φ = {PHI}, M thresholds: FLOW<{M_FLOW}, STRUGGLE<{M_STRUGGLE}, FREEZE>={M_STRUGGLE}")
-print(f"   BPM: FLOW={BPM_PREFERRED}x1.05, STRUGGLE={BPM_PREFERRED}xψ({PSI:.3f}), FREEZE={BPM_REST}xφ={BPM_PHI_FREEZE}")
+logger.info("🎵 Rhythm Return Engine loaded — /api/rhythm-return/* endpoints ready")
+logger.info(f"   Predict:   POST /api/rhythm-return/predict")
+logger.info(f"   Session:   POST /api/rhythm-return/session")
+logger.info(f"   Update:    POST /api/rhythm-return/session/<id>/update")
+logger.info(f"   History:   GET  /api/rhythm-return/session/<id>")
+logger.info(f"   Constants: GET  /api/rhythm-return/constants")
+logger.info(f"   Health:    GET  /api/rhythm-return/health")
+logger.info(f"   φ = {PHI}, M thresholds: FLOW<{M_FLOW}, STRUGGLE<{M_STRUGGLE}, FREEZE>={M_STRUGGLE}")
+logger.info(f"   BPM: FLOW={BPM_PREFERRED}x1.05, STRUGGLE={BPM_PREFERRED}xψ({PSI:.3f}), FREEZE={BPM_REST}xφ={BPM_PHI_FREEZE}")

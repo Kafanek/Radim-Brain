@@ -489,7 +489,7 @@ def compute_metrics():
         })
         
     except Exception as e:
-        print(f"⚠️ voice_runtime_routes.py error: {e}")
+        logger.error(f"⚠️ voice_runtime_routes.py error: {e}")
         return jsonify({'error': 'Interní chyba serveru'}), 500
 
 @voice_runtime_bp.route('/state', methods=['POST'])
@@ -560,7 +560,7 @@ def update_state():
         })
         
     except Exception as e:
-        print(f"⚠️ voice_runtime_routes.py error: {e}")
+        logger.error(f"⚠️ voice_runtime_routes.py error: {e}")
         return jsonify({'error': 'Interní chyba serveru'}), 500
 
 @voice_runtime_bp.route('/session/<session_id>', methods=['GET'])
@@ -680,7 +680,7 @@ def get_voice_ai_response(messages, context=None):
                     text = clean_for_tts(text)
                     return {'response': text, 'provider': 'gemini', 'success': True}
         except Exception as e:
-            print(f"Gemini voice error: {e}")
+            logger.error(f"Gemini voice error: {e}")
     
     # Fallback na Claude
     if ANTHROPIC_API_KEY:
@@ -710,7 +710,7 @@ def get_voice_ai_response(messages, context=None):
                     text = clean_for_tts(text)
                     return {'response': text, 'provider': 'claude', 'success': True}
         except Exception as e:
-            print(f"Claude voice error: {e}")
+            logger.error(f"Claude voice error: {e}")
     
     return {'response': 'Omlouvám se, zkuste to prosím znovu.', 'provider': 'fallback', 'success': False}
 
@@ -839,7 +839,7 @@ def voice_chat():
         return jsonify(result)
 
     except Exception as e:
-        print(f"⚠️ voice_runtime_routes.py error: {e}")
+        logger.error(f"⚠️ voice_runtime_routes.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
-print("✅ Voice Runtime routes registered: /api/voice/*")
+logger.info("✅ Voice Runtime routes registered: /api/voice/*")

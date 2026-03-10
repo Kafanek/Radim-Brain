@@ -20,7 +20,7 @@ try:
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
-    print("⚠️ Anthropic SDK not installed. Run: pip install anthropic")
+    logger.warning("⚠️ Anthropic SDK not installed. Run: pip install anthropic")
 
 logger = logging.getLogger(__name__)
 
@@ -1085,7 +1085,7 @@ def get_fallback_quiz(topic):
 # LOGGING
 # ============================================================================
 
-print("✅ Claude AI Blueprint loaded - /api/claude/* endpoints ready")
-print("🧠 Emotion Analysis endpoint: /api/claude/analyze-emotion")
-print("🧠 Consciousness State endpoint: /api/claude/consciousness-state")
-print("📝 Memory endpoints: /api/claude/memory/save, /api/claude/memory/recall")
+logger.info("✅ Claude AI Blueprint loaded - /api/claude/* endpoints ready")
+logger.info("🧠 Emotion Analysis endpoint: /api/claude/analyze-emotion")
+logger.info("🧠 Consciousness State endpoint: /api/claude/consciousness-state")
+logger.info("📝 Memory endpoints: /api/claude/memory/save, /api/claude/memory/recall")

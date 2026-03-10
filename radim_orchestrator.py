@@ -14,6 +14,9 @@ import base64
 import time as _time
 from datetime import datetime, timedelta, date
 from xml.sax.saxutils import escape as xml_escape
+import logging
+
+logger = logging.getLogger(__name__)
 
 radim_bp = Blueprint('radim', __name__)
 
@@ -169,7 +172,7 @@ def _build_time_context():
         weather = _fetch_weather_context()
         return f"{base}{weather}"
     except Exception as e:
-        print(f"Time context warning: {e}")
+        logger.warning(f"Time context warning: {e}")
         return ""
 
 def _get_dynamic_system_prompt(mode='senior'):
@@ -188,7 +191,7 @@ def _get_dynamic_system_prompt(mode='senior'):
             )
             return prompt + _ORCH_ACTION_HINT
         except Exception as e:
-            print(f"Dynamic prompt warning: {e}")
+            logger.warning(f"Dynamic prompt warning: {e}")
     # Fallback: short centralized prompt from radim_system_prompt.py
     from radim_system_prompt import RADIM_SYSTEM_PROMPT_SHORT
     return RADIM_SYSTEM_PROMPT_SHORT + _ORCH_ACTION_HINT
@@ -390,7 +393,7 @@ def call_gemini_whatsapp(message, context=None, mode='senior', personalized_prom
         return None, None
         
     except Exception as e:
-        print(f"Gemini WhatsApp error: {e}")
+        logger.error(f"Gemini WhatsApp error: {e}")
         return None, None
 
 def parse_radim_response(full_response):
@@ -497,7 +500,7 @@ def radim_chat():
                 personalized = _orch_build_prompt(user_id)
                 history = _orch_get_history(user_id, limit=6)
             except Exception as mem_err:
-                print(f"Memory load warning: {mem_err}")
+                logger.warning(f"Memory load warning: {mem_err}")
 
         # 📋 Load pending tasks context for AI awareness
         if _ORCH_TASK_SERVICE:
@@ -506,7 +509,7 @@ def radim_chat():
                 if tasks_ctx:
                     personalized += tasks_ctx
             except Exception as tc_err:
-                print(f"Tasks context warning: {tc_err}")
+                logger.warning(f"Tasks context warning: {tc_err}")
 
         # 🎵 Text Rhythm: matematika → styl textu
         anticipation_prompt = ''
@@ -543,7 +546,7 @@ def radim_chat():
                 anticipation_meta = _tr_meta(text_result)
                 gen_config = _tr_gen_config(text_result)
             except Exception as tr_err:
-                print(f"Text rhythm warning (non-fatal): {tr_err}")
+                logger.warning(f"Text rhythm warning (non-fatal): {tr_err}")
 
         # 🧠 Brain Engine: Ψ(t) = (C, E, R, S) — stavový vektor vědomí
         brain_meta = None
@@ -566,7 +569,7 @@ def radim_chat():
                 }
                 personalized += f"\n\n[RADIM Brain: mode={psi_state['mode']}, coherence={psi_state['coherence']:.2f}]\n{decision['instructions']}"
             except Exception as brain_err:
-                print(f"Brain warning (non-fatal): {brain_err}")
+                logger.warning(f"Brain warning (non-fatal): {brain_err}")
 
         # 🎯 Intent Resolver: short-circuit simple queries locally (v272)
         action_json = None
@@ -578,9 +581,9 @@ def radim_chat():
                 _resolved_text, _resolved_intent, _resolved_meta = _resolve_intent(message, user_id, _brain_mode)
                 if _resolved_text:
                     text_response = _resolved_text
-                    print(f"🎯 Intent '{_resolved_intent}' resolved locally for {user_id}")
+                    logger.info(f"🎯 Intent '{_resolved_intent}' resolved locally for {user_id}")
             except Exception as ir_err:
-                print(f"Intent resolver warning (non-fatal): {ir_err}")
+                logger.warning(f"Intent resolver warning (non-fatal): {ir_err}")
 
         if text_response is None:
             text_response, action_json = call_gemini_whatsapp(
@@ -618,7 +621,7 @@ def radim_chat():
                     )
                     if task:
                         action_json['created_task'] = task
-                        print(f"📋 AI created task: #{task['id']} '{task['title']}'")
+                        logger.info(f"📋 AI created task: #{task['id']} '{task['title']}'")
 
                 elif action_type == 'log_health':
                     _ts_log_med(
@@ -627,16 +630,16 @@ def radim_chat():
                         dosage=payload.get('dosage'),
                         notes=payload.get('notes', message[:200])
                     )
-                    print(f"💊 AI logged medication for {user_id}")
+                    logger.info(f"💊 AI logged medication for {user_id}")
             except Exception as act_err:
-                print(f"Action processing warning: {act_err}")
+                logger.warning(f"Action processing warning: {act_err}")
 
         # 🧠 Record interaction to memory (save history + update learning)
         if _ORCH_MEMORY_AVAILABLE and text_response != "Promiňte, zkuste to za chvíli. 🙏":
             try:
                 _orch_record(user_id, message, text_response)
             except Exception as rec_err:
-                print(f"Memory record warning: {rec_err}")
+                logger.warning(f"Memory record warning: {rec_err}")
 
         # 🧠 Brain reinforcement: adapt per-user after response
         if _ORCH_BRAIN_AVAILABLE and text_response != "Promiňte, zkuste to za chvíli. 🙏":
@@ -660,7 +663,7 @@ def radim_chat():
         return jsonify(result)
         
     except Exception as e:
-        print(f"⚠️ radim_orchestrator.py error: {e}")
+        logger.error(f"⚠️ radim_orchestrator.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @radim_bp.route('/api/radim/tasks', methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
@@ -824,7 +827,7 @@ Odpověz POUZE textem příspěvku:"""
         return jsonify({'success': False, 'error': 'AI nedostupné'}), 503
         
     except Exception as e:
-        print(f"⚠️ radim_orchestrator.py error: {e}")
+        logger.error(f"⚠️ radim_orchestrator.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @radim_bp.route('/api/radim/voice/speak', methods=['POST', 'OPTIONS'])
@@ -935,7 +938,7 @@ def radim_voice_speak():
         return jsonify({'success': False, 'error': f'Azure TTS error: {response.status_code}'}), 500
         
     except Exception as e:
-        print(f"⚠️ radim_orchestrator.py error: {e}")
+        logger.error(f"⚠️ radim_orchestrator.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @radim_bp.route('/api/radim/health', methods=['GET'])

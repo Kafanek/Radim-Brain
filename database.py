@@ -12,9 +12,13 @@
 
 import os
 import json
+import logging
 import sqlite3
+import time
 import threading
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 # Detect database type
 DATABASE_URL = os.environ.get('DATABASE_URL')
@@ -38,13 +42,13 @@ if USE_POSTGRES:
             _safe_url = f"{_parsed.scheme}://{_parsed.username}:***@{_parsed.hostname}:{_parsed.port}{_parsed.path}"
         except Exception:
             _safe_url = "postgresql://***"
-        print(f"🐘 PostgreSQL mode - connecting to: {_safe_url}")
+        logger.info(f"🐘 PostgreSQL mode - connecting to: {_safe_url}")
     except ImportError:
-        print("⚠️  psycopg2 not installed, falling back to SQLite")
+        logger.warning("⚠️  psycopg2 not installed, falling back to SQLite")
         USE_POSTGRES = False
 
 if not USE_POSTGRES:
-    print(f"📁 SQLite mode - database: {DATABASE_PATH}")
+    logger.info(f"📁 SQLite mode - database: {DATABASE_PATH}")
 
 # ============================================
 # CONNECTION POOL (PostgreSQL only)
@@ -60,12 +64,31 @@ def _get_pg_pool():
     with _pg_pool_lock:
         # Double-check inside lock
         if _pg_pool is None or _pg_pool.closed:
+            # Heroku PG connections may idle-timeout; keepalives prevent this
             _pg_pool = psycopg2.pool.ThreadedConnectionPool(
                 minconn=1,
                 maxconn=10,
-                dsn=DATABASE_URL
+                dsn=DATABASE_URL,
+                connect_timeout=10,
+                keepalives=1,
+                keepalives_idle=30,
+                keepalives_interval=10,
+                keepalives_count=3,
+                options='-c statement_timeout=25000'  # 25s query timeout
             )
+            logger.info("🐘 PostgreSQL pool created (maxconn=10, keepalive=30s, stmt_timeout=25s)")
     return _pg_pool
+
+
+def _test_connection(conn):
+    """Test if a PostgreSQL connection is still alive."""
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        cur.close()
+        return True
+    except Exception:
+        return False
 
 
 # ============================================
@@ -223,11 +246,44 @@ def _convert_schema(script):
 # PUBLIC API
 # ============================================
 def get_connection():
-    """Get a new database connection (for use outside Flask request context)"""
+    """Get a new database connection (for use outside Flask request context).
+
+    PostgreSQL: pulls from pool with health check + 1 retry on stale conn.
+    SQLite: creates fresh connection each time.
+    """
     if USE_POSTGRES:
-        pool = _get_pg_pool()
-        conn = pool.getconn()
-        return PgConnectionWrapper(conn)
+        for attempt in range(2):
+            try:
+                pool = _get_pg_pool()
+                conn = pool.getconn()
+                # Health check — reject stale/dead connections
+                if not _test_connection(conn):
+                    logger.warning("⚠️ Stale PG connection, discarding")
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    # Force pool to give us a fresh one
+                    if attempt == 0:
+                        continue
+                    raise Exception("No healthy PG connection available")
+                return PgConnectionWrapper(conn)
+            except Exception as e:
+                if attempt == 0:
+                    logger.warning(f"⚠️ PG pool.getconn() failed (attempt 1): {e}")
+                    # Pool might be exhausted or broken — try recreating
+                    global _pg_pool
+                    with _pg_pool_lock:
+                        try:
+                            if _pg_pool and not _pg_pool.closed:
+                                _pg_pool.closeall()
+                        except Exception:
+                            pass
+                        _pg_pool = None
+                    time.sleep(0.5)
+                    continue
+                logger.error(f"❌ PG connection failed after 2 attempts: {e}")
+                raise
     else:
         conn = sqlite3.connect(DATABASE_PATH)
         conn.row_factory = sqlite3.Row
@@ -1055,7 +1111,7 @@ def init_db():
         pass
 
     db_type = "PostgreSQL" if USE_POSTGRES else "SQLite"
-    print(f"✅ Databáze inicializována ({db_type}, v4.0 — Brain Engine persistence)")
+    logger.info(f"✅ Databáze inicializována ({db_type}, v4.0 — Brain Engine persistence)")
 
 
 def is_postgres():

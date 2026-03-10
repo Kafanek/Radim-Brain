@@ -459,7 +459,7 @@ def twilio_voice_webhook():
         called = request.form.get("To", "")
 
         logger.info(f"📞 Incoming call: {caller} → {called} (SID: {call_sid})")
-        print(f"📞 Incoming call: {caller} → {called} (SID: {call_sid})")
+        logger.info(f"📞 Incoming call: {caller} → {called} (SID: {call_sid})")
 
         # Register active call (with C/α tracking for Anticipation Engine)
         # Use shared baseline from Anticipation Engine
@@ -535,7 +535,7 @@ def twilio_gather_webhook():
         caller = request.form.get("From", "unknown")
 
         logger.info(f"🎤 Speech: '{speech_result}' (confidence: {confidence}, SID: {call_sid})")
-        print(f"🎤 Speech: '{speech_result}' (confidence: {confidence})")
+        logger.info(f"🎤 Speech: '{speech_result}' (confidence: {confidence})")
 
         if not speech_result.strip():
             say_retry = twiml_say("Promiňte, neslyšel jsem vás. Můžete to zopakovat?")
@@ -670,7 +670,7 @@ def twilio_status_webhook():
         call_status = request.form.get("CallStatus", "unknown")
         duration = request.form.get("CallDuration", "0")
         logger.info(f"📊 Call status: {call_sid} → {call_status} (duration: {duration}s)")
-        print(f"📊 Call status: {call_sid} → {call_status} (duration: {duration}s)")
+        logger.info(f"📊 Call status: {call_sid} → {call_status} (duration: {duration}s)")
         if call_sid in active_calls:
             active_calls[call_sid]["status"] = call_status
             if call_status in ("completed", "failed", "busy", "no-answer"):
@@ -845,7 +845,7 @@ def send_call_invitation():
         )
 
         logger.info(f"📱 SMS invite sent to {to}: {message.sid}")
-        print(f"📱 SMS invite sent to {to} (room: {room_code})")
+        logger.info(f"📱 SMS invite sent to {to} (room: {room_code})")
 
         return jsonify({
             "success": True,

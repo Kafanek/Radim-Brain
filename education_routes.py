@@ -10,6 +10,9 @@ from datetime import datetime
 import json
 from database import get_connection
 from auth_middleware import require_auth, require_teacher, optional_auth
+import logging
+
+logger = logging.getLogger(__name__)
 
 education_bp = Blueprint('education', __name__)
 
@@ -3749,7 +3752,7 @@ def _db_save_progress(user_id, course_id, module_id=None, lesson_id=None, action
         )
         db.commit()
     except Exception as e:
-        print(f"⚠️ education progress save error: {e}")
+        logger.error(f"⚠️ education progress save error: {e}")
 
 
     finally:
@@ -3820,7 +3823,7 @@ def _db_get_progress(user_id):
 
         return progress
     except Exception as e:
-        print(f"⚠️ education progress load error: {e}")
+        logger.error(f"⚠️ education progress load error: {e}")
         return {}
 
 
@@ -4295,7 +4298,7 @@ def lesson_progress_sync():
                 )
             db.commit()
         except Exception as e:
-            print(f"⚠️ lesson progress save error: {e}")
+            logger.error(f"⚠️ lesson progress save error: {e}")
 
         finally:
             if db:
@@ -4339,7 +4342,7 @@ def lesson_progress_sync():
                 "updatedAt": str(row['updated_at'])
             }
     except Exception as e:
-        print(f"⚠️ lesson progress load error: {e}")
+        logger.error(f"⚠️ lesson progress load error: {e}")
         progress = {}
 
     finally:
@@ -4554,7 +4557,7 @@ def _get_adaptive_profile(user_id):
             profile["level"] = row['level'] or profile.get("level", "beginner")
             return profile
     except Exception as e:
-        print(f"⚠️ education profile load error: {e}")
+        logger.error(f"⚠️ education profile load error: {e}")
 
     finally:
         if db:
@@ -4593,7 +4596,7 @@ def _save_adaptive_profile(user_id, profile):
             )
         db.commit()
     except Exception as e:
-        print(f"⚠️ education profile save error: {e}")
+        logger.error(f"⚠️ education profile save error: {e}")
 
 
     finally:
@@ -4963,7 +4966,7 @@ def _db_assign_teacher(user_id, teacher_id, teacher_type='ai'):
             )
         db.commit()
     except Exception as e:
-        print(f"⚠️ teacher assign error: {e}")
+        logger.error(f"⚠️ teacher assign error: {e}")
 
 
     finally:
@@ -6028,7 +6031,7 @@ def _get_teacher_students(teacher_id):
             ).fetchall()
         return [r['student_id'] for r in rows]
     except Exception as e:
-        print(f"⚠️ get teacher students error: {e}")
+        logger.error(f"⚠️ get teacher students error: {e}")
         return []
 
 

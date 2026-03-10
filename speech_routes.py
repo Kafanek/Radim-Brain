@@ -12,6 +12,9 @@ import requests
 from xml.sax.saxutils import escape as xml_escape
 from flask import Blueprint, request, jsonify, Response, g
 from auth_middleware import require_auth
+import logging
+
+logger = logging.getLogger(__name__)
 
 speech_bp = Blueprint('speech', __name__, url_prefix='/api/speech')
 
@@ -209,7 +212,7 @@ def synthesize_speech():
     except requests.exceptions.Timeout:
         return jsonify({'success': False, 'error': 'Azure TTS timeout'}), 504
     except Exception as e:
-        print(f"⚠️ speech_routes.py error: {e}")
+        logger.error(f"⚠️ speech_routes.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @speech_bp.route('/synthesize/stream', methods=['POST'])
@@ -292,7 +295,7 @@ def synthesize_stream():
         return jsonify({'success': False, 'error': 'TTS synthesis failed'}), 500
         
     except Exception as e:
-        print(f"⚠️ speech_routes.py error: {e}")
+        logger.error(f"⚠️ speech_routes.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
@@ -384,7 +387,7 @@ def transcribe_speech():
     except requests.exceptions.Timeout:
         return jsonify({'success': False, 'error': 'Azure STT timeout'}), 504
     except Exception as e:
-        print(f"⚠️ speech_routes.py error: {e}")
+        logger.error(f"⚠️ speech_routes.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
@@ -616,5 +619,5 @@ def radim_speak(text, emotion='friendly', C=None, alpha=None, user_id=None):
         return None
         
     except Exception as e:
-        print(f"Radim speak error: {e}")
+        logger.error(f"Radim speak error: {e}")
         return None

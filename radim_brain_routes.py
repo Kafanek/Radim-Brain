@@ -32,6 +32,9 @@ import json
 import traceback
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify
+import logging
+
+logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════
 # BLUEPRINT
@@ -203,7 +206,7 @@ def _db_load_adaptation(user_id):
                 "intervention_level": float(row[5]),
             }
     except Exception as e:
-        print(f"Brain DB load warning: {e}")
+        logger.warning(f"Brain DB load warning: {e}")
     finally:
         if db:
             try:
@@ -244,7 +247,7 @@ def _db_save_adaptation(user_id, state):
                   state["style"], state["intervention_level"]))
         db.commit()
     except Exception as e:
-        print(f"Brain DB save warning: {e}")
+        logger.warning(f"Brain DB save warning: {e}")
 
 
     finally:
@@ -274,7 +277,7 @@ def _db_save_brain_state(user_id, psi, alpha, mode, coherence, source="chat"):
                   alpha, mode, coherence, source))
         db.commit()
     except Exception as e:
-        print(f"Brain state save warning: {e}")
+        logger.warning(f"Brain state save warning: {e}")
 
 
     finally:
@@ -317,7 +320,7 @@ def update_early_psi(user_id, C_estimate, alpha_estimate, is_final=False):
         mode = "HARMONY" if C_estimate < T1 else ("ALERT" if C_estimate < T2 else "CRISIS")
         compute_psi_state(C_estimate, 0.5, 0.5, 0.5, alpha_estimate, user_id=user_id)
     except Exception as e:
-        print(f"Early Ψ final save warning: {e}")
+        logger.warning(f"Early Ψ final save warning: {e}")
     finally:
         # Clear interim cache for this user
         _early_psi_cache.pop(user_id, None)
@@ -450,7 +453,7 @@ def get_brain_speech_for_user(user_id):
         speech["source"] = "brain_states"
         return speech
     except Exception as e:
-        print(f"Brain speech lookup warning: {e}")
+        logger.warning(f"Brain speech lookup warning: {e}")
         return None
 
 
@@ -1362,7 +1365,7 @@ def brain_feedback():
                 )
             db.commit()
         except Exception as e:
-            print(f"Brain feedback save warning: {e}")
+            logger.warning(f"Brain feedback save warning: {e}")
 
         finally:
             if db:
@@ -1482,7 +1485,7 @@ def brain_architecture():
 # ═══════════════════════════════════════════════════════════
 # STARTUP
 # ═══════════════════════════════════════════════════════════
-print(f"""
+logger.info(f"""
 🧠 RADIM Brain Engine v2.0.0
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Ψ(t) = (C, E, R, S)

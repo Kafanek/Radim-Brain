@@ -23,6 +23,9 @@ import sqlite3
 from datetime import datetime, timedelta
 from xml.sax.saxutils import escape as xml_escape
 from flask import Blueprint, request, jsonify, g
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Flask Blueprint
 anticipation_bp = Blueprint('anticipation', __name__, url_prefix='/api/anticipation')
@@ -143,9 +146,9 @@ def init_anticipation_tables():
         ''')
         
         conn.commit()
-        print("✅ Anticipation tables initialized")
+        logger.info("✅ Anticipation tables initialized")
     except Exception as e:
-        print(f"⚠️ Anticipation tables init error: {e}")
+        logger.error(f"⚠️ Anticipation tables init error: {e}")
     finally:
         if conn:
             try:
@@ -468,7 +471,7 @@ def predict():
                   speech_params["pitch"], speech_params["pause_ms"]))
             conn.commit()
         except Exception as db_error:
-            print(f"⚠️ DB save error: {db_error}")
+            logger.error(f"⚠️ DB save error: {db_error}")
         finally:
             if conn:
                 try:
@@ -502,7 +505,7 @@ def predict():
         })
         
     except Exception as e:
-        print(f"❌ Anticipation error: {e}")
+        logger.error(f"❌ Anticipation error: {e}")
         return jsonify({
             "success": False,
             "error": str(e)
@@ -572,7 +575,7 @@ def speech_adjust():
         })
         
     except Exception as e:
-        print(f"⚠️ anticipation_routes.py error: {e}")
+        logger.error(f"⚠️ anticipation_routes.py error: {e}")
         return jsonify({"success": False, "error": "Interní chyba serveru"}), 500
 
 
@@ -635,7 +638,7 @@ def get_history():
         })
         
     except Exception as e:
-        print(f"⚠️ anticipation_routes.py error: {e}")
+        logger.error(f"⚠️ anticipation_routes.py error: {e}")
         return jsonify({"success": False, "error": "Interní chyba serveru"}), 500
 
 
@@ -679,8 +682,8 @@ def generate_orchestrator_instructions(C_current, C_predicted, state_current, st
 # LOGGING
 # ============================================================================
 
-print("🔮 Anticipation Engine loaded - /api/anticipation/* endpoints ready")
-print("   Predict: POST /api/anticipation/predict")
-print("   Speech Adjust: POST /api/anticipation/speech-adjust")
-print("   History: GET /api/anticipation/history")
-print(f"   φ = {PHI}, Thresholds: HARMONY<{C_HARMONY}, ALERT<{C_ALERT}, CRISIS≥{C_ALERT}")
+logger.info("🔮 Anticipation Engine loaded - /api/anticipation/* endpoints ready")
+logger.info("   Predict: POST /api/anticipation/predict")
+logger.info("   Speech Adjust: POST /api/anticipation/speech-adjust")
+logger.info("   History: GET /api/anticipation/history")
+logger.info(f"   φ = {PHI}, Thresholds: HARMONY<{C_HARMONY}, ALERT<{C_ALERT}, CRISIS≥{C_ALERT}")
