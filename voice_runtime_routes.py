@@ -70,8 +70,8 @@ def _evict_oldest_sessions():
         # Persist before evicting
         try:
             save_session(sid)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"⚠️ Session eviction save failed for {sid}: {e}")
         del _sessions_cache[sid]
     logger.info(f"🗑️ Evicted {to_remove} oldest voice sessions from cache")
 

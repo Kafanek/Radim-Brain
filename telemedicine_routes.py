@@ -1745,3 +1745,17 @@ def get_upcoming_consultations_for_reminder(window_minutes=15):
                 db.close()
             except Exception:
                 pass
+
+
+# ═══════════════════════════════════════════════════════════════
+# HEALTH CHECK
+# ═══════════════════════════════════════════════════════════════
+
+@telemedicine_bp.route('/api/telemedicine/health', methods=['GET'])
+def telemedicine_health():
+    """Health check for telemedicine service."""
+    return jsonify({
+        'status': 'healthy',
+        'service': 'Telemedicine',
+        'features': ['consultations', 'scheduling', 'summaries']
+    })

@@ -405,6 +405,8 @@ def azure_tts_proxy():
         return jsonify({'error': 'Azure TTS not configured (AZURE_TTS_KEY missing)'}), 503
     try:
         data = request.json
+        if not data:
+            return jsonify({'error': 'Chybí tělo požadavku (JSON)'}), 400
         text = data.get('text', '')
         voice = data.get('voice', 'cs-CZ-AntoninNeural')
         rate = data.get('rate', '0.85')
@@ -527,6 +529,8 @@ def elevenlabs_tts_proxy():
     """ElevenLabs TTS Proxy - Pan Kafánek voice"""
     try:
         data = request.json
+        if not data:
+            return jsonify({'error': 'Chybí tělo požadavku (JSON)'}), 400
         text = data.get('text', '')
         voice_id = data.get('voice_id', 'JBFqnCBsd6RMkjVDRZzb')  # Pan Kafánek
         
@@ -968,7 +972,7 @@ def create_conversation():
 @optional_auth
 def get_messages(conversation_id):
     try:
-        limit = request.args.get('limit', 50, type=int)
+        limit = min(request.args.get('limit', 50, type=int), 500)
         before = request.args.get('before')
         
         db = get_db()
@@ -1879,7 +1883,7 @@ def kal_radim_history(user_id):
     try:
         if MEMORY_AVAILABLE:
             from memory_routes import get_conversation_messages, get_user_context
-            limit = request.args.get('limit', 10, type=int)
+            limit = min(request.args.get('limit', 10, type=int), 200)
             history = get_conversation_messages(user_id, limit=limit)
             ctx = get_user_context(user_id)
             return jsonify({

@@ -73,9 +73,11 @@ def synthesize_speech():
     """Převeď text na řeč pomocí Azure REST API"""
     if not AZURE_SPEECH_KEY:
         return jsonify({'success': False, 'error': 'AZURE_SPEECH_KEY není nastaven'}), 500
-    
+
     try:
         data = request.json
+        if not data:
+            return jsonify({'success': False, 'error': 'Chybí tělo požadavku (JSON)'}), 400
         text = data.get('text', '')
         voice_name = data.get('voice', 'radim').lower()
         rate = data.get('rate', SENIOR_DEFAULTS['rate'])
@@ -216,9 +218,11 @@ def synthesize_stream():
     """Streamovaná syntéza pro okamžité přehrávání"""
     if not AZURE_SPEECH_KEY:
         return jsonify({'success': False, 'error': 'Speech service not available'}), 500
-    
+
     try:
         data = request.json
+        if not data:
+            return jsonify({'success': False, 'error': 'Chybí tělo požadavku (JSON)'}), 400
         text = data.get('text', '')
         voice_name = data.get('voice', 'radim').lower()
         

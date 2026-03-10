@@ -231,6 +231,22 @@ def set_client_email():
     return jsonify({'success': True, 'client_id': client_id, 'email': email})
 
 
+# ═══════════════════════════════════════════════════════════════
+# HEALTH CHECK
+# ═══════════════════════════════════════════════════════════════
+
+@email_bp.route('/api/email/health', methods=['GET'])
+def email_health():
+    """Health check for email service."""
+    config = get_smtp_config()
+    return jsonify({
+        'status': 'healthy' if config['host'] and config['user'] else 'degraded',
+        'service': 'Email (SMTP)',
+        'smtp_configured': bool(config['host'] and config['user']),
+        'smtp_host': config['host'] or None
+    })
+
+
 @email_bp.route('/api/email/client/<client_id>', methods=['GET'])
 def get_client_email_route(client_id):
     """Get client's configured email."""
