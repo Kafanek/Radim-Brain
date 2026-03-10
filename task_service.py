@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-📋 RADIM Task & Medication Service v1.0.0
+📋 RADIM Task & Medication Service v1.1.0
 Persistentní úkoly, připomínky a sledování léků.
 PostgreSQL / SQLite backed.
 
 Používá database.py adapter — stejný pattern jako memory_routes.py.
+
+v1.1.0 — Fixed connection leak: all get_connection() calls now use try/finally
 """
 
 import json
@@ -39,24 +41,11 @@ def create_task(user_id, title, task_type='reminder', scheduled_time=None,
                 description=None, metadata=None):
     """
     Vytvořit nový úkol. Vrací dict s ID.
-
-    Args:
-        user_id: ID uživatele
-        title: Název úkolu
-        task_type: 'reminder', 'medication', 'appointment', 'custom'
-        scheduled_time: Čas (HH:MM nebo None)
-        scheduled_date: Datum (YYYY-MM-DD nebo None = dnes)
-        recurrence: 'once', 'daily', 'weekdays', 'weekly'
-        priority: 'low', 'normal', 'high', 'critical'
-        description: Volitelný popis
-        metadata: Volitelný dict s extra daty
-
-    Returns:
-        dict s task daty včetně id, nebo None při chybě
     """
     if not _DB_AVAILABLE:
         return None
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -89,7 +78,6 @@ def create_task(user_id, title, task_type='reminder', scheduled_time=None,
             task_id = cursor.lastrowid
 
         db.commit()
-        db.close()
 
         if task_id:
             logger.info(f"✅ Task created: #{task_id} '{title}' for {user_id}")
@@ -105,24 +93,22 @@ def create_task(user_id, title, task_type='reminder', scheduled_time=None,
     except Exception as e:
         logger.error(f"create_task error: {e}")
         return None
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def get_tasks(user_id, status=None, task_type=None, date_filter=None):
     """
     Získat úkoly uživatele s volitelnými filtry.
-
-    Args:
-        user_id: ID uživatele
-        status: 'pending', 'done', 'skipped' nebo None (všechny)
-        task_type: 'reminder', 'medication', 'appointment' nebo None
-        date_filter: 'YYYY-MM-DD' nebo None
-
-    Returns:
-        list of dict
     """
     if not _DB_AVAILABLE:
         return []
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -143,7 +129,6 @@ def get_tasks(user_id, status=None, task_type=None, date_filter=None):
         query += " ORDER BY scheduled_time ASC, priority DESC"
 
         rows = db.execute(query, tuple(params)).fetchall()
-        db.close()
 
         result = []
         for r in rows:
@@ -169,6 +154,12 @@ def get_tasks(user_id, status=None, task_type=None, date_filter=None):
     except Exception as e:
         logger.error(f"get_tasks error: {e}")
         return []
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def complete_task(task_id, user_id):
@@ -176,6 +167,7 @@ def complete_task(task_id, user_id):
     if not _DB_AVAILABLE:
         return False
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -188,7 +180,6 @@ def complete_task(task_id, user_id):
             (now, now, task_id, user_id)
         )
         db.commit()
-        db.close()
 
         logger.info(f"✅ Task #{task_id} completed by {user_id}")
         return True
@@ -196,6 +187,12 @@ def complete_task(task_id, user_id):
     except Exception as e:
         logger.error(f"complete_task error: {e}")
         return False
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def delete_task(task_id, user_id):
@@ -203,6 +200,7 @@ def delete_task(task_id, user_id):
     if not _DB_AVAILABLE:
         return False
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -212,7 +210,6 @@ def delete_task(task_id, user_id):
             (task_id, user_id)
         )
         db.commit()
-        db.close()
 
         logger.info(f"🗑️ Task #{task_id} deleted by {user_id}")
         return True
@@ -220,22 +217,22 @@ def delete_task(task_id, user_id):
     except Exception as e:
         logger.error(f"delete_task error: {e}")
         return False
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def get_due_tasks(user_id, window_minutes=30):
     """
     Získat úkoly, které jsou splatné v příštích N minutách.
-
-    Args:
-        user_id: ID uživatele
-        window_minutes: Okno v minutách (default 30)
-
-    Returns:
-        list of dict — úkoly blížící se ke splnění
     """
     if not _DB_AVAILABLE:
         return []
 
+    db = None
     try:
         now = datetime.now()
         current_time = now.strftime('%H:%M:%S')
@@ -255,12 +252,17 @@ def get_due_tasks(user_id, window_minutes=30):
             (user_id, current_date, current_time, future_time)
         ).fetchall()
 
-        db.close()
         return [dict(r) for r in rows]
 
     except Exception as e:
         logger.error(f"get_due_tasks error: {e}")
         return []
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 # ============================================
@@ -270,14 +272,11 @@ def get_due_tasks(user_id, window_minutes=30):
 def get_all_due_tasks(window_minutes=5):
     """
     Získat VŠECHNY splatné úkoly napříč uživateli (pro scheduler).
-    Filtruje: pending, naplánovaný čas v okně, ještě nenotifikované.
-
-    Returns:
-        list of dict — úkoly ke notifikaci
     """
     if not _DB_AVAILABLE:
         return []
 
+    db = None
     try:
         now = datetime.now()
         current_time = now.strftime('%H:%M')
@@ -297,8 +296,6 @@ def get_all_due_tasks(window_minutes=5):
             (current_date, current_time, future_time)
         ).fetchall()
 
-        db.close()
-
         # Filter out already-notified tasks
         results = []
         for r in rows:
@@ -317,6 +314,12 @@ def get_all_due_tasks(window_minutes=5):
     except Exception as e:
         logger.error(f"get_all_due_tasks error: {e}")
         return []
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def mark_task_notified(task_id):
@@ -324,6 +327,7 @@ def mark_task_notified(task_id):
     if not _DB_AVAILABLE:
         return False
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -348,7 +352,6 @@ def mark_task_notified(task_id):
             (json.dumps(meta), task_id)
         )
         db.commit()
-        db.close()
 
         logger.info(f"🔔 Task #{task_id} marked as notified")
         return True
@@ -356,6 +359,12 @@ def mark_task_notified(task_id):
     except Exception as e:
         logger.error(f"mark_task_notified error: {e}")
         return False
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 # ============================================
@@ -365,20 +374,11 @@ def mark_task_notified(task_id):
 def log_medication(user_id, medication_name, task_id=None, dosage=None, notes=None):
     """
     Zaznamenat užití léku.
-
-    Args:
-        user_id: ID uživatele
-        medication_name: Název léku
-        task_id: Volitelné ID navázaného úkolu
-        dosage: Volitelná dávka
-        notes: Volitelné poznámky
-
-    Returns:
-        bool — úspěch
     """
     if not _DB_AVAILABLE:
         return False
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -390,7 +390,6 @@ def log_medication(user_id, medication_name, task_id=None, dosage=None, notes=No
             (user_id, task_id, medication_name, dosage, notes)
         )
         db.commit()
-        db.close()
 
         logger.info(f"💊 Medication logged: {medication_name} for {user_id}")
         return True
@@ -398,22 +397,22 @@ def log_medication(user_id, medication_name, task_id=None, dosage=None, notes=No
     except Exception as e:
         logger.error(f"log_medication error: {e}")
         return False
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def get_medication_history(user_id, days=7):
     """
     Získat historii užívání léků za posledních N dní.
-
-    Args:
-        user_id: ID uživatele
-        days: Počet dní zpět (default 7)
-
-    Returns:
-        list of dict
     """
     if not _DB_AVAILABLE:
         return []
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -425,7 +424,6 @@ def get_medication_history(user_id, days=7):
                 ORDER BY taken_at DESC""",
             (user_id, since)
         ).fetchall()
-        db.close()
 
         result = []
         for r in rows:
@@ -438,6 +436,12 @@ def get_medication_history(user_id, days=7):
     except Exception as e:
         logger.error(f"get_medication_history error: {e}")
         return []
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 # ============================================
@@ -448,12 +452,6 @@ def build_tasks_context(user_id):
     """
     Sestavit kontext o úkolech uživatele pro injekci do system promptu.
     Radim tak bude vědět o čekajících úkolech a může na ně reagovat.
-
-    Args:
-        user_id: ID uživatele
-
-    Returns:
-        str — kontext pro prompt, prázdný string pokud žádné úkoly
     """
     try:
         today = date.today().isoformat()

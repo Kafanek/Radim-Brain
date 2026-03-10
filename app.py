@@ -891,6 +891,7 @@ def sync_wp_user(wp_user):
 # REST API - CONVERSATIONS
 # ============================================
 @app.route('/api/chat/conversations/<user_id>', methods=['GET'])
+@optional_auth
 def get_conversations(user_id):
     try:
         db = get_db()
@@ -913,6 +914,7 @@ def get_conversations(user_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/chat/conversations', methods=['POST'])
+@optional_auth
 def create_conversation():
     try:
         data = request.json
@@ -947,6 +949,7 @@ def create_conversation():
 # REST API - MESSAGES (with AI)
 # ============================================
 @app.route('/api/chat/messages/<conversation_id>', methods=['GET'])
+@optional_auth
 def get_messages(conversation_id):
     try:
         limit = request.args.get('limit', 50, type=int)
@@ -979,6 +982,7 @@ def get_messages(conversation_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/chat/messages', methods=['POST'])
+@optional_auth
 def send_message():
     try:
         data = request.json
@@ -1103,6 +1107,7 @@ def send_message():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/chat/messages/<message_id>/read', methods=['PATCH'])
+@optional_auth
 def mark_as_read(message_id):
     try:
         data = request.json
@@ -1125,6 +1130,7 @@ def mark_as_read(message_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/chat/messages/<message_id>/reaction', methods=['POST'])
+@optional_auth
 def add_reaction(message_id):
     try:
         data = request.json
@@ -1160,6 +1166,7 @@ def add_reaction(message_id):
 # REST API - CONTACTS
 # ============================================
 @app.route('/api/chat/contacts/<user_id>', methods=['GET'])
+@optional_auth
 def get_contacts(user_id):
     try:
         db = get_db()
@@ -1192,6 +1199,7 @@ def get_contacts(user_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/chat/contacts', methods=['POST'])
+@optional_auth
 def add_contact():
     try:
         data = request.json

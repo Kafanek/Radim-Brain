@@ -51,20 +51,43 @@ STATES = {
 }
 
 # Session storage: in-memory cache backed by PostgreSQL
+# Max 200 sessions in memory; oldest evicted when exceeded
 _sessions_cache = {}
+_SESSION_CACHE_MAX = 200
+
+
+def _evict_oldest_sessions():
+    """Remove oldest sessions from cache when over limit."""
+    if len(_sessions_cache) <= _SESSION_CACHE_MAX:
+        return
+    # Sort by 'created' timestamp, remove oldest
+    sorted_ids = sorted(
+        _sessions_cache.keys(),
+        key=lambda sid: _sessions_cache[sid].get('created', ''),
+    )
+    to_remove = len(_sessions_cache) - _SESSION_CACHE_MAX
+    for sid in sorted_ids[:to_remove]:
+        # Persist before evicting
+        try:
+            save_session(sid)
+        except Exception:
+            pass
+        del _sessions_cache[sid]
+    logger.info(f"🗑️ Evicted {to_remove} oldest voice sessions from cache")
 
 
 def _load_session_from_db(session_id):
     """Load session from DB, return dict or None."""
+    db = None
     try:
-        from database import get_db, close_db
-        db = get_db()
+        from database import get_connection, is_postgres
+        db = get_connection()
+        p = "%s" if is_postgres() else "?"
         row = db.execute(
-            'SELECT state, "C", kappa, alpha, last_tts_text, conversation, wake_count, created_at '
-            'FROM voice_sessions WHERE session_id = %s',
+            f'SELECT state, "C", kappa, alpha, last_tts_text, conversation, wake_count, created_at '
+            f'FROM voice_sessions WHERE session_id = {p}',
             (session_id,)
         ).fetchone()
-        close_db()
         if row:
             conv = row['conversation']
             if isinstance(conv, str):
@@ -81,6 +104,12 @@ def _load_session_from_db(session_id):
             }
     except Exception as e:
         logger.warning(f"DB load session {session_id} (non-fatal): {e}")
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return None
 
 
@@ -89,9 +118,10 @@ def save_session(session_id):
     session = _sessions_cache.get(session_id)
     if not session:
         return
+    db = None
     try:
-        from database import get_db, close_db, is_postgres
-        db = get_db()
+        from database import get_connection, is_postgres
+        db = get_connection()
         conv_json = json.dumps(session['conversation'][-50:])  # Keep last 50 messages
         if is_postgres():
             db.execute(
@@ -113,14 +143,21 @@ def save_session(session_id):
                  session['alpha'], session['last_tts_text'], conv_json, session['wake_count'])
             )
         db.commit()
-        close_db()
     except Exception as e:
         logger.warning(f"DB save session {session_id} (non-fatal): {e}")
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def get_session(session_id):
     """Get or create session (cache + DB backed)."""
     if session_id not in _sessions_cache:
+        # Evict old sessions before adding new one
+        _evict_oldest_sessions()
         # Try loading from DB first
         db_session = _load_session_from_db(session_id)
         if db_session:

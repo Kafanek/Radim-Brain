@@ -38,6 +38,7 @@ def _db_load_profile(user_id: str) -> dict:
     """Load user profile from DB"""
     if not _DB_AVAILABLE:
         return {}
+    db = None
     try:
         db = get_connection()
         row = db.execute(
@@ -45,7 +46,6 @@ def _db_load_profile(user_id: str) -> dict:
             else "SELECT data FROM memory_profiles WHERE user_id = ?",
             (user_id,)
         ).fetchone()
-        db.close()
         if row:
             data = row['data'] if isinstance(row['data'], dict) else json.loads(row['data'])
             return data
@@ -53,12 +53,19 @@ def _db_load_profile(user_id: str) -> dict:
     except Exception as e:
         logger.warning(f"DB load profile error: {e}")
         return {}
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def _db_save_profile(user_id: str, profile: dict):
     """Save user profile to DB"""
     if not _DB_AVAILABLE:
         return
+    db = None
     try:
         db = get_connection()
         data_json = json.dumps(profile, ensure_ascii=False)
@@ -75,15 +82,21 @@ def _db_save_profile(user_id: str, profile: dict):
                 (user_id, data_json, datetime.utcnow().isoformat())
             )
         db.commit()
-        db.close()
     except Exception as e:
         logger.warning(f"DB save profile error: {e}")
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def _db_delete_profile(user_id: str):
     """Delete all user data from DB"""
     if not _DB_AVAILABLE:
         return
+    db = None
     try:
         db = get_connection()
         p = "%s" if is_postgres() else "?"
@@ -91,15 +104,21 @@ def _db_delete_profile(user_id: str):
         db.execute(f"DELETE FROM memory_history WHERE user_id = {p}", (user_id,))
         db.execute(f"DELETE FROM memory_learning WHERE user_id = {p}", (user_id,))
         db.commit()
-        db.close()
     except Exception as e:
         logger.warning(f"DB delete profile error: {e}")
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def _db_load_history(user_id: str, limit: int = 50) -> list:
     """Load conversation history from DB"""
     if not _DB_AVAILABLE:
         return []
+    db = None
     try:
         db = get_connection()
         if is_postgres():
@@ -112,7 +131,6 @@ def _db_load_history(user_id: str, limit: int = 50) -> list:
                 "SELECT role, content, created_at FROM memory_history WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
                 (user_id, limit)
             ).fetchall()
-        db.close()
         # Reverse so oldest first
         messages = []
         for r in reversed(rows):
@@ -128,12 +146,19 @@ def _db_load_history(user_id: str, limit: int = 50) -> list:
     except Exception as e:
         logger.warning(f"DB load history error: {e}")
         return []
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def _db_add_history(user_id: str, role: str, content: str):
     """Add message to conversation history in DB"""
     if not _DB_AVAILABLE:
         return
+    db = None
     try:
         db = get_connection()
         if is_postgres():
@@ -162,29 +187,41 @@ def _db_add_history(user_id: str, role: str, content: str):
                 (user_id, MAX_HISTORY, user_id)
             )
         db.commit()
-        db.close()
     except Exception as e:
         logger.warning(f"DB add history error: {e}")
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def _db_clear_history(user_id: str):
     """Clear conversation history from DB"""
     if not _DB_AVAILABLE:
         return
+    db = None
     try:
         db = get_connection()
         p = "%s" if is_postgres() else "?"
         db.execute(f"DELETE FROM memory_history WHERE user_id = {p}", (user_id,))
         db.commit()
-        db.close()
     except Exception as e:
         logger.warning(f"DB clear history error: {e}")
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def _db_load_learning(user_id: str) -> dict:
     """Load learning data from DB"""
     if not _DB_AVAILABLE:
         return _default_learning()
+    db = None
     try:
         db = get_connection()
         row = db.execute(
@@ -192,7 +229,6 @@ def _db_load_learning(user_id: str) -> dict:
             else "SELECT data FROM memory_learning WHERE user_id = ?",
             (user_id,)
         ).fetchone()
-        db.close()
         if row:
             data = row['data'] if isinstance(row['data'], dict) else json.loads(row['data'])
             # Ensure all keys exist
@@ -205,12 +241,19 @@ def _db_load_learning(user_id: str) -> dict:
     except Exception as e:
         logger.warning(f"DB load learning error: {e}")
         return _default_learning()
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def _db_save_learning(user_id: str, learning: dict):
     """Save learning data to DB"""
     if not _DB_AVAILABLE:
         return
+    db = None
     try:
         db = get_connection()
         data_json = json.dumps(learning, ensure_ascii=False)
@@ -227,9 +270,14 @@ def _db_save_learning(user_id: str, learning: dict):
                 (user_id, data_json, datetime.utcnow().isoformat())
             )
         db.commit()
-        db.close()
     except Exception as e:
         logger.warning(f"DB save learning error: {e}")
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def _default_learning() -> dict:

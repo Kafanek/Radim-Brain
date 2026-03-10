@@ -105,12 +105,12 @@ from radim_shared import build_time_context_string
 # ============================================================================
 
 def get_claude_client():
-    """Get Anthropic client"""
+    """Get Anthropic client with 25s timeout (under Heroku 30s limit)"""
     if not ANTHROPIC_AVAILABLE:
         return None
     if not ANTHROPIC_API_KEY:
         return None
-    return Anthropic(api_key=ANTHROPIC_API_KEY)
+    return Anthropic(api_key=ANTHROPIC_API_KEY, timeout=25.0)
 
 def call_gemini_fallback(prompt, system_prompt="", max_tokens=1024):
     """Gemini fallback when Claude API is unavailable (e.g. credits exhausted)"""
@@ -436,7 +436,7 @@ Dnešní datum: {info['date']}"""
             json_match = re.search(r'\[.*\]', text, re.DOTALL)
             if json_match:
                 articles = json.loads(json_match.group())
-        except:
+        except Exception:
             articles = [{"title": f"Zprávy z {category}", "description": text[:200], "source": "Claude AI"}]
         
         return jsonify({
@@ -469,7 +469,7 @@ Dnešní datum: {info['date']}"""
                             "source": "gemini_fallback",
                             "timestamp": datetime.utcnow().isoformat()
                         })
-                except:
+                except Exception:
                     pass
         return jsonify({
             "success": True,
@@ -509,7 +509,7 @@ def get_weather():
             json_match = re.search(r'\{.*\}', text, re.DOTALL)
             if json_match:
                 weather = json.loads(json_match.group())
-        except:
+        except Exception:
             weather = {"condition": "Informace nedostupná"}
         
         return jsonify({
@@ -577,7 +577,7 @@ FORMÁT (pouze JSON):
                 json_match = re.search(r'\[.*\]', text, re.DOTALL)
                 if json_match:
                     questions = json.loads(json_match.group())
-            except:
+            except Exception:
                 pass
 
         # Static fallback if no AI response
@@ -661,7 +661,7 @@ FORMÁT (pouze JSON):
             json_match = re.search(r'\{.*\}', text, re.DOTALL)
             if json_match:
                 story = json.loads(json_match.group())
-        except:
+        except Exception:
             story = {"title": f"Příběh o {theme}", "content": text}
 
         return jsonify({
@@ -707,7 +707,7 @@ def get_dashboard_data():
             "humidity": fallback.get("humidity"),
             "wind": fallback.get("wind")
         }
-    except:
+    except Exception:
         pass
     
     return jsonify(result)
@@ -779,7 +779,7 @@ Kontext: Péče o seniory. Buď citlivý k implicitním emocím."""
             json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
             if json_match:
                 emotions = json.loads(json_match.group())
-        except:
+        except Exception:
             emotions = analyze_emotions_local(text)
         
         logger.info(f"Emotion analysis | Dominant: {emotions.get('dominant_emotion', 'unknown')}")
