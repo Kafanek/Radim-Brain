@@ -449,7 +449,6 @@ async def initiate_outgoing_call(request: OutgoingCallRequest):
         return {"success": True, "call_sid": call.sid, "status": call.status, "to": request.to}
     except Exception as e:
         logger.error(f"Outgoing call error: {e}")
-        logger.error(f"Outgoing call error detail: {e}")
         raise HTTPException(status_code=500, detail="Nepodařilo se zahájit hovor. Zkuste to prosím znovu.")
 
 
