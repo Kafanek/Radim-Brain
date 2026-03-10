@@ -751,7 +751,7 @@ def initiate_outgoing_call():
 
     except Exception as e:
         logger.error(f"Outgoing call error: {e}")
-        return jsonify({"success": False, "error": f"Nepodařilo se zahájit hovor: {str(e)}"}), 500
+        return jsonify({"success": False, "error": "Interní chyba serveru"}), 500
 
 
 @twilio_bp.route('/active-calls', methods=['GET'])
@@ -856,7 +856,7 @@ def send_call_invitation():
 
     except Exception as e:
         logger.error(f"SMS invite error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Interní chyba serveru"}), 500
 
 
 @twilio_bp.route('/tts', methods=['GET'])

@@ -6375,23 +6375,23 @@ def teacher_get_student_tasks(student_id):
         if status_filter:
             if is_postgres():
                 rows = db.execute(
-                    "SELECT * FROM education_teacher_tasks WHERE student_id = %s AND teacher_id = %s AND status = %s ORDER BY created_at DESC",
+                    "SELECT * FROM education_teacher_tasks WHERE student_id = %s AND teacher_id = %s AND status = %s ORDER BY created_at DESC LIMIT 100",
                     (student_id, teacher_id, status_filter)
                 ).fetchall()
             else:
                 rows = db.execute(
-                    "SELECT * FROM education_teacher_tasks WHERE student_id = ? AND teacher_id = ? AND status = ? ORDER BY created_at DESC",
+                    "SELECT * FROM education_teacher_tasks WHERE student_id = ? AND teacher_id = ? AND status = ? ORDER BY created_at DESC LIMIT 100",
                     (student_id, teacher_id, status_filter)
                 ).fetchall()
         else:
             if is_postgres():
                 rows = db.execute(
-                    "SELECT * FROM education_teacher_tasks WHERE student_id = %s AND teacher_id = %s AND status != 'deleted' ORDER BY created_at DESC",
+                    "SELECT * FROM education_teacher_tasks WHERE student_id = %s AND teacher_id = %s AND status != 'deleted' ORDER BY created_at DESC LIMIT 100",
                     (student_id, teacher_id)
                 ).fetchall()
             else:
                 rows = db.execute(
-                    "SELECT * FROM education_teacher_tasks WHERE student_id = ? AND teacher_id = ? AND status != 'deleted' ORDER BY created_at DESC",
+                    "SELECT * FROM education_teacher_tasks WHERE student_id = ? AND teacher_id = ? AND status != 'deleted' ORDER BY created_at DESC LIMIT 100",
                     (student_id, teacher_id)
                 ).fetchall()
 

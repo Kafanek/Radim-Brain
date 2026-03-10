@@ -489,7 +489,8 @@ def compute_metrics():
         })
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"⚠️ voice_runtime_routes.py error: {e}")
+        return jsonify({'error': 'Interní chyba serveru'}), 500
 
 @voice_runtime_bp.route('/state', methods=['POST'])
 @require_auth
@@ -559,7 +560,8 @@ def update_state():
         })
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"⚠️ voice_runtime_routes.py error: {e}")
+        return jsonify({'error': 'Interní chyba serveru'}), 500
 
 @voice_runtime_bp.route('/session/<session_id>', methods=['GET'])
 @require_auth
@@ -837,6 +839,7 @@ def voice_chat():
         return jsonify(result)
 
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ voice_runtime_routes.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 print("✅ Voice Runtime routes registered: /api/voice/*")

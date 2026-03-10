@@ -126,7 +126,7 @@ def get_tasks(user_id, status=None, task_type=None, date_filter=None):
             query += f" AND (scheduled_date = {p} OR scheduled_date IS NULL)"
             params.append(date_filter)
 
-        query += " ORDER BY scheduled_time ASC, priority DESC"
+        query += " ORDER BY scheduled_time ASC, priority DESC LIMIT 200"
 
         rows = db.execute(query, tuple(params)).fetchall()
 
@@ -421,7 +421,7 @@ def get_medication_history(user_id, days=7):
         rows = db.execute(
             f"""SELECT * FROM radim_medication_log
                 WHERE user_id = {p} AND taken_at >= {p}
-                ORDER BY taken_at DESC""",
+                ORDER BY taken_at DESC LIMIT 500""",
             (user_id, since)
         ).fetchall()
 

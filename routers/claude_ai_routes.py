@@ -170,7 +170,7 @@ def get_claude_client():
     if not ANTHROPIC_API_KEY:
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
     
-    return Anthropic(api_key=ANTHROPIC_API_KEY)
+    return Anthropic(api_key=ANTHROPIC_API_KEY, timeout=25.0)
 
 def get_today_info():
     """Get today's date info"""
@@ -368,7 +368,7 @@ FORMÁT ODPOVĚDI (pouze JSON):
             json_match = re.search(r'\[.*\]', text, re.DOTALL)
             if json_match:
                 articles = json.loads(json_match.group())
-        except:
+        except Exception:
             # Fallback - vytvořit článek z textu
             articles = [{
                 "title": f"Zprávy z kategorie {request.category}",
@@ -443,7 +443,7 @@ Teplota v °C, vlhkost v %, vítr v km/h."""
             json_match = re.search(r'\{.*\}', text, re.DOTALL)
             if json_match:
                 weather_data = json.loads(json_match.group())
-        except:
+        except Exception:
             weather_data = {
                 "condition": "Informace nedostupná",
                 "forecast": text[:100]
@@ -533,7 +533,7 @@ FORMÁT ODPOVĚDI (pouze JSON):
             json_match = re.search(r'\[.*\]', text, re.DOTALL)
             if json_match:
                 questions = json.loads(json_match.group())
-        except:
+        except Exception:
             questions = [{
                 "question": "Který hrad je největší na světě?",
                 "options": {"A": "Pražský hrad", "B": "Windsor", "C": "Versailles", "D": "Kreml"},
@@ -618,7 +618,7 @@ FORMÁT ODPOVĚDI (pouze JSON):
             json_match = re.search(r'\{.*\}', text, re.DOTALL)
             if json_match:
                 story_data = json.loads(json_match.group())
-        except:
+        except Exception:
             story_data = {
                 "title": f"Příběh o {request.theme}",
                 "content": text
@@ -677,7 +677,7 @@ async def get_dashboard_data():
                     "humidity": weather_response.humidity,
                     "wind": weather_response.wind
                 }
-        except:
+        except Exception:
             pass
         
         return result

@@ -42,6 +42,16 @@ def get_smtp_config():
 
 # In-memory fallback; production uses memory_profiles table
 _client_emails = {}
+_CLIENT_EMAILS_MAX = 500
+
+def _evict_old_client_emails():
+    """Keep _client_emails bounded."""
+    if len(_client_emails) <= _CLIENT_EMAILS_MAX:
+        return
+    # No timestamp to sort by, just remove arbitrary oldest entries
+    excess = len(_client_emails) - _CLIENT_EMAILS_MAX
+    for key in list(_client_emails.keys())[:excess]:
+        del _client_emails[key]
 
 
 def get_client_email(client_id):
@@ -165,7 +175,7 @@ def send_email():
         return jsonify({'success': False, 'error': f'Adresa {to_addr} odmítnuta'}), 400
     except Exception as e:
         logger.error(f"📧 Email send error: {e}")
-        return jsonify({'success': False, 'error': f'Chyba odesílání: {str(e)}'}), 500
+        return jsonify({'success': False, 'error': 'Chyba odesílání emailu. Zkuste to prosím znovu.'}), 500
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -199,7 +209,8 @@ def set_client_email():
     if not client_id or not email:
         return jsonify({'success': False, 'error': 'client_id a email jsou povinné'}), 400
 
-    # Save to memory
+    # Save to memory (bounded)
+    _evict_old_client_emails()
     _client_emails[client_id] = email
 
     # Persist to database

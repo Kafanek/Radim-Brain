@@ -207,7 +207,8 @@ def synthesize_speech():
     except requests.exceptions.Timeout:
         return jsonify({'success': False, 'error': 'Azure TTS timeout'}), 504
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ speech_routes.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @speech_bp.route('/synthesize/stream', methods=['POST'])
 @require_auth
@@ -287,7 +288,8 @@ def synthesize_stream():
         return jsonify({'success': False, 'error': 'TTS synthesis failed'}), 500
         
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ speech_routes.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
 # SPEECH-TO-TEXT (REST API)
@@ -378,7 +380,8 @@ def transcribe_speech():
     except requests.exceptions.Timeout:
         return jsonify({'success': False, 'error': 'Azure STT timeout'}), 504
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ speech_routes.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
 # VOICE INFO

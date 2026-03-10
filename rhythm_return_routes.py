@@ -635,11 +635,11 @@ def _db_get_session(session_id):
             return None
 
         states = db.execute(
-            f'SELECT * FROM rhythm_states WHERE session_id = {ph} ORDER BY timestamp ASC', (session_id,)
+            f'SELECT * FROM rhythm_states WHERE session_id = {ph} ORDER BY timestamp ASC LIMIT 1000', (session_id,)
         ).fetchall()
 
         breakpoints = db.execute(
-            f'SELECT * FROM rhythm_breakpoints WHERE session_id = {ph} ORDER BY timestamp ASC', (session_id,)
+            f'SELECT * FROM rhythm_breakpoints WHERE session_id = {ph} ORDER BY timestamp ASC LIMIT 500', (session_id,)
         ).fetchall()
 
         return {

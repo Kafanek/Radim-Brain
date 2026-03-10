@@ -47,9 +47,30 @@ def get_twilio_client():
 
 # Active calls: { call_sid: { from, to, started, history[], caller_name, status } }
 active_calls: Dict[str, Dict] = {}
+_ACTIVE_CALLS_MAX = 100
 
 # Known callers: { phone: { name, formality, contacts } }
 known_callers: Dict[str, Dict] = {}
+_KNOWN_CALLERS_MAX = 500
+
+def _cleanup_active_calls():
+    """Evict expired / over-limit active calls."""
+    cutoff = time.time() - 7200  # 2h
+    expired = [sid for sid, d in active_calls.items() if d.get("started", 0) < cutoff]
+    for sid in expired:
+        del active_calls[sid]
+    if len(active_calls) > _ACTIVE_CALLS_MAX:
+        sorted_sids = sorted(active_calls.keys(), key=lambda s: active_calls[s].get("started", 0))
+        for sid in sorted_sids[:len(active_calls) - _ACTIVE_CALLS_MAX]:
+            del active_calls[sid]
+
+def _cleanup_known_callers():
+    """Evict oldest known callers when over limit."""
+    if len(known_callers) <= _KNOWN_CALLERS_MAX:
+        return
+    sorted_phones = sorted(known_callers.keys(), key=lambda p: known_callers[p].get("registered_at", 0))
+    for phone in sorted_phones[:len(known_callers) - _KNOWN_CALLERS_MAX]:
+        del known_callers[phone]
 
 # Intent patterns (Czech)
 TRANSFER_PATTERNS = re.compile(
@@ -104,7 +125,7 @@ Smlouva: "Jsem zde, abych naslouchal, ne abych soudil." """
         # Use Anthropic SDK (same as claude_ai_routes.py)
         try:
             from anthropic import Anthropic
-            client = Anthropic(api_key=ANTHROPIC_API_KEY)
+            client = Anthropic(api_key=ANTHROPIC_API_KEY, timeout=25.0)
             response = client.messages.create(
                 model=os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
                 max_tokens=200,
@@ -200,6 +221,9 @@ async def twilio_voice_webhook(request: Request):
         called = form.get("To", "")
 
         logger.info(f"📞 Incoming call: {caller} → {called} (SID: {call_sid})")
+
+        # Evict old calls before adding
+        _cleanup_active_calls()
 
         # Register active call
         active_calls[call_sid] = {
@@ -425,7 +449,8 @@ async def initiate_outgoing_call(request: OutgoingCallRequest):
         return {"success": True, "call_sid": call.sid, "status": call.status, "to": request.to}
     except Exception as e:
         logger.error(f"Outgoing call error: {e}")
-        raise HTTPException(status_code=500, detail=f"Nepodařilo se zahájit hovor: {str(e)}")
+        logger.error(f"Outgoing call error detail: {e}")
+        raise HTTPException(status_code=500, detail="Nepodařilo se zahájit hovor. Zkuste to prosím znovu.")
 
 
 @router.get("/active-calls")
@@ -466,6 +491,7 @@ class RegisterCallerRequest(BaseModel):
 @router.post("/register-caller")
 async def register_known_caller(request: RegisterCallerRequest):
     """Register caller for personalized greetings"""
+    _cleanup_known_callers()
     known_callers[request.phone] = {
         "name": request.name,
         "formality": request.formality,

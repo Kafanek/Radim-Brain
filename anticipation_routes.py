@@ -572,7 +572,8 @@ def speech_adjust():
         })
         
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        print(f"⚠️ anticipation_routes.py error: {e}")
+        return jsonify({"success": False, "error": "Interní chyba serveru"}), 500
 
 
 @anticipation_bp.route('/history', methods=['GET'])
@@ -634,7 +635,8 @@ def get_history():
         })
         
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        print(f"⚠️ anticipation_routes.py error: {e}")
+        return jsonify({"success": False, "error": "Interní chyba serveru"}), 500
 
 
 def generate_orchestrator_instructions(C_current, C_predicted, state_current, state_predicted, emotions, breakpoints):

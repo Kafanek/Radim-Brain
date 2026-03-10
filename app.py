@@ -480,7 +480,8 @@ def azure_tts_proxy():
         except requests.exceptions.Timeout:
             return jsonify({'error': 'Azure TTS API timeout - try again'}), 504
         except requests.exceptions.RequestException as e:
-            return jsonify({'error': f'Azure TTS API connection error: {str(e)}'}), 503
+            print(f"⚠️ app.py error: {e}")
+            return jsonify({'error': 'Interní chyba serveru'}), 503
         
         if response.status_code == 200:
             from flask import Response
@@ -503,7 +504,8 @@ def azure_tts_proxy():
             return jsonify({'error': f'Azure TTS error: {response.status_code}'}), response.status_code
             
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'error': 'Interní chyba serveru'}), 500
 
 # ============================================
 # ELEVENLABS TTS PROXY
@@ -554,7 +556,8 @@ def elevenlabs_tts_proxy():
         except requests.exceptions.Timeout:
             return jsonify({'error': 'ElevenLabs API timeout'}), 504
         except requests.exceptions.RequestException as e:
-            return jsonify({'error': f'ElevenLabs API error: {str(e)}'}), 503
+            print(f"⚠️ app.py error: {e}")
+            return jsonify({'error': 'Interní chyba serveru'}), 503
         
         if response.status_code == 200:
             from flask import Response
@@ -570,7 +573,8 @@ def elevenlabs_tts_proxy():
             return jsonify({'error': f'ElevenLabs error: {response.status_code}', 'detail': response.text}), response.status_code
             
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/tts/health', methods=['GET'])
 def tts_health():
@@ -610,7 +614,17 @@ def today_date():
     return datetime.utcnow().strftime('%Y-%m-%d')
 
 users_online = {}  # In-memory cache of {user_id: socket_sid} for fast lookups
+_USERS_ONLINE_MAX = 500
 # Note: On dyno restart, all users are set offline in init_db_online_reset()
+
+def _cleanup_users_online():
+    """Evict stale entries from users_online if over limit."""
+    if len(users_online) <= _USERS_ONLINE_MAX:
+        return
+    # Remove oldest entries (first inserted)
+    excess = len(users_online) - _USERS_ONLINE_MAX
+    for key in list(users_online.keys())[:excess]:
+        del users_online[key]
 
 # ============================================
 # RADIM AI - GEMINI/CLAUDE INTEGRATION
@@ -911,7 +925,8 @@ def get_conversations(user_id):
         
         return jsonify({'success': True, 'conversations': conversations})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/chat/conversations', methods=['POST'])
 @optional_auth
@@ -943,7 +958,8 @@ def create_conversation():
         
         return jsonify({'success': True, 'conversation': conversation}), 201
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
 # REST API - MESSAGES (with AI)
@@ -979,7 +995,8 @@ def get_messages(conversation_id):
         
         return jsonify({'success': True, 'messages': list(reversed(messages)), 'hasMore': len(messages) == limit})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/chat/messages', methods=['POST'])
 @optional_auth
@@ -1104,7 +1121,8 @@ def send_message():
         
         return jsonify({'success': True, 'message': message}), 201
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/chat/messages/<message_id>/read', methods=['PATCH'])
 @optional_auth
@@ -1127,7 +1145,8 @@ def mark_as_read(message_id):
         
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/chat/messages/<message_id>/reaction', methods=['POST'])
 @optional_auth
@@ -1160,7 +1179,8 @@ def add_reaction(message_id):
         
         return jsonify({'success': False, 'error': 'Message not found'}), 404
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
 # REST API - CONTACTS
@@ -1196,7 +1216,8 @@ def get_contacts(user_id):
         
         return jsonify({'success': True, 'contacts': contacts})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/chat/contacts', methods=['POST'])
 @optional_auth
@@ -1225,7 +1246,8 @@ def add_contact():
         
         return jsonify({'success': True, 'contact': contact}), 201
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
 # REST API - MEDIA UPLOAD
@@ -1278,7 +1300,8 @@ def upload_media():
         })
         
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/media/voice', methods=['POST'])
 def upload_voice_message():
@@ -1318,7 +1341,8 @@ def upload_voice_message():
         })
         
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
 # REST API - PUSH NOTIFICATIONS
@@ -1350,7 +1374,8 @@ def subscribe_push():
         
         return jsonify({'success': True, 'message': 'Subscribed to push notifications'})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/push/unsubscribe', methods=['POST'])
 def unsubscribe_push():
@@ -1369,7 +1394,8 @@ def unsubscribe_push():
         
         return jsonify({'success': True, 'message': 'Unsubscribed from push notifications'})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/push/vapid-key', methods=['GET'])
 def get_vapid_key():
@@ -1395,7 +1421,8 @@ def test_push():
         
         return jsonify({'success': success})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
 # REST API - WORDPRESS INTEGRATION
@@ -1424,7 +1451,8 @@ def wp_login():
         
         return jsonify({'success': False, 'error': 'User not found'}), 404
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/wordpress/sync', methods=['POST'])
 def wp_sync_users():
@@ -1456,7 +1484,8 @@ def wp_sync_users():
         
         return jsonify({'success': False, 'error': 'WordPress API error'}), 500
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
 # REST API - ADMIN DASHBOARD
@@ -1536,7 +1565,8 @@ def get_admin_stats():
             }
         })
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/admin/users', methods=['GET'])
 def get_admin_users():
@@ -1558,7 +1588,8 @@ def get_admin_users():
         
         return jsonify({'success': True, 'users': users})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/admin/conversations', methods=['GET'])
 def get_admin_conversations():
@@ -1580,7 +1611,8 @@ def get_admin_conversations():
         
         return jsonify({'success': True, 'conversations': conversations})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
 # REST API - AI SETTINGS
@@ -1619,7 +1651,8 @@ def ai_chat():
             'provider': 'gemini' if GEMINI_API_KEY else 'claude'
         })
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 # ============================================
 # SOCKET.IO EVENTS
@@ -1657,6 +1690,7 @@ def handle_disconnect():
 def handle_join(data):
     user_id = data.get('userId')
     if user_id:
+        _cleanup_users_online()
         users_online[user_id] = request.sid
         join_room(user_id)
         socketio.emit('user_online', {'userId': user_id, 'timestamp': now_iso()}, broadcast=True)
@@ -2249,7 +2283,8 @@ def auth_data_delete():
             conn.commit()
             cursor.close()
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        print(f"⚠️ app.py error: {e}")
+        return jsonify({"success": False, "error": "Interní chyba serveru"}), 500
     finally:
         if conn:
             try:

@@ -660,7 +660,8 @@ def radim_chat():
         return jsonify(result)
         
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ radim_orchestrator.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @radim_bp.route('/api/radim/tasks', methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
 @require_auth
@@ -823,7 +824,8 @@ Odpověz POUZE textem příspěvku:"""
         return jsonify({'success': False, 'error': 'AI nedostupné'}), 503
         
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ radim_orchestrator.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @radim_bp.route('/api/radim/voice/speak', methods=['POST', 'OPTIONS'])
 @require_auth
@@ -933,7 +935,8 @@ def radim_voice_speak():
         return jsonify({'success': False, 'error': f'Azure TTS error: {response.status_code}'}), 500
         
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"⚠️ radim_orchestrator.py error: {e}")
+        return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @radim_bp.route('/api/radim/health', methods=['GET'])
 def radim_health():
