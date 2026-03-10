@@ -3739,6 +3739,7 @@ U DLB mohou klasická antipsychotika (haloperidol aj.) způsobit těžkou reakci
 
 def _db_save_progress(user_id, course_id, module_id=None, lesson_id=None, action='view', score=None, data=None):
     """Save education progress event to DB"""
+    db = None
     try:
         db = get_connection()
         db.execute(
@@ -3747,13 +3748,19 @@ def _db_save_progress(user_id, course_id, module_id=None, lesson_id=None, action
             (user_id, course_id, module_id, lesson_id, action, score, json.dumps(data or {}))
         )
         db.commit()
-        db.close()
     except Exception as e:
         print(f"⚠️ education progress save error: {e}")
 
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 def _db_get_progress(user_id):
     """Reconstruct progress dict from DB events"""
+    db = None
     try:
         db = get_connection()
         rows = db.execute(
@@ -3761,7 +3768,6 @@ def _db_get_progress(user_id):
                FROM education_progress WHERE user_id = ? ORDER BY created_at ASC''',
             (user_id,)
         ).fetchall()
-        db.close()
 
         progress = {}
         for row in rows:
@@ -3818,16 +3824,28 @@ def _db_get_progress(user_id):
         return {}
 
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 def _db_count_active_learners():
     """Count distinct users with education progress"""
+    db = None
     try:
         db = get_connection()
         row = db.execute('SELECT COUNT(DISTINCT user_id) as cnt FROM education_progress').fetchone()
-        db.close()
         return row['cnt'] if row else 0
     except Exception:
         return 0
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 # ============================================
 # ENDPOINTS
 # ============================================
@@ -4253,6 +4271,7 @@ def lesson_progress_sync():
         if not lesson_id:
             return jsonify({"success": False, "error": "lessonId je vyžadováno"}), 400
 
+        db = None
         try:
             db = get_connection()
             from database import is_postgres
@@ -4275,10 +4294,15 @@ def lesson_progress_sync():
                     (user_id, lesson_id, category, score, completed, json.dumps(answers), time_spent)
                 )
             db.commit()
-            db.close()
         except Exception as e:
             print(f"⚠️ lesson progress save error: {e}")
 
+        finally:
+            if db:
+                try:
+                    db.close()
+                except Exception:
+                    pass
         # 🔔 Notify teacher when lesson completed
         if completed:
             _notify_teacher(user_id, 'education_student_completed', {
@@ -4292,13 +4316,13 @@ def lesson_progress_sync():
 
     # GET
     user_id = request.args.get('userId', 'anonymous')
+    db = None
     try:
         db = get_connection()
         rows = db.execute(
             'SELECT lesson_id, category, score, completed, answers, time_spent, updated_at FROM education_lesson_progress WHERE user_id = ?',
             (user_id,)
         ).fetchall()
-        db.close()
 
         progress = {}
         for row in rows:
@@ -4318,6 +4342,12 @@ def lesson_progress_sync():
         print(f"⚠️ lesson progress load error: {e}")
         progress = {}
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return jsonify({"success": True, "user_id": user_id, "progress": progress, "timestamp": now_iso()})
 
 
@@ -4506,13 +4536,13 @@ _DEFAULT_PROFILE = {
 
 def _get_adaptive_profile(user_id):
     """Získat nebo vytvořit adaptivní profil uživatele (z DB)"""
+    db = None
     try:
         db = get_connection()
         row = db.execute(
             'SELECT level, data FROM education_profiles WHERE user_id = ?',
             (user_id,)
         ).fetchone()
-        db.close()
 
         if row:
             try:
@@ -4526,6 +4556,12 @@ def _get_adaptive_profile(user_id):
     except Exception as e:
         print(f"⚠️ education profile load error: {e}")
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     # New profile
     profile = {**_DEFAULT_PROFILE, "user_id": user_id}
     return profile
@@ -4533,6 +4569,7 @@ def _get_adaptive_profile(user_id):
 
 def _save_adaptive_profile(user_id, profile):
     """Uložit adaptivní profil do DB"""
+    db = None
     try:
         data = {k: v for k, v in profile.items() if k not in ('user_id', 'level')}
         db = get_connection()
@@ -4555,11 +4592,16 @@ def _save_adaptive_profile(user_id, profile):
                 (user_id, profile.get("level", "beginner"), json.dumps(data))
             )
         db.commit()
-        db.close()
     except Exception as e:
         print(f"⚠️ education profile save error: {e}")
 
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 def _evaluate_and_adapt(user_id, course_id, module_id, score):
     """Adaptivní vyhodnocení — přizpůsobí doporučení na základě výsledků"""
     profile = _get_adaptive_profile(user_id)
@@ -4874,6 +4916,7 @@ TEACHERS = {
 
 def _db_get_teacher_assignment(user_id):
     """Get assigned teacher_id for user from DB"""
+    db = None
     try:
         db = get_connection()
         from database import is_postgres
@@ -4887,14 +4930,20 @@ def _db_get_teacher_assignment(user_id):
                 "SELECT teacher_id FROM education_assignments WHERE student_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
                 (user_id,)
             ).fetchone()
-        db.close()
         return row['teacher_id'] if row else None
     except Exception:
         return None
 
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 def _db_assign_teacher(user_id, teacher_id, teacher_type='ai'):
     """Assign teacher to student in DB (upsert — handles unique constraint)"""
+    db = None
     try:
         db = get_connection()
         from database import is_postgres
@@ -4913,11 +4962,16 @@ def _db_assign_teacher(user_id, teacher_id, teacher_type='ai'):
                 (user_id, teacher_id, teacher_type)
             )
         db.commit()
-        db.close()
     except Exception as e:
         print(f"⚠️ teacher assign error: {e}")
 
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 @education_bp.route('/api/education/teachers', methods=['GET'])
 def list_teachers():
     """Seznam dostupných učitelů/tutorů"""
@@ -5915,19 +5969,26 @@ def _notify_teacher(student_id, event, data):
             return
 
         # Find teacher(s) for this student
-        db = get_connection()
-        from database import is_postgres
-        if is_postgres():
-            rows = db.execute(
-                "SELECT teacher_id FROM education_assignments WHERE student_id = %s AND status = 'active'",
-                (student_id,)
-            ).fetchall()
-        else:
-            rows = db.execute(
-                "SELECT teacher_id FROM education_assignments WHERE student_id = ? AND status = 'active'",
-                (student_id,)
-            ).fetchall()
-        db.close()
+        db = None
+        try:
+            db = get_connection()
+            from database import is_postgres
+            if is_postgres():
+                rows = db.execute(
+                    "SELECT teacher_id FROM education_assignments WHERE student_id = %s AND status = 'active'",
+                    (student_id,)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT teacher_id FROM education_assignments WHERE student_id = ? AND status = 'active'",
+                    (student_id,)
+                ).fetchall()
+        finally:
+            if db:
+                try:
+                    db.close()
+                except Exception:
+                    pass
 
         for row in rows:
             socketio.emit(event, {**data, 'student_id': student_id}, room=f'user_{row["teacher_id"]}')
@@ -5951,6 +6012,7 @@ def _get_teacher_id():
 
 def _get_teacher_students(teacher_id):
     """Get all students assigned to this teacher"""
+    db = None
     try:
         db = get_connection()
         from database import is_postgres
@@ -5964,13 +6026,18 @@ def _get_teacher_students(teacher_id):
                 "SELECT student_id FROM education_assignments WHERE teacher_id = ? AND status = 'active'",
                 (teacher_id,)
             ).fetchall()
-        db.close()
         return [r['student_id'] for r in rows]
     except Exception as e:
         print(f"⚠️ get teacher students error: {e}")
         return []
 
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 def _verify_teacher_student(teacher_id, student_id):
     """Verify teacher has access to this student"""
     students = _get_teacher_students(teacher_id)
@@ -6004,6 +6071,7 @@ def teacher_dashboard():
 
     # Pending tasks count
     pending_tasks = 0
+    db = None
     try:
         db = get_connection()
         from database import is_postgres
@@ -6017,11 +6085,16 @@ def teacher_dashboard():
                 "SELECT COUNT(*) as cnt FROM education_teacher_tasks WHERE teacher_id = ? AND status = 'submitted'",
                 (teacher_id,)
             ).fetchone()
-        db.close()
         pending_tasks = row['cnt'] if row else 0
     except Exception:
         pass
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return jsonify({
         "success": True,
         "teacher_id": teacher_id,
@@ -6147,6 +6220,7 @@ def teacher_dashboard_student_detail(student_id):
 
     # Tasks for this student
     tasks = []
+    db = None
     try:
         db = get_connection()
         from database import is_postgres
@@ -6162,11 +6236,16 @@ def teacher_dashboard_student_detail(student_id):
                 "WHERE student_id = ? AND teacher_id = ? ORDER BY created_at DESC LIMIT 20",
                 (student_id, teacher_id)
             ).fetchall()
-        db.close()
         tasks = [dict(r) for r in rows]
     except Exception:
         pass
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return jsonify({
         "success": True,
         "student": {
@@ -6223,6 +6302,7 @@ def teacher_create_task(student_id):
     if task_type not in valid_types:
         task_type = 'homework'
 
+    db = None
     try:
         db = get_connection()
         from database import is_postgres
@@ -6244,10 +6324,15 @@ def teacher_create_task(student_id):
             )
             task_id = cursor.lastrowid
         db.commit()
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     # SocketIO notification (if available)
     try:
         from flask import current_app
@@ -6283,6 +6368,7 @@ def teacher_get_student_tasks(student_id):
 
     status_filter = request.args.get('status')
 
+    db = None
     try:
         db = get_connection()
         from database import is_postgres
@@ -6308,7 +6394,6 @@ def teacher_get_student_tasks(student_id):
                     "SELECT * FROM education_teacher_tasks WHERE student_id = ? AND teacher_id = ? AND status != 'deleted' ORDER BY created_at DESC",
                     (student_id, teacher_id)
                 ).fetchall()
-        db.close()
 
         tasks = []
         for r in rows:
@@ -6329,6 +6414,12 @@ def teacher_get_student_tasks(student_id):
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return jsonify({
         "success": True,
         "tasks": tasks,
@@ -6355,6 +6446,7 @@ def teacher_grade_task(task_id):
     if len(feedback) > 10000:
         return jsonify({"success": False, "error": "feedback max 10 000 znaků"}), 400
 
+    db = None
     try:
         db = get_connection()
         from database import is_postgres
@@ -6371,7 +6463,6 @@ def teacher_grade_task(task_id):
             ).fetchone()
 
         if not row:
-            db.close()
             return jsonify({"success": False, "error": "Úkol nenalezen nebo vám nepatří"}), 404
 
         student_id = row['student_id']
@@ -6387,10 +6478,15 @@ def teacher_grade_task(task_id):
                 (grade, feedback, task_id)
             )
         db.commit()
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     # SocketIO notification
     try:
         from flask import current_app
@@ -6421,6 +6517,7 @@ def teacher_update_task(task_id):
     teacher_id = _get_teacher_id()
     data = request.json or {}
 
+    db = None
     try:
         db = get_connection()
         from database import is_postgres
@@ -6437,11 +6534,9 @@ def teacher_update_task(task_id):
             ).fetchone()
 
         if not row:
-            db.close()
             return jsonify({"success": False, "error": "Úkol nenalezen nebo vám nepatří"}), 404
 
         if row['status'] == 'graded':
-            db.close()
             return jsonify({"success": False, "error": "Ohodnocený úkol nelze upravit"}), 400
 
         # Build SET clause dynamically
@@ -6451,13 +6546,10 @@ def teacher_update_task(task_id):
             if field in data:
                 val = data[field]
                 if field == 'title' and (not val or not val.strip()):
-                    db.close()
                     return jsonify({"success": False, "error": "title nemůže být prázdné"}), 400
                 if field == 'title' and len(val) > 500:
-                    db.close()
                     return jsonify({"success": False, "error": "title max 500 znaků"}), 400
                 if field == 'description' and len(str(val)) > 50000:
-                    db.close()
                     return jsonify({"success": False, "error": "description max 50 000 znaků"}), 400
                 if field == 'task_type' and val not in ('homework', 'reading', 'quiz', 'scenario', 'exercise'):
                     val = 'homework'
@@ -6466,7 +6558,6 @@ def teacher_update_task(task_id):
                 params.append(val.strip() if isinstance(val, str) else val)
 
         if not updates:
-            db.close()
             return jsonify({"success": False, "error": "Žádné pole k aktualizaci"}), 400
 
         ph = "%s" if is_postgres() else "?"
@@ -6475,10 +6566,15 @@ def teacher_update_task(task_id):
         sql = f"UPDATE education_teacher_tasks SET {', '.join(updates)} WHERE id = {ph}"
         db.execute(sql, tuple(params))
         db.commit()
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return jsonify({
         "success": True,
         "message": "Úkol aktualizován",
@@ -6494,6 +6590,7 @@ def teacher_delete_task(task_id):
     """Učitel smaže úkol (soft-delete → status='deleted')"""
     teacher_id = _get_teacher_id()
 
+    db = None
     try:
         db = get_connection()
         from database import is_postgres
@@ -6510,7 +6607,6 @@ def teacher_delete_task(task_id):
             ).fetchone()
 
         if not row:
-            db.close()
             return jsonify({"success": False, "error": "Úkol nenalezen nebo vám nepatří"}), 404
 
         # Soft delete
@@ -6525,10 +6621,15 @@ def teacher_delete_task(task_id):
                 (task_id,)
             )
         db.commit()
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return jsonify({
         "success": True,
         "message": "Úkol smazán",
@@ -6658,6 +6759,7 @@ def student_my_tasks():
 
     status_filter = request.args.get('status')
 
+    db = None
     try:
         db = get_connection()
         from database import is_postgres
@@ -6687,7 +6789,6 @@ def student_my_tasks():
                     "FROM education_teacher_tasks WHERE student_id = ? AND status != 'deleted' ORDER BY created_at DESC",
                     (student_id,)
                 ).fetchall()
-        db.close()
 
         tasks = []
         for r in rows:
@@ -6700,6 +6801,12 @@ def student_my_tasks():
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return jsonify({
         "success": True,
         "tasks": tasks,
@@ -6728,6 +6835,7 @@ def student_submit_task(task_id):
     except (TypeError, ValueError):
         return jsonify({"success": False, "error": "Neplatný formát submission"}), 400
 
+    db = None
     try:
         db = get_connection()
         from database import is_postgres
@@ -6744,11 +6852,9 @@ def student_submit_task(task_id):
             ).fetchone()
 
         if not row:
-            db.close()
             return jsonify({"success": False, "error": "Úkol nenalezen"}), 404
 
         if row['status'] == 'graded':
-            db.close()
             return jsonify({"success": False, "error": "Úkol je již ohodnocen"}), 400
 
         teacher_id = row['teacher_id']
@@ -6765,10 +6871,15 @@ def student_submit_task(task_id):
                 (submission_json, task_id)
             )
         db.commit()
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     # SocketIO notification to teacher
     try:
         from flask import current_app
@@ -6800,6 +6911,7 @@ def student_my_teacher():
         return jsonify({"success": False, "error": "Neplatný uživatel"}), 401
 
     # Get all assignments (human + AI)
+    db = None
     try:
         db = get_connection()
         from database import is_postgres
@@ -6813,10 +6925,15 @@ def student_my_teacher():
                 "SELECT teacher_id, teacher_type, created_at FROM education_assignments WHERE student_id = ? AND status = 'active' ORDER BY created_at DESC",
                 (student_id,)
             ).fetchall()
-        db.close()
     except Exception:
         rows = []
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     teachers = []
     for r in rows:
         t = {

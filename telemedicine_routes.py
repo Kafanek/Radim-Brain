@@ -45,6 +45,7 @@ def _get_teacher_id_local():
 
 def _verify_teacher_owns_consultation(teacher_id, consultation_id):
     """Verify teacher owns this consultation"""
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -52,14 +53,20 @@ def _verify_teacher_owns_consultation(teacher_id, consultation_id):
             f"SELECT id FROM telemedicine_consultations WHERE id = {p} AND teacher_id = {p}",
             (consultation_id, teacher_id)
         ).fetchone()
-        db.close()
         return row is not None
     except Exception:
         return False
 
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 def _verify_student_owns_consultation(student_id, consultation_id):
     """Verify student owns this consultation"""
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -67,14 +74,20 @@ def _verify_student_owns_consultation(student_id, consultation_id):
             f"SELECT id FROM telemedicine_consultations WHERE id = {p} AND student_id = {p}",
             (consultation_id, student_id)
         ).fetchone()
-        db.close()
         return row is not None
     except Exception:
         return False
 
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 def _get_consultation(consultation_id):
     """Get consultation by ID"""
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -82,7 +95,6 @@ def _get_consultation(consultation_id):
             f"SELECT * FROM telemedicine_consultations WHERE id = {p}",
             (consultation_id,)
         ).fetchone()
-        db.close()
         if row:
             d = dict(row)
             for k in ('scheduled_date', 'scheduled_time', 'created_at', 'updated_at'):
@@ -99,6 +111,12 @@ def _get_consultation(consultation_id):
         return None
 
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 def _generate_room_code(teacher_id, student_id, multiparty=False):
     """Generate Jitsi room code (UUID for multi-party, legacy format for 1:1)"""
     if multiparty:
@@ -136,6 +154,7 @@ def _validate_time(t):
 
 def _get_teacher_students_local(teacher_id):
     """Get students assigned to teacher (local copy)"""
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -143,12 +162,17 @@ def _get_teacher_students_local(teacher_id):
             f"SELECT student_id FROM education_assignments WHERE teacher_id = {p} AND status = 'active'",
             (teacher_id,)
         ).fetchall()
-        db.close()
         return [r['student_id'] for r in rows]
     except Exception:
         return []
 
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 def _verify_teacher_student_local(teacher_id, student_id):
     """Verify teacher-student relationship (local)"""
     return student_id in _get_teacher_students_local(teacher_id)
@@ -156,6 +180,7 @@ def _verify_teacher_student_local(teacher_id, student_id):
 
 def _get_assigned_teacher(student_id):
     """Get student's assigned teacher"""
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -163,12 +188,17 @@ def _get_assigned_teacher(student_id):
             f"SELECT teacher_id FROM education_assignments WHERE student_id = {p} AND status = 'active' ORDER BY created_at DESC LIMIT 1",
             (student_id,)
         ).fetchone()
-        db.close()
         return row['teacher_id'] if row else None
     except Exception:
         return None
 
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 MAX_TEXT = 10000  # max characters for text fields
 
 # --- Multi-party constants ---
@@ -182,6 +212,7 @@ def _is_participant(user_id, consultation):
     """Check if user is organizer, patient, or accepted participant"""
     if user_id == str(consultation.get('teacher_id', '')) or user_id == str(consultation.get('student_id', '')):
         return True
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -189,14 +220,20 @@ def _is_participant(user_id, consultation):
             f"SELECT id FROM telemedicine_participants WHERE consultation_id = {p} AND user_id = {p} AND status = 'accepted'",
             (consultation.get('id'), user_id)
         ).fetchone()
-        db.close()
         return row is not None
     except Exception:
         return False
 
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 def _notify_all_participants(consultation_id, event, data):
     """Notify all accepted participants of a consultation event"""
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -204,13 +241,18 @@ def _notify_all_participants(consultation_id, event, data):
             f"SELECT user_id FROM telemedicine_participants WHERE consultation_id = {p} AND status = 'accepted'",
             (consultation_id,)
         ).fetchall()
-        db.close()
         for r in rows:
             _notify_user(r['user_id'], event, data)
     except Exception:
         pass
 
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 # ============================================
 # 🩺 TEACHER ENDPOINTS — Telemedicine Dashboard
 # ============================================
@@ -223,6 +265,7 @@ def telemed_dashboard():
     teacher_id = _get_teacher_id_local()
     today = date.today().isoformat()
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -247,10 +290,15 @@ def telemed_dashboard():
             (teacher_id, month_start)
         ).fetchone()
 
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     today_list = []
     for r in today_rows:
         d = dict(r)
@@ -298,6 +346,7 @@ def telemed_set_availability():
     if day_of_week is not None and (not isinstance(day_of_week, int) or day_of_week < 0 or day_of_week > 6):
         return jsonify({"success": False, "error": "day_of_week musi byt 0-6 (Po-Ne)"}), 400
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -316,10 +365,15 @@ def telemed_set_availability():
             )
             slot_id = cursor.lastrowid
         db.commit()
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return jsonify({
         "success": True,
         "slot_id": slot_id,
@@ -335,6 +389,7 @@ def telemed_get_availability():
     """Get teacher's availability slots"""
     teacher_id = _get_teacher_id_local()
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -342,7 +397,6 @@ def telemed_get_availability():
             f"SELECT * FROM telemedicine_availability WHERE teacher_id = {p} AND is_active = 1 ORDER BY day_of_week, start_time",
             (teacher_id,)
         ).fetchall()
-        db.close()
 
         slots = []
         for r in rows:
@@ -354,6 +408,12 @@ def telemed_get_availability():
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return jsonify({
         "success": True,
         "slots": slots,
@@ -369,6 +429,7 @@ def telemed_delete_availability(slot_id):
     """Remove availability slot"""
     teacher_id = _get_teacher_id_local()
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -377,7 +438,6 @@ def telemed_delete_availability(slot_id):
             (slot_id, teacher_id)
         ).fetchone()
         if not row:
-            db.close()
             return jsonify({"success": False, "error": "Slot nenalezen"}), 404
 
         db.execute(
@@ -385,10 +445,15 @@ def telemed_delete_availability(slot_id):
             (slot_id,)
         )
         db.commit()
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return jsonify({"success": True, "message": "Slot odstranen", "timestamp": _now_iso()})
 
 
@@ -406,6 +471,7 @@ def telemed_list_consultations():
     page = request.args.get('page', 1, type=int)
     limit = min(request.args.get('limit', 20, type=int), 100)
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -439,7 +505,6 @@ def telemed_list_consultations():
             f"LIMIT {limit} OFFSET {offset}",
             tuple(params)
         ).fetchall()
-        db.close()
 
         consultations = []
         for r in rows:
@@ -452,6 +517,12 @@ def telemed_list_consultations():
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return jsonify({
         "success": True,
         "consultations": consultations,
@@ -469,6 +540,7 @@ def telemed_confirm(consultation_id):
     """Teacher confirms a consultation request"""
     teacher_id = _get_teacher_id_local()
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -478,10 +550,8 @@ def telemed_confirm(consultation_id):
         ).fetchone()
 
         if not row:
-            db.close()
             return jsonify({"success": False, "error": "Konzultace nenalezena"}), 404
         if row['status'] != 'requested':
-            db.close()
             return jsonify({"success": False, "error": f"Nelze potvrdit konzultaci ve stavu '{row['status']}'"}), 400
 
         db.execute(
@@ -490,10 +560,15 @@ def telemed_confirm(consultation_id):
         )
         db.commit()
         student_id = row['student_id']
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     _notify_user(student_id, 'telemedicine_confirmed', {
         'consultation_id': consultation_id, 'teacher_id': teacher_id
     })
@@ -514,6 +589,7 @@ def telemed_teacher_cancel(consultation_id):
     data = request.json or {}
     reason = data.get('reason', '').strip()[:MAX_TEXT]
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -523,10 +599,8 @@ def telemed_teacher_cancel(consultation_id):
         ).fetchone()
 
         if not row:
-            db.close()
             return jsonify({"success": False, "error": "Konzultace nenalezena"}), 404
         if row['status'] in ('completed', 'cancelled', 'archived'):
-            db.close()
             return jsonify({"success": False, "error": f"Nelze zrusit konzultaci ve stavu '{row['status']}'"}), 400
 
         db.execute(
@@ -535,10 +609,15 @@ def telemed_teacher_cancel(consultation_id):
         )
         db.commit()
         student_id = row['student_id']
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     _notify_user(student_id, 'telemedicine_cancelled', {
         'consultation_id': consultation_id, 'cancelled_by': 'teacher', 'reason': reason
     })
@@ -557,6 +636,7 @@ def telemed_start(consultation_id):
     """Teacher starts consultation — generates Jitsi room"""
     teacher_id = _get_teacher_id_local()
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -566,10 +646,8 @@ def telemed_start(consultation_id):
         ).fetchone()
 
         if not row:
-            db.close()
             return jsonify({"success": False, "error": "Konzultace nenalezena"}), 404
         if row['status'] not in ('confirmed', 'requested'):
-            db.close()
             return jsonify({"success": False, "error": f"Nelze spustit konzultaci ve stavu '{row['status']}'"}), 400
 
         student_id = row['student_id']
@@ -582,10 +660,15 @@ def telemed_start(consultation_id):
             (room_code, jitsi_url, consultation_id)
         )
         db.commit()
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     # Build frontend join URL
     frontend_url = os.environ.get('FRONTEND_URL', 'https://polite-bush-001303503.6.azurestaticapps.net')
     join_page = f"{frontend_url}/call.html?room={room_code}&from=Terapeut&type=video"
@@ -622,6 +705,7 @@ def telemed_complete(consultation_id):
     """Teacher completes consultation"""
     teacher_id = _get_teacher_id_local()
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -631,10 +715,8 @@ def telemed_complete(consultation_id):
         ).fetchone()
 
         if not row:
-            db.close()
             return jsonify({"success": False, "error": "Konzultace nenalezena"}), 404
         if row['status'] != 'in_progress':
-            db.close()
             return jsonify({"success": False, "error": f"Nelze ukoncit konzultaci ve stavu '{row['status']}'"}), 400
 
         db.execute(
@@ -642,10 +724,15 @@ def telemed_complete(consultation_id):
             (consultation_id,)
         )
         db.commit()
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return jsonify({"success": True, "message": "Konzultace ukoncena", "consultation_id": consultation_id, "timestamp": _now_iso()})
 
 
@@ -665,6 +752,7 @@ def telemed_notes(consultation_id):
     if not any([complaint, findings, recommendations]):
         return jsonify({"success": False, "error": "Alespon jedno pole (complaint, findings, recommendations) je povinne"}), 400
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -674,10 +762,8 @@ def telemed_notes(consultation_id):
         ).fetchone()
 
         if not row:
-            db.close()
             return jsonify({"success": False, "error": "Konzultace nenalezena"}), 404
         if row['status'] not in ('in_progress', 'completed'):
-            db.close()
             return jsonify({"success": False, "error": f"Nalez lze zapsat jen u probihajici/dokoncene konzultace"}), 400
 
         notes_json = json.dumps(extra_notes) if extra_notes else '{}'
@@ -688,10 +774,15 @@ def telemed_notes(consultation_id):
             (complaint, findings, recommendations, notes_json, consultation_id)
         )
         db.commit()
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     _notify_user(student_id, 'telemedicine_notes_ready', {'consultation_id': consultation_id})
 
     return jsonify({"success": True, "message": "Nalez zapsan", "consultation_id": consultation_id, "timestamp": _now_iso()})
@@ -763,14 +854,21 @@ def telemed_send_summary(consultation_id):
         server.quit()
 
         # Mark email sent
-        db = get_connection()
-        p = _p()
-        db.execute(
-            f"UPDATE telemedicine_consultations SET email_sent = 1, updated_at = CURRENT_TIMESTAMP WHERE id = {p}",
-            (consultation_id,)
-        )
-        db.commit()
-        db.close()
+        db2 = None
+        try:
+            db2 = get_connection()
+            p = _p()
+            db2.execute(
+                f"UPDATE telemedicine_consultations SET email_sent = 1, updated_at = CURRENT_TIMESTAMP WHERE id = {p}",
+                (consultation_id,)
+            )
+            db2.commit()
+        finally:
+            if db2:
+                try:
+                    db2.close()
+                except Exception:
+                    pass
 
     except Exception as e:
         return jsonify({"success": False, "error": f"Email error: {e}"}), 500
@@ -791,6 +889,7 @@ def telemed_student_history(student_id):
     if not _verify_teacher_student_local(teacher_id, student_id):
         return jsonify({"success": False, "error": "Student vam neni prirazen"}), 403
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -800,7 +899,6 @@ def telemed_student_history(student_id):
             f"ORDER BY scheduled_date DESC, scheduled_time DESC LIMIT 50",
             (teacher_id, student_id)
         ).fetchall()
-        db.close()
 
         history = []
         for r in rows:
@@ -812,6 +910,12 @@ def telemed_student_history(student_id):
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return jsonify({"success": True, "history": history, "total": len(history), "student_id": student_id, "timestamp": _now_iso()})
 
 
@@ -829,6 +933,7 @@ def telemed_my_upcoming():
 
     today = date.today().isoformat()
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -838,7 +943,6 @@ def telemed_my_upcoming():
             f"ORDER BY scheduled_date, scheduled_time",
             (student_id, today)
         ).fetchall()
-        db.close()
 
         upcoming = []
         for r in rows:
@@ -850,6 +954,12 @@ def telemed_my_upcoming():
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return jsonify({"success": True, "upcoming": upcoming, "total": len(upcoming), "timestamp": _now_iso()})
 
 
@@ -861,6 +971,7 @@ def telemed_my_history():
     if not student_id:
         return jsonify({"success": False, "error": "Neplatny uzivatel"}), 401
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -870,7 +981,6 @@ def telemed_my_history():
             f"ORDER BY scheduled_date DESC LIMIT 50",
             (student_id,)
         ).fetchall()
-        db.close()
 
         history = []
         for r in rows:
@@ -882,6 +992,12 @@ def telemed_my_history():
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return jsonify({"success": True, "history": history, "total": len(history), "timestamp": _now_iso()})
 
 
@@ -917,6 +1033,7 @@ def telemed_my_request():
     if not teacher_id:
         return jsonify({"success": False, "error": "Nemate prirazeneho terapeuta"}), 400
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -935,10 +1052,15 @@ def telemed_my_request():
             )
             cid = cursor.lastrowid
         db.commit()
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     _notify_user(teacher_id, 'telemedicine_new_request', {
         'consultation_id': cid, 'student_id': student_id,
         'scheduled_date': preferred_date, 'scheduled_time': preferred_time
@@ -980,6 +1102,7 @@ def telemed_my_teacher_availability():
     if not teacher_id:
         return jsonify({"success": False, "error": "Nemate prirazeneho terapeuta"}), 400
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -988,7 +1111,6 @@ def telemed_my_teacher_availability():
             f"FROM telemedicine_availability WHERE teacher_id = {p} AND is_active = 1 ORDER BY day_of_week, start_time",
             (teacher_id,)
         ).fetchall()
-        db.close()
 
         slots = []
         for r in rows:
@@ -1000,6 +1122,12 @@ def telemed_my_teacher_availability():
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return jsonify({"success": True, "teacher_id": teacher_id, "slots": slots, "total": len(slots), "timestamp": _now_iso()})
 
 
@@ -1014,6 +1142,7 @@ def telemed_my_cancel(consultation_id):
     data = request.json or {}
     reason = data.get('reason', '').strip()[:MAX_TEXT]
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -1023,10 +1152,8 @@ def telemed_my_cancel(consultation_id):
         ).fetchone()
 
         if not row:
-            db.close()
             return jsonify({"success": False, "error": "Konzultace nenalezena"}), 404
         if row['status'] not in ('requested', 'confirmed'):
-            db.close()
             return jsonify({"success": False, "error": f"Nelze zrusit konzultaci ve stavu '{row['status']}'"}), 400
 
         db.execute(
@@ -1035,10 +1162,15 @@ def telemed_my_cancel(consultation_id):
         )
         db.commit()
         teacher_id = row['teacher_id']
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     _notify_user(teacher_id, 'telemedicine_cancelled', {
         'consultation_id': consultation_id, 'cancelled_by': 'student', 'reason': reason
     })
@@ -1122,6 +1254,7 @@ def telemed_create_multiparty():
     if not _verify_teacher_student_local(organizer_id, patient_id):
         return jsonify({"success": False, "error": "Pacient vam neni prirazen"}), 403
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -1178,10 +1311,15 @@ def telemed_create_multiparty():
                 pass  # duplicate — skip
 
         db.commit()
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     # Notify patient
     _notify_user(patient_id, 'telemedicine_confirmed', {
         'consultation_id': cid, 'teacher_id': organizer_id, 'title': title, 'multiparty': True
@@ -1232,6 +1370,7 @@ def telemed_invite_participant(consultation_id):
     if specialty not in SPECIALTIES:
         specialty = 'other'
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -1271,12 +1410,17 @@ def telemed_invite_participant(consultation_id):
             pid = cursor.lastrowid
 
         db.commit()
-        db.close()
     except Exception as e:
         if 'UNIQUE' in str(e).upper() or 'unique' in str(e):
             return jsonify({"success": False, "error": "Uzivatel je jiz pozvan"}), 409
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     _notify_user(user_id, 'telemedicine_invited', {
         'consultation_id': consultation_id, 'organizer_id': organizer_id,
         'role': role, 'specialty': specialty
@@ -1297,6 +1441,7 @@ def telemed_list_participants(consultation_id):
     if not _is_participant(user_id, consultation):
         return jsonify({"success": False, "error": "Nemate opravneni"}), 403
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -1305,7 +1450,6 @@ def telemed_list_participants(consultation_id):
             f"FROM telemedicine_participants WHERE consultation_id = {p} ORDER BY created_at",
             (consultation_id,)
         ).fetchall()
-        db.close()
 
         participants = []
         for r in rows:
@@ -1317,6 +1461,12 @@ def telemed_list_participants(consultation_id):
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     # If no participants rows (legacy 1:1), return synthetic list
     if not participants:
         participants = [
@@ -1345,6 +1495,7 @@ def telemed_respond_invitation(consultation_id):
     if response not in ('accepted', 'declined'):
         return jsonify({"success": False, "error": "response musi byt 'accepted' nebo 'declined'"}), 400
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -1354,10 +1505,8 @@ def telemed_respond_invitation(consultation_id):
         ).fetchone()
 
         if not row:
-            db.close()
             return jsonify({"success": False, "error": "Pozvanka nenalezena"}), 404
         if row['status'] != 'invited':
-            db.close()
             return jsonify({"success": False, "error": f"Pozvanka je jiz ve stavu '{row['status']}'"}), 400
 
         db.execute(
@@ -1365,10 +1514,15 @@ def telemed_respond_invitation(consultation_id):
             (response, row['id'])
         )
         db.commit()
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     # Notify organizer
     consultation = _get_consultation(consultation_id)
     if consultation:
@@ -1397,6 +1551,7 @@ def telemed_participant_notes(consultation_id):
     if consultation.get('status') not in ('in_progress', 'completed'):
         return jsonify({"success": False, "error": "Poznamky lze zapsat jen u probihajici/dokoncene konzultace"}), 400
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -1408,7 +1563,6 @@ def telemed_participant_notes(consultation_id):
         if not row:
             # Allow organizer to write even without participant row (legacy 1:1)
             if user_id != consultation.get('teacher_id'):
-                db.close()
                 return jsonify({"success": False, "error": "Nejste ucastnikem konzultace"}), 403
             # Auto-create participant row for organizer
             db.execute(
@@ -1423,10 +1577,15 @@ def telemed_participant_notes(consultation_id):
             )
 
         db.commit()
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     # Notify organizer if specialist wrote notes
     if user_id != consultation.get('teacher_id'):
         _notify_user(consultation.get('teacher_id'), 'telemedicine_notes_ready', {
@@ -1457,6 +1616,7 @@ def telemed_all_notes(consultation_id):
 
     # Specialist contributions
     specialist_notes = []
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -1465,11 +1625,16 @@ def telemed_all_notes(consultation_id):
             f"WHERE consultation_id = {p} AND notes_contribution IS NOT NULL AND notes_contribution != ''",
             (consultation_id,)
         ).fetchall()
-        db.close()
         specialist_notes = [dict(r) for r in rows]
     except Exception:
         pass
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return jsonify({
         "success": True,
         "consultation_id": consultation_id,
@@ -1497,6 +1662,7 @@ def telemed_remove_participant(consultation_id, participant_user_id):
     if participant_user_id == consultation.get('student_id'):
         return jsonify({"success": False, "error": "Nelze odebrat pacienta"}), 400
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -1506,15 +1672,19 @@ def telemed_remove_participant(consultation_id, participant_user_id):
         ).fetchone()
 
         if not row:
-            db.close()
             return jsonify({"success": False, "error": "Ucastnik nenalezen"}), 404
 
         db.execute(f"DELETE FROM telemedicine_participants WHERE id = {p}", (row['id'],))
         db.commit()
-        db.close()
     except Exception as e:
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     _notify_user(participant_user_id, 'telemedicine_cancelled', {
         'consultation_id': consultation_id, 'cancelled_by': 'organizer', 'reason': 'Odebrán z konzultace'
     })
@@ -1533,6 +1703,7 @@ def get_upcoming_consultations_for_reminder(window_minutes=15):
     current_time = now.strftime('%H:%M')
     future_time = (now + timedelta(minutes=window_minutes)).strftime('%H:%M')
 
+    db = None
     try:
         db = get_connection()
         p = _p()
@@ -1542,7 +1713,6 @@ def get_upcoming_consultations_for_reminder(window_minutes=15):
             f"WHERE status = 'confirmed' AND scheduled_date = {p} AND scheduled_time >= {p} AND scheduled_time <= {p}",
             (current_date, current_time, future_time)
         ).fetchall()
-        db.close()
 
         results = []
         for r in rows:
@@ -1569,3 +1739,9 @@ def get_upcoming_consultations_for_reminder(window_minutes=15):
         return results
     except Exception:
         return []
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass

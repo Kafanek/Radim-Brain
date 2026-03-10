@@ -175,42 +175,48 @@ def _get_real_stats():
         'moods': {},
         'lessons_count': 0
     }
+    conn = None
     try:
         conn = sqlite3.connect('radim_brain.db')
         cursor = conn.cursor()
         today = datetime.now().strftime('%Y-%m-%d')
-        
+
         cursor.execute('SELECT COUNT(*) FROM soul_interactions')
         defaults['total_interactions'] = cursor.fetchone()[0]
-        
+
         cursor.execute('SELECT COUNT(*) FROM soul_interactions WHERE DATE(timestamp) = ?', (today,))
         defaults['today_interactions'] = cursor.fetchone()[0]
-        
+
         cursor.execute('SELECT AVG(empathy_shown) FROM soul_interactions WHERE empathy_shown > 0')
         row = cursor.fetchone()[0]
         if row:
             defaults['avg_empathy'] = round(row, 3)
-        
+
         cursor.execute('SELECT COUNT(*) FROM soul_lessons')
         defaults['lessons_count'] = cursor.fetchone()[0]
-        
+
         # Mood distribution (safe - column may not exist yet)
         try:
             cursor.execute('SELECT mood, COUNT(*) FROM soul_interactions WHERE mood IS NOT NULL GROUP BY mood')
-            defaults['moods'] = {row[0]: row[1] for row in cursor.fetchall() if row[0]}
-        except:
+            defaults['moods'] = {r[0]: r[1] for r in cursor.fetchall() if r[0]}
+        except Exception:
             pass
 
         # Top emotions today
         try:
             cursor.execute("SELECT dominant_emotion, COUNT(*) FROM soul_interactions WHERE DATE(timestamp) = ? AND dominant_emotion IS NOT NULL AND dominant_emotion != '' GROUP BY dominant_emotion ORDER BY COUNT(*) DESC LIMIT 5", (today,))
-            defaults['top_emotions_today'] = {row[0]: row[1] for row in cursor.fetchall()}
-        except:
+            defaults['top_emotions_today'] = {r[0]: r[1] for r in cursor.fetchall()}
+        except Exception:
             defaults['top_emotions_today'] = {}
 
-        conn.close()
     except Exception as e:
         print(f"⚠️ Stats DB error: {e}")
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
     return defaults
 
 

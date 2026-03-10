@@ -13,6 +13,7 @@
 import os
 import json
 import sqlite3
+import threading
 from urllib.parse import urlparse
 
 # Detect database type
@@ -49,16 +50,21 @@ if not USE_POSTGRES:
 # CONNECTION POOL (PostgreSQL only)
 # ============================================
 _pg_pool = None
+_pg_pool_lock = threading.Lock()
 
 def _get_pg_pool():
-    """Get or create PostgreSQL connection pool"""
+    """Get or create PostgreSQL connection pool (thread-safe)"""
     global _pg_pool
-    if _pg_pool is None or _pg_pool.closed:
-        _pg_pool = psycopg2.pool.ThreadedConnectionPool(
-            minconn=1,
-            maxconn=10,
-            dsn=DATABASE_URL
-        )
+    if _pg_pool is not None and not _pg_pool.closed:
+        return _pg_pool
+    with _pg_pool_lock:
+        # Double-check inside lock
+        if _pg_pool is None or _pg_pool.closed:
+            _pg_pool = psycopg2.pool.ThreadedConnectionPool(
+                minconn=1,
+                maxconn=10,
+                dsn=DATABASE_URL
+            )
     return _pg_pool
 
 

@@ -210,8 +210,22 @@ DEMO_BOOKS = {
     }
 }
 
-# Uživatelský pokrok při čtení
+# Uživatelský pokrok při čtení (bounded, max 500 users)
 USER_PROGRESS = {}
+_USER_PROGRESS_MAX = 500
+
+
+def _evict_old_progress():
+    """Remove oldest progress entries if over limit."""
+    if len(USER_PROGRESS) <= _USER_PROGRESS_MAX:
+        return
+    # Sort by last_read timestamp, remove oldest
+    sorted_users = sorted(
+        USER_PROGRESS.keys(),
+        key=lambda u: USER_PROGRESS[u].get('last_read', '')
+    )
+    for uid in sorted_users[:len(USER_PROGRESS) - _USER_PROGRESS_MAX]:
+        del USER_PROGRESS[uid]
 
 # ============================================
 # HELPER FUNCTIONS
@@ -410,6 +424,7 @@ def handle_progress():
             return jsonify({"success": False, "error": "bookId je vyžadováno"}), 400
 
         if user_id not in USER_PROGRESS:
+            _evict_old_progress()
             USER_PROGRESS[user_id] = {}
 
         USER_PROGRESS[user_id][book_id] = {

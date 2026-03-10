@@ -286,9 +286,24 @@ def twiml_say(text, speech_params=None):
 
 # Active calls: { call_sid: { from, to, started, history[], caller_name, status } }
 active_calls = {}
+_ACTIVE_CALLS_MAX = 100  # Prevent unbounded growth
 
 # Known callers: { phone: { name, formality, contacts } }
 known_callers = {}
+_KNOWN_CALLERS_MAX = 500  # Prevent unbounded growth
+
+
+def _cleanup_active_calls():
+    """Remove calls older than 2h, enforce max size."""
+    cutoff = time.time() - 7200
+    expired = [sid for sid, d in active_calls.items() if d.get("started", 0) < cutoff]
+    for sid in expired:
+        del active_calls[sid]
+    # If still over limit, remove oldest
+    if len(active_calls) > _ACTIVE_CALLS_MAX:
+        sorted_sids = sorted(active_calls.keys(), key=lambda s: active_calls[s].get("started", 0))
+        for sid in sorted_sids[:len(active_calls) - _ACTIVE_CALLS_MAX]:
+            del active_calls[sid]
 
 # Intent patterns (Czech)
 TRANSFER_PATTERNS = re.compile(
@@ -362,7 +377,7 @@ def get_ai_response_for_call(user_text, call_sid, user_id=None):
         # Try Anthropic SDK first
         try:
             from anthropic import Anthropic
-            client = Anthropic(api_key=ANTHROPIC_API_KEY)
+            client = Anthropic(api_key=ANTHROPIC_API_KEY, timeout=25.0)
             response = client.messages.create(
                 model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
                 max_tokens=200,
@@ -742,11 +757,7 @@ def initiate_outgoing_call():
 @twilio_bp.route('/active-calls', methods=['GET'])
 def get_active_calls():
     """List active phone calls"""
-    # Cleanup old calls (2h+)
-    cutoff = time.time() - 7200
-    expired = [sid for sid, d in active_calls.items() if d.get("started", 0) < cutoff]
-    for sid in expired:
-        del active_calls[sid]
+    _cleanup_active_calls()
 
     return jsonify({
         "success": True,

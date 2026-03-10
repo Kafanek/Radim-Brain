@@ -185,6 +185,7 @@ def _db_load_adaptation(user_id):
     """Load per-user adaptation state from PostgreSQL, or return defaults."""
     if not DB_AVAILABLE or not user_id:
         return dict(_ADAPTATION_DEFAULTS)
+    db = None
     try:
         db = get_connection()
         ph = "%s" if is_postgres() else "?"
@@ -192,7 +193,6 @@ def _db_load_adaptation(user_id):
             f"SELECT reward_sum, interactions, speech_rate_adjust, pause_adjust_ms, style, intervention_level FROM brain_adaptation WHERE user_id = {ph}",
             (user_id,)
         ).fetchone()
-        db.close()
         if row:
             return {
                 "reward_sum": row[0],
@@ -204,6 +204,12 @@ def _db_load_adaptation(user_id):
             }
     except Exception as e:
         print(f"Brain DB load warning: {e}")
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return dict(_ADAPTATION_DEFAULTS)
 
 
@@ -211,6 +217,7 @@ def _db_save_adaptation(user_id, state):
     """Upsert per-user adaptation state to PostgreSQL."""
     if not DB_AVAILABLE or not user_id:
         return
+    db = None
     try:
         db = get_connection()
         if is_postgres():
@@ -236,15 +243,21 @@ def _db_save_adaptation(user_id, state):
                   state["speech_rate_adjust"], state["pause_adjust_ms"],
                   state["style"], state["intervention_level"]))
         db.commit()
-        db.close()
     except Exception as e:
         print(f"Brain DB save warning: {e}")
 
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 def _db_save_brain_state(user_id, psi, alpha, mode, coherence, source="chat"):
     """Save Psi(t) snapshot to brain_states table."""
     if not DB_AVAILABLE or not user_id:
         return
+    db = None
     try:
         db = get_connection()
         if is_postgres():
@@ -260,11 +273,16 @@ def _db_save_brain_state(user_id, psi, alpha, mode, coherence, source="chat"):
             ''', (user_id, psi["C"], psi["E"], psi["R"], psi["S"],
                   alpha, mode, coherence, source))
         db.commit()
-        db.close()
     except Exception as e:
         print(f"Brain state save warning: {e}")
 
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 # ═══════════════════════════════════════════════════════════
 # EARLY Ψ CACHE — Streaming STT → Brain (v272)
 # ═══════════════════════════════════════════════════════════
@@ -403,6 +421,7 @@ def get_brain_speech_for_user(user_id):
     """
     if not DB_AVAILABLE or not user_id:
         return None
+    db = None
     try:
         db = get_connection()
         if is_postgres():
@@ -415,7 +434,6 @@ def get_brain_speech_for_user(user_id):
                 "SELECT C, E, R, S, alpha, mode, coherence FROM brain_states WHERE user_id = ? AND created_at > datetime('now', '-' || ? || ' minutes') ORDER BY created_at DESC LIMIT 1",
                 (user_id, BRAIN_STATE_TTL_MINUTES)
             ).fetchone()
-        db.close()
         if not row:
             return None
 
@@ -436,6 +454,12 @@ def get_brain_speech_for_user(user_id):
         return None
 
 
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 # ═══════════════════════════════════════════════════════════
 # JÁDROVÉ MATEMATICKÉ FUNKCE
 # ═══════════════════════════════════════════════════════════
@@ -1323,6 +1347,7 @@ def brain_feedback():
 
     # Save feedback to DB
     if DB_AVAILABLE:
+        db = None
         try:
             db = get_connection()
             if is_postgres():
@@ -1336,10 +1361,15 @@ def brain_feedback():
                     (user_id, rating, action, response_time_ms, signal, context)
                 )
             db.commit()
-            db.close()
         except Exception as e:
             print(f"Brain feedback save warning: {e}")
 
+        finally:
+            if db:
+                try:
+                    db.close()
+                except Exception:
+                    pass
     # Apply RL update (2× multiplier for speech_feedback)
     rl_result = None
     if signal != "neutral":

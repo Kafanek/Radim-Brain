@@ -447,12 +447,13 @@ def predict():
         )
         
         # Uložit stav do databáze
+        conn = None
         try:
             conn = sqlite3.connect(DATABASE)
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO anticipation_state 
-                (user_id, C, alpha, trend_C, trend_alpha, predicted_C, predicted_alpha, 
+                INSERT INTO anticipation_state
+                (user_id, C, alpha, trend_C, trend_alpha, predicted_C, predicted_alpha,
                  state, predicted_state, empathy, rate, pitch, pause_ms)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (user_id, C_current, alpha_current, trend_C, trend_alpha,
@@ -460,9 +461,14 @@ def predict():
                   speech_params["empathy"], speech_params["rate"],
                   speech_params["pitch"], speech_params["pause_ms"]))
             conn.commit()
-            conn.close()
         except Exception as db_error:
             print(f"⚠️ DB save error: {db_error}")
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
         
         return jsonify({
             "success": True,
@@ -572,20 +578,27 @@ def get_history():
         user_id = request.args.get('user_id', 'global')
         limit = request.args.get('limit', 50, type=int)
         
-        conn = sqlite3.connect(DATABASE)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT C, alpha, trend_C, trend_alpha, predicted_C, predicted_alpha,
-                   state, predicted_state, empathy, rate, pitch, pause_ms, timestamp
-            FROM anticipation_state
-            WHERE user_id = ?
-            ORDER BY timestamp DESC
-            LIMIT ?
-        ''', (user_id, limit))
-        
-        rows = cursor.fetchall()
-        conn.close()
+        conn = None
+        try:
+            conn = sqlite3.connect(DATABASE)
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                SELECT C, alpha, trend_C, trend_alpha, predicted_C, predicted_alpha,
+                       state, predicted_state, empathy, rate, pitch, pause_ms, timestamp
+                FROM anticipation_state
+                WHERE user_id = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+            ''', (user_id, limit))
+
+            rows = cursor.fetchall()
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
         
         history = []
         for row in rows:

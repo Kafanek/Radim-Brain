@@ -199,39 +199,45 @@ def get_stats():
         user_id = request.args.get('user_id', 'global')
         
         # Get stats from database or calculate defaults
-        conn = sqlite3.connect(DATABASE)
-        cursor = conn.cursor()
-        
-        # Today's date
-        today = datetime.now().strftime('%Y-%m-%d')
-        
-        # Count today's helpful actions
-        cursor.execute('''
-            SELECT COUNT(*) FROM soul_interactions 
-            WHERE DATE(timestamp) = ? AND was_helpful = 1
-        ''', (today,))
-        helpful_today = cursor.fetchone()[0]
-        
-        # Count today's mistakes
-        cursor.execute('''
-            SELECT COUNT(*) FROM soul_interactions 
-            WHERE DATE(timestamp) = ? AND was_mistake = 1
-        ''', (today,))
-        mistakes_today = cursor.fetchone()[0]
-        
-        # Count total lessons
-        cursor.execute('SELECT COUNT(*) FROM soul_lessons')
-        lessons_count = cursor.fetchone()[0]
-        
-        # Count total interactions
-        cursor.execute('SELECT COUNT(*) FROM soul_interactions')
-        total_interactions = cursor.fetchone()[0]
-        
-        # Average empathy level
-        cursor.execute('SELECT AVG(empathy_shown) FROM soul_interactions WHERE empathy_shown > 0')
-        avg_empathy = cursor.fetchone()[0] or 0.75
-        
-        conn.close()
+        conn = None
+        try:
+            conn = sqlite3.connect(DATABASE)
+            cursor = conn.cursor()
+
+            # Today's date
+            today = datetime.now().strftime('%Y-%m-%d')
+
+            # Count today's helpful actions
+            cursor.execute('''
+                SELECT COUNT(*) FROM soul_interactions
+                WHERE DATE(timestamp) = ? AND was_helpful = 1
+            ''', (today,))
+            helpful_today = cursor.fetchone()[0]
+
+            # Count today's mistakes
+            cursor.execute('''
+                SELECT COUNT(*) FROM soul_interactions
+                WHERE DATE(timestamp) = ? AND was_mistake = 1
+            ''', (today,))
+            mistakes_today = cursor.fetchone()[0]
+
+            # Count total lessons
+            cursor.execute('SELECT COUNT(*) FROM soul_lessons')
+            lessons_count = cursor.fetchone()[0]
+
+            # Count total interactions
+            cursor.execute('SELECT COUNT(*) FROM soul_interactions')
+            total_interactions = cursor.fetchone()[0]
+
+            # Average empathy level
+            cursor.execute('SELECT AVG(empathy_shown) FROM soul_interactions WHERE empathy_shown > 0')
+            avg_empathy = cursor.fetchone()[0] or 0.75
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
         
         # Calculate empathy level based on interactions
         # Base level + adjustment based on helpful vs mistakes ratio
@@ -284,18 +290,25 @@ def get_lessons():
         limit = request.args.get('limit', 10, type=int)
         user_id = request.args.get('user_id', 'global')
         
-        conn = sqlite3.connect(DATABASE)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT id, description, what_learned, context, emotion, importance, timestamp
-            FROM soul_lessons
-            ORDER BY timestamp DESC
-            LIMIT ?
-        ''', (limit,))
-        
-        rows = cursor.fetchall()
-        conn.close()
+        conn = None
+        try:
+            conn = sqlite3.connect(DATABASE)
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                SELECT id, description, what_learned, context, emotion, importance, timestamp
+                FROM soul_lessons
+                ORDER BY timestamp DESC
+                LIMIT ?
+            ''', (limit,))
+
+            rows = cursor.fetchall()
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
         
         lessons = []
         for row in rows:
@@ -379,17 +392,24 @@ def add_lesson():
                 "error": "Description and what_learned are required"
             }), 400
         
-        conn = sqlite3.connect(DATABASE)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO soul_lessons (user_id, description, what_learned, context, emotion, importance)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (user_id, description, what_learned, context, emotion, importance))
-        
-        lesson_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
+        conn = None
+        try:
+            conn = sqlite3.connect(DATABASE)
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                INSERT INTO soul_lessons (user_id, description, what_learned, context, emotion, importance)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (user_id, description, what_learned, context, emotion, importance))
+
+            lesson_id = cursor.lastrowid
+            conn.commit()
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
         
         return jsonify({
             "success": True,
@@ -423,30 +443,37 @@ def log_interaction():
         dominant_emotion = data.get('dominant_emotion', '')
         intensity = data.get('intensity', 0)
         
-        conn = sqlite3.connect(DATABASE)
-        cursor = conn.cursor()
-        
-        # Ensure extended columns exist
+        conn = None
         try:
-            cursor.execute('ALTER TABLE soul_interactions ADD COLUMN mood TEXT DEFAULT "neutral"')
-        except:
-            pass
-        try:
-            cursor.execute('ALTER TABLE soul_interactions ADD COLUMN dominant_emotion TEXT DEFAULT ""')
-        except:
-            pass
-        try:
-            cursor.execute('ALTER TABLE soul_interactions ADD COLUMN intensity REAL DEFAULT 0')
-        except:
-            pass
-        
-        cursor.execute('''
-            INSERT INTO soul_interactions (user_id, interaction_type, was_helpful, was_mistake, empathy_shown, mood, dominant_emotion, intensity)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (user_id, interaction_type, was_helpful, was_mistake, empathy_shown, mood, dominant_emotion, intensity))
-        
-        conn.commit()
-        conn.close()
+            conn = sqlite3.connect(DATABASE)
+            cursor = conn.cursor()
+
+            # Ensure extended columns exist
+            try:
+                cursor.execute('ALTER TABLE soul_interactions ADD COLUMN mood TEXT DEFAULT "neutral"')
+            except Exception:
+                pass
+            try:
+                cursor.execute('ALTER TABLE soul_interactions ADD COLUMN dominant_emotion TEXT DEFAULT ""')
+            except Exception:
+                pass
+            try:
+                cursor.execute('ALTER TABLE soul_interactions ADD COLUMN intensity REAL DEFAULT 0')
+            except Exception:
+                pass
+
+            cursor.execute('''
+                INSERT INTO soul_interactions (user_id, interaction_type, was_helpful, was_mistake, empathy_shown, mood, dominant_emotion, intensity)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (user_id, interaction_type, was_helpful, was_mistake, empathy_shown, mood, dominant_emotion, intensity))
+
+            conn.commit()
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
         
         return jsonify({
             "success": True,
