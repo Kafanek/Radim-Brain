@@ -1639,13 +1639,19 @@ def handle_disconnect():
     if user_id:
         socketio.emit('user_offline', {'userId': user_id, 'timestamp': now_iso()}, broadcast=True)
         # Update user last_seen (using adapter for proper connection handling)
+        db = None
         try:
             db = get_connection()
             db.execute('UPDATE chat_users SET online = 0, last_seen = ? WHERE id = ?', (now_iso(), user_id))
             db.commit()
-            db.close()
         except Exception as e:
             print(f"⚠️  Error updating user offline status: {e}")
+        finally:
+            if db:
+                try:
+                    db.close()
+                except Exception:
+                    pass
 
 @socketio.on('join')
 def handle_join(data):
@@ -1655,13 +1661,19 @@ def handle_join(data):
         join_room(user_id)
         socketio.emit('user_online', {'userId': user_id, 'timestamp': now_iso()}, broadcast=True)
         # Update user online status (using adapter for proper connection handling)
+        db = None
         try:
             db = get_connection()
             db.execute('UPDATE chat_users SET online = 1 WHERE id = ?', (user_id,))
             db.commit()
-            db.close()
         except Exception as e:
             print(f"⚠️  Error updating user online status: {e}")
+        finally:
+            if db:
+                try:
+                    db.close()
+                except Exception:
+                    pass
 
 @socketio.on('join_conversation')
 def handle_join_conversation(data):
@@ -1940,14 +1952,17 @@ def kal_radim_stats():
     try:
         if MEMORY_AVAILABLE:
             from database import get_connection, is_postgres
-            db = get_connection()
-            if is_postgres():
+            db = None
+            try:
+                db = get_connection()
                 profiles_count = db.execute("SELECT COUNT(*) as cnt FROM memory_profiles").fetchone()['cnt']
                 history_count = db.execute("SELECT COUNT(*) as cnt FROM memory_history").fetchone()['cnt']
-            else:
-                profiles_count = db.execute("SELECT COUNT(*) as cnt FROM memory_profiles").fetchone()['cnt']
-                history_count = db.execute("SELECT COUNT(*) as cnt FROM memory_history").fetchone()['cnt']
-            db.close()
+            finally:
+                if db:
+                    try:
+                        db.close()
+                    except Exception:
+                        pass
             return jsonify({
                 "success": True,
                 "message": f"Radim pomohl {profiles_count} lidem v {history_count} konverzacich",
@@ -2172,6 +2187,7 @@ def auth_data_export():
     }
 
     # Export memory data
+    conn = None
     try:
         conn = get_connection()
         if conn:
@@ -2198,9 +2214,14 @@ def auth_data_export():
                 export_data["backend_data"]["learning"] = json.loads(row[0]) if isinstance(row[0], str) else row[0]
 
             cursor.close()
-            conn.close()
     except Exception as e:
         export_data["backend_data"]["error"] = str(e)
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     return jsonify({
         "success": True,
@@ -2214,6 +2235,7 @@ def auth_data_delete():
     user_id = str(g.auth_user.get('id', ''))
     deleted = {"profile": False, "history": False, "learning": False}
 
+    conn = None
     try:
         conn = get_connection()
         if conn:
@@ -2226,9 +2248,14 @@ def auth_data_delete():
             deleted["learning"] = cursor.rowcount > 0
             conn.commit()
             cursor.close()
-            conn.close()
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     return jsonify({
         "success": True,
@@ -2391,14 +2418,20 @@ def server_error(e):
 with app.app_context():
     init_db()
     # Reset all users to offline on server start (dyno restart resets socket connections)
+    db = None
     try:
         db = get_connection()
         db.execute("UPDATE chat_users SET online = 0 WHERE id != 'radim'")
         db.commit()
-        db.close()
         print("✅ All user online statuses reset")
     except Exception as e:
         print(f"⚠️  Could not reset online statuses: {e}")
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

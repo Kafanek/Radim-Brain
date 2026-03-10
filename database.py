@@ -1048,7 +1048,11 @@ def init_db():
         ''', ('radim', 'Radim Asistent', 'ai_assistant', 1, '{"ai_enabled": true, "voice": "radim"}'))
 
     db.commit()
-    db.close()
+
+    try:
+        db.close()
+    except Exception:
+        pass
 
     db_type = "PostgreSQL" if USE_POSTGRES else "SQLite"
     print(f"✅ Databáze inicializována ({db_type}, v4.0 — Brain Engine persistence)")

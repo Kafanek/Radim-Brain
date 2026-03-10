@@ -29,10 +29,11 @@ def get_db():
 
 def init_soul_tables():
     """Initialize soul database tables"""
+    conn = None
     try:
         conn = sqlite3.connect(DATABASE)
         cursor = conn.cursor()
-        
+
         # Soul lessons table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS soul_lessons (
@@ -46,7 +47,7 @@ def init_soul_tables():
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        
+
         # Soul interactions table (for stats)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS soul_interactions (
@@ -59,12 +60,17 @@ def init_soul_tables():
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        
+
         conn.commit()
-        conn.close()
         print("✅ Soul tables initialized")
     except Exception as e:
         print(f"⚠️ Soul tables init error: {e}")
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 # Initialize tables on import
 init_soul_tables()

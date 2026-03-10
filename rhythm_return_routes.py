@@ -544,6 +544,7 @@ def _db_save_session(session_id, user_id, preferred_bpm, hy_stage, notes):
     """Create new therapy session in DB"""
     if not _DB_AVAILABLE:
         return False
+    db = None
     try:
         db = get_connection()
         ph = '%s' if is_postgres() else '?'
@@ -553,17 +554,23 @@ def _db_save_session(session_id, user_id, preferred_bpm, hy_stage, notes):
             (session_id, user_id, preferred_bpm, hy_stage, notes)
         )
         db.commit()
-        db.close()
         return True
     except Exception as e:
         print(f"⚠️ rhythm session save error: {e}")
         return False
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def _db_save_state(session_id, M, tau, predicted_M, predicted_tau, state, bpm, accent_json, confidence_json):
     """Save rhythm state snapshot to DB"""
     if not _DB_AVAILABLE:
         return False
+    db = None
     try:
         db = get_connection()
         ph = '%s' if is_postgres() else '?'
@@ -574,17 +581,23 @@ def _db_save_state(session_id, M, tau, predicted_M, predicted_tau, state, bpm, a
             (session_id, M, tau, predicted_M, predicted_tau, state, bpm, accent_json, confidence_json)
         )
         db.commit()
-        db.close()
         return True
     except Exception as e:
         print(f"⚠️ rhythm state save error: {e}")
         return False
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def _db_save_breakpoint(session_id, bp_type, direction, M_before, M_after, action):
     """Save motor breakpoint event to DB"""
     if not _DB_AVAILABLE:
         return False
+    db = None
     try:
         db = get_connection()
         ph = '%s' if is_postgres() else '?'
@@ -594,17 +607,23 @@ def _db_save_breakpoint(session_id, bp_type, direction, M_before, M_after, actio
             (session_id, bp_type, direction, M_before, M_after, action)
         )
         db.commit()
-        db.close()
         return True
     except Exception as e:
         print(f"⚠️ rhythm breakpoint save error: {e}")
         return False
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def _db_get_session(session_id):
     """Load session with full state history"""
     if not _DB_AVAILABLE:
         return None
+    db = None
     try:
         db = get_connection()
         ph = '%s' if is_postgres() else '?'
@@ -613,7 +632,6 @@ def _db_get_session(session_id):
             f'SELECT * FROM rhythm_sessions WHERE id = {ph}', (session_id,)
         ).fetchone()
         if not session:
-            db.close()
             return None
 
         states = db.execute(
@@ -624,8 +642,6 @@ def _db_get_session(session_id):
             f'SELECT * FROM rhythm_breakpoints WHERE session_id = {ph} ORDER BY timestamp ASC', (session_id,)
         ).fetchall()
 
-        db.close()
-
         return {
             "session": dict(session),
             "states": [dict(s) for s in states],
@@ -634,6 +650,12 @@ def _db_get_session(session_id):
     except Exception as e:
         print(f"⚠️ rhythm session load error: {e}")
         return None
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 # ============================================

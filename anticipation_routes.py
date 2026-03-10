@@ -86,6 +86,7 @@ def get_db():
 
 def init_anticipation_tables():
     """Initialize anticipation database tables"""
+    conn = None
     try:
         conn = sqlite3.connect(DATABASE)
         cursor = conn.cursor()
@@ -142,10 +143,15 @@ def init_anticipation_tables():
         ''')
         
         conn.commit()
-        conn.close()
         print("✅ Anticipation tables initialized")
     except Exception as e:
         print(f"⚠️ Anticipation tables init error: {e}")
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 init_anticipation_tables()
 
