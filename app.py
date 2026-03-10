@@ -223,6 +223,42 @@ VAPID_PUBLIC_KEY = os.environ.get('VAPID_PUBLIC_KEY')
 VAPID_PRIVATE_KEY = os.environ.get('VAPID_PRIVATE_KEY')
 VAPID_EMAIL = os.environ.get('VAPID_EMAIL', 'mailto:admin@kafanek.com')
 
+# ============================================
+# STARTUP ENV VAR VALIDATION
+# ============================================
+def _validate_env_vars():
+    """Log warnings for missing critical env vars at startup."""
+    critical = {
+        'DATABASE_URL': os.environ.get('DATABASE_URL'),
+        'SECRET_KEY': os.environ.get('SECRET_KEY'),
+    }
+    important = {
+        'GEMINI_API_KEY': GEMINI_API_KEY,
+        'ANTHROPIC_API_KEY': ANTHROPIC_API_KEY,
+        'AZURE_TTS_KEY': os.environ.get('AZURE_TTS_KEY'),
+        'AZURE_TTS_REGION': os.environ.get('AZURE_TTS_REGION'),
+    }
+    optional = {
+        'TWILIO_ACCOUNT_SID': os.environ.get('TWILIO_ACCOUNT_SID'),
+        'SMTP_HOST': os.environ.get('SMTP_HOST'),
+        'WP_URL': WP_URL,
+    }
+
+    missing_critical = [k for k, v in critical.items() if not v]
+    missing_important = [k for k, v in important.items() if not v]
+    missing_optional = [k for k, v in optional.items() if not v]
+
+    if missing_critical:
+        logger.error(f"❌ CRITICAL env vars missing: {', '.join(missing_critical)}")
+    if missing_important:
+        logger.warning(f"⚠️ Important env vars missing (some features disabled): {', '.join(missing_important)}")
+    if missing_optional:
+        logger.info(f"ℹ️ Optional env vars not set: {', '.join(missing_optional)}")
+
+    return len(missing_critical) == 0
+
+_validate_env_vars()
+
 # Import Speech module
 from speech_routes import speech_bp
 app.register_blueprint(speech_bp)
@@ -1518,6 +1554,7 @@ def update_daily_stats(field):
         logger.error(f"Stats update error: {e}")
 
 @app.route('/api/admin/stats', methods=['GET'])
+@require_auth
 def get_admin_stats():
     """Získej statistiky pro admin dashboard"""
     try:
@@ -1576,6 +1613,7 @@ def get_admin_stats():
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/admin/users', methods=['GET'])
+@require_auth
 def get_admin_users():
     """Seznam všech uživatelů"""
     try:
@@ -1599,6 +1637,7 @@ def get_admin_users():
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/admin/conversations', methods=['GET'])
+@require_auth
 def get_admin_conversations():
     """Seznam všech konverzací pro admin"""
     try:
@@ -2448,13 +2487,33 @@ def index():
         'health': '/health'
     })
 
+@app.errorhandler(400)
+def bad_request(e):
+    return jsonify({'success': False, 'error': 'Neplatný požadavek', 'code': 400}), 400
+
+@app.errorhandler(401)
+def unauthorized(e):
+    return jsonify({'success': False, 'error': 'Přihlášení je vyžadováno', 'code': 401}), 401
+
+@app.errorhandler(403)
+def forbidden(e):
+    return jsonify({'success': False, 'error': 'Přístup zamítnut', 'code': 403}), 403
+
 @app.errorhandler(404)
 def not_found(e):
-    return jsonify({'success': False, 'error': 'Endpoint nenalezen'}), 404
+    return jsonify({'success': False, 'error': 'Endpoint nenalezen', 'code': 404}), 404
+
+@app.errorhandler(405)
+def method_not_allowed(e):
+    return jsonify({'success': False, 'error': 'Metoda není povolena', 'code': 405}), 405
+
+@app.errorhandler(429)
+def rate_limited(e):
+    return jsonify({'success': False, 'error': 'Příliš mnoho požadavků, zkuste později', 'code': 429}), 429
 
 @app.errorhandler(500)
 def server_error(e):
-    return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
+    return jsonify({'success': False, 'error': 'Interní chyba serveru', 'code': 500}), 500
 
 # Initialize database
 with app.app_context():

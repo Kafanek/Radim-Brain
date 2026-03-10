@@ -10,6 +10,7 @@ from datetime import datetime
 import math
 import hashlib
 import time
+from auth_middleware import require_auth, optional_auth
 
 dashboard_bp = Blueprint('dashboard', __name__)
 
@@ -206,6 +207,7 @@ def _get_risk_overview():
 # DASHBOARD ENDPOINTS
 # ============================================
 @dashboard_bp.route('/api/dashboard', methods=['GET'])
+@optional_auth
 def get_dashboard():
     """
     Agregační dashboard endpoint.
@@ -250,6 +252,7 @@ def get_dashboard():
 
 
 @dashboard_bp.route('/api/dashboard/quick', methods=['GET'])
+@optional_auth
 def get_dashboard_quick():
     """
     Lightweight dashboard – jen počty a stavy, žádné detaily.

@@ -582,6 +582,7 @@ def get_session_info(session_id):
     })
 
 @voice_runtime_bp.route('/prompt', methods=['GET'])
+@require_auth
 def get_claude_prompt():
     """
     Vrátí system prompt pro Claude Voice Runtime

@@ -9,6 +9,7 @@ from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
 import random
 import uuid
+from auth_middleware import require_auth, optional_auth
 
 seniors_bp = Blueprint('seniors', __name__)
 
@@ -193,6 +194,7 @@ def update_last_interaction(senior_id):
 # ============================================
 
 @seniors_bp.route('/api/seniors', methods=['GET'])
+@require_auth
 def list_seniors():
     """Seznam všech seniorů"""
     status_filter = request.args.get('status', None)
@@ -251,6 +253,7 @@ def list_seniors():
 
 
 @seniors_bp.route('/api/seniors/<senior_id>', methods=['GET'])
+@require_auth
 def get_senior(senior_id):
     """Detail jednoho seniora"""
     senior = DEMO_SENIORS.get(senior_id)
@@ -271,6 +274,7 @@ def get_senior(senior_id):
 
 
 @seniors_bp.route('/api/seniors', methods=['POST'])
+@require_auth
 def create_senior():
     """Vytvoření nového seniora"""
     data = request.json or {}
@@ -320,6 +324,7 @@ def create_senior():
 
 
 @seniors_bp.route('/api/seniors/<senior_id>', methods=['PUT'])
+@require_auth
 def update_senior(senior_id):
     """Aktualizace seniora"""
     if senior_id not in DEMO_SENIORS:

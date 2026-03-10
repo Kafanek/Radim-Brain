@@ -9,6 +9,7 @@ from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
 import random
 import math
+from auth_middleware import require_auth, optional_auth
 
 iot_bp = Blueprint('iot', __name__)
 
@@ -269,6 +270,7 @@ def generate_room_readings(senior_id):
 # ============================================
 
 @iot_bp.route('/api/iot/system/status', methods=['GET'])
+@require_auth
 def iot_system_status():
     """Celkový stav IoT systému"""
     total_sensors = sum(len(r["sensors"]) for r in ROOM_SENSORS.values())
@@ -342,6 +344,7 @@ def iot_system_status():
 
 
 @iot_bp.route('/api/iot/sensors/<senior_id>/vitals', methods=['GET'])
+@require_auth
 def get_vitals(senior_id):
     """Vitální znaky a senzorová data pro konkrétního seniora"""
     if senior_id not in ROOM_SENSORS:
@@ -392,6 +395,7 @@ def get_vitals(senior_id):
 
 
 @iot_bp.route('/api/iot/sensors/<senior_id>/history', methods=['GET'])
+@require_auth
 def get_vitals_history(senior_id):
     """Historie vitálních znaků za posledních 24h"""
     if senior_id not in ROOM_SENSORS:

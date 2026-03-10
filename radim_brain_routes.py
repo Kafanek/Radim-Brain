@@ -33,6 +33,7 @@ import traceback
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify
 import logging
+from auth_middleware import require_auth, optional_auth
 
 logger = logging.getLogger(__name__)
 
@@ -1094,6 +1095,7 @@ def brain_constants():
 
 
 @radim_brain_bp.route('/consciousness', methods=['POST'])
+@optional_auth
 def brain_consciousness():
     """
     Výpočet rovnice stavu vědomí (§6):
@@ -1114,6 +1116,7 @@ def brain_consciousness():
 
 
 @radim_brain_bp.route('/state', methods=['POST'])
+@optional_auth
 def brain_state():
     """
     Výpočet stavového vektoru Ψ(t) = (C, E, R, S)
@@ -1204,6 +1207,7 @@ def brain_state():
 
 
 @radim_brain_bp.route('/perceive', methods=['POST'])
+@optional_auth
 def brain_perceive():
     """
     PERCEPTION vrstva — zpracování senzorových dat.
@@ -1284,6 +1288,7 @@ def brain_perceive():
 
 
 @radim_brain_bp.route('/adapt', methods=['POST'])
+@optional_auth
 def brain_adapt():
     """
     Adaptace (Master Prompt §11):
@@ -1313,6 +1318,7 @@ def brain_adapt():
 
 
 @radim_brain_bp.route('/feedback', methods=['POST'])
+@optional_auth
 def brain_feedback():
     """
     Speech feedback from frontend (v2.1).

@@ -16,6 +16,7 @@ import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import Blueprint, request, jsonify
+from auth_middleware import require_auth, optional_auth
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,7 @@ def get_client_email(client_id):
 # ═══════════════════════════════════════════════════════════════
 
 @email_bp.route('/api/email/send', methods=['POST'])
+@require_auth
 def send_email():
     """Send email via SMTP.
 
@@ -195,6 +197,7 @@ def get_email_config():
 
 
 @email_bp.route('/api/email/client', methods=['POST'])
+@require_auth
 def set_client_email():
     """Set email address for a client.
 
@@ -248,6 +251,7 @@ def email_health():
 
 
 @email_bp.route('/api/email/client/<client_id>', methods=['GET'])
+@require_auth
 def get_client_email_route(client_id):
     """Get client's configured email."""
     email = get_client_email(client_id)
