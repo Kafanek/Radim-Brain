@@ -12,7 +12,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, g
-from auth_middleware import require_auth
+from auth_middleware import require_auth, optional_auth
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
@@ -932,12 +932,9 @@ def get_context(user_id):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @memory_bp.route('/feedback/<user_id>', methods=['POST'])
-@require_auth
+@optional_auth
 def submit_feedback(user_id):
-    """v284: Rozšířený feedback s brain RL propojením"""
-    auth_user_id = str(g.auth_user.get('id', ''))
-    if auth_user_id and auth_user_id != str(user_id):
-        return jsonify({"success": False, "error": "Přístup odepřen"}), 403
+    """v284: Rozšířený feedback s brain RL propojením (optional_auth pro frontend)"""
     data = request.get_json() or {}
 
     feedback_type = data.get("type", "neutral")  # positive/negative/neutral
@@ -1041,12 +1038,9 @@ def _crisis_escalate(user_id: str, brain_C: float = None, message: str = ""):
 
 
 @memory_bp.route('/caregiver/<user_id>', methods=['POST'])
-@require_auth
+@optional_auth
 def set_caregiver(user_id):
     """v284: Nastavit pečovatele pro seniora (pro krizové notifikace)"""
-    auth_user_id = str(g.auth_user.get('id', ''))
-    if auth_user_id and auth_user_id != str(user_id):
-        return jsonify({"success": False, "error": "Přístup odepřen"}), 403
 
     data = request.get_json() or {}
     caregiver_id = data.get("caregiver_id")
@@ -1068,7 +1062,7 @@ def set_caregiver(user_id):
 
 
 @memory_bp.route('/crisis-history/<user_id>', methods=['GET'])
-@require_auth
+@optional_auth
 def get_crisis_history(user_id):
     """v284: Historie krizových událostí pro daného seniora"""
     if not _DB_AVAILABLE:
