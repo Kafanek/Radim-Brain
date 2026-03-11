@@ -641,10 +641,12 @@ def radim_chat():
             except Exception as act_err:
                 logger.warning(f"Action processing warning: {act_err}")
 
-        # 🧠 Record interaction to memory (save history + update learning)
+        # 🧠 Record interaction to memory (v283: + brain state for baseline_C learning)
         if _ORCH_MEMORY_AVAILABLE and text_response != "Promiňte, zkuste to za chvíli. 🙏":
             try:
-                _orch_record(user_id, message, text_response)
+                _brain_C_val = brain_meta["psi"]["C"] if brain_meta else None
+                _brain_mode_val = brain_meta["mode"] if brain_meta else None
+                _orch_record(user_id, message, text_response, brain_C=_brain_C_val, brain_mode=_brain_mode_val)
             except Exception as rec_err:
                 logger.warning(f"Memory record warning: {rec_err}")
 

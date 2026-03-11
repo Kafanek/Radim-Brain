@@ -70,6 +70,17 @@ try:
 except ImportError:
     _CL_DB_AVAILABLE = False
 
+# v283: Brain Engine integration for /api/claude/chat
+try:
+    from radim_brain_routes import (
+        compute_psi_state as _cl_brain_psi,
+        derive_text_empathy_proxies as _cl_brain_proxies,
+        decision_model as _cl_brain_decision
+    )
+    _CL_BRAIN_AVAILABLE = True
+except ImportError:
+    _CL_BRAIN_AVAILABLE = False
+
 # Flask Blueprint
 claude_bp = Blueprint('claude', __name__, url_prefix='/api/claude')
 
@@ -317,10 +328,42 @@ def chat_with_radim():
         
         text = extract_text_from_response(response)
 
-        # 🧠 Record interaction to memory (save history + update learning)
+        # v283: Brain Engine — compute Ψ(t) for this interaction
+        brain_meta = None
+        brain_C_val = None
+        brain_mode_val = None
+        if _CL_BRAIN_AVAILABLE:
+            try:
+                mood_for_brain = _cl_detect_mood(message) if _CL_MEMORY_AVAILABLE else "neutral"
+                # Použij C/alpha z text rhythm pokud jsou k dispozici
+                try:
+                    C_brain, alpha_brain = float(C), float(alpha)
+                except Exception:
+                    C_brain, alpha_brain = _cl_tr_estimate(message, mood_for_brain) if _CL_TEXT_RHYTHM else (5.0, 0.2)
+                proxies = _cl_brain_proxies(message, mood_for_brain, alpha_brain)
+                psi_state = _cl_brain_psi(
+                    C_brain, alpha_brain,
+                    proxies["voice_tone"], proxies["hrv"], proxies["speech_tempo"],
+                    user_id=user_id
+                )
+                decision = _cl_brain_decision(
+                    C_brain, psi_state["psi"]["E"], psi_state["psi"]["R"], psi_state["psi"]["S"]
+                )
+                brain_meta = {
+                    "psi": psi_state["psi"],
+                    "mode": psi_state["mode"],
+                    "decision": decision["level"],
+                    "coherence": psi_state["coherence"]
+                }
+                brain_C_val = C_brain
+                brain_mode_val = psi_state["mode"]
+            except Exception as brain_err:
+                logger.warning(f"Brain in claude chat (non-fatal): {brain_err}")
+
+        # 🧠 Record interaction to memory (v283: + brain state for baseline_C learning)
         if _CL_MEMORY_AVAILABLE:
             try:
-                record_interaction(user_id, message, text)
+                record_interaction(user_id, message, text, brain_C=brain_C_val, brain_mode=brain_mode_val)
             except Exception as mem_err:
                 logger.warning(f"Memory record failed (non-fatal): {mem_err}")
 
@@ -346,6 +389,8 @@ def chat_with_radim():
         }
         if anticipation_meta:
             result["anticipation"] = anticipation_meta
+        if brain_meta:
+            result["brain"] = brain_meta
         return jsonify(result)
         
     except Exception as e:

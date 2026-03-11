@@ -288,7 +288,12 @@ def _default_learning() -> dict:
         "last_mood": "neutral",
         "interaction_count": 0,
         "successful_interactions": 0,
-        "last_interaction": None
+        "last_interaction": None,
+        # v283: Brain state learning
+        "C_history": [],          # Posledních 20 hodnot C pro výpočet baseline
+        "avg_C": None,            # Klouzavý průměr C (= learned baseline_C)
+        "last_brain_mode": None,  # Poslední brain mode (HARMONY/ALERT/CRISIS)
+        "crisis_count": 0         # Počet krizových stavů pro trend
     }
 
 
@@ -651,6 +656,21 @@ def build_personalized_prompt(user_id: str) -> str:
         )
         parts.append(f"- Nouzové kontakty: {contacts_str}")
 
+    # v283: Brain state context — learned baseline a trend
+    learning_raw = _db_load_learning(user_id)
+    avg_C = learning_raw.get("avg_C")
+    crisis_count = learning_raw.get("crisis_count", 0)
+    last_brain = learning_raw.get("last_brain_mode")
+    if avg_C is not None:
+        if avg_C < 8:
+            parts.append(f"- 🧠 Mozek: Uživatel je typicky klidný (avg C={avg_C:.1f})")
+        elif avg_C < 18:
+            parts.append(f"- 🧠 Mozek: Uživatel má střední zátěž (avg C={avg_C:.1f})")
+        else:
+            parts.append(f"- 🧠 Mozek: Uživatel bývá ve stresu (avg C={avg_C:.1f}) → buď extra klidný")
+    if crisis_count >= 3:
+        parts.append(f"- ⚠️ Historicky {crisis_count}× krizový stav → zvýšená opatrnost")
+
     parts.append("═══════════════════════════════════════════════════════════════")
 
     return "\n".join(parts)
@@ -957,8 +977,8 @@ def get_conversation_messages(user_id: str, limit: int = 10) -> list:
     history = _db_load_history(user_id, limit=limit)
     return [{"role": m["role"], "content": m["content"]} for m in history]
 
-def record_interaction(user_id: str, user_message: str, assistant_response: str):
-    """Zaznamenat interakci"""
+def record_interaction(user_id: str, user_message: str, assistant_response: str, brain_C: float = None, brain_mode: str = None):
+    """Zaznamenat interakci (v283: + brain state tracking)"""
     _db_add_history(user_id, "user", user_message)
     _db_add_history(user_id, "assistant", assistant_response)
 
@@ -973,7 +993,38 @@ def record_interaction(user_id: str, user_message: str, assistant_response: str)
     learning["last_mood"] = mood
     learning["interaction_count"] = learning.get("interaction_count", 0) + 1
     learning["last_interaction"] = datetime.utcnow().isoformat()
+
+    # v283: Brain state learning — track C history and compute rolling baseline
+    if brain_C is not None:
+        c_history = learning.get("C_history", [])
+        c_history.append(round(float(brain_C), 2))
+        # Udržuj posledních 20 hodnot
+        if len(c_history) > 20:
+            c_history = c_history[-20:]
+        learning["C_history"] = c_history
+        # Klouzavý průměr = learned baseline_C
+        learning["avg_C"] = round(sum(c_history) / len(c_history), 2)
+
+    if brain_mode:
+        learning["last_brain_mode"] = brain_mode
+        if brain_mode == "CRISIS":
+            learning["crisis_count"] = learning.get("crisis_count", 0) + 1
+
     _db_save_learning(user_id, learning)
+
+    # v283: Auto-update baseline_C v profilu pokud máme dostatek dat (5+ interakcí)
+    avg_C = learning.get("avg_C")
+    if avg_C is not None and learning.get("interaction_count", 0) >= 5:
+        try:
+            profile = _db_load_profile(user_id)
+            old_baseline = profile.get("baseline_C")
+            # Aktualizuj pouze pokud se výrazně liší (>1.0 rozdíl) nebo nebyl nastaven
+            if old_baseline is None or abs(float(old_baseline) - avg_C) > 1.0:
+                profile["baseline_C"] = avg_C
+                _db_save_profile(user_id, profile)
+                logger.info(f"🧠 [v283] baseline_C updated for {user_id}: {old_baseline} → {avg_C}")
+        except Exception as e:
+            logger.debug(f"baseline_C auto-update non-fatal: {e}")
 
 # Export
 __all__ = [
