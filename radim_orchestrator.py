@@ -567,8 +567,13 @@ def radim_chat():
                     "psi": psi_state["psi"],
                     "mode": psi_state["mode"],
                     "decision": decision["level"],
-                    "coherence": psi_state["coherence"]
+                    "coherence": psi_state["coherence"],
+                    "phi_index": psi_state.get("phi_index"),
+                    "rho_stability": psi_state.get("rho_stability")
                 }
+                # v282: Include rhythm return data if available
+                if psi_state.get("rhythm_return"):
+                    brain_meta["rhythm_return"] = psi_state["rhythm_return"]
                 personalized += f"\n\n[RADIM Brain: mode={psi_state['mode']}, coherence={psi_state['coherence']:.2f}]\n{decision['instructions']}"
             except Exception as brain_err:
                 logger.warning(f"Brain warning (non-fatal): {brain_err}")
@@ -643,10 +648,11 @@ def radim_chat():
             except Exception as rec_err:
                 logger.warning(f"Memory record warning: {rec_err}")
 
-        # 🧠 Brain reinforcement: adapt per-user after response
+        # 🧠 Brain reinforcement: adapt per-user after response (v282: richer signal)
         if _ORCH_BRAIN_AVAILABLE and text_response != "Promiňte, zkuste to za chvíli. 🙏":
             try:
-                _brain_reinforce(intent != "safety", user_id=user_id)
+                success = intent != "safety" and bool(text_response)
+                _brain_reinforce(success, user_id=user_id)
             except Exception:
                 pass
 

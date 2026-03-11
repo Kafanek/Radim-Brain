@@ -707,12 +707,33 @@ def compute_psi_state(C, alpha, voice_tone=0.5, hrv=0.5, speech_tempo=0.5, user_
     # Unified speech computation (v2.1: single source of truth)
     speech = compute_unified_speech(C, alpha, mode, user_id=user_id)
 
+    # v282: Rhythm Return Engine integration — enrich speech with motor/therapy data
+    rhythm_data = None
+    if RHYTHM_RETURN_AVAILABLE:
+        try:
+            motor_state = _rr_classify_motor(C)
+            therapy_bpm = _rr_therapy_bpm(C, alpha)
+            speech_rhythm = _rr_speech_rhythm(C, alpha)
+            rhythm_data = {
+                "motor_state": motor_state,
+                "therapy_bpm": therapy_bpm,
+                "speech_rhythm": speech_rhythm
+            }
+            # Blend RR speech rhythm into pause_ms if available
+            if speech_rhythm and isinstance(speech_rhythm, dict):
+                rr_pause = speech_rhythm.get("pause_ms")
+                if rr_pause and isinstance(rr_pause, (int, float)):
+                    # Weighted blend: 70% unified + 30% rhythm return
+                    speech["pause_ms"] = round(0.7 * speech["pause_ms"] + 0.3 * rr_pause)
+        except Exception as rr_err:
+            logger.debug(f"Rhythm Return in psi_state (non-fatal): {rr_err}")
+
     # Save Ψ(t) snapshot to DB
     psi_vec = {"C": round(C, 4), "E": E, "R": R, "S": S}
     if user_id:
         _db_save_brain_state(user_id, psi_vec, alpha, mode, coherence)
 
-    return {
+    result = {
         "psi": psi_vec,
         "mode": mode,
         "thresholds": {"T1": T1, "T2": T2},
@@ -745,6 +766,9 @@ def compute_psi_state(C, alpha, voice_tone=0.5, hrv=0.5, speech_tempo=0.5, user_
             "adaptation": empathy["adaptation"]
         }
     }
+    if rhythm_data:
+        result["rhythm_return"] = rhythm_data
+    return result
 
 
 def quasiperiodic_rhythm(omega, t_points=None):

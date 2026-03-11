@@ -2348,17 +2348,23 @@ def kal_consciousness_state():
                 C, alpha = early['C'], early['alpha']
             else:
                 C, alpha = 5.0, 0.2
-            psi = compute_psi_state(C, alpha)
-            return jsonify({
+            psi = compute_psi_state(C, alpha, user_id=user_id)
+            result = {
                 "harmony": psi["phi_index"],
                 "empathy": psi["psi"]["E"],
                 "phi_direction": psi["coherence"],
                 "chaos_index": psi["psi"]["S"],
                 "iteration": psi["psi"]["C"],
                 "mode": psi["mode"],
+                "coherence": psi["coherence"],
+                "rho_stability": psi.get("rho_stability"),
                 "status": "active",
                 "timestamp": now_iso()
-            }), 200
+            }
+            # v282: Include rhythm return data if available
+            if psi.get("rhythm_return"):
+                result["rhythm_return"] = psi["rhythm_return"]
+            return jsonify(result), 200
     except Exception as e:
         logger.warning(f"kal_consciousness_state error: {e}")
     return jsonify({
