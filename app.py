@@ -2160,16 +2160,211 @@ def api_emergency():
     }), 200
 
 # ============================================
+# v281: KAL Agent Endpoints — Brain Communication Bridge
+# ============================================
+
+_KAL_AGENT_PROMPTS = {
+    'core': '',
+    'agent_protector': '[Režim: Pan Ochránce — priorita bezpečí a klid. Odpovídej stručně, uklidňujícím tónem.]',
+    'agent_teacher': '[Režim: Pan Učitel — vzdělávací režim. Vysvětluj srozumitelně, použij příklady.]',
+    'agent_storyteller': '[Režim: Pan Vypravěč — kreativní vyprávění. Buď poetický, používej obrazy.]',
+    'agent_senior': '[Režim: Pan Senior — zjednodušený režim. Krátké věty, přátelský tón.]',
+    'agent_caller': '[Režim: Agent Caller — asistence s telefonáty. Nabídni zavolání, přepojení.]',
+    'agent_coder': '[Režim: Pan Programátor — technická podpora. Přesné instrukce krok za krokem.]',
+}
+
+def _get_agent_name(agent):
+    """Get Czech display name for agent type."""
+    names = {
+        'core': 'Pan Kafánek',
+        'agent_teacher': 'Pan Učitel Kafánek',
+        'agent_protector': 'Pan Ochránce Kafánek',
+        'agent_storyteller': 'Pan Vypravěč Kafánek',
+        'agent_senior': 'Pan Senior Kafánek',
+        'agent_caller': 'Agent Caller',
+        'agent_coder': 'Pan Programátor'
+    }
+    return names.get(agent, 'Pan Kafánek')
+
+
+@app.route('/kal/agents/interact', methods=['POST', 'OPTIONS'])
+@rate_limit(max_requests=30, window_seconds=60, key_func='ip')
+def kal_agents_interact():
+    """KAL Agent interaction — routes to appropriate agent via orchestrator (v281)"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    data = request.get_json() or {}
+    agent = data.get('agent', 'core')
+    message = data.get('message', '')
+    context = data.get('context', {})
+    session_id = data.get('session_id')
+
+    if not message:
+        return jsonify({'success': False, 'error': 'Message required'}), 400
+
+    agent_prefix = _KAL_AGENT_PROMPTS.get(agent, '')
+
+    try:
+        from radim_orchestrator import call_gemini_whatsapp
+        from intent_resolver import resolve_intent
+
+        # Intent resolver first (local NLU bypass)
+        resolved_text, resolved_intent, _ = resolve_intent(message)
+        if resolved_text:
+            response_text = resolved_text
+        else:
+            response_text, _ = call_gemini_whatsapp(
+                message, context, context.get('mode', 'senior'),
+                agent_prefix, None, '', None
+            )
+
+        # Get brain state for consciousness_state field
+        consciousness_state = None
+        phi_metrics = None
+        if RADIM_BRAIN_AVAILABLE:
+            from radim_brain_routes import compute_psi_state, derive_text_empathy_proxies
+            proxies = derive_text_empathy_proxies(message, 'neutral', 0.2)
+            psi = compute_psi_state(5.0, 0.2, proxies['voice_tone'], proxies['hrv'], proxies['speech_tempo'])
+            consciousness_state = {
+                'mode': psi['mode'],
+                'coherence': psi['coherence'],
+                'C': psi['psi']['C'],
+                'E': psi['psi']['E']
+            }
+            phi_metrics = {
+                'phi_index': psi['phi_index'],
+                'rho_stability': psi['rho_stability']
+            }
+
+        return jsonify({
+            'success': True,
+            'response': response_text or 'Promiňte, zkuste to za chvíli.',
+            'consciousness_state': consciousness_state,
+            'phi_metrics': phi_metrics,
+            'agent': agent,
+            'agentName': _get_agent_name(agent)
+        }), 200
+
+    except Exception as e:
+        logger.error(f"kal_agents_interact error: {e}")
+        return jsonify({
+            'success': False,
+            'response': 'Omlouvám se, momentálně nejsem dostupný.',
+            'agent': agent,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/kal/timing/calculate', methods=['POST', 'OPTIONS'])
+def kal_timing_calculate():
+    """φ-based timing calculation for text (v281)"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    data = request.get_json() or {}
+    text = data.get('text', '')
+
+    try:
+        if RADIM_BRAIN_AVAILABLE:
+            from radim_brain_routes import compute_unified_speech
+            from intent_resolver import quick_estimate_from_text
+            C_est, alpha_est = quick_estimate_from_text(text)
+            mode = "HARMONY" if C_est < 12 else ("ALERT" if C_est < 27 else "CRISIS")
+            speech = compute_unified_speech(C_est, alpha_est, mode)
+            # Parse rate string (e.g. "-5%") to WPM offset
+            rate_str = speech.get('rate', '+0%')
+            try:
+                rate_offset = int(rate_str.replace('%', '').replace('+', ''))
+            except (ValueError, AttributeError):
+                rate_offset = 0
+            return jsonify({
+                'pause_ms': speech.get('pause_ms', 618),
+                'wpm': 120 + rate_offset,
+                'phi_ratio': 1.618,
+                'mode': mode
+            }), 200
+    except Exception as e:
+        logger.warning(f"kal_timing_calculate error: {e}")
+
+    return jsonify({'pause_ms': 800, 'wpm': 120, 'phi_ratio': 1.618, 'mode': 'HARMONY'}), 200
+
+
+@app.route('/kal/safety/check', methods=['POST', 'OPTIONS'])
+def kal_safety_check():
+    """Safety/crisis detection for message (v281)"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    data = request.get_json() or {}
+    message = data.get('message', '')
+
+    try:
+        from intent_resolver import quick_estimate_from_text, _CRISIS_WORDS, _STRESS_WORDS
+        C_est, alpha_est = quick_estimate_from_text(message)
+        text_lower = message.lower()
+
+        crisis_hits = sum(1 for w in _CRISIS_WORDS if w in text_lower)
+        stress_hits = sum(1 for w in _STRESS_WORDS if w in text_lower)
+
+        alert = None
+        severity = 'low'
+        recommendation = None
+
+        if crisis_hits > 0 or C_est >= 27:
+            alert = 'panic'
+            severity = 'critical'
+            recommendation = 'Okamžitě kontaktujte záchrannou službu nebo rodinu.'
+        elif stress_hits >= 2 or C_est >= 12:
+            alert = 'stress'
+            severity = 'medium'
+            recommendation = 'Uživatel může potřebovat podporu. Zvažte kontaktování rodiny.'
+        elif stress_hits == 1:
+            alert = 'mild_stress'
+            severity = 'low'
+            recommendation = 'Monitorujte situaci.'
+
+        return jsonify({
+            'alert': alert,
+            'severity': severity,
+            'recommendation': recommendation,
+            'shouldEscalate': alert == 'panic',
+            'C_estimate': round(C_est, 1),
+            'alpha_estimate': round(alpha_est, 2)
+        }), 200
+
+    except Exception as e:
+        logger.warning(f"kal_safety_check error: {e}")
+
+    return jsonify({'alert': None, 'severity': 'low', 'recommendation': None, 'shouldEscalate': False}), 200
+
 
 @app.route("/kal/consciousness/state")
 def kal_consciousness_state():
-    """Consciousness state for frontend dashboard"""
+    """Consciousness state — real Ψ(t) from brain engine (v281)"""
+    try:
+        if RADIM_BRAIN_AVAILABLE:
+            from radim_brain_routes import compute_psi_state, get_early_psi
+            user_id = request.args.get('user_id', 'default')
+            early = get_early_psi(user_id)
+            if early:
+                C, alpha = early['C'], early['alpha']
+            else:
+                C, alpha = 5.0, 0.2
+            psi = compute_psi_state(C, alpha)
+            return jsonify({
+                "harmony": psi["phi_index"],
+                "empathy": psi["psi"]["E"],
+                "phi_direction": psi["coherence"],
+                "chaos_index": psi["psi"]["S"],
+                "iteration": psi["psi"]["C"],
+                "mode": psi["mode"],
+                "status": "active",
+                "timestamp": now_iso()
+            }), 200
+    except Exception as e:
+        logger.warning(f"kal_consciousness_state error: {e}")
     return jsonify({
-        "status": "active",
-        "level": 0.85,
-        "phi_balance": 1.618,
-        "emotions": {"calm": 0.8, "curious": 0.6, "empathetic": 0.9},
-        "timestamp": now_iso()
+        "harmony": 0.85, "empathy": 0.7, "phi_direction": 0.8,
+        "chaos_index": 0.1, "iteration": 5.0, "mode": "HARMONY",
+        "status": "active", "timestamp": now_iso()
     }), 200
 
 @app.route("/health/ready")
