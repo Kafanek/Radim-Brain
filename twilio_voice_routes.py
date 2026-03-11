@@ -15,9 +15,50 @@ import logging
 import requests as http_requests
 from datetime import datetime
 from xml.sax.saxutils import escape as xml_escape
-from flask import Blueprint, request, jsonify, Response
+from functools import wraps
+from flask import Blueprint, request, jsonify, Response, abort
+from auth_middleware import require_auth
 
 logger = logging.getLogger(__name__)
+
+
+def validate_twilio_signature(f):
+    """Decorator to validate incoming Twilio webhook requests.
+    Verifies the X-Twilio-Signature header using TWILIO_AUTH_TOKEN.
+    Skips validation if TWILIO_AUTH_TOKEN is not set (dev mode).
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
+        if not auth_token:
+            # Dev mode — no validation
+            return f(*args, **kwargs)
+
+        signature = request.headers.get("X-Twilio-Signature", "")
+        if not signature:
+            logger.warning("⚠️ Twilio webhook call without X-Twilio-Signature header")
+            abort(403)
+
+        try:
+            from twilio.request_validator import RequestValidator
+            validator = RequestValidator(auth_token)
+
+            # Build the full URL Twilio signed against
+            url = request.url
+            # Twilio signs against form data for POST
+            post_vars = request.form.to_dict() if request.method == "POST" else {}
+
+            if not validator.validate(url, post_vars, signature):
+                logger.warning(f"⚠️ Twilio signature validation failed for {request.path}")
+                abort(403)
+        except ImportError:
+            logger.warning("⚠️ twilio package not installed — skipping signature validation")
+        except Exception as e:
+            logger.error(f"❌ Twilio signature validation error: {e}")
+            abort(403)
+
+        return f(*args, **kwargs)
+    return decorated
 
 # Centralized utilities — no more duplicated nameday/time/greeting code
 from radim_shared import get_nameday as _get_nameday, build_time_context as _shared_build_time_context, get_greeting as _shared_get_greeting
@@ -451,6 +492,7 @@ def lookup_contact_phone(target, caller_phone):
 # ============================================================================
 
 @twilio_bp.route('/voice', methods=['POST'])
+@validate_twilio_signature
 def twilio_voice_webhook():
     """Incoming call handler — Twilio webhook"""
     try:
@@ -526,6 +568,7 @@ def twilio_voice_webhook():
 
 
 @twilio_bp.route('/gather', methods=['POST'])
+@validate_twilio_signature
 def twilio_gather_webhook():
     """Speech recognized — Twilio STT webhook"""
     try:
@@ -663,6 +706,7 @@ def twilio_gather_webhook():
 
 
 @twilio_bp.route('/status', methods=['POST'])
+@validate_twilio_signature
 def twilio_status_webhook():
     """Call status callback"""
     try:
@@ -682,6 +726,7 @@ def twilio_status_webhook():
 
 
 @twilio_bp.route('/dial-status', methods=['POST'])
+@validate_twilio_signature
 def twilio_dial_status_webhook():
     """Transfer result handler"""
     try:
@@ -711,6 +756,7 @@ def twilio_dial_status_webhook():
 # ============================================================================
 
 @twilio_bp.route('/call', methods=['POST', 'OPTIONS'])
+@require_auth
 def initiate_outgoing_call():
     """Initiate outgoing call from frontend"""
     if request.method == 'OPTIONS':
@@ -779,6 +825,7 @@ def get_active_calls():
 
 
 @twilio_bp.route('/register-caller', methods=['POST', 'OPTIONS'])
+@require_auth
 def register_known_caller():
     """Register caller for personalized greetings"""
     if request.method == 'OPTIONS':
@@ -805,6 +852,7 @@ def register_known_caller():
 
 
 @twilio_bp.route('/invite', methods=['POST', 'OPTIONS'])
+@require_auth
 def send_call_invitation():
     """Send SMS invitation with Jitsi join link"""
     if request.method == 'OPTIONS':

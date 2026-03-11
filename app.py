@@ -27,6 +27,7 @@ from dotenv import load_dotenv
 from database import get_db_for_flask, close_db_for_flask, get_connection
 from database import init_db as db_init_db, is_postgres
 from auth_middleware import require_auth, require_premium, optional_auth, decode_jwt
+from rate_limiter import rate_limit
 
 load_dotenv()
 
@@ -438,6 +439,7 @@ def azure_tts_preflight():
     return response, 200
 
 @app.route('/api/azure/tts', methods=['POST'])
+@rate_limit(max_requests=60, window_seconds=60, key_func='ip')
 def azure_tts_proxy():
     """Azure TTS Proxy - Antonín voice"""
     if not AZURE_TTS_KEY:
@@ -564,6 +566,7 @@ def elevenlabs_tts_preflight():
     return response, 200
 
 @app.route('/api/elevenlabs/tts', methods=['POST'])
+@rate_limit(max_requests=40, window_seconds=60, key_func='ip')
 def elevenlabs_tts_proxy():
     """ElevenLabs TTS Proxy - Pan Kafánek voice"""
     try:
@@ -1680,6 +1683,8 @@ def get_ai_settings():
     })
 
 @app.route('/api/ai/chat', methods=['POST'])
+@require_auth
+@rate_limit(max_requests=20, window_seconds=60, key_func='user')
 def ai_chat():
     """Přímý chat s AI (bez ukládání do konverzace)"""
     try:

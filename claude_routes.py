@@ -13,6 +13,7 @@ import logging
 from datetime import datetime
 from flask import Blueprint, request, jsonify, g
 from auth_middleware import require_auth, optional_auth
+from rate_limiter import rate_limit
 
 # Anthropic Claude SDK
 try:
@@ -197,6 +198,7 @@ def get_nameday():
 
 @claude_bp.route('/chat', methods=['POST'])
 @require_auth
+@rate_limit(max_requests=30, window_seconds=60, key_func='user')
 def chat_with_radim():
     """
     💬 Hlavní chat endpoint s Claude + Web Search
@@ -529,6 +531,7 @@ def get_weather():
 
 @claude_bp.route('/quiz', methods=['POST'])
 @require_auth
+@rate_limit(max_requests=10, window_seconds=60, key_func='user')
 def generate_quiz():
     """🎮 Vygenerovat kvíz"""
     topic = 'general'
@@ -602,6 +605,7 @@ FORMÁT (pouze JSON):
 
 @claude_bp.route('/story', methods=['POST'])
 @require_auth
+@rate_limit(max_requests=10, window_seconds=60, key_func='user')
 def generate_story():
     """📖 Vygenerovat příběh"""
     theme = 'nature'
