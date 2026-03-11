@@ -934,7 +934,7 @@ def get_context(user_id):
 @memory_bp.route('/feedback/<user_id>', methods=['POST'])
 @require_auth
 def submit_feedback(user_id):
-    """Uložit feedback pro učení"""
+    """v284: Rozšířený feedback s brain RL propojením"""
     auth_user_id = str(g.auth_user.get('id', ''))
     if auth_user_id and auth_user_id != str(user_id):
         return jsonify({"success": False, "error": "Přístup odepřen"}), 403
@@ -942,12 +942,14 @@ def submit_feedback(user_id):
 
     feedback_type = data.get("type", "neutral")  # positive/negative/neutral
     comment = data.get("comment", "")
+    message_id = data.get("message_id")  # v284: optional message reference
 
     learning = _db_load_learning(user_id)
 
     if feedback_type == "positive":
         learning["successful_interactions"] = learning.get("successful_interactions", 0) + 1
     elif feedback_type == "negative":
+        learning["negative_feedback_count"] = learning.get("negative_feedback_count", 0) + 1
         if "příliš dlouhé" in comment.lower():
             learning["preferred_length"] = "short"
         elif "příliš krátké" in comment.lower():
@@ -955,13 +957,154 @@ def submit_feedback(user_id):
 
     _db_save_learning(user_id, learning)
 
-    logger.info(f"Feedback from {user_id}: {feedback_type}")
+    # v284: Propojení na brain RL — thumbs feedback ovlivní adaptaci
+    rl_result = None
+    try:
+        from radim_brain_routes import reinforcement_update as _rl_update
+        if feedback_type in ("positive", "negative"):
+            rl_result = _rl_update(
+                success=(feedback_type == "positive"),
+                user_id=user_id,
+                signal_type="chat_feedback"
+            )
+    except Exception as rl_err:
+        logger.debug(f"v284 RL feedback non-fatal: {rl_err}")
+
+    logger.info(f"Feedback from {user_id}: {feedback_type} (RL: {rl_result is not None})")
 
     return jsonify({
         "success": True,
         "message": "Děkuji za zpětnou vazbu!",
+        "rl_update": rl_result,
         "timestamp": datetime.utcnow().isoformat()
     })
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v284: CRISIS ESCALATION SYSTEM
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _crisis_escalate(user_id: str, brain_C: float = None, message: str = ""):
+    """
+    v284: Eskalace krize — notifikace pečovatele.
+    Volá se automaticky při brain_mode == CRISIS.
+    """
+    try:
+        profile = _db_load_profile(user_id)
+        caregiver_id = profile.get("caregiver_id")
+
+        if not caregiver_id:
+            logger.warning(f"🚨 [v284] CRISIS for {user_id} but no caregiver configured!")
+            return
+
+        # Ulož krizovou událost do DB
+        if _DB_AVAILABLE:
+            db = None
+            try:
+                db = get_connection()
+                if is_postgres():
+                    db.execute(
+                        "INSERT INTO crisis_events (user_id, caregiver_id, brain_c, message_excerpt, created_at) "
+                        "VALUES (%s, %s, %s, %s, %s)",
+                        (user_id, caregiver_id, brain_C, (message or "")[:100], datetime.utcnow().isoformat())
+                    )
+                else:
+                    db.execute(
+                        "INSERT INTO crisis_events (user_id, caregiver_id, brain_c, message_excerpt, created_at) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (user_id, caregiver_id, brain_C, (message or "")[:100], datetime.utcnow().isoformat())
+                    )
+                db.commit()
+            except Exception as db_err:
+                logger.debug(f"Crisis event DB save non-fatal: {db_err}")
+            finally:
+                if db:
+                    try:
+                        db.close()
+                    except Exception:
+                        pass
+
+        # Push notifikace pečovateli (fire & forget)
+        try:
+            from app import send_push_notification
+            send_push_notification(
+                caregiver_id,
+                "🚨 Krizová situace",
+                f"Senior {user_id} potřebuje pomoc. Mozek detekoval krizový stav.",
+                data={"type": "crisis", "senior_id": user_id, "brain_C": brain_C}
+            )
+            logger.info(f"🚨 [v284] Crisis notification sent to caregiver {caregiver_id} for {user_id}")
+        except Exception as push_err:
+            logger.warning(f"🚨 [v284] Push notification failed: {push_err}")
+
+    except Exception as e:
+        logger.error(f"🚨 [v284] Crisis escalation error: {e}")
+
+
+@memory_bp.route('/caregiver/<user_id>', methods=['POST'])
+@require_auth
+def set_caregiver(user_id):
+    """v284: Nastavit pečovatele pro seniora (pro krizové notifikace)"""
+    auth_user_id = str(g.auth_user.get('id', ''))
+    if auth_user_id and auth_user_id != str(user_id):
+        return jsonify({"success": False, "error": "Přístup odepřen"}), 403
+
+    data = request.get_json() or {}
+    caregiver_id = data.get("caregiver_id")
+
+    if not caregiver_id:
+        return jsonify({"success": False, "error": "caregiver_id is required"}), 400
+
+    profile = _db_load_profile(user_id)
+    profile["caregiver_id"] = caregiver_id
+    _db_save_profile(user_id, profile)
+
+    logger.info(f"🛡️ [v284] Caregiver set: {user_id} → {caregiver_id}")
+
+    return jsonify({
+        "success": True,
+        "message": f"Pečovatel {caregiver_id} nastaven pro {user_id}",
+        "timestamp": datetime.utcnow().isoformat()
+    })
+
+
+@memory_bp.route('/crisis-history/<user_id>', methods=['GET'])
+@require_auth
+def get_crisis_history(user_id):
+    """v284: Historie krizových událostí pro daného seniora"""
+    if not _DB_AVAILABLE:
+        return jsonify({"success": True, "events": []})
+
+    events = []
+    db = None
+    try:
+        db = get_connection()
+        if is_postgres():
+            cursor = db.execute(
+                "SELECT * FROM crisis_events WHERE user_id = %s ORDER BY created_at DESC LIMIT 20", (user_id,)
+            )
+        else:
+            cursor = db.execute(
+                "SELECT * FROM crisis_events WHERE user_id = ? ORDER BY created_at DESC LIMIT 20", (user_id,)
+            )
+        rows = cursor.fetchall() if cursor else []
+        for row in rows:
+            events.append({
+                "user_id": row[1] if isinstance(row, (list, tuple)) else row.get("user_id", user_id),
+                "brain_c": row[3] if isinstance(row, (list, tuple)) else row.get("brain_c"),
+                "message_excerpt": row[4] if isinstance(row, (list, tuple)) else row.get("message_excerpt", ""),
+                "created_at": row[5] if isinstance(row, (list, tuple)) else row.get("created_at", "")
+            })
+    except Exception as e:
+        logger.debug(f"Crisis history fetch non-fatal: {e}")
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+    return jsonify({"success": True, "events": events})
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # EXPORT FUNCTIONS FOR CLAUDE_ROUTES
@@ -1009,6 +1152,8 @@ def record_interaction(user_id: str, user_message: str, assistant_response: str,
         learning["last_brain_mode"] = brain_mode
         if brain_mode == "CRISIS":
             learning["crisis_count"] = learning.get("crisis_count", 0) + 1
+            # v284: Crisis escalation — notifikace pečovatele
+            _crisis_escalate(user_id, brain_C, user_message)
 
     _db_save_learning(user_id, learning)
 

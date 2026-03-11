@@ -691,6 +691,19 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_brain_feedback_user ON brain_feedback(user_id);
         ''')
 
+        # v284: Crisis events
+        db.execute('''
+            CREATE TABLE IF NOT EXISTS crisis_events (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                caregiver_id TEXT,
+                brain_c REAL,
+                message_excerpt TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_crisis_events_user ON crisis_events(user_id);
+        ''')
+
         # v3.8 migration: add multiparty columns to existing table
         try:
             db.execute("ALTER TABLE telemedicine_consultations ADD COLUMN IF NOT EXISTS title TEXT")
@@ -1086,6 +1099,17 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             CREATE INDEX IF NOT EXISTS idx_brain_feedback_user ON brain_feedback(user_id);
+
+            -- v284: Crisis events
+            CREATE TABLE IF NOT EXISTS crisis_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                caregiver_id TEXT,
+                brain_c REAL,
+                message_excerpt TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_crisis_events_user ON crisis_events(user_id);
         ''')
 
         # v3.8 migration: add multiparty columns to existing table
