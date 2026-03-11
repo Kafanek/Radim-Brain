@@ -1160,7 +1160,15 @@ def brain_state():
 
     C = clamp(float(data.get('C', 5.0)), 0.0, C_MAX)
     alpha = clamp(float(data.get('alpha', 0.0)), 0.0, 1.0)
-    voice_tone = clamp(float(data.get('voice_tone', 0.5)), 0.0, 1.0)
+
+    # voice_tone: accept string labels or float (0-1)
+    _vt_raw = data.get('voice_tone', 0.5)
+    _TONE_MAP = {'calm': 0.3, 'happy': 0.2, 'sad': 0.6, 'distressed': 0.8, 'angry': 0.9}
+    try:
+        voice_tone = clamp(float(_vt_raw), 0.0, 1.0)
+    except (ValueError, TypeError):
+        voice_tone = _TONE_MAP.get(str(_vt_raw).lower(), 0.5)
+
     hrv = clamp(float(data.get('hrv', 0.5)), 0.0, 1.0)
     speech_tempo = clamp(float(data.get('speech_tempo', 0.5)), 0.0, 1.0)
     n = int(data.get('n', 5))
