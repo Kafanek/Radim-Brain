@@ -711,6 +711,24 @@ def init_db():
         except Exception:
             pass
 
+        # v3.9 migration: audit_log table for GDPR compliance
+        db.execute('''
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT,
+                action TEXT NOT NULL,
+                resource TEXT,
+                detail TEXT,
+                ip_address TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        try:
+            db.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action)")
+        except Exception:
+            pass
+
         # Upsert Radim AI assistant
         db.execute('''
             INSERT INTO chat_users (id, name, role, online, settings)

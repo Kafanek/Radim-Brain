@@ -34,6 +34,62 @@ except ImportError:
 MAX_HISTORY = 50  # Posledních 50 zpráv v DB
 
 
+# ============================================================================
+# GDPR CONSENT — kontrola souhlasu s ukládáním dat
+# ============================================================================
+
+def get_gdpr_consent(user_id: str) -> dict:
+    """Načti GDPR souhlas uživatele z profilu.
+    Vrací dict s klíči: data_processing, chat_history, health_data (bool)"""
+    profile = _db_load_profile(user_id)
+    return profile.get("gdpr_consent", {
+        "data_processing": False,
+        "chat_history": False,
+        "health_data": False,
+    })
+
+
+def audit_log(user_id: str, action: str, resource: str = None, detail: str = None, ip_address: str = None):
+    """Zapiš audit log záznam pro GDPR compliance.
+    Actions: login, logout, consent_change, data_export, data_delete, chat_access, profile_access"""
+    if not _DB_AVAILABLE:
+        return
+    db = None
+    try:
+        db = get_connection()
+        if is_postgres():
+            db.execute(
+                "INSERT INTO audit_log (user_id, action, resource, detail, ip_address) VALUES (%s, %s, %s, %s, %s)",
+                (user_id, action, resource, detail, ip_address)
+            )
+        else:
+            db.execute(
+                "INSERT INTO audit_log (user_id, action, resource, detail, ip_address) VALUES (?, ?, ?, ?, ?)",
+                (user_id, action, resource, detail, ip_address)
+            )
+        db.commit()
+    except Exception as e:
+        logger.warning(f"Audit log write error (non-fatal): {e}")
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+
+def save_gdpr_consent(user_id: str, consent: dict):
+    """Ulož GDPR souhlas do profilu uživatele (Heroku PG)"""
+    profile = _db_load_profile(user_id)
+    profile["gdpr_consent"] = {
+        "data_processing": bool(consent.get("data_processing", False)),
+        "chat_history": bool(consent.get("chat_history", False)),
+        "health_data": bool(consent.get("health_data", False)),
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+    _db_save_profile(user_id, profile)
+
+
 def _db_load_profile(user_id: str) -> dict:
     """Load user profile from DB"""
     if not _DB_AVAILABLE:
@@ -732,6 +788,49 @@ def health_check():
     })
 
 # ─────────────────────────────────────────────────────────────────────────────
+# GDPR CONSENT SYNC (frontend → Heroku backend)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@memory_bp.route('/gdpr-consent/<user_id>', methods=['POST'])
+@require_auth
+def sync_gdpr_consent(user_id):
+    """Sync GDPR consent from WordPress/frontend to Heroku backend.
+    Called after user grants/revokes consent in GDPR dialog."""
+    data = request.get_json() or {}
+    consent = {
+        "data_processing": bool(data.get("data_processing", False)),
+        "chat_history": bool(data.get("chat_history", False)),
+        "health_data": bool(data.get("health_data", False)),
+    }
+    save_gdpr_consent(user_id, consent)
+    audit_log(user_id, "consent_change", "gdpr", str(consent), request.remote_addr)
+    logger.info(f"🔒 [GDPR] Consent synced for user={user_id}: {consent}")
+
+    # If user revoked chat_history consent, delete existing history
+    if not consent["chat_history"]:
+        try:
+            db = get_connection()
+            p = "%s" if is_postgres() else "?"
+            db.execute(f"DELETE FROM memory_history WHERE user_id = {p}", (user_id,))
+            db.commit()
+            if db:
+                db.close()
+            logger.info(f"🗑️ [GDPR] Chat history deleted for user={user_id} (consent revoked)")
+        except Exception as e:
+            logger.warning(f"GDPR history cleanup error: {e}")
+
+    return jsonify({"success": True, "consent": consent})
+
+
+@memory_bp.route('/gdpr-consent/<user_id>', methods=['GET'])
+@require_auth
+def get_gdpr_consent_route(user_id):
+    """Get current GDPR consent status."""
+    consent = get_gdpr_consent(user_id)
+    return jsonify({"success": True, "consent": consent})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # USER PROFILE
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -816,6 +915,7 @@ def delete_profile(user_id):
     if auth_user_id and auth_user_id != str(user_id):
         return jsonify({"success": False, "error": "Přístup odepřen"}), 403
     _db_delete_profile(user_id)
+    audit_log(user_id, "data_delete", "all_user_data", "GDPR profile deletion", request.remote_addr)
 
     logger.info(f"Profile deleted for user: {user_id}")
 
@@ -1114,8 +1214,50 @@ def get_conversation_messages(user_id: str, limit: int = 10) -> list:
     history = _db_load_history(user_id, limit=limit)
     return [{"role": m["role"], "content": m["content"]} for m in history]
 
+def _update_learning_stats(user_id: str, user_message: str, brain_C: float = None, brain_mode: str = None):
+    """Aktualizuj anonymizované learning stats BEZ ukládání obsahu zpráv.
+    Používá se i bez GDPR chat_history souhlasu."""
+    try:
+        learning = _db_load_learning(user_id)
+        topic = detect_topic(user_message)
+        mood = detect_mood(user_message)
+
+        topics = learning.get("topics", {})
+        topics[topic] = topics.get(topic, 0) + 1
+        learning["topics"] = topics
+        learning["last_mood"] = mood
+        learning["interaction_count"] = learning.get("interaction_count", 0) + 1
+        learning["last_interaction"] = datetime.utcnow().isoformat()
+
+        if brain_C is not None:
+            c_history = learning.get("C_history", [])
+            c_history.append(round(float(brain_C), 2))
+            if len(c_history) > 20:
+                c_history = c_history[-20:]
+            learning["C_history"] = c_history
+            learning["avg_C"] = round(sum(c_history) / len(c_history), 2)
+
+        if brain_mode:
+            learning["last_brain_mode"] = brain_mode
+            if brain_mode == "CRISIS":
+                learning["crisis_count"] = learning.get("crisis_count", 0) + 1
+                _crisis_escalate(user_id, brain_C, user_message)
+
+        _db_save_learning(user_id, learning)
+    except Exception as e:
+        logger.warning(f"Learning stats update error (non-fatal): {e}")
+
+
 def record_interaction(user_id: str, user_message: str, assistant_response: str, brain_C: float = None, brain_mode: str = None):
-    """Zaznamenat interakci (v283: + brain state tracking)"""
+    """Zaznamenat interakci (v283: + brain state tracking, v290: + GDPR consent check)"""
+    # GDPR enforcement — ukládej chat historii POUZE pokud uživatel souhlasil
+    consent = get_gdpr_consent(user_id)
+    if not consent.get("chat_history", False):
+        logger.info(f"🔒 [GDPR] Skipping chat history save for user={user_id} (no chat_history consent)")
+        # Stále aktualizuj learning stats (anonymizované), ale ne obsah zpráv
+        _update_learning_stats(user_id, user_message, brain_C, brain_mode)
+        return
+
     _db_add_history(user_id, "user", user_message)
     _db_add_history(user_id, "assistant", assistant_response)
 
