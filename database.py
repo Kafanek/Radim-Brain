@@ -704,6 +704,93 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_crisis_events_user ON crisis_events(user_id);
         ''')
 
+        # v5.0: IoT Bridge — sensor data, devices, alerts
+        db.execute('''
+            CREATE TABLE IF NOT EXISTS iot_devices (
+                id SERIAL PRIMARY KEY,
+                device_id TEXT UNIQUE NOT NULL,
+                room_id TEXT NOT NULL,
+                user_id TEXT,
+                device_type TEXT NOT NULL,
+                name TEXT,
+                model TEXT,
+                firmware TEXT,
+                last_seen TIMESTAMP,
+                status TEXT DEFAULT 'active',
+                config JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        try:
+            db.execute("CREATE INDEX IF NOT EXISTS idx_iot_devices_room ON iot_devices(room_id)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_iot_devices_user ON iot_devices(user_id)")
+        except Exception:
+            pass
+
+        db.execute('''
+            CREATE TABLE IF NOT EXISTS iot_sensor_data (
+                id SERIAL PRIMARY KEY,
+                device_id TEXT NOT NULL,
+                room_id TEXT NOT NULL,
+                sensor_type TEXT NOT NULL,
+                value REAL NOT NULL,
+                unit TEXT,
+                metadata JSONB DEFAULT '{}',
+                recorded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        try:
+            db.execute("CREATE INDEX IF NOT EXISTS idx_iot_data_device ON iot_sensor_data(device_id)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_iot_data_room ON iot_sensor_data(room_id)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_iot_data_type ON iot_sensor_data(sensor_type)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_iot_data_recorded ON iot_sensor_data(recorded_at)")
+        except Exception:
+            pass
+
+        db.execute('''
+            CREATE TABLE IF NOT EXISTS iot_alert_rules (
+                id SERIAL PRIMARY KEY,
+                room_id TEXT NOT NULL,
+                sensor_type TEXT NOT NULL,
+                condition TEXT NOT NULL,
+                threshold REAL NOT NULL,
+                severity TEXT DEFAULT 'warning',
+                notify_channels TEXT DEFAULT 'push',
+                cooldown_minutes INTEGER DEFAULT 15,
+                enabled BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        try:
+            db.execute("CREATE INDEX IF NOT EXISTS idx_iot_rules_room ON iot_alert_rules(room_id)")
+        except Exception:
+            pass
+
+        db.execute('''
+            CREATE TABLE IF NOT EXISTS iot_alerts (
+                id SERIAL PRIMARY KEY,
+                rule_id INTEGER,
+                room_id TEXT NOT NULL,
+                user_id TEXT,
+                sensor_type TEXT NOT NULL,
+                value REAL,
+                threshold REAL,
+                severity TEXT DEFAULT 'warning',
+                message TEXT,
+                notified_channels TEXT DEFAULT '[]',
+                acknowledged_at TIMESTAMP,
+                acknowledged_by TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        try:
+            db.execute("CREATE INDEX IF NOT EXISTS idx_iot_alerts_room ON iot_alerts(room_id)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_iot_alerts_created ON iot_alerts(created_at)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_iot_alerts_severity ON iot_alerts(severity)")
+        except Exception:
+            pass
+
         # v3.8 migration: add multiparty columns to existing table
         try:
             db.execute("ALTER TABLE telemedicine_consultations ADD COLUMN IF NOT EXISTS title TEXT")
@@ -1128,6 +1215,73 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             CREATE INDEX IF NOT EXISTS idx_crisis_events_user ON crisis_events(user_id);
+
+            -- v5.0: IoT Bridge
+            CREATE TABLE IF NOT EXISTS iot_devices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id TEXT UNIQUE NOT NULL,
+                room_id TEXT NOT NULL,
+                user_id TEXT,
+                device_type TEXT NOT NULL,
+                name TEXT,
+                model TEXT,
+                firmware TEXT,
+                last_seen TIMESTAMP,
+                status TEXT DEFAULT 'active',
+                config TEXT DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_iot_devices_room ON iot_devices(room_id);
+            CREATE INDEX IF NOT EXISTS idx_iot_devices_user ON iot_devices(user_id);
+
+            CREATE TABLE IF NOT EXISTS iot_sensor_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id TEXT NOT NULL,
+                room_id TEXT NOT NULL,
+                sensor_type TEXT NOT NULL,
+                value REAL NOT NULL,
+                unit TEXT,
+                metadata TEXT DEFAULT '{}',
+                recorded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_iot_data_device ON iot_sensor_data(device_id);
+            CREATE INDEX IF NOT EXISTS idx_iot_data_room ON iot_sensor_data(room_id);
+            CREATE INDEX IF NOT EXISTS idx_iot_data_type ON iot_sensor_data(sensor_type);
+            CREATE INDEX IF NOT EXISTS idx_iot_data_recorded ON iot_sensor_data(recorded_at);
+
+            CREATE TABLE IF NOT EXISTS iot_alert_rules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_id TEXT NOT NULL,
+                sensor_type TEXT NOT NULL,
+                condition TEXT NOT NULL,
+                threshold REAL NOT NULL,
+                severity TEXT DEFAULT 'warning',
+                notify_channels TEXT DEFAULT 'push',
+                cooldown_minutes INTEGER DEFAULT 15,
+                enabled INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_iot_rules_room ON iot_alert_rules(room_id);
+
+            CREATE TABLE IF NOT EXISTS iot_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rule_id INTEGER,
+                room_id TEXT NOT NULL,
+                user_id TEXT,
+                sensor_type TEXT NOT NULL,
+                value REAL,
+                threshold REAL,
+                severity TEXT DEFAULT 'warning',
+                message TEXT,
+                notified_channels TEXT DEFAULT '[]',
+                acknowledged_at TIMESTAMP,
+                acknowledged_by TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_iot_alerts_room ON iot_alerts(room_id);
+            CREATE INDEX IF NOT EXISTS idx_iot_alerts_created ON iot_alerts(created_at);
+            CREATE INDEX IF NOT EXISTS idx_iot_alerts_severity ON iot_alerts(severity);
         ''')
 
         # v3.8 migration: add multiparty columns to existing table

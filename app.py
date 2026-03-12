@@ -331,6 +331,16 @@ except ImportError:
     TWILIO_AVAILABLE = False
     logger.warning("⚠️ Twilio Voice routes not available")
 
+# 🔌 Import IoT Bridge routes - Real sensor data from Zigbee gateways
+try:
+    from iot_bridge_routes import iot_bridge_bp
+    app.register_blueprint(iot_bridge_bp)
+    IOT_BRIDGE_AVAILABLE = True
+    logger.info("🔌 IoT Bridge registered: /api/iot-bridge/*")
+except ImportError:
+    IOT_BRIDGE_AVAILABLE = False
+    logger.warning("⚠️ IoT Bridge routes not available")
+
 # 🧠 Import Memory & Learning routes
 if MEMORY_AVAILABLE:
     app.register_blueprint(memory_bp)
@@ -2413,6 +2423,8 @@ def health():
         blueprints['dashboard'] = {'prefix': '/api/dashboard/*', 'version': '1.0.0', 'status': 'active'}
     if TWILIO_AVAILABLE:
         blueprints['twilio_voice'] = {'prefix': '/api/twilio/*', 'version': '1.0.0', 'status': 'active'}
+    if IOT_BRIDGE_AVAILABLE:
+        blueprints['iot_bridge'] = {'prefix': '/api/iot-bridge/*', 'version': '5.0', 'status': 'active'}
     if LIBRARY_AVAILABLE:
         blueprints['library'] = {'prefix': '/kal/library/*', 'version': '1.0.0', 'status': 'active'}
     if EDUCATION_AVAILABLE:
