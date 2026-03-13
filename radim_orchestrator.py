@@ -5,7 +5,7 @@
 # WhatsApp styl chat s action JSON
 
 from flask import Blueprint, request, jsonify, g
-from auth_middleware import require_auth
+from auth_middleware import require_auth, optional_auth
 from rate_limiter import rate_limit
 import requests
 import json
@@ -451,8 +451,8 @@ STORY_TEMPLATES = [
 # ============================================
 
 @radim_bp.route('/api/radim/chat', methods=['POST', 'OPTIONS'])
-@require_auth
-@rate_limit(max_requests=30, window_seconds=60, key_func='user')
+@optional_auth
+@rate_limit(max_requests=30, window_seconds=60, key_func='ip')
 def radim_chat():
     """Hlavní WhatsApp-styl chat endpoint"""
     if request.method == 'OPTIONS':
@@ -841,7 +841,7 @@ Odpověz POUZE textem příspěvku:"""
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @radim_bp.route('/api/radim/voice/speak', methods=['POST', 'OPTIONS'])
-@require_auth
+@optional_auth
 def radim_voice_speak():
     """Azure TTS endpoint"""
     if request.method == 'OPTIONS':
