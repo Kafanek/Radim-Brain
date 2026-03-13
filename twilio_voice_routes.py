@@ -613,7 +613,7 @@ def twilio_gather_webhook():
                     twilio_client = get_twilio_client()
                     if twilio_client and TWILIO_PHONE_NUMBER:
                         try:
-                            say_outgoing = twiml_say("Dobrý den, volá vám Radim v zastoupení vašeho blízkého.")
+                            say_outgoing = twiml_say(f"{_shared_get_greeting(with_emoji=False)}, volá vám Radim v zastoupení vašeho blízkého.")
                             twilio_client.calls.create(
                                 to=target_phone,
                                 from_=TWILIO_PHONE_NUMBER,
@@ -770,7 +770,7 @@ def initiate_outgoing_call():
         data = request.json or {}
         to = data.get("to", "")
         caller_name = data.get("caller_name", "")
-        greeting = data.get("greeting") or "Dobrý den, volá vám Radim, asistent pro seniory."
+        greeting = data.get("greeting") or f"{_shared_get_greeting(with_emoji=False)}, volá vám Radim, asistent pro seniory."
 
         if not to:
             return jsonify({"success": False, "error": "Chybí telefonní číslo"}), 400
