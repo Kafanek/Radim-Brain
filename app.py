@@ -2467,6 +2467,11 @@ def health():
 # ============================================
 
 WP_AUTH_BASE = 'https://www.radimcare.cz/wp-json/radim-obchodnik/v1/user-auth'
+WP_PROXY_HEADERS = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    'User-Agent': 'RadimBrain/1.0 (Heroku; Auth Proxy)'
+}
 
 
 def _create_jwt(user_id, email, name, role='subscriber'):
@@ -2505,8 +2510,12 @@ def auth_register():
     try:
         wp_resp = requests.post(f"{WP_AUTH_BASE}/register", json={
             "email": email, "password": password, "name": name
-        }, timeout=10)
-        wp_data = wp_resp.json()
+        }, headers=WP_PROXY_HEADERS, timeout=10)
+        try:
+            wp_data = wp_resp.json()
+        except Exception:
+            logger.error(f"WP register returned non-JSON: {wp_resp.status_code} {wp_resp.text[:200]}")
+            return jsonify({"success": False, "error": "WordPress vrátil neplatnou odpověď", "code": "wp_error"}), 502
 
         if wp_resp.status_code == 200 and wp_data.get('success'):
             user_id = wp_data.get('data', {}).get('user_id', 0)
@@ -2544,8 +2553,12 @@ def auth_login():
     try:
         wp_resp = requests.post(f"{WP_AUTH_BASE}/login", json={
             "email": email, "password": password
-        }, timeout=10)
-        wp_data = wp_resp.json()
+        }, headers=WP_PROXY_HEADERS, timeout=10)
+        try:
+            wp_data = wp_resp.json()
+        except Exception:
+            logger.error(f"WP login returned non-JSON: {wp_resp.status_code} {wp_resp.text[:200]}")
+            return jsonify({"success": False, "error": "WordPress vrátil neplatnou odpověď", "code": "wp_error"}), 502
 
         if wp_resp.status_code == 200 and wp_data.get('success'):
             user = wp_data.get('data', {})
@@ -2583,7 +2596,7 @@ def auth_lost_password():
         return jsonify({"success": False, "error": "Email je povinný"}), 400
 
     try:
-        wp_resp = requests.post(f"{WP_AUTH_BASE}/lost-password", json={"email": email}, timeout=10)
+        wp_resp = requests.post(f"{WP_AUTH_BASE}/lost-password", json={"email": email}, headers=WP_PROXY_HEADERS, timeout=10)
         wp_data = wp_resp.json()
         return jsonify({
             "success": wp_data.get('success', True),
