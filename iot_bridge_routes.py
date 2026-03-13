@@ -1,5 +1,5 @@
 """
-IoT Bridge Routes v5.1
+IoT Bridge Routes v5.2
 ======================
 REST API for Zigbee sensor data ingestion from Raspberry Pi gateways.
 
@@ -240,10 +240,24 @@ def _send_sms_alert(alert, room_id):
                 )
                 sent_count += 1
                 logger.info(f"📱 SMS sent to {cg['name']} ({cg['phone'][-4:]})")
-            except Exception as e:
-                logger.error(f"SMS send error to {cg['name']}: {e}")
+            except Exception as sms_err:
+                logger.warning(f"SMS failed to {cg['name']}: {sms_err}")
+                # Fallback: try WhatsApp if SMS-not-capable
+                if 'not SMS-capable' in str(sms_err) or 'not a valid' in str(sms_err):
+                    try:
+                        client.messages.create(
+                            body=body,
+                            from_=f"whatsapp:{from_number}",
+                            to=f"whatsapp:{cg['phone']}"
+                        )
+                        sent_count += 1
+                        logger.info(f"📲 WhatsApp sent to {cg['name']} ({cg['phone'][-4:]})")
+                    except Exception as wa_err:
+                        logger.error(f"WhatsApp also failed to {cg['name']}: {wa_err}")
+                else:
+                    logger.error(f"SMS send error to {cg['name']}: {sms_err}")
 
-        logger.info(f"📱 SMS alerts: {sent_count}/{len(caregiver_numbers)} sent for {room_id}")
+        logger.info(f"📱 Alerts sent: {sent_count}/{len(caregiver_numbers)} for {room_id}")
 
     except ImportError:
         logger.warning("Twilio SDK not available for SMS alerts")
