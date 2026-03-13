@@ -186,7 +186,8 @@ DEV_ORIGINS = [
 ]
 
 IS_PRODUCTION = os.environ.get('DYNO') is not None  # Heroku sets DYNO
-ALLOWED_ORIGINS = PRODUCTION_ORIGINS if IS_PRODUCTION else PRODUCTION_ORIGINS + DEV_ORIGINS
+# Always include dev origins — localhost can't be spoofed from internet
+ALLOWED_ORIGINS = PRODUCTION_ORIGINS + DEV_ORIGINS
 
 CORS(app,
      resources={r"/*": {"origins": ALLOWED_ORIGINS}},
