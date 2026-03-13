@@ -1,23 +1,28 @@
 """
-IoT Bridge Routes v5.0
+IoT Bridge Routes v5.1
 ======================
 REST API for Zigbee sensor data ingestion from Raspberry Pi gateways.
 
 Architecture:
   Zigbee 3.0 sensors → Raspberry Pi 5 (Home Assistant) → MQTT →
-  HA automation → HTTP POST → This API → PostgreSQL → Alert engine
+  HA automation → HTTP POST → This API → PostgreSQL → Alert engine → SMS/Push
 
 Endpoints:
-  POST /api/iot/data           — Ingest sensor reading(s)
-  POST /api/iot/data/batch     — Batch ingest (up to 100 readings)
-  GET  /api/iot/data/<room_id> — Get recent readings for room
-  POST /api/iot/devices        — Register/update device
-  GET  /api/iot/devices        — List all devices
-  GET  /api/iot/dashboard      — Caregiver overview (all rooms)
-  POST /api/iot/alert-rules    — Create/update alert rule
-  GET  /api/iot/alert-rules    — List alert rules
-  GET  /api/iot/alerts         — List triggered alerts
-  POST /api/iot/alerts/<id>/ack — Acknowledge alert
+  POST /api/iot-bridge/data           — Ingest sensor reading(s)
+  POST /api/iot-bridge/data/batch     — Batch ingest (up to 100 readings)
+  GET  /api/iot-bridge/data/<room_id> — Get recent readings for room
+  POST /api/iot-bridge/devices        — Register/update device
+  GET  /api/iot-bridge/devices        — List all devices
+  GET  /api/iot-bridge/dashboard      — Caregiver overview (all rooms)
+  POST /api/iot-bridge/alert-rules    — Create/update alert rule
+  GET  /api/iot-bridge/alert-rules    — List alert rules
+  GET  /api/iot-bridge/alerts         — List triggered alerts
+  POST /api/iot-bridge/alerts/<id>/ack — Acknowledge alert
+  GET  /api/iot-bridge/caregivers     — List caregivers (optionally by room)
+  POST /api/iot-bridge/caregivers     — Assign caregiver to room
+  PUT  /api/iot-bridge/caregivers/<id> — Update caregiver
+  DELETE /api/iot-bridge/caregivers/<id> — Deactivate caregiver
+  POST /api/iot-bridge/caregivers/test-sms — Send test SMS
 
 Security:
   - Gateway auth via X-IoT-Token header (shared secret)
@@ -25,7 +30,7 @@ Security:
   - Rate limited: 120 req/60s for data ingestion
 
 @author RadimCare Team
-@version 5.0
+@version 5.1
 """
 
 import json
@@ -189,34 +194,93 @@ def _send_alert_notifications(alerts, room_id, user_id=None):
 
 
 def _send_sms_alert(alert, room_id):
-    """Send SMS alert to caregiver via Twilio."""
+    """Send SMS alert to all caregivers assigned to this room via Twilio.
+    Falls back to CAREGIVER_PHONE_NUMBER env var if no per-room assignments."""
     try:
         from twilio.rest import Client
         account_sid = os.environ.get('TWILIO_ACCOUNT_SID')
         auth_token = os.environ.get('TWILIO_AUTH_TOKEN')
         from_number = os.environ.get('TWILIO_PHONE_NUMBER')
-        caregiver_number = os.environ.get('CAREGIVER_PHONE_NUMBER')
 
-        if not all([account_sid, auth_token, from_number, caregiver_number]):
-            logger.warning("SMS alert: Twilio not configured")
+        if not all([account_sid, auth_token, from_number]):
+            logger.warning("SMS alert: Twilio not configured (missing SID/token/number)")
             return
 
-        client = Client(account_sid, auth_token)
-        body = f"🚨 Radim Care Alert\n" \
-               f"Místnost: {room_id}\n" \
-               f"Závažnost: {alert['severity']}\n" \
-               f"{alert['message']}"
+        # Get caregivers for this room from DB
+        caregiver_numbers = _get_room_caregivers(room_id)
 
-        client.messages.create(
-            body=body,
-            from_=from_number,
-            to=caregiver_number
-        )
-        logger.info(f"📱 SMS alert sent to {caregiver_number[-4:]}")
+        # Fallback to env var
+        if not caregiver_numbers:
+            fallback = os.environ.get('CAREGIVER_PHONE_NUMBER')
+            if fallback:
+                caregiver_numbers = [{'name': 'Default', 'phone': fallback}]
+            else:
+                logger.warning(f"SMS alert: No caregivers for {room_id} and no CAREGIVER_PHONE_NUMBER set")
+                return
+
+        client = Client(account_sid, auth_token)
+
+        # Room-friendly name
+        room_name = _get_room_display_name(room_id)
+
+        body = f"🚨 Radim Care Alert\n" \
+               f"Místnost: {room_name}\n" \
+               f"Závažnost: {alert['severity'].upper()}\n" \
+               f"{alert['message']}\n" \
+               f"---\n" \
+               f"Čas: {datetime.utcnow().strftime('%H:%M:%S')} UTC"
+
+        sent_count = 0
+        for cg in caregiver_numbers:
+            try:
+                client.messages.create(
+                    body=body,
+                    from_=from_number,
+                    to=cg['phone']
+                )
+                sent_count += 1
+                logger.info(f"📱 SMS sent to {cg['name']} ({cg['phone'][-4:]})")
+            except Exception as e:
+                logger.error(f"SMS send error to {cg['name']}: {e}")
+
+        logger.info(f"📱 SMS alerts: {sent_count}/{len(caregiver_numbers)} sent for {room_id}")
+
     except ImportError:
         logger.warning("Twilio SDK not available for SMS alerts")
     except Exception as e:
         logger.error(f"SMS send error: {e}")
+
+
+def _get_room_caregivers(room_id):
+    """Get active caregivers with SMS enabled for a room."""
+    try:
+        db, is_pg = _get_db()
+        ph = _ph(is_pg)
+        rows = db.execute(f'''
+            SELECT name, phone FROM iot_caregivers
+            WHERE room_id = {ph} AND active = {ph} AND notify_sms = {ph}
+        ''', (room_id, True if is_pg else 1, True if is_pg else 1)).fetchall()
+        db.close()
+        return [{'name': r['name'], 'phone': r['phone']} for r in rows]
+    except Exception as e:
+        logger.warning(f"Caregiver lookup error: {e}")
+        return []
+
+
+def _get_room_display_name(room_id):
+    """Get user-friendly room name from device registry."""
+    try:
+        db, is_pg = _get_db()
+        ph = _ph(is_pg)
+        row = db.execute(f'''
+            SELECT user_id FROM iot_devices WHERE room_id = {ph} LIMIT 1
+        ''', (room_id,)).fetchone()
+        db.close()
+        if row and row['user_id']:
+            return f"{room_id} ({row['user_id']})"
+        return room_id
+    except Exception:
+        return room_id
 
 
 # ============================================
@@ -944,7 +1008,7 @@ def iot_health():
             'devices_registered': dev_count['cnt'] if dev_count else 0,
             'readings_last_hour': data_count['cnt'] if data_count else 0,
             'unacknowledged_alerts': alert_count['cnt'] if alert_count else 0,
-            'version': '5.0',
+            'version': '5.1',
             'timestamp': _now_iso()
         }), 200
     except Exception as e:
@@ -954,3 +1018,265 @@ def iot_health():
             db.close()
         except Exception:
             pass
+
+
+# ============================================
+# CAREGIVER MANAGEMENT
+# ============================================
+
+@iot_bridge_bp.route('/caregivers', methods=['GET'])
+def list_caregivers():
+    """List all caregivers, optionally filtered by room_id."""
+    room_id = request.args.get('room_id')
+    db, is_pg = _get_db()
+    ph = _ph(is_pg)
+
+    try:
+        if room_id:
+            rows = db.execute(f'''
+                SELECT id, room_id, name, phone, email, role, notify_sms, notify_push, active, created_at
+                FROM iot_caregivers WHERE room_id = {ph} ORDER BY name
+            ''', (room_id,)).fetchall()
+        else:
+            rows = db.execute('''
+                SELECT id, room_id, name, phone, email, role, notify_sms, notify_push, active, created_at
+                FROM iot_caregivers ORDER BY room_id, name
+            ''').fetchall()
+
+        caregivers = []
+        for r in rows:
+            caregivers.append({
+                'id': r['id'],
+                'room_id': r['room_id'],
+                'name': r['name'],
+                'phone': r['phone'],
+                'email': r.get('email'),
+                'role': r['role'],
+                'notify_sms': bool(r['notify_sms']),
+                'notify_push': bool(r['notify_push']),
+                'active': bool(r['active'])
+            })
+
+        return jsonify({'caregivers': caregivers, 'count': len(caregivers)}), 200
+    except Exception as e:
+        logger.error(f"List caregivers error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+@iot_bridge_bp.route('/caregivers', methods=['POST', 'OPTIONS'])
+def add_caregiver():
+    """Assign a caregiver to a room.
+
+    Body: {
+        "room_id": "room_A12",
+        "name": "Jana Nováková",
+        "phone": "+420777123456",
+        "email": "jana@example.com",  (optional)
+        "role": "caregiver"            (optional: caregiver|nurse|doctor|family)
+    }
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    data = request.get_json()
+    if not data or not data.get('room_id') or not data.get('name') or not data.get('phone'):
+        return jsonify({'error': 'room_id, name, phone required'}), 400
+
+    # Normalize phone number
+    phone = data['phone'].strip()
+    if not phone.startswith('+'):
+        phone = '+420' + phone  # Default Czech prefix
+
+    db, is_pg = _get_db()
+    ph = _ph(is_pg)
+
+    try:
+        # Check for duplicate
+        existing = db.execute(f'''
+            SELECT id FROM iot_caregivers WHERE room_id = {ph} AND phone = {ph}
+        ''', (data['room_id'], phone)).fetchone()
+
+        if existing:
+            # Update existing
+            db.execute(f'''
+                UPDATE iot_caregivers
+                SET name = {ph}, email = {ph}, role = {ph}, active = {ph}, updated_at = {ph}
+                WHERE id = {ph}
+            ''', (
+                data['name'],
+                data.get('email'),
+                data.get('role', 'caregiver'),
+                True if is_pg else 1,
+                datetime.utcnow(),
+                existing['id']
+            ))
+            db.commit()
+            return jsonify({
+                'success': True,
+                'caregiver_id': existing['id'],
+                'action': 'updated'
+            }), 200
+        else:
+            if is_pg:
+                row = db.execute(f'''
+                    INSERT INTO iot_caregivers (room_id, name, phone, email, role)
+                    VALUES ({ph}, {ph}, {ph}, {ph}, {ph})
+                    RETURNING id
+                ''', (
+                    data['room_id'],
+                    data['name'],
+                    phone,
+                    data.get('email'),
+                    data.get('role', 'caregiver')
+                )).fetchone()
+                db.commit()
+                cg_id = row['id'] if row else None
+            else:
+                db.execute(f'''
+                    INSERT INTO iot_caregivers (room_id, name, phone, email, role)
+                    VALUES ({ph}, {ph}, {ph}, {ph}, {ph})
+                ''', (
+                    data['room_id'],
+                    data['name'],
+                    phone,
+                    data.get('email'),
+                    data.get('role', 'caregiver')
+                ))
+                db.commit()
+                cg_id = db.execute('SELECT last_insert_rowid() as id').fetchone()['id']
+
+            logger.info(f"👤 Caregiver added: {data['name']} → {data['room_id']}")
+            return jsonify({
+                'success': True,
+                'caregiver_id': cg_id,
+                'action': 'created'
+            }), 201
+
+    except Exception as e:
+        logger.error(f"Add caregiver error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+@iot_bridge_bp.route('/caregivers/<int:caregiver_id>', methods=['PUT', 'DELETE', 'OPTIONS'])
+def manage_caregiver(caregiver_id):
+    """Update or deactivate a caregiver."""
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    db, is_pg = _get_db()
+    ph = _ph(is_pg)
+
+    try:
+        if request.method == 'DELETE':
+            db.execute(f'UPDATE iot_caregivers SET active = {ph}, updated_at = {ph} WHERE id = {ph}',
+                       (False if is_pg else 0, datetime.utcnow(), caregiver_id))
+            db.commit()
+            return jsonify({'success': True, 'action': 'deactivated'}), 200
+
+        # PUT — update fields
+        data = request.get_json() or {}
+        updates = []
+        params = []
+        for field in ['name', 'phone', 'email', 'role']:
+            if field in data:
+                updates.append(f"{field} = {ph}")
+                params.append(data[field])
+        for field in ['notify_sms', 'notify_push', 'active']:
+            if field in data:
+                updates.append(f"{field} = {ph}")
+                params.append(data[field] if is_pg else (1 if data[field] else 0))
+
+        if not updates:
+            return jsonify({'error': 'No fields to update'}), 400
+
+        updates.append(f"updated_at = {ph}")
+        params.append(datetime.utcnow())
+        params.append(caregiver_id)
+
+        db.execute(f"UPDATE iot_caregivers SET {', '.join(updates)} WHERE id = {ph}", params)
+        db.commit()
+
+        return jsonify({'success': True, 'action': 'updated'}), 200
+
+    except Exception as e:
+        logger.error(f"Manage caregiver error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+@iot_bridge_bp.route('/caregivers/test-sms', methods=['POST', 'OPTIONS'])
+def test_sms():
+    """Send a test SMS to verify Twilio configuration.
+
+    Body: {"phone": "+420777123456"}  (optional — uses first caregiver if omitted)
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    data = request.get_json() or {}
+    phone = data.get('phone')
+
+    if not phone:
+        # Try first active caregiver
+        try:
+            db, is_pg = _get_db()
+            ph = _ph(is_pg)
+            row = db.execute(f'''
+                SELECT phone FROM iot_caregivers WHERE active = {ph} AND notify_sms = {ph} LIMIT 1
+            ''', (True if is_pg else 1, True if is_pg else 1)).fetchone()
+            db.close()
+            if row:
+                phone = row['phone']
+        except Exception:
+            pass
+
+    if not phone:
+        fallback = os.environ.get('CAREGIVER_PHONE_NUMBER')
+        if fallback:
+            phone = fallback
+        else:
+            return jsonify({'error': 'No phone number provided and no caregivers registered'}), 400
+
+    try:
+        from twilio.rest import Client
+        account_sid = os.environ.get('TWILIO_ACCOUNT_SID')
+        auth_token = os.environ.get('TWILIO_AUTH_TOKEN')
+        from_number = os.environ.get('TWILIO_PHONE_NUMBER')
+
+        if not all([account_sid, auth_token, from_number]):
+            return jsonify({'error': 'Twilio not configured (missing env vars)'}), 503
+
+        client = Client(account_sid, auth_token)
+        msg = client.messages.create(
+            body=f"✅ Radim Care — Testovací SMS\nČas: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC\nSystém funguje správně.",
+            from_=from_number,
+            to=phone
+        )
+
+        logger.info(f"📱 Test SMS sent: {msg.sid}")
+        return jsonify({
+            'success': True,
+            'message_sid': msg.sid,
+            'to': phone[-4:].rjust(len(phone), '*'),
+            'status': msg.status
+        }), 200
+
+    except ImportError:
+        return jsonify({'error': 'Twilio SDK not installed'}), 503
+    except Exception as e:
+        logger.error(f"Test SMS error: {e}")
+        return jsonify({'error': str(e)}), 500

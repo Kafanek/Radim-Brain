@@ -1,0 +1,57 @@
+# ==============================================
+# Radim Care — Home Assistant REST Commands
+# ==============================================
+# Add to /config/configuration.yaml:
+#   rest_command: !include rest_commands.yaml
+#
+# Or inline:
+#   rest_command:
+#     radim_iot_ingest:
+#       url: !secret radim_api_url
+#       ...
+
+radim_iot_ingest:
+  url: "{{ states('input_text.radim_api_url') | default('https://radim-brain-2025-be1cd52b04dc.herokuapp.com/api/iot-bridge/data', true) }}"
+  method: POST
+  headers:
+    Content-Type: "application/json"
+    X-IoT-Token: !secret radim_iot_token
+  payload: >
+    {
+      "device_id": "{{ device_id }}",
+      "room_id": "{{ room_id }}",
+      "sensor_type": "{{ sensor_type }}",
+      "value": {{ value }},
+      "unit": "{{ unit | default('') }}",
+      "recorded_at": "{{ utcnow().isoformat() }}Z"
+    }
+  timeout: 10
+  verify_ssl: true
+
+radim_iot_batch:
+  url: "{{ states('input_text.radim_api_url') | default('https://radim-brain-2025-be1cd52b04dc.herokuapp.com/api/iot-bridge/data/batch', true) }}"
+  method: POST
+  headers:
+    Content-Type: "application/json"
+    X-IoT-Token: !secret radim_iot_token
+  payload: "{{ readings }}"
+  timeout: 15
+  verify_ssl: true
+
+radim_register_device:
+  url: "{{ states('input_text.radim_api_url') | default('https://radim-brain-2025-be1cd52b04dc.herokuapp.com/api/iot-bridge/devices', true) }}"
+  method: POST
+  headers:
+    Content-Type: "application/json"
+    X-IoT-Token: !secret radim_iot_token
+  payload: >
+    {
+      "device_id": "{{ device_id }}",
+      "room_id": "{{ room_id }}",
+      "user_id": "{{ user_id | default('') }}",
+      "device_type": "{{ device_type }}",
+      "name": "{{ name | default('') }}",
+      "model": "{{ model | default('') }}"
+    }
+  timeout: 10
+  verify_ssl: true

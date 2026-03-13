@@ -791,6 +791,27 @@ def init_db():
         except Exception:
             pass
 
+        # IoT Caregivers — per-room caregiver assignments (v5.1)
+        db.execute('''
+            CREATE TABLE IF NOT EXISTS iot_caregivers (
+                id SERIAL PRIMARY KEY,
+                room_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                email TEXT,
+                role TEXT DEFAULT 'caregiver',
+                notify_sms BOOLEAN DEFAULT TRUE,
+                notify_push BOOLEAN DEFAULT TRUE,
+                active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        try:
+            db.execute("CREATE INDEX IF NOT EXISTS idx_iot_caregivers_room ON iot_caregivers(room_id)")
+        except Exception:
+            pass
+
         # v3.8 migration: add multiparty columns to existing table
         try:
             db.execute("ALTER TABLE telemedicine_consultations ADD COLUMN IF NOT EXISTS title TEXT")

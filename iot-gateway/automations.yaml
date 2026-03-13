@@ -1,0 +1,513 @@
+# ==============================================
+# Radim Care — Home Assistant Automations
+# ==============================================
+# Raspberry Pi 5 gateway: Zigbee sensors → Heroku IoT Bridge
+#
+# Prerequisites:
+#   1. Home Assistant installed on Raspberry Pi 5
+#   2. Zigbee2MQTT or ZHA integration configured
+#   3. Add to secrets.yaml:
+#        radim_api_url: "https://radim-brain-2025-be1cd52b04dc.herokuapp.com/api/iot-bridge"
+#        radim_iot_token: "YOUR_IOT_GATEWAY_TOKEN_HERE"
+#
+# Installation:
+#   Copy this file to /config/automations.yaml (or include via !include)
+#   Restart Home Assistant
+#
+# Sensor naming convention:
+#   sensor.zigbee_temp_A12    — temperature sensor in room A-12
+#   binary_sensor.zigbee_motion_A12 — motion sensor in room A-12
+#   binary_sensor.zigbee_door_A12   — door contact sensor
+#   sensor.zigbee_humidity_A12      — humidity sensor
+# ==============================================
+
+
+# ============================================
+# TEMPERATURE — every 5 minutes
+# ============================================
+
+- id: radim_temp_A12
+  alias: "Radim: Teplota A-12 → Backend"
+  description: "Odesílá teplotu z místnosti A-12 na Heroku každých 5 minut"
+  mode: single
+  trigger:
+    - platform: time_pattern
+      minutes: "/5"
+  condition:
+    - condition: state
+      entity_id: sensor.zigbee_temp_A12
+      state: "unavailable"
+      match: false
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_temp_A12"
+        room_id: "room_A12"
+        sensor_type: "temperature"
+        value: "{{ states('sensor.zigbee_temp_A12') | float }}"
+        unit: "°C"
+
+- id: radim_temp_A15
+  alias: "Radim: Teplota A-15 → Backend"
+  mode: single
+  trigger:
+    - platform: time_pattern
+      minutes: "/5"
+  condition:
+    - condition: state
+      entity_id: sensor.zigbee_temp_A15
+      state: "unavailable"
+      match: false
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_temp_A15"
+        room_id: "room_A15"
+        sensor_type: "temperature"
+        value: "{{ states('sensor.zigbee_temp_A15') | float }}"
+        unit: "°C"
+
+- id: radim_temp_B03
+  alias: "Radim: Teplota B-03 → Backend"
+  mode: single
+  trigger:
+    - platform: time_pattern
+      minutes: "/5"
+  condition:
+    - condition: state
+      entity_id: sensor.zigbee_temp_B03
+      state: "unavailable"
+      match: false
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_temp_B03"
+        room_id: "room_B03"
+        sensor_type: "temperature"
+        value: "{{ states('sensor.zigbee_temp_B03') | float }}"
+        unit: "°C"
+
+- id: radim_temp_B07
+  alias: "Radim: Teplota B-07 → Backend"
+  mode: single
+  trigger:
+    - platform: time_pattern
+      minutes: "/5"
+  condition:
+    - condition: state
+      entity_id: sensor.zigbee_temp_B07
+      state: "unavailable"
+      match: false
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_temp_B07"
+        room_id: "room_B07"
+        sensor_type: "temperature"
+        value: "{{ states('sensor.zigbee_temp_B07') | float }}"
+        unit: "°C"
+
+- id: radim_temp_C01
+  alias: "Radim: Teplota C-01 → Backend"
+  mode: single
+  trigger:
+    - platform: time_pattern
+      minutes: "/5"
+  condition:
+    - condition: state
+      entity_id: sensor.zigbee_temp_C01
+      state: "unavailable"
+      match: false
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_temp_C01"
+        room_id: "room_C01"
+        sensor_type: "temperature"
+        value: "{{ states('sensor.zigbee_temp_C01') | float }}"
+        unit: "°C"
+
+
+# ============================================
+# HUMIDITY — every 5 minutes (same schedule as temp)
+# ============================================
+
+- id: radim_humidity_A12
+  alias: "Radim: Vlhkost A-12 → Backend"
+  mode: single
+  trigger:
+    - platform: time_pattern
+      minutes: "/5"
+  condition:
+    - condition: state
+      entity_id: sensor.zigbee_humidity_A12
+      state: "unavailable"
+      match: false
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_hum_A12"
+        room_id: "room_A12"
+        sensor_type: "humidity"
+        value: "{{ states('sensor.zigbee_humidity_A12') | float }}"
+        unit: "%"
+
+- id: radim_humidity_A15
+  alias: "Radim: Vlhkost A-15 → Backend"
+  mode: single
+  trigger:
+    - platform: time_pattern
+      minutes: "/5"
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_hum_A15"
+        room_id: "room_A15"
+        sensor_type: "humidity"
+        value: "{{ states('sensor.zigbee_humidity_A15') | float }}"
+        unit: "%"
+
+- id: radim_humidity_B03
+  alias: "Radim: Vlhkost B-03 → Backend"
+  mode: single
+  trigger:
+    - platform: time_pattern
+      minutes: "/5"
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_hum_B03"
+        room_id: "room_B03"
+        sensor_type: "humidity"
+        value: "{{ states('sensor.zigbee_humidity_B03') | float }}"
+        unit: "%"
+
+- id: radim_humidity_B07
+  alias: "Radim: Vlhkost B-07 → Backend"
+  mode: single
+  trigger:
+    - platform: time_pattern
+      minutes: "/5"
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_hum_B07"
+        room_id: "room_B07"
+        sensor_type: "humidity"
+        value: "{{ states('sensor.zigbee_humidity_B07') | float }}"
+        unit: "%"
+
+- id: radim_humidity_C01
+  alias: "Radim: Vlhkost C-01 → Backend"
+  mode: single
+  trigger:
+    - platform: time_pattern
+      minutes: "/5"
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_hum_C01"
+        room_id: "room_C01"
+        sensor_type: "humidity"
+        value: "{{ states('sensor.zigbee_humidity_C01') | float }}"
+        unit: "%"
+
+
+# ============================================
+# MOTION — event-driven (on state change)
+# ============================================
+
+- id: radim_motion_A12
+  alias: "Radim: Pohyb A-12 → Backend"
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.zigbee_motion_A12
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_motion_A12"
+        room_id: "room_A12"
+        sensor_type: "motion"
+        value: "{{ 1 if is_state('binary_sensor.zigbee_motion_A12', 'on') else 0 }}"
+        unit: "boolean"
+
+- id: radim_motion_A15
+  alias: "Radim: Pohyb A-15 → Backend"
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.zigbee_motion_A15
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_motion_A15"
+        room_id: "room_A15"
+        sensor_type: "motion"
+        value: "{{ 1 if is_state('binary_sensor.zigbee_motion_A15', 'on') else 0 }}"
+        unit: "boolean"
+
+- id: radim_motion_B03
+  alias: "Radim: Pohyb B-03 → Backend"
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.zigbee_motion_B03
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_motion_B03"
+        room_id: "room_B03"
+        sensor_type: "motion"
+        value: "{{ 1 if is_state('binary_sensor.zigbee_motion_B03', 'on') else 0 }}"
+        unit: "boolean"
+
+- id: radim_motion_B07
+  alias: "Radim: Pohyb B-07 → Backend"
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.zigbee_motion_B07
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_motion_B07"
+        room_id: "room_B07"
+        sensor_type: "motion"
+        value: "{{ 1 if is_state('binary_sensor.zigbee_motion_B07', 'on') else 0 }}"
+        unit: "boolean"
+
+- id: radim_motion_C01
+  alias: "Radim: Pohyb C-01 → Backend"
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.zigbee_motion_C01
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_motion_C01"
+        room_id: "room_C01"
+        sensor_type: "motion"
+        value: "{{ 1 if is_state('binary_sensor.zigbee_motion_C01', 'on') else 0 }}"
+        unit: "boolean"
+
+
+# ============================================
+# DOOR CONTACT — event-driven
+# ============================================
+
+- id: radim_door_A12
+  alias: "Radim: Dveře A-12 → Backend"
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.zigbee_door_A12
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_door_A12"
+        room_id: "room_A12"
+        sensor_type: "door"
+        value: "{{ 1 if is_state('binary_sensor.zigbee_door_A12', 'on') else 0 }}"
+        unit: "boolean"
+
+- id: radim_door_A15
+  alias: "Radim: Dveře A-15 → Backend"
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.zigbee_door_A15
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_door_A15"
+        room_id: "room_A15"
+        sensor_type: "door"
+        value: "{{ 1 if is_state('binary_sensor.zigbee_door_A15', 'on') else 0 }}"
+        unit: "boolean"
+
+- id: radim_door_B07
+  alias: "Radim: Dveře B-07 → Backend"
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.zigbee_door_B07
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_door_B07"
+        room_id: "room_B07"
+        sensor_type: "door"
+        value: "{{ 1 if is_state('binary_sensor.zigbee_door_B07', 'on') else 0 }}"
+        unit: "boolean"
+
+
+# ============================================
+# FALL DETECTION — CRITICAL, event-driven
+# ============================================
+
+- id: radim_fall_A15
+  alias: "Radim: Pád A-15 → Backend (CRITICAL)"
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.zigbee_fall_A15
+      to: "on"
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_fall_A15"
+        room_id: "room_A15"
+        sensor_type: "fall"
+        value: "1"
+        unit: "boolean"
+
+- id: radim_fall_B07
+  alias: "Radim: Pád B-07 → Backend (CRITICAL)"
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.zigbee_fall_B07
+      to: "on"
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_fall_B07"
+        room_id: "room_B07"
+        sensor_type: "fall"
+        value: "1"
+        unit: "boolean"
+
+
+# ============================================
+# SOS BUTTON — CRITICAL, event-driven
+# ============================================
+
+- id: radim_sos_A12
+  alias: "Radim: SOS A-12 → Backend (CRITICAL)"
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.zigbee_sos_A12
+      to: "on"
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_sos_A12"
+        room_id: "room_A12"
+        sensor_type: "sos"
+        value: "1"
+        unit: "boolean"
+
+- id: radim_sos_A15
+  alias: "Radim: SOS A-15 → Backend (CRITICAL)"
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.zigbee_sos_A15
+      to: "on"
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_sos_A15"
+        room_id: "room_A15"
+        sensor_type: "sos"
+        value: "1"
+        unit: "boolean"
+
+- id: radim_sos_B03
+  alias: "Radim: SOS B-03 → Backend (CRITICAL)"
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.zigbee_sos_B03
+      to: "on"
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_sos_B03"
+        room_id: "room_B03"
+        sensor_type: "sos"
+        value: "1"
+        unit: "boolean"
+
+- id: radim_sos_B07
+  alias: "Radim: SOS B-07 → Backend (CRITICAL)"
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.zigbee_sos_B07
+      to: "on"
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_sos_B07"
+        room_id: "room_B07"
+        sensor_type: "sos"
+        value: "1"
+        unit: "boolean"
+
+- id: radim_sos_C01
+  alias: "Radim: SOS C-01 → Backend (CRITICAL)"
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.zigbee_sos_C01
+      to: "on"
+  action:
+    - service: rest_command.radim_iot_ingest
+      data:
+        device_id: "zigbee_sos_C01"
+        room_id: "room_C01"
+        sensor_type: "sos"
+        value: "1"
+        unit: "boolean"
+
+
+# ============================================
+# NO-MOTION WATCHDOG — every 30 min, checks if motion was seen
+# ============================================
+# If no motion detected in 2+ hours during daytime (6:00-22:00),
+# sends value 0 to trigger "no_motion" alert
+
+- id: radim_no_motion_watchdog
+  alias: "Radim: Watchdog — žádný pohyb 2+ hodiny"
+  description: "Kontroluje denní aktivitu seniorů"
+  mode: single
+  trigger:
+    - platform: time_pattern
+      minutes: "/30"
+  condition:
+    - condition: time
+      after: "06:00:00"
+      before: "22:00:00"
+  action:
+    - repeat:
+        for_each:
+          - entity: binary_sensor.zigbee_motion_A12
+            room: room_A12
+            device: zigbee_motion_A12
+          - entity: binary_sensor.zigbee_motion_A15
+            room: room_A15
+            device: zigbee_motion_A15
+          - entity: binary_sensor.zigbee_motion_B03
+            room: room_B03
+            device: zigbee_motion_B03
+          - entity: binary_sensor.zigbee_motion_B07
+            room: room_B07
+            device: zigbee_motion_B07
+          - entity: binary_sensor.zigbee_motion_C01
+            room: room_C01
+            device: zigbee_motion_C01
+        sequence:
+          - condition: template
+            value_template: >
+              {{ (as_timestamp(now()) - as_timestamp(states[repeat.item.entity].last_changed)) > 7200 }}
+          - service: rest_command.radim_iot_ingest
+            data:
+              device_id: "{{ repeat.item.device }}"
+              room_id: "{{ repeat.item.room }}"
+              sensor_type: "no_motion"
+              value: "0"
+              unit: "hours_inactive"
