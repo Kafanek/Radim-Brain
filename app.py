@@ -2576,7 +2576,8 @@ def auth_register():
                 "INSERT INTO auth_users (email, password_hash, name) VALUES (%s, %s, %s) RETURNING id",
                 (email, pw_hash, name)
             )
-            user_id = cur.fetchone()[0]
+            ret = cur.fetchone()
+            user_id = ret['id'] if isinstance(ret, dict) else ret[0]
         else:
             cur = db.execute(
                 "INSERT INTO auth_users (email, password_hash, name) VALUES (?, ?, ?)",
@@ -2633,7 +2634,11 @@ def auth_login():
         ).fetchone()
 
         if row:
-            user_id, user_email, user_name, role, pw_hash = row
+            user_id = row['id'] if isinstance(row, dict) else row[0]
+            user_email = row['email'] if isinstance(row, dict) else row[1]
+            user_name = row['name'] if isinstance(row, dict) else row[2]
+            role = row['role'] if isinstance(row, dict) else row[3]
+            pw_hash = row['password_hash'] if isinstance(row, dict) else row[4]
             if pw_hash == _hash_password(password):
                 token = _create_jwt(user_id, user_email, user_name, role or 'subscriber')
                 return jsonify({
