@@ -525,11 +525,15 @@ Dnešní datum: {info['date']}"""
             "timestamp": datetime.utcnow().isoformat()
         })
 
-@claude_bp.route('/weather', methods=['GET'])
-@require_auth
+@claude_bp.route('/weather', methods=['GET', 'POST'])
+@optional_auth
 def get_weather():
     """🌤️ Získat aktuální počasí"""
-    location = request.args.get('location', 'Praha')
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        location = data.get('city') or data.get('location', 'Praha')
+    else:
+        location = request.args.get('location', 'Praha')
     
     try:
         client = get_claude_client()

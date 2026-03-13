@@ -1139,6 +1139,41 @@ def brain_consciousness():
     })
 
 
+@radim_brain_bp.route('/state', methods=['GET'])
+def brain_state_get():
+    """
+    GET varianta — vrátí výchozí Ψ(t) stav + Janečkovy hodnoty.
+    Používá RadimEmpathyBridge.js pro načtení soul values.
+    """
+    try:
+        psi = compute_psi_state(5.0, 0.2)
+    except Exception:
+        psi = {"mode": "HARMONY", "phi_index": 0.85, "psi": {"C": 5.0, "E": 0.7, "R": 0.5, "S": 0.1}}
+
+    try:
+        from predict_routes import JANECKUV_VALUES
+        values = JANECKUV_VALUES
+    except Exception:
+        values = [
+            "MYŠLENKA", "CÍTĚNÍ", "RESPEKT", "ODVAHA", "HRAVOST", "DŮVĚRA",
+            "ODPOVĚDNOST", "RACIONALITA", "EMPATIE", "NADĚJE", "POKORA", "SVOBODA"
+        ]
+
+    return jsonify({
+        "success": True,
+        "psi_state": psi,
+        "janecek_values": values,
+        "values": [{"name": v, "weight": round(1.0 / len(values), 3)} for v in values],
+        "mode": psi.get("mode", "HARMONY"),
+        "constants": {
+            "phi": round(PHI, 6),
+            "delta": round(DELTA, 6),
+            "rho": round(RHO, 6)
+        },
+        "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+    })
+
+
 @radim_brain_bp.route('/state', methods=['POST'])
 @optional_auth
 def brain_state():
