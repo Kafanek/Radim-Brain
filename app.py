@@ -2727,6 +2727,46 @@ def auth_verify():
         "message": "Token je platný"
     })
 
+@app.route('/api/auth/logout', methods=['POST', 'OPTIONS'])
+def auth_logout():
+    """Odhlášení — invalidate session (best effort)"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    # JWT je stateless — klient jen smaže token
+    # Server-side blacklist by se řešil přes Redis, zatím nepotřebujeme
+    return jsonify({"success": True, "message": "Odhlášen"})
+
+@app.route('/api/auth/refresh', methods=['POST', 'OPTIONS'])
+@require_auth
+def auth_refresh():
+    """Obnoví JWT token"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    try:
+        user = g.auth_user
+        new_token = _create_jwt(user['id'], user.get('email', ''), user.get('name', ''), user.get('role', 'user'))
+        return jsonify({"success": True, "token": new_token})
+    except Exception as e:
+        logger.warning(f"auth_refresh error: {e}")
+        return jsonify({"success": False, "error": "Nelze obnovit token"}), 500
+
+@app.route('/api/auth/me', methods=['GET'])
+@require_auth
+def auth_me():
+    """Vrátí profil aktuálně přihlášeného uživatele"""
+    return jsonify({
+        "success": True,
+        "user": g.auth_user
+    })
+
+@app.route('/api/auth/resend-verification', methods=['POST', 'OPTIONS'])
+@require_auth
+def auth_resend_verification():
+    """Znovu odešle verifikační email (placeholder — email service TBD)"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    return jsonify({"success": True, "message": "Verifikační email byl odeslán (pokud je nakonfigurován)."})
+
 @app.route('/api/auth/data-export', methods=['GET'])
 @require_auth
 def auth_data_export():
@@ -2815,6 +2855,46 @@ def auth_data_delete():
         "message": "Všechna data uživatele byla smazána",
         "deleted": deleted
     })
+
+@app.route('/api/auth/delete-account', methods=['POST'])
+@require_auth
+def auth_delete_account():
+    """GDPR: Smaže účet uživatele + všechna data"""
+    user_id = str(g.auth_user.get('id', ''))
+    email = g.auth_user.get('email', '')
+
+    conn = None
+    try:
+        conn = get_connection()
+        if conn:
+            cursor = conn.cursor()
+            # 1. Smazat všechna data (memory, history, learning)
+            cursor.execute("DELETE FROM memory_profiles WHERE user_id = %s", (user_id,))
+            cursor.execute("DELETE FROM memory_history WHERE user_id = %s", (user_id,))
+            cursor.execute("DELETE FROM memory_learning WHERE user_id = %s", (user_id,))
+            # 2. Smazat samotný účet
+            cursor.execute("DELETE FROM auth_users WHERE id = %s", (user_id,))
+            account_deleted = cursor.rowcount > 0
+            conn.commit()
+            cursor.close()
+
+            if account_deleted:
+                logger.info(f"🗑️ Account deleted: {email} (id={user_id})")
+                return jsonify({
+                    "success": True,
+                    "message": "Účet a všechna data byly trvale smazány."
+                })
+            else:
+                return jsonify({"success": False, "error": "Účet nenalezen"}), 404
+    except Exception as e:
+        logger.error(f"delete-account error: {e}")
+        return jsonify({"success": False, "error": "Interní chyba serveru"}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 @app.route('/api')
 def api_info():
