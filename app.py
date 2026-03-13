@@ -2494,116 +2494,221 @@ def _create_jwt(user_id, email, name, role='subscriber'):
     return f"{header}.{payload}.{sig}"
 
 
+def _ensure_auth_table():
+    """Create auth_users table if not exists."""
+    from database import get_connection, is_postgres
+    db = None
+    try:
+        db = get_connection()
+        if is_postgres():
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS auth_users (
+                    id SERIAL PRIMARY KEY,
+                    email VARCHAR(255) UNIQUE NOT NULL,
+                    password_hash VARCHAR(255) NOT NULL,
+                    name VARCHAR(255) DEFAULT '',
+                    role VARCHAR(50) DEFAULT 'subscriber',
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+        else:
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS auth_users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    email TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    name TEXT DEFAULT '',
+                    role TEXT DEFAULT 'subscriber',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+        db.commit()
+    except Exception as e:
+        logger.warning(f"Auth table init: {e}")
+    finally:
+        if db:
+            try: db.close()
+            except: pass
+
+
+# Init auth table at startup
+try:
+    _ensure_auth_table()
+except Exception:
+    pass
+
+
+def _hash_password(password):
+    """Hash password with SHA256 + salt."""
+    salt = os.environ.get('WP_JWT_SECRET', 'radim-default-salt')
+    return hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+
+
 @app.route('/api/auth/register', methods=['POST', 'OPTIONS'])
 def auth_register():
-    """Proxy registrace → WordPress radim-obchodnik"""
+    """Register user in PostgreSQL (+ try WordPress sync)"""
     if request.method == 'OPTIONS':
         return '', 204
     data = request.get_json() or {}
-    email = data.get('email', '')
+    email = data.get('email', '').strip().lower()
     password = data.get('password', '')
     name = data.get('name', '')
 
     if not email or not password:
         return jsonify({"success": False, "error": "Email a heslo jsou povinné", "code": "missing_fields"}), 400
+    if len(password) < 6:
+        return jsonify({"success": False, "error": "Heslo musí mít alespoň 6 znaků", "code": "password_weak"}), 400
 
+    from database import get_connection, is_postgres
+    db = None
     try:
-        wp_resp = requests.post(f"{WP_AUTH_BASE}/register", json={
-            "email": email, "password": password, "name": name
-        }, headers=WP_PROXY_HEADERS, timeout=10)
-        try:
-            wp_data = wp_resp.json()
-        except Exception:
-            logger.error(f"WP register returned non-JSON: {wp_resp.status_code} {wp_resp.text[:200]}")
-            return jsonify({"success": False, "error": "WordPress vrátil neplatnou odpověď", "code": "wp_error"}), 502
+        db = get_connection()
+        # Check if exists
+        ph = '%s' if is_postgres() else '?'
+        row = db.execute(f"SELECT id FROM auth_users WHERE email = {ph}", (email,)).fetchone()
+        if row:
+            return jsonify({"success": False, "error": "Účet s tímto emailem již existuje", "code": "email_exists"}), 409
 
-        if wp_resp.status_code == 200 and wp_data.get('success'):
-            user_id = wp_data.get('data', {}).get('user_id', 0)
-            token = _create_jwt(user_id, email, name)
-            return jsonify({
-                "success": True,
-                "token": token,
-                "user": {"id": user_id, "email": email, "name": name, "role": "subscriber"},
-                "message": wp_data.get('data', {}).get('message', 'Registrace úspěšná')
-            })
+        # Insert
+        pw_hash = _hash_password(password)
+        if is_postgres():
+            cur = db.execute(
+                "INSERT INTO auth_users (email, password_hash, name) VALUES (%s, %s, %s) RETURNING id",
+                (email, pw_hash, name)
+            )
+            user_id = cur.fetchone()[0]
         else:
-            return jsonify({
-                "success": False,
-                "error": wp_data.get('message', 'Registrace selhala'),
-                "code": wp_data.get('code', 'register_failed')
-            }), wp_resp.status_code
+            cur = db.execute(
+                "INSERT INTO auth_users (email, password_hash, name) VALUES (?, ?, ?)",
+                (email, pw_hash, name)
+            )
+            user_id = cur.lastrowid
+        db.commit()
+
+        token = _create_jwt(user_id, email, name)
+
+        # Best-effort WordPress sync (non-blocking)
+        try:
+            requests.post(f"{WP_AUTH_BASE}/register", json={
+                "email": email, "password": password, "name": name
+            }, headers=WP_PROXY_HEADERS, timeout=5)
+        except Exception:
+            pass  # WP sync is optional
+
+        return jsonify({
+            "success": True,
+            "token": token,
+            "user": {"id": user_id, "email": email, "name": name, "role": "subscriber"},
+            "message": "Registrace úspěšná!"
+        })
 
     except Exception as e:
-        logger.error(f"Auth register proxy error: {e}")
-        return jsonify({"success": False, "error": "Registrační server nedostupný", "code": "proxy_error"}), 503
+        logger.error(f"Auth register error: {e}")
+        return jsonify({"success": False, "error": "Chyba při registraci", "code": "db_error"}), 500
+    finally:
+        if db:
+            try: db.close()
+            except: pass
 
 
 @app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
 def auth_login():
-    """Proxy login → WordPress radim-obchodnik"""
+    """Login from PostgreSQL (+ WordPress fallback)"""
     if request.method == 'OPTIONS':
         return '', 204
     data = request.get_json() or {}
-    email = data.get('email', '')
+    email = data.get('email', '').strip().lower()
     password = data.get('password', '')
 
     if not email or not password:
         return jsonify({"success": False, "error": "Email a heslo jsou povinné", "code": "missing_fields"}), 400
 
+    from database import get_connection, is_postgres
+    db = None
     try:
-        wp_resp = requests.post(f"{WP_AUTH_BASE}/login", json={
-            "email": email, "password": password
-        }, headers=WP_PROXY_HEADERS, timeout=10)
-        try:
-            wp_data = wp_resp.json()
-        except Exception:
-            logger.error(f"WP login returned non-JSON: {wp_resp.status_code} {wp_resp.text[:200]}")
-            return jsonify({"success": False, "error": "WordPress vrátil neplatnou odpověď", "code": "wp_error"}), 502
+        db = get_connection()
+        ph = '%s' if is_postgres() else '?'
+        row = db.execute(
+            f"SELECT id, email, name, role, password_hash FROM auth_users WHERE email = {ph}", (email,)
+        ).fetchone()
 
-        if wp_resp.status_code == 200 and wp_data.get('success'):
-            user = wp_data.get('data', {})
-            user_id = user.get('user_id', 0)
-            user_name = user.get('display_name', name if 'name' in dir() else email)
-            role = user.get('role', 'subscriber')
-            token = _create_jwt(user_id, email, user_name, role)
-            return jsonify({
-                "success": True,
-                "token": token,
-                "user": {"id": user_id, "email": email, "name": user_name, "role": role},
-                "message": "Přihlášení úspěšné"
-            })
-        else:
-            return jsonify({
-                "success": False,
-                "error": wp_data.get('message', 'Přihlášení selhalo'),
-                "code": wp_data.get('code', 'login_failed')
-            }), wp_resp.status_code
+        if row:
+            user_id, user_email, user_name, role, pw_hash = row
+            if pw_hash == _hash_password(password):
+                token = _create_jwt(user_id, user_email, user_name, role or 'subscriber')
+                return jsonify({
+                    "success": True,
+                    "token": token,
+                    "user": {"id": user_id, "email": user_email, "name": user_name, "role": role},
+                    "message": "Přihlášení úspěšné"
+                })
+
+        # Not found locally or wrong password → try WordPress
+        try:
+            wp_resp = requests.post(f"{WP_AUTH_BASE}/login", json={
+                "email": email, "password": password
+            }, headers=WP_PROXY_HEADERS, timeout=8)
+            wp_data = wp_resp.json()
+            if wp_resp.status_code == 200 and wp_data.get('success'):
+                user = wp_data.get('data', {})
+                wp_id = user.get('user_id', 0)
+                wp_name = user.get('display_name', email)
+                wp_role = user.get('role', 'subscriber')
+                token = _create_jwt(wp_id, email, wp_name, wp_role)
+                # Sync to local DB for next time
+                try:
+                    pw_hash = _hash_password(password)
+                    if is_postgres():
+                        db.execute(
+                            "INSERT INTO auth_users (email, password_hash, name, role) VALUES (%s, %s, %s, %s) ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, name = EXCLUDED.name",
+                            (email, pw_hash, wp_name, wp_role)
+                        )
+                    else:
+                        db.execute(
+                            "INSERT OR REPLACE INTO auth_users (email, password_hash, name, role) VALUES (?, ?, ?, ?)",
+                            (email, pw_hash, wp_name, wp_role)
+                        )
+                    db.commit()
+                except Exception:
+                    pass
+                return jsonify({
+                    "success": True,
+                    "token": token,
+                    "user": {"id": wp_id, "email": email, "name": wp_name, "role": wp_role},
+                    "message": "Přihlášení úspěšné"
+                })
+        except Exception:
+            pass  # WP unreachable — use only local result
+
+        return jsonify({"success": False, "error": "Nesprávný email nebo heslo", "code": "invalid_credentials"}), 401
 
     except Exception as e:
-        logger.error(f"Auth login proxy error: {e}")
-        return jsonify({"success": False, "error": "Přihlašovací server nedostupný", "code": "proxy_error"}), 503
+        logger.error(f"Auth login error: {e}")
+        return jsonify({"success": False, "error": "Chyba při přihlášení", "code": "db_error"}), 500
+    finally:
+        if db:
+            try: db.close()
+            except: pass
 
 
 @app.route('/api/auth/lost-password', methods=['POST', 'OPTIONS'])
 def auth_lost_password():
-    """Proxy reset hesla → WordPress"""
+    """Password reset — try WordPress, always return success"""
     if request.method == 'OPTIONS':
         return '', 204
     data = request.get_json() or {}
-    email = data.get('email', '')
+    email = data.get('email', '').strip().lower()
 
     if not email:
         return jsonify({"success": False, "error": "Email je povinný"}), 400
 
+    # Best-effort WordPress reset
     try:
-        wp_resp = requests.post(f"{WP_AUTH_BASE}/lost-password", json={"email": email}, headers=WP_PROXY_HEADERS, timeout=10)
-        wp_data = wp_resp.json()
-        return jsonify({
-            "success": wp_data.get('success', True),
-            "message": "Pokud účet s tímto emailem existuje, odeslali jsme instrukce pro obnovu hesla."
-        })
+        requests.post(f"{WP_AUTH_BASE}/lost-password", json={"email": email}, headers=WP_PROXY_HEADERS, timeout=5)
     except Exception:
-        return jsonify({"success": True, "message": "Pokud účet existuje, odeslali jsme instrukce."})
+        pass
+
+    return jsonify({"success": True, "message": "Pokud účet s tímto emailem existuje, odeslali jsme instrukce pro obnovu hesla."})
 
 
 @app.route('/api/auth/verify', methods=['GET'])
