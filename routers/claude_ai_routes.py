@@ -16,6 +16,13 @@ import json
 import logging
 import asyncio
 
+# Shared greeting (single source of truth)
+try:
+    from radim_shared import get_greeting as _shared_greeting
+    _SHARED_GREETING = True
+except ImportError:
+    _SHARED_GREETING = False
+
 # Anthropic Claude SDK
 try:
     from anthropic import Anthropic
@@ -695,7 +702,10 @@ async def get_dashboard_data():
         }
 
 def get_greeting():
-    """Získat pozdrav podle denní doby"""
+    """Získat pozdrav podle denní doby — deleguje na radim_shared"""
+    if _SHARED_GREETING:
+        return _shared_greeting(with_emoji=True)
+    # Fallback if radim_shared not available (FastAPI standalone)
     hour = datetime.now().hour
     if 5 <= hour < 12:
         return "Dobré ráno! ☀️"

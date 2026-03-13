@@ -951,6 +951,38 @@ def radim_voice_speak():
         logger.error(f"⚠️ radim_orchestrator.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
+@radim_bp.route('/api/radim/greeting', methods=['GET'])
+def radim_greeting():
+    """Time-based greeting — single source of truth for all frontends"""
+    try:
+        from radim_shared import get_greeting, get_nameday, build_time_context_string
+        greeting_emoji = get_greeting(with_emoji=True)
+        greeting_plain = get_greeting(with_emoji=False)
+        nameday = get_nameday()
+        time_ctx = build_time_context_string()
+
+        return jsonify({
+            'success': True,
+            'greeting': greeting_emoji,
+            'greeting_plain': greeting_plain,
+            'nameday': nameday or None,
+            'time_context': time_ctx,
+            'timestamp': datetime.utcnow().isoformat() + 'Z'
+        })
+    except Exception as e:
+        # Minimal fallback
+        hour = datetime.now().hour
+        if 5 <= hour < 12:
+            g_text = "Dobré ráno! ☀️"
+        elif 12 <= hour < 18:
+            g_text = "Dobré odpoledne! 🌤️"
+        elif 18 <= hour < 22:
+            g_text = "Dobrý večer! 🌙"
+        else:
+            g_text = "Dobrou noc! 🌟"
+        return jsonify({'success': True, 'greeting': g_text, 'timestamp': datetime.utcnow().isoformat() + 'Z'})
+
+
 @radim_bp.route('/api/radim/health', methods=['GET'])
 def radim_health():
     """Health check"""
