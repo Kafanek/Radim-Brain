@@ -17,7 +17,7 @@ from datetime import datetime
 from xml.sax.saxutils import escape as xml_escape
 from functools import wraps
 from flask import Blueprint, request, jsonify, Response, abort
-from auth_middleware import require_auth
+from auth_middleware import require_auth, optional_auth
 
 logger = logging.getLogger(__name__)
 
@@ -852,9 +852,10 @@ def register_known_caller():
 
 
 @twilio_bp.route('/invite', methods=['POST', 'OPTIONS'])
-@require_auth
+@optional_auth
 def send_call_invitation():
-    """Send SMS invitation with Jitsi join link"""
+    """Send SMS/WhatsApp invitation with Jitsi join link.
+    v300: removed require_auth (seniors don't have JWT), added WhatsApp fallback."""
     if request.method == 'OPTIONS':
         return '', 204
 
@@ -873,37 +874,85 @@ def send_call_invitation():
         if not to or not room_code:
             return jsonify({"success": False, "error": "Chybí telefonní číslo nebo kód místnosti"}), 400
 
+        # Normalize phone number
+        to_clean = to.strip()
+        if to_clean.startswith('00420'):
+            to_clean = '+420' + to_clean[5:]
+        elif not to_clean.startswith('+'):
+            to_clean = '+420' + to_clean.lstrip('0')
+
         # Build join URL with parameters
         if not join_url:
             join_url = f"https://meet.jit.si/{room_code}"
 
         # Frontend join page URL (with nice UI)
         frontend_url = os.environ.get('FRONTEND_URL', 'https://polite-bush-001303503.6.azurestaticapps.net')
-        nice_url = f"{frontend_url}/call.html?room={room_code}&from={caller_name}&type={call_type}"
+        import urllib.parse
+        caller_encoded = urllib.parse.quote(caller_name)
+        nice_url = f"{frontend_url}/call.html?room={room_code}&from={caller_encoded}&type={call_type}"
 
-        # Build SMS message
+        # Build message
         type_label = "video hovor" if call_type == "video" else "hlasový hovor"
-        sms_body = f"📞 {caller_name} vás zve na {type_label} přes Radim.\n\nPřipojte se: {nice_url}\n\n(Stačí kliknout na odkaz, nic neinstalujete.)"
+        msg_body = f"📞 {caller_name} vás zve na {type_label} přes Radim.\n\nPřipojte se: {nice_url}\n\n(Stačí kliknout na odkaz, nic neinstalujete.)"
 
-        # Send SMS
-        message = twilio_client.messages.create(
-            to=to,
-            from_=TWILIO_PHONE_NUMBER,
-            body=sms_body
-        )
+        # Try SMS first, fallback to WhatsApp, fallback to voice call announcement
+        sent_via = None
+        message_sid = None
+        error_detail = None
 
-        logger.info(f"📱 SMS invite sent to {to}: {message.sid}")
-        logger.info(f"📱 SMS invite sent to {to} (room: {room_code})")
+        # Attempt 1: SMS
+        try:
+            message = twilio_client.messages.create(
+                to=to_clean,
+                from_=TWILIO_PHONE_NUMBER,
+                body=msg_body
+            )
+            sent_via = 'sms'
+            message_sid = message.sid
+            logger.info(f"📱 SMS invite sent to {to_clean} (room: {room_code})")
+        except Exception as sms_err:
+            error_detail = str(sms_err)
+            logger.warning(f"SMS invite failed: {sms_err}")
+
+            # Attempt 2: WhatsApp (if SMS fails)
+            try:
+                message = twilio_client.messages.create(
+                    to=f"whatsapp:{to_clean}",
+                    from_=f"whatsapp:{TWILIO_PHONE_NUMBER}",
+                    body=msg_body
+                )
+                sent_via = 'whatsapp'
+                message_sid = message.sid
+                logger.info(f"📲 WhatsApp invite sent to {to_clean} (room: {room_code})")
+            except Exception as wa_err:
+                logger.warning(f"WhatsApp invite also failed: {wa_err}")
+
+                # Attempt 3: Twilio voice call with TTS announcement
+                try:
+                    tts_text = f"Máte pozvánku na {type_label} od {caller_name} přes Radim. Otevřete SMS nebo WhatsApp pro připojení."
+                    call = twilio_client.calls.create(
+                        to=to_clean,
+                        from_=TWILIO_PHONE_NUMBER,
+                        twiml=f'<Response><Say language="cs-CZ" voice="Polly.Jitka">{tts_text}</Say><Pause length="2"/><Say language="cs-CZ" voice="Polly.Jitka">Odkaz najdete ve zprávě. Na shledanou.</Say></Response>'
+                    )
+                    sent_via = 'voice_announcement'
+                    message_sid = call.sid
+                    logger.info(f"📞 Voice announcement sent to {to_clean} (room: {room_code})")
+                except Exception as call_err:
+                    logger.error(f"All invite methods failed for {to_clean}: SMS={sms_err}, WA={wa_err}, Voice={call_err}")
 
         return jsonify({
-            "success": True,
-            "message_sid": message.sid,
+            "success": sent_via is not None,
+            "sent_via": sent_via or "none",
+            "message_sid": message_sid,
             "join_url": nice_url,
-            "room_code": room_code
-        })
+            "direct_jitsi_url": join_url,
+            "room_code": room_code,
+            "error": error_detail if not sent_via else None
+        }), 200 if sent_via else 503
 
     except Exception as e:
-        logger.error(f"SMS invite error: {e}")
+        logger.error(f"Invite error: {e}")
         return jsonify({"success": False, "error": "Interní chyba serveru"}), 500
 
 
