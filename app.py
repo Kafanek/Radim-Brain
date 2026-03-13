@@ -16,6 +16,9 @@ eventlet.monkey_patch()
 import os
 import json
 import uuid
+import time
+import hmac
+import hashlib
 import requests
 import base64
 from datetime import datetime
@@ -2460,8 +2463,135 @@ def health():
     })
 
 # ============================================
-# 🔐 AUTH ENDPOINTS
+# 🔐 AUTH ENDPOINTS (proxy → WordPress radim-obchodnik)
 # ============================================
+
+WP_AUTH_BASE = 'https://www.radimcare.cz/wp-json/radim-obchodnik/v1/user-auth'
+
+
+def _create_jwt(user_id, email, name, role='subscriber'):
+    """Create JWT token compatible with WordPress plugin (HS256)."""
+    from auth_middleware import _base64url_encode, WP_JWT_SECRET
+    if not WP_JWT_SECRET:
+        return None
+    now = int(time.time())
+    header = _base64url_encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    payload_data = {
+        "iss": "radim-brain",
+        "iat": now,
+        "exp": now + 7 * 86400,  # 7 days
+        "user": {"id": user_id, "email": email, "name": name, "role": role}
+    }
+    payload = _base64url_encode(json.dumps(payload_data).encode())
+    sig = _base64url_encode(
+        hmac.new(WP_JWT_SECRET.encode(), f"{header}.{payload}".encode(), hashlib.sha256).digest()
+    )
+    return f"{header}.{payload}.{sig}"
+
+
+@app.route('/api/auth/register', methods=['POST', 'OPTIONS'])
+def auth_register():
+    """Proxy registrace → WordPress radim-obchodnik"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    data = request.get_json() or {}
+    email = data.get('email', '')
+    password = data.get('password', '')
+    name = data.get('name', '')
+
+    if not email or not password:
+        return jsonify({"success": False, "error": "Email a heslo jsou povinné", "code": "missing_fields"}), 400
+
+    try:
+        wp_resp = requests.post(f"{WP_AUTH_BASE}/register", json={
+            "email": email, "password": password, "name": name
+        }, timeout=10)
+        wp_data = wp_resp.json()
+
+        if wp_resp.status_code == 200 and wp_data.get('success'):
+            user_id = wp_data.get('data', {}).get('user_id', 0)
+            token = _create_jwt(user_id, email, name)
+            return jsonify({
+                "success": True,
+                "token": token,
+                "user": {"id": user_id, "email": email, "name": name, "role": "subscriber"},
+                "message": wp_data.get('data', {}).get('message', 'Registrace úspěšná')
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": wp_data.get('message', 'Registrace selhala'),
+                "code": wp_data.get('code', 'register_failed')
+            }), wp_resp.status_code
+
+    except Exception as e:
+        logger.error(f"Auth register proxy error: {e}")
+        return jsonify({"success": False, "error": "Registrační server nedostupný", "code": "proxy_error"}), 503
+
+
+@app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
+def auth_login():
+    """Proxy login → WordPress radim-obchodnik"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    data = request.get_json() or {}
+    email = data.get('email', '')
+    password = data.get('password', '')
+
+    if not email or not password:
+        return jsonify({"success": False, "error": "Email a heslo jsou povinné", "code": "missing_fields"}), 400
+
+    try:
+        wp_resp = requests.post(f"{WP_AUTH_BASE}/login", json={
+            "email": email, "password": password
+        }, timeout=10)
+        wp_data = wp_resp.json()
+
+        if wp_resp.status_code == 200 and wp_data.get('success'):
+            user = wp_data.get('data', {})
+            user_id = user.get('user_id', 0)
+            user_name = user.get('display_name', name if 'name' in dir() else email)
+            role = user.get('role', 'subscriber')
+            token = _create_jwt(user_id, email, user_name, role)
+            return jsonify({
+                "success": True,
+                "token": token,
+                "user": {"id": user_id, "email": email, "name": user_name, "role": role},
+                "message": "Přihlášení úspěšné"
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": wp_data.get('message', 'Přihlášení selhalo'),
+                "code": wp_data.get('code', 'login_failed')
+            }), wp_resp.status_code
+
+    except Exception as e:
+        logger.error(f"Auth login proxy error: {e}")
+        return jsonify({"success": False, "error": "Přihlašovací server nedostupný", "code": "proxy_error"}), 503
+
+
+@app.route('/api/auth/lost-password', methods=['POST', 'OPTIONS'])
+def auth_lost_password():
+    """Proxy reset hesla → WordPress"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    data = request.get_json() or {}
+    email = data.get('email', '')
+
+    if not email:
+        return jsonify({"success": False, "error": "Email je povinný"}), 400
+
+    try:
+        wp_resp = requests.post(f"{WP_AUTH_BASE}/lost-password", json={"email": email}, timeout=10)
+        wp_data = wp_resp.json()
+        return jsonify({
+            "success": wp_data.get('success', True),
+            "message": "Pokud účet s tímto emailem existuje, odeslali jsme instrukce pro obnovu hesla."
+        })
+    except Exception:
+        return jsonify({"success": True, "message": "Pokud účet existuje, odeslali jsme instrukce."})
+
 
 @app.route('/api/auth/verify', methods=['GET'])
 @require_auth
