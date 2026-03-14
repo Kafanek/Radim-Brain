@@ -736,7 +736,7 @@ FORMÁT (pouze JSON):
         })
 
 @claude_bp.route('/dashboard-data', methods=['GET'])
-@require_auth
+@optional_auth
 def get_dashboard_data():
     """📊 Všechna data pro dashboard"""
     info = get_today_info()
