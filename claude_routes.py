@@ -256,6 +256,18 @@ def chat_with_radim():
         if emotional_context:
             system += f"\n\n═══ EMOČNÍ KONTEXT (aktuální stav uživatele) ═══\n{emotional_context}"
 
+        # 🧠 v320: Neuron context from frontend KafanekNeurons
+        neuron_ctx = data.get('neuron_context')
+        if neuron_ctx and isinstance(neuron_ctx, dict):
+            ntype = neuron_ctx.get('type', 'unknown')
+            ntone = neuron_ctx.get('tone', 'patient')
+            nhint = neuron_ctx.get('hint', '')
+            system += f"\n\n═══ NEURONOVÁ INTERVENCE ({ntype}) ═══\n"
+            system += f"Tón odpovědi: {ntone}.\n"
+            if nhint:
+                system += f"Doporučená odpověď neuronu: {nhint}\n"
+            system += "Přizpůsob svou odpověď tomuto kontextu — buď extra trpělivý, klidný a empatický."
+
         # 🎵 Text Rhythm: matematika → styl textu
         anticipation_meta = None
         gen_config_override = None
