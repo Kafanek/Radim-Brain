@@ -2601,6 +2601,7 @@ def auth_register():
             "success": True,
             "token": token,
             "user": {"id": user_id, "email": email, "name": name, "role": "subscriber"},
+            "gdpr_consent": False,
             "message": "Registrace úspěšná!"
         })
 
@@ -2642,10 +2643,19 @@ def auth_login():
             pw_hash = row['password_hash'] if isinstance(row, dict) else row[4]
             if pw_hash == _hash_password(password):
                 token = _create_jwt(user_id, user_email, user_name, role or 'subscriber')
+                # Fetch GDPR consent status (one response = no extra API call)
+                gdpr_consent = False
+                try:
+                    from memory_routes import get_gdpr_consent
+                    consent = get_gdpr_consent(str(user_id))
+                    gdpr_consent = bool(consent.get("data_processing", False))
+                except Exception:
+                    pass
                 return jsonify({
                     "success": True,
                     "token": token,
                     "user": {"id": user_id, "email": user_email, "name": user_name, "role": role},
+                    "gdpr_consent": gdpr_consent,
                     "message": "Přihlášení úspěšné"
                 })
 
@@ -2681,6 +2691,7 @@ def auth_login():
                     "success": True,
                     "token": token,
                     "user": {"id": wp_id, "email": email, "name": wp_name, "role": wp_role},
+                    "gdpr_consent": False,
                     "message": "Přihlášení úspěšné"
                 })
         except Exception:
