@@ -2877,17 +2877,16 @@ def auth_delete_account():
     conn = None
     try:
         conn = get_connection()
+        ph = '%s' if is_postgres() else '?'
         if conn:
-            cursor = conn.cursor()
             # 1. Smazat všechna data (memory, history, learning)
-            cursor.execute("DELETE FROM memory_profiles WHERE user_id = %s", (user_id,))
-            cursor.execute("DELETE FROM memory_history WHERE user_id = %s", (user_id,))
-            cursor.execute("DELETE FROM memory_learning WHERE user_id = %s", (user_id,))
+            conn.execute(f"DELETE FROM memory_profiles WHERE user_id = {ph}", (user_id,))
+            conn.execute(f"DELETE FROM memory_history WHERE user_id = {ph}", (user_id,))
+            conn.execute(f"DELETE FROM memory_learning WHERE user_id = {ph}", (user_id,))
             # 2. Smazat samotný účet
-            cursor.execute("DELETE FROM auth_users WHERE id = %s", (user_id,))
-            account_deleted = cursor.rowcount > 0
+            result = conn.execute(f"DELETE FROM auth_users WHERE id = {ph}", (int(user_id),))
+            account_deleted = getattr(result, 'rowcount', 0) > 0
             conn.commit()
-            cursor.close()
 
             if account_deleted:
                 logger.info(f"🗑️ Account deleted: {email} (id={user_id})")
