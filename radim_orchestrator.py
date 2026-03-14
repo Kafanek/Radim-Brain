@@ -600,15 +600,19 @@ def radim_chat():
             except Exception as ir_err:
                 logger.warning(f"Intent resolver warning (non-fatal): {ir_err}")
 
-        # v321: Inject neuron intervention into AI prompt
+        # v321+v3: Inject neuron intervention + rhythm into AI prompt
         if neuron_ctx:
             ntype = neuron_ctx.get('type', 'unknown')
             ntone = neuron_ctx.get('tone', 'patient')
             nhint = neuron_ctx.get('hint', '')
+            nrhythm = neuron_ctx.get('rhythm')
             personalized += f"\n\n═══ NEURONOVÁ INTERVENCE ({ntype}) ═══\n"
             personalized += f"Tón: {ntone}. "
             if nhint:
                 personalized += f"Nápověda: {nhint}\n"
+            if nrhythm:
+                rmode = nrhythm.get('mode', 'HARMONY')
+                personalized += f"[Ψ-rytmus: {rmode}, koherence: {nrhythm.get('coherence', 0.8):.1f}] "
             personalized += "Přizpůsob odpověď — buď extra trpělivý, klidný a empatický."
 
         if text_response is None:
