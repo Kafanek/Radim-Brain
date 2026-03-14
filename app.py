@@ -2477,16 +2477,27 @@ def kal_neurons_save():
             ex_act = existing.get('activations', 0)
             in_act = incoming.get('activations', 0)
 
-            if in_act >= ex_act:
-                # Frontend has more data — take it
-                existing_neurons[neuron_id] = incoming
-            else:
-                # Server has more data — merge learned patterns only
+            if in_act > ex_act:
+                # Frontend has strictly more data — take it, but keep server patterns too
                 server_patterns = set(existing.get('learnedPatterns', []))
                 client_patterns = set(incoming.get('learnedPatterns', []))
-                existing.setdefault('learnedPatterns', [])
+                incoming['learnedPatterns'] = list(server_patterns | client_patterns)[:30]
+                existing_neurons[neuron_id] = incoming
+            else:
+                # Server has same or more data — merge learned patterns + keep better thresholds
+                server_patterns = set(existing.get('learnedPatterns', []))
+                client_patterns = set(incoming.get('learnedPatterns', []))
                 merged = list(server_patterns | client_patterns)[:30]
                 existing['learnedPatterns'] = merged
+                # Keep lower threshold (= more sensitive = more learned)
+                if incoming.get('thresholdAdjust', 0) < existing.get('thresholdAdjust', 0):
+                    existing['thresholdAdjust'] = incoming['thresholdAdjust']
+                # Keep higher helpful count
+                existing['helpfulCount'] = max(
+                    existing.get('helpfulCount', 0), incoming.get('helpfulCount', 0))
+                # Merge rhythm data if incoming has it
+                if incoming.get('rhythm') and not existing.get('rhythm'):
+                    existing['rhythm'] = incoming['rhythm']
                 existing_neurons[neuron_id] = existing
 
         learning['neurons'] = existing_neurons
