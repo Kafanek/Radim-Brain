@@ -19,21 +19,29 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 _CRISIS_WORDS = {
-    'pomoc', 'help', 'bolest', 'spadl', 'sos', 'umírám', 'záchranku',
-    'nemohu dýchat', 'nemůžu dýchat', 'bolest na hrudi', 'záchranka',
-    '155', '112', 'infarkt', 'mrtvice', 'bezvědomí', 'krev'
+    'pomoc', 'help', 'bolest', 'spadl', 'spadla', 'sos', 'umírám', 'umiram',
+    'záchranku', 'zachranku', 'záchranka', 'zachranka',
+    'nemohu dýchat', 'nemůžu dýchat', 'nemohu dychat', 'nemazu dychat',
+    'bolest na hrudi', '155', '112', 'infarkt', 'mrtvice', 'bezvědomí',
+    'bezvedomi', 'krev', 'zlomenina', 'mdloba', 'omdlel',
 }
 
 _STRESS_WORDS = {
-    'strach', 'bojím', 'nervózní', 'nemocný', 'unavený', 'problém',
-    'bolí', 'nespím', 'samota', 'sám', 'smutný', 'osamělý', 'úzkost',
-    'panika', 'špatně', 'nemůžu', 'trápí', 'nevím', 'ztracený'
+    'strach', 'bojím', 'bojim', 'nervózní', 'nervozni', 'nemocný', 'nemocny',
+    'unavený', 'unaveny', 'problém', 'problem', 'bolí', 'boli',
+    'nespím', 'nespim', 'samota', 'sám', 'sam', 'smutný', 'smutny',
+    'osamělý', 'osamely', 'úzkost', 'uzkost', 'panika',
+    'špatně', 'spatne', 'nemůžu', 'nemuzu', 'nemazu',
+    'trápí', 'trapi', 'nevím', 'nevim', 'ztracený', 'ztraceny',
+    'brečím', 'brecim', 'pláču', 'placu', 'stýská', 'styska',
 }
 
 _CALM_WORDS = {
-    'děkuji', 'díky', 'hezky', 'dobře', 'krásně', 'fajn', 'prima',
-    'skvěle', 'výborně', 'pohoda', 'šťastný', 'radost', 'super',
-    'báječné', 'nádherné', 'klidný', 'spokojený'
+    'děkuji', 'dekuji', 'díky', 'diky', 'hezky', 'dobře', 'dobre',
+    'krásně', 'krasne', 'fajn', 'prima', 'skvěle', 'skvele',
+    'výborně', 'vyborne', 'pohoda', 'šťastný', 'stastny',
+    'radost', 'super', 'báječné', 'bajecne', 'nádherné', 'nadherne',
+    'klidný', 'klidny', 'spokojený', 'spokojeny',
 }
 
 
