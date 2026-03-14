@@ -139,6 +139,10 @@ class PgCursorWrapper:
         return [DictRow(row) for row in rows]
 
     @property
+    def rowcount(self):
+        return self._cursor.rowcount
+
+    @property
     def lastrowid(self):
         return getattr(self._cursor, 'lastrowid', None)
 
