@@ -24,6 +24,8 @@ _CRISIS_WORDS = {
     'nemohu dýchat', 'nemůžu dýchat', 'nemohu dychat', 'nemazu dychat',
     'bolest na hrudi', '155', '112', 'infarkt', 'mrtvice', 'bezvědomí',
     'bezvedomi', 'krev', 'zlomenina', 'mdloba', 'omdlel',
+    'padám', 'padam', 'padl', 'padla', 'upadl', 'upadla',
+    'nehýbu', 'nehybu', 'nehýbám', 'nehybam',
 }
 
 _STRESS_WORDS = {

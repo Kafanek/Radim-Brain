@@ -2350,6 +2350,70 @@ def kal_safety_check():
     return jsonify({'alert': None, 'severity': 'low', 'recommendation': None, 'shouldEscalate': False}), 200
 
 
+@app.route('/kal/emotion/analyze', methods=['POST', 'OPTIONS'])
+def kal_emotion_analyze():
+    """Emotion analysis from text — valence/arousal model (v319)"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    data = request.get_json() or {}
+    text = data.get('text', '')
+
+    try:
+        from intent_resolver import quick_estimate_from_text, _CRISIS_WORDS, _STRESS_WORDS, _CALM_WORDS
+        C_est, alpha_est = quick_estimate_from_text(text)
+        text_lower = text.lower()
+
+        crisis_hits = sum(1 for w in _CRISIS_WORDS if w in text_lower)
+        stress_hits = sum(1 for w in _STRESS_WORDS if w in text_lower)
+        calm_hits = sum(1 for w in _CALM_WORDS if w in text_lower)
+
+        # Valence: -1 (negative) to +1 (positive)
+        valence = round(max(-1.0, min(1.0,
+            0.0 + calm_hits * 0.3 - stress_hits * 0.2 - crisis_hits * 0.5)), 2)
+
+        # Arousal: 0 (calm) to 1 (agitated)
+        arousal = round(max(0.0, min(1.0, alpha_est)), 2)
+
+        # Primary emotion mapping
+        if crisis_hits > 0:
+            primary = 'strach'
+        elif stress_hits >= 2:
+            primary = 'úzkost' if valence < -0.3 else 'smutek'
+        elif stress_hits == 1:
+            primary = 'nejistota'
+        elif calm_hits >= 2:
+            primary = 'radost' if valence > 0.5 else 'klid'
+        elif calm_hits == 1:
+            primary = 'spokojenost'
+        else:
+            primary = 'neutrální'
+
+        mode = "HARMONY" if C_est < 12 else ("ALERT" if C_est < 27 else "CRISIS")
+
+        return jsonify({
+            'primary_emotion': primary,
+            'valence': valence,
+            'arousal': arousal,
+            'C_estimate': round(C_est, 1),
+            'mode': mode,
+            'word_hits': {
+                'crisis': crisis_hits,
+                'stress': stress_hits,
+                'calm': calm_hits
+            }
+        }), 200
+
+    except Exception as e:
+        logger.warning(f"kal_emotion_analyze error: {e}")
+
+    return jsonify({
+        'primary_emotion': 'neutrální',
+        'valence': 0.0, 'arousal': 0.2,
+        'C_estimate': 5.0, 'mode': 'HARMONY',
+        'word_hits': {'crisis': 0, 'stress': 0, 'calm': 0}
+    }), 200
+
+
 @app.route("/kal/consciousness/state")
 def kal_consciousness_state():
     """Consciousness state — real Ψ(t) from brain engine (v281)"""
