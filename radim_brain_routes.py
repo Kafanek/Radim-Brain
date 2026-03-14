@@ -755,6 +755,7 @@ def compute_psi_state(C, alpha, voice_tone=0.5, hrv=0.5, speech_tempo=0.5, user_
             "phrasing": speech["phrasing"],
             "style": speech["style"],
             "styledegree": speech["styledegree"],
+            "mode": mode,
             "phi_proportions": "618:1000:1618"
         },
         "response_style": {

@@ -2284,17 +2284,17 @@ def kal_timing_calculate():
             C_est, alpha_est = quick_estimate_from_text(text)
             mode = "HARMONY" if C_est < 12 else ("ALERT" if C_est < 27 else "CRISIS")
             speech = compute_unified_speech(C_est, alpha_est, mode)
-            # Parse rate string (e.g. "-5%") to WPM offset
-            rate_str = speech.get('rate', '+0%')
-            try:
-                rate_offset = int(rate_str.replace('%', '').replace('+', ''))
-            except (ValueError, AttributeError):
-                rate_offset = 0
+            # Rate is a float multiplier (1.0=normal, 0.85=slower, 0.7=crisis)
+            rate = float(speech.get('rate', 1.0))
+            wpm = round(120 * rate)  # 120 base × rate → 120/102/84
             return jsonify({
                 'pause_ms': speech.get('pause_ms', 618),
-                'wpm': 120 + rate_offset,
+                'wpm': wpm,
+                'rate': rate,
                 'phi_ratio': 1.618,
-                'mode': mode
+                'mode': mode,
+                'phrasing': speech.get('phrasing', 'natural'),
+                'style': speech.get('style', 'friendly'),
             }), 200
     except Exception as e:
         logger.warning(f"kal_timing_calculate error: {e}")
