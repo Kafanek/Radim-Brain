@@ -474,6 +474,14 @@ def radim_chat():
         if emotional_context:
             context['emotional_state'] = emotional_context
 
+        # v321: Neuron context from frontend KafanekNeurons
+        neuron_ctx = data.get('neuron_context')
+        if neuron_ctx and isinstance(neuron_ctx, dict):
+            ntype = neuron_ctx.get('type', 'unknown')
+            ntone = neuron_ctx.get('tone', 'patient')
+            nhint = neuron_ctx.get('hint', '')
+            context['neuron_intervention'] = neuron_ctx
+
         intent = detect_intent(message)
         
         if intent == 'task':
@@ -591,6 +599,17 @@ def radim_chat():
                     logger.info(f"🎯 Intent '{_resolved_intent}' resolved locally for {user_id}")
             except Exception as ir_err:
                 logger.warning(f"Intent resolver warning (non-fatal): {ir_err}")
+
+        # v321: Inject neuron intervention into AI prompt
+        if neuron_ctx:
+            ntype = neuron_ctx.get('type', 'unknown')
+            ntone = neuron_ctx.get('tone', 'patient')
+            nhint = neuron_ctx.get('hint', '')
+            personalized += f"\n\n═══ NEURONOVÁ INTERVENCE ({ntype}) ═══\n"
+            personalized += f"Tón: {ntone}. "
+            if nhint:
+                personalized += f"Nápověda: {nhint}\n"
+            personalized += "Přizpůsob odpověď — buď extra trpělivý, klidný a empatický."
 
         if text_response is None:
             text_response, action_json = call_gemini_whatsapp(
