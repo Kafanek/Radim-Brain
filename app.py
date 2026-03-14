@@ -2414,6 +2414,98 @@ def kal_emotion_analyze():
     }), 200
 
 
+# ============================================
+# 🧠 NEURON SYNC — persist neuron learning to PostgreSQL (v324)
+# ============================================
+@app.route('/kal/neurons/sync', methods=['GET', 'OPTIONS'])
+@optional_auth
+def kal_neurons_load():
+    """Load neuron learning data for user"""
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    user_id = getattr(request, 'user_id', None) or request.args.get('user_id', 'anonymous')
+
+    try:
+        from memory_routes import _db_load_learning, _db_save_learning
+        learning = _db_load_learning(user_id)
+        neuron_data = learning.get('neurons', {})
+
+        return jsonify({
+            'success': True,
+            'neurons': neuron_data,
+            'synced_at': learning.get('neurons_synced_at'),
+            'user_id': user_id
+        }), 200
+
+    except Exception as e:
+        logger.warning(f"kal_neurons_load error: {e}")
+        return jsonify({'success': False, 'neurons': {}, 'error': str(e)}), 200
+
+
+@app.route('/kal/neurons/sync', methods=['POST', 'OPTIONS'])
+@optional_auth
+def kal_neurons_save():
+    """Save neuron learning data from frontend to PostgreSQL"""
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    user_id = getattr(request, 'user_id', None)
+    data = request.get_json() or {}
+
+    if not user_id:
+        user_id = data.get('user_id', 'anonymous')
+
+    neurons_data = data.get('neurons', {})
+    if not neurons_data or not isinstance(neurons_data, dict):
+        return jsonify({'success': False, 'error': 'No neuron data provided'}), 400
+
+    try:
+        from memory_routes import _db_load_learning, _db_save_learning
+
+        # Load existing learning, merge neurons into it
+        learning = _db_load_learning(user_id)
+
+        existing_neurons = learning.get('neurons', {})
+
+        # Merge strategy: per-neuron, keep higher activations + newer data
+        for neuron_id, incoming in neurons_data.items():
+            if not isinstance(incoming, dict):
+                continue
+
+            existing = existing_neurons.get(neuron_id, {})
+            ex_act = existing.get('activations', 0)
+            in_act = incoming.get('activations', 0)
+
+            if in_act >= ex_act:
+                # Frontend has more data — take it
+                existing_neurons[neuron_id] = incoming
+            else:
+                # Server has more data — merge learned patterns only
+                server_patterns = set(existing.get('learnedPatterns', []))
+                client_patterns = set(incoming.get('learnedPatterns', []))
+                existing.setdefault('learnedPatterns', [])
+                merged = list(server_patterns | client_patterns)[:30]
+                existing['learnedPatterns'] = merged
+                existing_neurons[neuron_id] = existing
+
+        learning['neurons'] = existing_neurons
+        learning['neurons_synced_at'] = now_iso()
+
+        _db_save_learning(user_id, learning)
+
+        return jsonify({
+            'success': True,
+            'synced': len(existing_neurons),
+            'synced_at': learning['neurons_synced_at'],
+            'user_id': user_id
+        }), 200
+
+    except Exception as e:
+        logger.warning(f"kal_neurons_save error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route("/kal/consciousness/state")
 def kal_consciousness_state():
     """Consciousness state — real Ψ(t) from brain engine (v281)"""
