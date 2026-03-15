@@ -76,6 +76,16 @@ _CALM_WORDS = {
 }
 
 
+def _word_in_text(word, text):
+    """Check if word appears in text. For numeric words (155, 112),
+    use word-boundary matching to avoid false positives like '15500 Kč'.
+    v329: Fix false positive for numbers in longer strings."""
+    if word.isdigit():
+        import re
+        return bool(re.search(r'\b' + re.escape(word) + r'\b', text))
+    return word in text
+
+
 def quick_estimate_from_text(text):
     """Quick C/alpha estimation from text for streaming STT→Brain.
     Returns (C_estimate, alpha_estimate).
@@ -84,9 +94,9 @@ def quick_estimate_from_text(text):
         return (5.0, 0.2)
 
     text_lower = text.lower()
-    crisis_hits = sum(1 for w in _CRISIS_WORDS if w in text_lower)
-    stress_hits = sum(1 for w in _STRESS_WORDS if w in text_lower)
-    calm_hits = sum(1 for w in _CALM_WORDS if w in text_lower)
+    crisis_hits = sum(1 for w in _CRISIS_WORDS if _word_in_text(w, text_lower))
+    stress_hits = sum(1 for w in _STRESS_WORDS if _word_in_text(w, text_lower))
+    calm_hits = sum(1 for w in _CALM_WORDS if _word_in_text(w, text_lower))
 
     C = 5.0
     C += crisis_hits * 12.0

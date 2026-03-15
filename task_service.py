@@ -374,6 +374,7 @@ def mark_task_notified(task_id):
 def log_medication(user_id, medication_name, task_id=None, dosage=None, notes=None):
     """
     Zaznamenat užití léku.
+    v329: Added double-dose protection — warns if same medication logged within 2 hours.
     """
     if not _DB_AVAILABLE:
         return False
@@ -382,6 +383,29 @@ def log_medication(user_id, medication_name, task_id=None, dosage=None, notes=No
     try:
         db = get_connection()
         p = _p()
+
+        # v329: Double-dose protection — check if same medication was logged recently
+        two_hours_ago = (datetime.utcnow() - timedelta(hours=2)).isoformat()
+        cursor = db.execute(
+            f"""SELECT id, taken_at FROM radim_medication_log
+                WHERE user_id = {p} AND medication_name = {p} AND taken_at > {p}
+                ORDER BY taken_at DESC LIMIT 1""",
+            (user_id, medication_name, two_hours_ago)
+        )
+        recent = cursor.fetchone()
+        if recent:
+            recent_time = recent['taken_at'] if hasattr(recent, '__getitem__') and isinstance(recent, dict) else recent[1]
+            logger.warning(f"⚠️ DOUBLE-DOSE WARNING: {medication_name} for {user_id} — already taken at {recent_time}")
+            # Still log it but return a warning dict instead of True
+            db.execute(
+                f"""INSERT INTO radim_medication_log
+                    (user_id, task_id, medication_name, dosage, notes)
+                    VALUES ({p},{p},{p},{p},{p})""",
+                (user_id, task_id, medication_name, dosage,
+                 f"⚠️ MOŽNÝ DVOJITÝ DÁVEK — předchozí v {recent_time}. {notes or ''}")
+            )
+            db.commit()
+            return {'logged': True, 'double_dose_warning': True, 'previous_at': str(recent_time)}
 
         db.execute(
             f"""INSERT INTO radim_medication_log
