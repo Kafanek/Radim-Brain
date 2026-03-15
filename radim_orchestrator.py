@@ -1082,8 +1082,15 @@ def radim_voice_speak():
                 pass  # Fall back to previous settings
 
         # v2.1: express-as for emotional style (style/styledegree from Brain Engine)
+        # v330: Sanitize to prevent SSML injection
         _style = brain_speech.get('style', 'friendly') if brain_speech else 'friendly'
         _styledegree = brain_speech.get('styledegree', '1.2') if brain_speech else '1.2'
+        _VALID_STYLES = {'friendly', 'cheerful', 'sad', 'angry', 'excited', 'gentle', 'serious',
+                         'empathetic', 'calm', 'chat', 'assistant', 'customerservice', 'newscast'}
+        if _style not in _VALID_STYLES:
+            _style = 'friendly'
+        if not re.match(r'^[0-9.]+$', str(_styledegree)):
+            _styledegree = '1.2'
 
         ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
                xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="cs-CZ">

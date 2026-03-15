@@ -378,10 +378,10 @@ def transcribe_speech():
                 }), 400
         
         else:
+            logger.error(f"Azure STT error: {response.status_code} — {response.text[:200]}")
             return jsonify({
                 'success': False,
-                'error': f'Azure STT error: {response.status_code}',
-                'details': response.text
+                'error': f'Azure STT chyba (kód {response.status_code})'
             }), 500
         
     except requests.exceptions.Timeout:

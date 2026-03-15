@@ -511,8 +511,15 @@ def azure_tts_proxy():
             pitch = '+0Hz'
 
         # Build SSML (v2.1: express-as for emotional style)
+        # v330: Sanitize style/styledegree to prevent SSML injection
+        import re as _re_ssml
         _style = brain_speech.get('style', 'friendly') if brain_speech else 'friendly'
         _styledegree = brain_speech.get('styledegree', '1.2') if brain_speech else '1.2'
+        _VALID_STYLES = {'friendly', 'cheerful', 'sad', 'angry', 'excited', 'gentle', 'serious', 'empathetic', 'calm', 'newscast', 'customerservice', 'chat', 'assistant', 'newscast-casual', 'newscast-formal', 'advertisement_upbeat', 'documentary-narration', 'narration-professional', 'narration-relaxed', 'poetry-reading', 'shouting', 'whispering', 'terrified', 'unfriendly', 'depressed', 'disgruntled', 'embarrassed', 'fearful', 'hopeful', 'lyrical', 'envious', 'sports_commentary', 'sports_commentary_excited'}
+        if _style not in _VALID_STYLES:
+            _style = 'friendly'
+        if not _re_ssml.match(r'^[0-9.]+$', str(_styledegree)):
+            _styledegree = '1.2'
 
         ssml = f"""<speak version='1.0' xmlns:mstts='https://www.w3.org/2001/mstts' xml:lang='cs-CZ'>
             <voice name='{voice}'>
@@ -630,7 +637,9 @@ def elevenlabs_tts_proxy():
                 }
             )
         else:
-            return jsonify({'error': f'ElevenLabs error: {response.status_code}', 'detail': response.text}), response.status_code
+            # v330: Don't leak ElevenLabs API error details to client
+            logger.error(f"ElevenLabs error {response.status_code}: {response.text[:200]}")
+            return jsonify({'error': 'Chyba syntézy hlasu'}), response.status_code
             
     except Exception as e:
         logger.error(f"⚠️ app.py error: {e}")
@@ -963,10 +972,31 @@ def sync_wp_user(wp_user):
 
 # ============================================
 # REST API - CONVERSATIONS
+# v330: IDOR protection helper — validates that authenticated user matches requested user_id
 # ============================================
+def _check_idor(requested_user_id):
+    """v330: Validate authenticated user matches requested user_id.
+    Returns None if OK, or error response tuple if IDOR detected.
+    Allows 'radim-ai' requests and admins through."""
+    auth_user = getattr(g, 'auth_user', None)
+    if not auth_user:
+        return None  # optional_auth — no token = anonymous access (for senior devices)
+    user_role = auth_user.get('role', 'user') if isinstance(auth_user, dict) else 'user'
+    auth_id = str(auth_user.get('id', '')) if isinstance(auth_user, dict) else ''
+    # Admins bypass IDOR check
+    if user_role in ('administrator', 'admin', 'caregiver'):
+        return None
+    # Check if requesting own data
+    if auth_id and str(requested_user_id) != auth_id:
+        logger.warning(f"🛡️ IDOR blocked: user {auth_id} tried to access {requested_user_id}")
+        return jsonify({'success': False, 'error': 'Přístup zamítnut'}), 403
+    return None
+
 @app.route('/api/chat/conversations/<user_id>', methods=['GET'])
 @optional_auth
 def get_conversations(user_id):
+    idor = _check_idor(user_id)
+    if idor: return idor
     try:
         db = get_db()
         cursor = db.execute('''
@@ -1060,11 +1090,16 @@ def get_messages(conversation_id):
 
 @app.route('/api/chat/messages', methods=['POST'])
 @optional_auth
+@rate_limit(30, 60, 'ip')  # v330: Rate limit message sending
 def send_message():
     try:
         data = request.json
         conversation_id = data['conversationId']
         sender_id = data['senderId']
+
+        # v330: IDOR — validate senderId matches authenticated user
+        idor = _check_idor(sender_id)
+        if idor: return idor
         
         message = {
             'id': generate_id(),
@@ -1248,6 +1283,8 @@ def add_reaction(message_id):
 @app.route('/api/chat/contacts/<user_id>', methods=['GET'])
 @optional_auth
 def get_contacts(user_id):
+    idor = _check_idor(user_id)
+    if idor: return idor
     try:
         db = get_db()
         cursor = db.execute('''
@@ -1942,8 +1979,11 @@ def kal_radim_health():
     }), 200
 
 @app.route('/kal/radim/history/<user_id>')
+@optional_auth  # v330: Add auth
 def kal_radim_history(user_id):
     """Get user conversation history + stats"""
+    idor = _check_idor(user_id)
+    if idor: return idor
     try:
         if MEMORY_AVAILABLE:
             from memory_routes import get_conversation_messages, get_user_context
@@ -1991,10 +2031,13 @@ def kal_radim_register():
     return jsonify({"success": True, "message": "User registered", "user": {"user_id": user_id}}), 200
 
 @app.route('/kal/radim/user/<user_id>', methods=['PUT', 'OPTIONS'])
+@optional_auth  # v330: Add auth
 def kal_radim_update_user(user_id):
     """Update user profile"""
     if request.method == 'OPTIONS':
         return '', 204
+    idor = _check_idor(user_id)
+    if idor: return idor
     data = request.get_json() or {}
     try:
         if MEMORY_AVAILABLE:
@@ -2008,8 +2051,11 @@ def kal_radim_update_user(user_id):
     return jsonify({"success": True, "user": {"user_id": user_id}}), 200
 
 @app.route('/kal/radim/insights/<user_id>')
+@optional_auth  # v330: Add auth
 def kal_radim_insights(user_id):
     """Get user insights from learning data"""
+    idor = _check_idor(user_id)
+    if idor: return idor
     try:
         if MEMORY_AVAILABLE:
             from memory_routes import get_user_context
@@ -2267,8 +2313,7 @@ def kal_agents_interact():
         return jsonify({
             'success': False,
             'response': 'Omlouvám se, momentálně nejsem dostupný.',
-            'agent': agent,
-            'error': str(e)
+            'agent': agent
         }), 500
 
 
@@ -2999,7 +3044,9 @@ def auth_data_export():
 
             cursor.close()
     except Exception as e:
-        export_data["backend_data"]["error"] = str(e)
+        # v330: Don't leak exception details in GDPR export
+        logger.error(f"GDPR export error for user: {e}")
+        export_data["backend_data"]["error"] = "Chyba při načítání dat"
     finally:
         if conn:
             try:
@@ -3163,7 +3210,8 @@ def dashboard():
             'facility': 'Dům seniorů Háje'
         }
     except Exception as e:
-        result['seniors'] = {'error': str(e)}
+        logger.warning(f"Dashboard seniors error: {e}")
+        result['seniors'] = {'error': 'nedostupné'}
 
     # 2) IoT summary
     try:
@@ -3175,7 +3223,8 @@ def dashboard():
             'health': 'operational'
         }
     except Exception as e:
-        result['iot'] = {'error': str(e)}
+        logger.warning(f"Dashboard IoT error: {e}")
+        result['iot'] = {'error': 'nedostupné'}
 
     # 3) Top-risk senior
     try:
@@ -3187,7 +3236,8 @@ def dashboard():
             'primary_concerns': top_risk[1].get('primary_concerns', [])
         }
     except Exception as e:
-        result['top_risk'] = {'error': str(e)}
+        logger.warning(f"Dashboard predict error: {e}")
+        result['top_risk'] = {'error': 'nedostupné'}
 
     # 4) Consciousness pulse
     try:
@@ -3202,7 +3252,8 @@ def dashboard():
             'values': 12
         }
     except Exception as e:
-        result['consciousness'] = {'error': str(e)}
+        logger.warning(f"Dashboard consciousness error: {e}")
+        result['consciousness'] = {'error': 'nedostupné'}
 
     # 5) AI status
     result['ai'] = {

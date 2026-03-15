@@ -347,6 +347,15 @@ def _cleanup_active_calls():
         for sid in sorted_sids[:len(active_calls) - _ACTIVE_CALLS_MAX]:
             del active_calls[sid]
 
+
+def _cleanup_known_callers():
+    """v330: Remove oldest known_callers entries when over limit."""
+    if len(known_callers) <= _KNOWN_CALLERS_MAX:
+        return
+    sorted_phones = sorted(known_callers.keys(), key=lambda p: known_callers[p].get("registered_at", 0))
+    for phone in sorted_phones[:len(known_callers) - _KNOWN_CALLERS_MAX]:
+        del known_callers[phone]
+
 # Intent patterns (Czech)
 TRANSFER_PATTERNS = re.compile(
     r'(zavolej|přepoj|spojte|přepojte|zavolejte)\s*(na\s+)?(dce[rř]|syn|doktor|lékař|mari[ie]|pet[rř]|rodinu|vnuč)',
@@ -840,6 +849,7 @@ def register_known_caller():
     if not phone or not name:
         return jsonify({"success": False, "error": "Chybí phone nebo name"}), 400
 
+    _cleanup_known_callers()  # v330: evict old entries before adding
     known_callers[phone] = {
         "name": name,
         "formality": data.get("formality", "formal"),
