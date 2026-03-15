@@ -18,6 +18,7 @@ from xml.sax.saxutils import escape as xml_escape
 from functools import wraps
 from flask import Blueprint, request, jsonify, Response, abort
 from auth_middleware import require_auth, optional_auth
+from rate_limiter import rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -757,6 +758,7 @@ def twilio_dial_status_webhook():
 
 @twilio_bp.route('/call', methods=['POST', 'OPTIONS'])
 @require_auth
+@rate_limit(5, 60, 'ip')  # v328: Rate limit outgoing calls (Twilio costs)
 def initiate_outgoing_call():
     """Initiate outgoing call from frontend"""
     if request.method == 'OPTIONS':
@@ -853,6 +855,7 @@ def register_known_caller():
 
 @twilio_bp.route('/invite', methods=['POST', 'OPTIONS'])
 @optional_auth
+@rate_limit(10, 60, 'ip')  # v328: Rate limit SMS/WhatsApp invitations (Twilio costs)
 def send_call_invitation():
     """Send SMS/WhatsApp invitation with Jitsi join link.
     v300: removed require_auth (seniors don't have JWT), added WhatsApp fallback."""
@@ -957,6 +960,7 @@ def send_call_invitation():
 
 
 @twilio_bp.route('/tts', methods=['GET'])
+@rate_limit(60, 60, 'ip')  # v328: Rate limit TTS generation (Azure costs)
 def twilio_tts():
     """Azure TTS endpoint - returns MP3 audio of Radim's voice.
     Now reads adaptive rate/pitch params from Anticipation Engine via query string."""

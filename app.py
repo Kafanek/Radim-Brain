@@ -1313,6 +1313,7 @@ def add_contact():
 # REST API - MEDIA UPLOAD
 # ============================================
 @app.route('/api/media/upload', methods=['POST'])
+@rate_limit(20, 60, 'ip')  # v328: Rate limit file uploads
 def upload_media():
     """Upload média (obrázek, audio, video)"""
     try:
@@ -1364,6 +1365,7 @@ def upload_media():
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
 
 @app.route('/api/media/voice', methods=['POST'])
+@rate_limit(20, 60, 'ip')  # v328: Rate limit voice uploads
 def upload_voice_message():
     """Upload hlasové zprávy"""
     try:
@@ -1408,6 +1410,7 @@ def upload_voice_message():
 # REST API - PUSH NOTIFICATIONS
 # ============================================
 @app.route('/api/push/subscribe', methods=['POST'])
+@rate_limit(10, 60, 'ip')  # v328: Rate limit push subscriptions
 def subscribe_push():
     """Přihlásit k push notifikacím"""
     try:
