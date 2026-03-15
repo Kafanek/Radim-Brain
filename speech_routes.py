@@ -12,6 +12,7 @@ import requests
 from xml.sax.saxutils import escape as xml_escape
 from flask import Blueprint, request, jsonify, Response, g
 from auth_middleware import require_auth
+from rate_limiter import rate_limit
 import logging
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,7 @@ def _get_anticipation_tts(C, alpha):
 # ============================================
 @speech_bp.route('/synthesize', methods=['POST'])
 @require_auth
+@rate_limit(30, 60, 'ip')
 def synthesize_speech():
     """Převeď text na řeč pomocí Azure REST API"""
     if not AZURE_SPEECH_KEY:
@@ -202,11 +204,10 @@ def synthesize_speech():
                     }
                 )
         else:
-            error_msg = response.text if response.text else f"HTTP {response.status_code}"
+            logger.error(f"Azure TTS error: {response.status_code} — {response.text[:200] if response.text else 'no body'}")
             return jsonify({
-                'success': False, 
-                'error': f'Azure TTS error: {error_msg}',
-                'status_code': response.status_code
+                'success': False,
+                'error': f'Azure TTS chyba (kód {response.status_code})'
             }), 500
         
     except requests.exceptions.Timeout:
@@ -303,6 +304,7 @@ def synthesize_stream():
 # ============================================
 @speech_bp.route('/transcribe', methods=['POST'])
 @require_auth
+@rate_limit(20, 60, 'ip')
 def transcribe_speech():
     """Převeď řeč na text pomocí Azure REST API"""
     if not AZURE_SPEECH_KEY:
@@ -462,10 +464,11 @@ def speech_health():
             }), 500
             
     except Exception as e:
+        logger.error(f"speech_health error: {e}")
         return jsonify({
             'success': False,
             'status': 'error',
-            'error': str(e)
+            'error': 'Speech service nedostupný'
         }), 500
 
 # ============================================
@@ -522,9 +525,10 @@ def get_azure_token():
             }), 500
 
     except Exception as e:
+        logger.error(f"azure_token error: {e}")
         return jsonify({
             'success': False,
-            'error': f'Token fetch error: {str(e)}'
+            'error': 'Nepodařilo se získat Azure token'
         }), 500
 
 @speech_bp.route('/azure-config', methods=['GET'])

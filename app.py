@@ -2499,7 +2499,7 @@ def kal_neurons_load():
 
     except Exception as e:
         logger.warning(f"kal_neurons_load error: {e}")
-        return jsonify({'success': False, 'neurons': {}, 'error': str(e)}), 200
+        return jsonify({'success': False, 'neurons': {}, 'error': 'Chyba načítání neuronů'}), 200
 
 
 @app.route('/kal/neurons/sync', methods=['POST', 'OPTIONS'])
@@ -2573,7 +2573,7 @@ def kal_neurons_save():
 
     except Exception as e:
         logger.warning(f"kal_neurons_save error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Chyba synchronizace neuronů'}), 500
 
 
 @app.route("/kal/consciousness/state")
