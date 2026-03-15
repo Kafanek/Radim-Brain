@@ -28,7 +28,8 @@ _CRISIS_WORDS = {
     'nehýbu', 'nehybu', 'nehýbám', 'nehybam',
     'umřít', 'umrit', 'zemřít', 'zemrit', 'zabít', 'zabit',
     'chci umřít', 'chci umrit', 'chci zemřít', 'chci zemrit',
-    'sebevražd', 'sebevrazd', 'oběsit', 'obesit', 'skočit', 'skocit',
+    'sebevražd', 'sebevrazd', 'sebevražed', 'sebevrazed',
+    'oběsit', 'obesit', 'skočit', 'skocit',
     'předávkov', 'predavkov', 'nechci žít', 'nechci zit',
 }
 
