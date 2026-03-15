@@ -26,6 +26,10 @@ _CRISIS_WORDS = {
     'bezvedomi', 'krev', 'zlomenina', 'mdloba', 'omdlel',
     'padám', 'padam', 'padl', 'padla', 'upadl', 'upadla',
     'nehýbu', 'nehybu', 'nehýbám', 'nehybam',
+    'umřít', 'umrit', 'zemřít', 'zemrit', 'zabít', 'zabit',
+    'chci umřít', 'chci umrit', 'chci zemřít', 'chci zemrit',
+    'sebevražd', 'sebevrazd', 'oběsit', 'obesit', 'skočit', 'skocit',
+    'předávkov', 'predavkov', 'nechci žít', 'nechci zit',
 }
 
 _STRESS_WORDS = {

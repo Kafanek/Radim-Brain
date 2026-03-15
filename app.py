@@ -2308,7 +2308,10 @@ def kal_safety_check():
     if request.method == 'OPTIONS':
         return '', 204
     data = request.get_json() or {}
-    message = data.get('message', '')
+    message = data.get('message', '') or data.get('text', '')
+
+    if not message:
+        return jsonify({'alert': None, 'severity': 'low', 'recommendation': None, 'shouldEscalate': False}), 200
 
     try:
         from intent_resolver import quick_estimate_from_text, _CRISIS_WORDS, _STRESS_WORDS
