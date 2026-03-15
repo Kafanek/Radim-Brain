@@ -19,18 +19,42 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 _CRISIS_WORDS = {
-    'pomoc', 'help', 'bolest', 'spadl', 'spadla', 'sos', 'umírám', 'umiram',
+    # Emergency calls
+    'pomoc', 'help', 'sos', '155', '112',
     'záchranku', 'zachranku', 'záchranka', 'zachranka',
+    # Falls
+    'spadl', 'spadla', 'padám', 'padam', 'padl', 'padla', 'upadl', 'upadla',
+    # Pain/medical emergency
+    'bolest', 'bolest na hrudi', 'infarkt', 'mrtvice',
+    'krev', 'zlomenina',
+    # Breathing
     'nemohu dýchat', 'nemůžu dýchat', 'nemohu dychat', 'nemazu dychat',
-    'bolest na hrudi', '155', '112', 'infarkt', 'mrtvice', 'bezvědomí',
-    'bezvedomi', 'krev', 'zlomenina', 'mdloba', 'omdlel',
-    'padám', 'padam', 'padl', 'padla', 'upadl', 'upadla',
+    'umírám', 'umiram',
+    # Unconsciousness/immobility
+    'bezvědomí', 'bezvedomi', 'mdloba', 'omdlel', 'omdlela',
     'nehýbu', 'nehybu', 'nehýbám', 'nehybam',
+    'nemůžu vstát', 'nemuzu vstat',
+    # Suicidal ideation (v327: C3 fix)
     'umřít', 'umrit', 'zemřít', 'zemrit', 'zabít', 'zabit',
     'chci umřít', 'chci umrit', 'chci zemřít', 'chci zemrit',
+    'nechci žít', 'nechci zit',
     'sebevražd', 'sebevrazd', 'sebevražed', 'sebevrazed',
-    'oběsit', 'obesit', 'skočit', 'skocit',
-    'předávkov', 'predavkov', 'nechci žít', 'nechci zit',
+    'oběsit', 'obesit', 'skočit z', 'skocit z',
+    'předávkov', 'predavkov',
+    'končit se životem', 'koncit se zivotem',
+    'vzít si život', 'vzit si zivot',
+    # Wandering/disorientation (v327: C4 fix)
+    'ztratil jsem se', 'ztratila jsem se',
+    'nevím kde jsem', 'nevim kde jsem',
+    'kde to jsem', 'zabloudil', 'zabloudila',
+    'nepoznávám', 'nepoznavam', 'nevím jak domů', 'nevim jak domu',
+    # Choking/aspiration (v327: C5 fix)
+    'dusím se', 'dusim se',
+    'nemůžu polykat', 'nemuzu polykat', 'nemůžu polknout',
+    'dávím se', 'davim se',
+    # Medication emergency
+    'vzal jsem dvakrát', 'vzala jsem dvakrát',
+    'moc prášků', 'moc prasek', 'předávkoval', 'predavkoval',
 }
 
 _STRESS_WORDS = {
@@ -378,6 +402,23 @@ _INTENTS = [
             r"záchranka",
             r"\b155\b",
             r"\b112\b",
+            # v327: Suicidal ideation
+            r"chci\s+umřít",
+            r"chci\s+zemřít",
+            r"nechci\s+žít",
+            r"sebevražd",
+            # v327: Wandering/disorientation
+            r"ztratil\s+jsem\s+se",
+            r"ztratila\s+jsem\s+se",
+            r"nevím\s+kde\s+jsem",
+            r"kde\s+to\s+jsem",
+            # v327: Choking
+            r"dusím\s+se",
+            r"nemůžu\s+polykat",
+            r"dávím\s+se",
+            # v327: Immobility
+            r"nemůžu\s+vstát",
+            r"nehýbu\s+se",
         ],
         "handler": None,  # Pass to AI with high priority
     },

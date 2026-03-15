@@ -73,7 +73,16 @@ def decode_jwt(token):
                 return None  # Token expired
             if payload['exp'] - now > MAX_TOKEN_AGE:
                 return None  # Token too long-lived (>30 days)
-        # Tokens without exp are accepted (WordPress compatibility)
+        elif 'iat' in payload:
+            # v327 C1 FIX: Tokens without exp but with iat — enforce MAX_TOKEN_AGE from issue time
+            if now - payload['iat'] > MAX_TOKEN_AGE:
+                logger.warning(f"JWT without exp rejected — iat too old ({int(now - payload['iat'])}s ago)")
+                return None
+        else:
+            # v327 C1 FIX: Tokens with neither exp nor iat are rejected
+            # (legacy WP tokens must be re-issued with proper claims)
+            logger.warning("JWT rejected — no exp and no iat claim")
+            return None
 
         return payload
 

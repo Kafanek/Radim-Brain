@@ -2348,9 +2348,17 @@ def kal_safety_check():
         }), 200
 
     except Exception as e:
-        logger.warning(f"kal_safety_check error: {e}")
+        # v327 C2 FIX: Error in safety MUST NOT default to "safe" — escalate on error
+        logger.error(f"🚨 kal_safety_check CRITICAL error: {e}")
 
-    return jsonify({'alert': None, 'severity': 'low', 'recommendation': None, 'shouldEscalate': False}), 200
+    # v327: On error, default to medium severity (not "safe") — better safe than sorry
+    return jsonify({
+        'alert': 'unknown_error',
+        'severity': 'medium',
+        'recommendation': 'Bezpečnostní kontrola selhala — doporučujeme ruční kontrolu uživatele.',
+        'shouldEscalate': False,
+        '_error': True
+    }), 200
 
 
 @app.route('/kal/emotion/analyze', methods=['POST', 'OPTIONS'])
