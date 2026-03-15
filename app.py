@@ -752,10 +752,12 @@ def call_gemini_ai(messages, context=None, image=None):
         
         if response.status_code == 200:
             data = response.json()
-            if 'candidates' in data and data['candidates']:
-                return data['candidates'][0]['content']['parts'][0]['text'].strip()
-        
-        logger.error(f"Gemini error: {response.status_code} - {response.text}")
+            if data.get('candidates'):
+                parts = data['candidates'][0].get('content', {}).get('parts', [])
+                if parts and parts[0].get('text'):
+                    return parts[0]['text'].strip()
+
+        logger.error(f"Gemini error: {response.status_code}")
         return None
         
     except Exception as e:
@@ -1093,20 +1095,24 @@ def get_messages(conversation_id):
 @rate_limit(30, 60, 'ip')  # v330: Rate limit message sending
 def send_message():
     try:
-        data = request.json
-        conversation_id = data['conversationId']
-        sender_id = data['senderId']
+        data = request.get_json() or {}
+        conversation_id = data.get('conversationId')
+        sender_id = data.get('senderId')
+        content = data.get('content')
+
+        if not conversation_id or not sender_id or not content:
+            return jsonify({'success': False, 'error': 'Chybí povinná pole (conversationId, senderId, content)'}), 400
 
         # v330: IDOR — validate senderId matches authenticated user
         idor = _check_idor(sender_id)
         if idor: return idor
-        
+
         message = {
             'id': generate_id(),
             'conversation_id': conversation_id,
             'sender_id': sender_id,
             'type': data.get('type', 'text'),
-            'content': data['content'],
+            'content': content,
             'reply_to': data.get('replyTo'),
             'metadata': data.get('metadata', {}),
             'timestamp': now_iso(),
@@ -1223,8 +1229,10 @@ def send_message():
 @optional_auth
 def mark_as_read(message_id):
     try:
-        data = request.json
-        user_id = data['userId']
+        data = request.get_json() or {}
+        user_id = data.get('userId')
+        if not user_id:
+            return jsonify({'success': False, 'error': 'Chybí userId'}), 400
         
         db = get_db()
         cursor = db.execute('SELECT read_by FROM chat_messages WHERE id = ?', (message_id,))
@@ -1247,9 +1255,11 @@ def mark_as_read(message_id):
 @optional_auth
 def add_reaction(message_id):
     try:
-        data = request.json
-        user_id = data['userId']
-        emoji = data['emoji']
+        data = request.get_json() or {}
+        user_id = data.get('userId')
+        emoji = data.get('emoji')
+        if not user_id or not emoji:
+            return jsonify({'success': False, 'error': 'Chybí userId nebo emoji'}), 400
         conversation_id = data.get('conversationId')
         
         db = get_db()
@@ -1320,10 +1330,12 @@ def get_contacts(user_id):
 @optional_auth
 def add_contact():
     try:
-        data = request.json
+        data = request.get_json() or {}
+        if not data.get('userId') or not data.get('contactId') or not data.get('name'):
+            return jsonify({'success': False, 'error': 'Chybí povinná pole (userId, contactId, name)'}), 400
         contact = {
-            'id': generate_id(), 
-            'user_id': data['userId'], 
+            'id': generate_id(),
+            'user_id': data['userId'],
             'contact_id': data['contactId'],
             'name': data['name'], 
             'role': data.get('role', 'Rodina'), 
@@ -1451,9 +1463,11 @@ def upload_voice_message():
 def subscribe_push():
     """Přihlásit k push notifikacím"""
     try:
-        data = request.json
-        user_id = data['userId']
-        subscription = data['subscription']
+        data = request.get_json() or {}
+        user_id = data.get('userId')
+        subscription = data.get('subscription')
+        if not user_id or not subscription:
+            return jsonify({'success': False, 'error': 'Chybí userId nebo subscription'}), 400
         
         db = get_db()
         if is_postgres():
@@ -1481,8 +1495,10 @@ def subscribe_push():
 def unsubscribe_push():
     """Odhlásit z push notifikací"""
     try:
-        data = request.json
-        user_id = data['userId']
+        data = request.get_json() or {}
+        user_id = data.get('userId')
+        if not user_id:
+            return jsonify({'success': False, 'error': 'Chybí userId'}), 400
         endpoint = data.get('endpoint')
         
         db = get_db()
@@ -1509,8 +1525,10 @@ def get_vapid_key():
 def test_push():
     """Test push notifikace"""
     try:
-        data = request.json
-        user_id = data['userId']
+        data = request.get_json() or {}
+        user_id = data.get('userId')
+        if not user_id:
+            return jsonify({'success': False, 'error': 'Chybí userId'}), 400
         
         success = send_push_notification(
             user_id,

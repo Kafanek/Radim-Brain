@@ -4610,7 +4610,7 @@ def _evaluate_and_adapt(user_id, course_id, module_id, score):
     profile = _get_adaptive_profile(user_id)
     profile["total_quizzes"] += 1
     profile["total_score"] += score
-    profile["avg_score"] = round(profile["total_score"] / profile["total_quizzes"])
+    profile["avg_score"] = round(profile["total_score"] / profile["total_quizzes"]) if profile["total_quizzes"] > 0 else 0
     profile["last_activity"] = now_iso()
 
     course = EDUCATION_COURSES.get(course_id, {})

@@ -532,9 +532,11 @@ def call_gemini_whatsapp(message, context=None, mode='senior', personalized_prom
         
         if response.status_code == 200:
             data = response.json()
-            if 'candidates' in data and data['candidates']:
-                full_response = data['candidates'][0]['content']['parts'][0]['text'].strip()
-                return parse_radim_response(full_response)
+            if data.get('candidates'):
+                parts = data['candidates'][0].get('content', {}).get('parts', [])
+                if parts and parts[0].get('text'):
+                    full_response = parts[0]['text'].strip()
+                    return parse_radim_response(full_response)
         
         return None, None
         

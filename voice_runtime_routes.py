@@ -676,10 +676,12 @@ def get_voice_ai_response(messages, context=None):
             
             if response.status_code == 200:
                 data = response.json()
-                if 'candidates' in data and data['candidates']:
-                    text = data['candidates'][0]['content']['parts'][0]['text'].strip()
-                    text = clean_for_tts(text)
-                    return {'response': text, 'provider': 'gemini', 'success': True}
+                if data.get('candidates'):
+                    parts = data['candidates'][0].get('content', {}).get('parts', [])
+                    text = parts[0]['text'].strip() if parts and parts[0].get('text') else None
+                    if text:
+                        text = clean_for_tts(text)
+                        return {'response': text, 'provider': 'gemini', 'success': True}
         except Exception as e:
             logger.error(f"Gemini voice error: {e}")
     
@@ -706,7 +708,7 @@ def get_voice_ai_response(messages, context=None):
             
             if response.status_code == 200:
                 data = response.json()
-                if 'content' in data and data['content']:
+                if data.get('content') and data['content'][0].get('text'):
                     text = data['content'][0]['text'].strip()
                     text = clean_for_tts(text)
                     return {'response': text, 'provider': 'claude', 'success': True}
