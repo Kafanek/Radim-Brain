@@ -226,12 +226,12 @@ def _get_education():
             "SELECT COUNT(DISTINCT user_id) as cnt FROM education_progress"
         ).fetchone()
 
-        # Completed lessons
+        # Completed lessons (action = 'complete_lesson' or 'complete_module')
         completed = db.execute(
-            "SELECT COUNT(*) as cnt FROM education_progress WHERE completed = TRUE"
+            "SELECT COUNT(*) as cnt FROM education_progress WHERE action LIKE 'complete%'"
         ).fetchone()
 
-        # Total quizzes taken
+        # Total quizzes taken (rows with score)
         quizzes = db.execute(
             "SELECT COUNT(*) as cnt, COALESCE(AVG(score), 0) as avg_score "
             "FROM education_progress WHERE score IS NOT NULL"
