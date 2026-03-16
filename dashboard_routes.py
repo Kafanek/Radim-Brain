@@ -443,6 +443,94 @@ def get_dashboard_v2_quick():
 
 
 # ============================================
+# UNIFIED HEALTH CHECK
+# ============================================
+
+HEALTH_MODULES = {
+    'claude': '/api/claude/health',
+    'speech': '/api/speech/health',
+    'twilio': '/api/twilio/health',
+    'iot_bridge': '/api/iot-bridge/health',
+    'brain': '/api/brain/health',
+    'memory': '/api/memory/health',
+    'orchestrator': '/api/orchestrator/health',
+    'anticipation': '/api/anticipation/health',
+    'education': '/api/education',
+    'telemedicine': '/api/telemedicine/health',
+    'voice': '/api/voice/health',
+    'soul': '/api/soul/health',
+    'rhythm': '/api/rhythm-return/health',
+    'email': '/api/email/health',
+}
+
+
+@dashboard_bp.route('/api/health/all', methods=['GET'])
+@optional_auth
+def unified_health():
+    """
+    Unified health check — aggregates status of all modules.
+    Calls each module's health endpoint internally via Flask test client.
+    """
+    from flask import current_app
+
+    modules = {}
+    healthy_count = 0
+    total_count = 0
+
+    for name, path in HEALTH_MODULES.items():
+        total_count += 1
+        try:
+            with current_app.test_client() as client:
+                resp = client.get(path, headers={'X-Internal-Health': '1'})
+                if resp.status_code == 200:
+                    modules[name] = {'status': 'ok', 'code': 200}
+                    healthy_count += 1
+                else:
+                    modules[name] = {'status': 'error', 'code': resp.status_code}
+        except Exception as e:
+            modules[name] = {'status': 'unavailable', 'error': str(e)}
+
+    # Database check
+    try:
+        from database import get_connection, is_postgres
+        db = get_connection()
+        db.execute("SELECT 1").fetchone()
+        db.close()
+        modules['database'] = {
+            'status': 'ok',
+            'type': 'postgresql' if is_postgres() else 'sqlite'
+        }
+        healthy_count += 1
+        total_count += 1
+    except Exception as e:
+        modules['database'] = {'status': 'error', 'error': str(e)}
+        total_count += 1
+
+    # AI providers
+    ai = _get_ai_status()
+    modules['ai'] = {
+        'status': 'ok' if ai['providers_active'] > 0 else 'warning',
+        'gemini': ai['gemini'],
+        'claude_api': ai['claude'],
+        'primary': ai['primary']
+    }
+
+    overall = 'healthy' if healthy_count >= total_count * 0.8 else (
+        'degraded' if healthy_count >= total_count * 0.5 else 'critical'
+    )
+
+    return jsonify({
+        'success': True,
+        'status': overall,
+        'healthy': healthy_count,
+        'total': total_count,
+        'modules': modules,
+        'timestamp': _now_iso(),
+        'version': '4.0.0'
+    })
+
+
+# ============================================
 # V1 ENDPOINTS (deprecated — kept for backward compatibility)
 # ============================================
 
