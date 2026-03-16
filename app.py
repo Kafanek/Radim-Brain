@@ -96,6 +96,14 @@ except ImportError:
     EDUCATION_AVAILABLE = False
     logger.warning("⚠️ Education routes not available")
 
+# 🏫 Import Education Teacher Dashboard
+try:
+    from education_teacher_routes import education_teacher_bp
+    EDUCATION_TEACHER_AVAILABLE = True
+except ImportError:
+    EDUCATION_TEACHER_AVAILABLE = False
+    logger.warning("⚠️ Education teacher routes not available")
+
 # 🏥 Import Telemedicine Routes
 try:
     from telemedicine_routes import telemedicine_bp, get_upcoming_consultations_for_reminder
@@ -153,6 +161,11 @@ if LIBRARY_AVAILABLE:
 if EDUCATION_AVAILABLE:
     app.register_blueprint(education_bp)
     logger.info("✅ Education routes registered: /api/education/*")
+
+# 🏫 Register Education Teacher Dashboard Blueprint
+if EDUCATION_TEACHER_AVAILABLE:
+    app.register_blueprint(education_teacher_bp)
+    logger.info("✅ Education teacher routes registered: /api/education/teacher-dashboard/*")
 
 # 🏥 Register Telemedicine Blueprint
 if TELEMEDICINE_AVAILABLE:
