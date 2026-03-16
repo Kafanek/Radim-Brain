@@ -223,7 +223,7 @@ def _get_education():
 
         # Enrolled students
         enrolled = db.execute(
-            "SELECT COUNT(DISTINCT student_id) as cnt FROM education_progress"
+            "SELECT COUNT(DISTINCT user_id) as cnt FROM education_progress"
         ).fetchone()
 
         # Completed lessons
