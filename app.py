@@ -142,7 +142,7 @@ if PREDICT_AVAILABLE:
 # 📊 Register Dashboard Blueprint
 if DASHBOARD_AVAILABLE:
     app.register_blueprint(dashboard_bp)
-    logger.info("✅ Dashboard routes registered: /api/dashboard/*")
+    logger.info("✅ Dashboard routes registered: /api/dashboard/*, /api/dashboard/v2/*")
 
 # 📚 Register Library Blueprint
 if LIBRARY_AVAILABLE:
@@ -2668,7 +2668,7 @@ def health():
     if MEMORY_AVAILABLE:
         blueprints['memory'] = {'prefix': '/api/memory/*', 'version': '1.0.0', 'status': 'active'}
     if DASHBOARD_AVAILABLE:
-        blueprints['dashboard'] = {'prefix': '/api/dashboard/*', 'version': '1.0.0', 'status': 'active'}
+        blueprints['dashboard'] = {'prefix': '/api/dashboard/*, /api/dashboard/v2/*', 'version': '4.0.0', 'status': 'active'}
     if TWILIO_AVAILABLE:
         blueprints['twilio_voice'] = {'prefix': '/api/twilio/*', 'version': '1.0.0', 'status': 'active'}
     if IOT_BRIDGE_AVAILABLE:
@@ -3207,87 +3207,6 @@ def api_info():
             'events': ['join', 'send_message', 'typing', 'mark_read']
         }
     })
-
-# ============================================
-# DASHBOARD - AGREGOVANÝ PŘEHLED
-# ============================================
-@app.route('/api/dashboard')
-def dashboard():
-    """Agregovaný dashboard pro investory a frontend"""
-    from datetime import datetime as dt
-    result = {'success': True, 'timestamp': now_iso(), 'version': '3.1.0'}
-
-    # 1) Seniors summary
-    try:
-        from seniors_routes import DEMO_SENIORS
-        active = [s for s in DEMO_SENIORS.values() if s.get('status') == 'active']
-        result['seniors'] = {
-            'total': len(active),
-            'avg_age': round(sum(s['age'] for s in active) / len(active), 1) if active else 0,
-            'high_care': sum(1 for s in active if s.get('care_level', 0) >= 3),
-            'facility': 'Dům seniorů Háje'
-        }
-    except Exception as e:
-        logger.warning(f"Dashboard seniors error: {e}")
-        result['seniors'] = {'error': 'nedostupné'}
-
-    # 2) IoT summary
-    try:
-        from iot_routes import ROOM_SENSORS
-        total_sensors = sum(len(r['sensors']) for r in ROOM_SENSORS.values())
-        result['iot'] = {
-            'rooms': len(ROOM_SENSORS),
-            'sensors_total': total_sensors,
-            'health': 'operational'
-        }
-    except Exception as e:
-        logger.warning(f"Dashboard IoT error: {e}")
-        result['iot'] = {'error': 'nedostupné'}
-
-    # 3) Top-risk senior
-    try:
-        from predict_routes import RISK_PROFILES
-        top_risk = max(RISK_PROFILES.items(), key=lambda x: x[1].get('base_risk', 0))
-        result['top_risk'] = {
-            'senior_id': top_risk[0],
-            'base_risk': top_risk[1]['base_risk'],
-            'primary_concerns': top_risk[1].get('primary_concerns', [])
-        }
-    except Exception as e:
-        logger.warning(f"Dashboard predict error: {e}")
-        result['top_risk'] = {'error': 'nedostupné'}
-
-    # 4) Consciousness pulse
-    try:
-        import math, time
-        phi = 1.618033988749895
-        t = time.time()
-        score = 0.5 + 0.3 * math.sin(t / (phi * 100))
-        result['consciousness'] = {
-            'score': round(score, 3),
-            'state': 'aware' if score > 0.6 else 'resting',
-            'neurons': 527,
-            'values': 12
-        }
-    except Exception as e:
-        logger.warning(f"Dashboard consciousness error: {e}")
-        result['consciousness'] = {'error': 'nedostupné'}
-
-    # 5) AI status
-    result['ai'] = {
-        'gemini': bool(GEMINI_API_KEY),
-        'claude': bool(ANTHROPIC_API_KEY),
-        'primary': 'gemini' if GEMINI_API_KEY else ('claude' if ANTHROPIC_API_KEY else 'none')
-    }
-
-    # 6) Blueprint count
-    result['api'] = {
-        'blueprints_active': 11,
-        'endpoints_estimated': 45
-    }
-
-    return jsonify(result)
-
 
 @app.route('/')
 def index():
