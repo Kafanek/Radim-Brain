@@ -455,7 +455,7 @@ HEALTH_MODULES = {
     'memory': '/api/memory/health',
     'orchestrator': '/api/orchestrator/health',
     'anticipation': '/api/anticipation/health',
-    'education': '/api/education',
+    'education': '/api/education/courses',
     'telemedicine': '/api/telemedicine/health',
     'voice': '/api/voice/health',
     'soul': '/api/soul/health',
