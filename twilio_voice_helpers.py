@@ -1,0 +1,455 @@
+"""
+📞 TWILIO VOICE HELPERS — Shared utilities for phone call handling
+=================================================================
+Extracted from twilio_voice_routes.py for modularity.
+
+Contains:
+  - Twilio signature validation decorator
+  - Anticipation Engine helpers (C/α estimation, adaptive speech)
+  - Configuration (env vars, voice constants)
+  - Azure TTS functions (generate_azure_tts, twiml_say)
+  - State management (active_calls, known_callers)
+  - AI response helper (get_ai_response_for_call)
+  - Intent detection (transfer/conference patterns)
+  - Contact lookup
+
+Version: 1.0.0
+"""
+
+import os
+import re
+import time
+import logging
+import requests as http_requests
+from xml.sax.saxutils import escape as xml_escape
+from functools import wraps
+from flask import request, Response, abort
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# SIGNATURE VALIDATION DECORATOR
+# ============================================================================
+
+def validate_twilio_signature(f):
+    """Decorator to validate incoming Twilio webhook requests."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
+        if not auth_token:
+            return f(*args, **kwargs)
+
+        signature = request.headers.get("X-Twilio-Signature", "")
+        if not signature:
+            logger.warning("⚠️ Twilio webhook call without X-Twilio-Signature header")
+            abort(403)
+
+        try:
+            from twilio.request_validator import RequestValidator
+            validator = RequestValidator(auth_token)
+            url = request.url
+            post_vars = request.form.to_dict() if request.method == "POST" else {}
+            if not validator.validate(url, post_vars, signature):
+                logger.warning(f"⚠️ Twilio signature validation failed for {request.path}")
+                abort(403)
+        except ImportError:
+            logger.warning("⚠️ twilio package not installed — skipping signature validation")
+        except Exception as e:
+            logger.error(f"❌ Twilio signature validation error: {e}")
+            abort(403)
+
+        return f(*args, **kwargs)
+    return decorated
+
+
+# ============================================================================
+# CENTRALIZED IMPORTS
+# ============================================================================
+
+from radim_shared import get_nameday as _get_nameday, build_time_context as _shared_build_time_context, get_greeting as _shared_get_greeting
+from radim_system_prompt import get_phone_prompt as _build_phone_prompt
+
+
+def _build_voice_time_context():
+    """Build time context for phone calls — delegates to radim_shared."""
+    return _shared_build_time_context()
+
+
+# ============================================================================
+# ANTICIPATION ENGINE INTEGRATION
+# ============================================================================
+
+try:
+    from anticipation_routes import (
+        predict_C, calculate_emotions, calculate_speech_params,
+        classify_state, PHI as ANT_PHI, C_HARMONY, C_ALERT
+    )
+    ANTICIPATION_AVAILABLE = True
+    logger.info("✅ Anticipation Engine connected to Twilio Voice")
+except ImportError:
+    ANTICIPATION_AVAILABLE = False
+    logger.warning("⚠️ Anticipation Engine not available - using hardcoded TTS params")
+
+# Task Service integration (v231)
+try:
+    from task_service import (
+        build_tasks_context as _voice_tasks_context,
+        get_tasks as _voice_get_tasks
+    )
+    _VOICE_TASK_SERVICE = True
+except ImportError:
+    _VOICE_TASK_SERVICE = False
+
+# Memory system (v231)
+try:
+    from memory_routes import build_personalized_prompt as _voice_build_prompt
+    _VOICE_MEMORY = True
+except ImportError:
+    _VOICE_MEMORY = False
+
+
+# Emotional keyword sets for C/α estimation from speech
+_CRISIS_WORDS = {'pomoc', 'help', 'bolest', 'pain', 'spadl', 'fell', 'sos',
+                 'nouzové', 'emergency', 'nemůžu', 'špatně', 'umírám', 'záchranku'}
+_STRESS_WORDS = {'strach', 'afraid', 'bojím', 'nervous', 'nemocný', 'sick',
+                 'unavený', 'tired', 'problém', 'bolí', 'nespím', 'samota', 'sám'}
+_CALM_WORDS = {'děkuji', 'díky', 'hezky', 'nice', 'dobře', 'good', 'krásně',
+               'fajn', 'prima', 'skvěle', 'výborně', 'pohoda'}
+
+
+def estimate_call_C_alpha(call_sid, speech_result, confidence):
+    """Estimate C and α from phone call context (keywords, STT confidence, turn count)."""
+    call_data = active_calls.get(call_sid, {})
+    history = call_data.get("history", [])
+    turn_count = len(history) // 2
+
+    C = 5.0
+    C += min(turn_count * 0.5, 5)
+
+    try:
+        conf_val = float(confidence)
+    except (ValueError, TypeError):
+        conf_val = 0.5
+    if conf_val < 0.5:
+        C += (0.5 - conf_val) * 10
+
+    text_lower = speech_result.lower()
+    words = set(text_lower.split())
+
+    crisis_hits = len(words & _CRISIS_WORDS)
+    stress_hits = len(words & _STRESS_WORDS)
+    calm_hits = len(words & _CALM_WORDS)
+
+    C += crisis_hits * 8
+    C += stress_hits * 3
+    C -= calm_hits * 2
+    C = max(0, min(C, 40))
+
+    alpha = 0.2
+    if crisis_hits > 0:
+        alpha = 0.8
+    elif stress_hits > 0:
+        alpha = 0.5
+    elif calm_hits > 0:
+        alpha = 0.1
+
+    if call_sid in active_calls:
+        prev_C = active_calls[call_sid].get("C", 5.0)
+        prev_alpha = active_calls[call_sid].get("alpha", 0.2)
+        C = 0.7 * C + 0.3 * prev_C
+        alpha = 0.7 * alpha + 0.3 * prev_alpha
+        active_calls[call_sid]["C"] = round(C, 2)
+        active_calls[call_sid]["alpha"] = round(alpha, 3)
+
+    return C, alpha
+
+
+def get_adaptive_speech_params(C, alpha):
+    """Get adaptive speech parameters from Anticipation Engine."""
+    if not ANTICIPATION_AVAILABLE:
+        return {"rate_pct": "-5%", "pitch_hz": "-2%", "state": "UNKNOWN"}
+
+    try:
+        C_pred = predict_C(C, 0, alpha)
+        emotions = calculate_emotions(C_pred, alpha)
+        params = calculate_speech_params(C_pred, alpha, emotions)
+        state = classify_state(C_pred)
+
+        rate_pct = f"{int(params['rate'] * 100)}%"
+        pitch_hz = f"{params['pitch']:+.0f}Hz" if params['pitch'] != 0 else "+0Hz"
+
+        return {
+            "rate_pct": rate_pct,
+            "pitch_hz": pitch_hz,
+            "state": state,
+            "empathy": params["empathy"],
+            "pause_ms": params["pause_ms"],
+            "raw": params
+        }
+    except Exception as e:
+        logger.error(f"Anticipation fallback: {e}")
+        return {"rate_pct": "-5%", "pitch_hz": "-2%", "state": "FALLBACK"}
+
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
+TWILIO_PHONE_NUMBER = os.environ.get("TWILIO_PHONE_NUMBER")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+
+AZURE_SPEECH_KEY = os.environ.get("AZURE_SPEECH_KEY")
+AZURE_SPEECH_REGION = os.environ.get("AZURE_SPEECH_REGION", "germanywestcentral")
+
+RADIM_VOICE_GOOGLE = "Google.cs-CZ-Standard-A"
+RADIM_VOICE_BASIC = "man"
+RADIM_LANG = "cs-CZ"
+RADIM_AZURE_VOICE = "cs-CZ-AntoninNeural"
+
+_twilio_client = None
+
+
+def get_twilio_client():
+    """Get or create Twilio REST client"""
+    global _twilio_client
+    if _twilio_client is None and TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
+        try:
+            from twilio.rest import Client
+            _twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        except ImportError:
+            logger.warning("twilio package not installed")
+    return _twilio_client
+
+
+def azure_tts_available():
+    """Check if Azure TTS is configured"""
+    return bool(AZURE_SPEECH_KEY and AZURE_SPEECH_REGION)
+
+
+# ============================================================================
+# TTS FUNCTIONS
+# ============================================================================
+
+def generate_azure_tts(text, rate_pct=None, pitch_hz=None):
+    """Generate audio bytes using Azure TTS (AntoninNeural)."""
+    if not azure_tts_available():
+        return None
+
+    if rate_pct is None:
+        rate_pct = "-5%"
+    if pitch_hz is None:
+        pitch_hz = "-2%"
+
+    try:
+        url = f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
+        safe_text = xml_escape(text)
+        ssml = f"""<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='cs-CZ'>
+            <voice name='{RADIM_AZURE_VOICE}'>
+                <prosody rate='{rate_pct}' pitch='{pitch_hz}'>{safe_text}</prosody>
+            </voice>
+        </speak>"""
+
+        resp = http_requests.post(
+            url,
+            headers={
+                'Ocp-Apim-Subscription-Key': AZURE_SPEECH_KEY,
+                'Content-Type': 'application/ssml+xml',
+                'X-Microsoft-OutputFormat': 'audio-16khz-32kbitrate-mono-mp3',
+            },
+            data=ssml.encode('utf-8'),
+            timeout=8
+        )
+        if resp.status_code == 200:
+            return resp.content
+        else:
+            logger.error(f"Azure TTS error: {resp.status_code} {resp.text[:200]}")
+            return None
+    except Exception as e:
+        logger.error(f"Azure TTS exception: {e}")
+        return None
+
+
+def twiml_say(text, speech_params=None):
+    """Generate TwiML for Radim speaking - Azure TTS <Play> or fallback <Say>."""
+    if azure_tts_available():
+        from urllib.parse import quote
+        encoded = quote(text, safe='')
+        backend_url = os.environ.get('BACKEND_URL', 'https://radim-brain-2025-be1cd52b04dc.herokuapp.com')
+        url = f'{backend_url}/api/twilio/tts?text={encoded}'
+        if speech_params and isinstance(speech_params, dict):
+            if speech_params.get("rate_pct"):
+                url += f'&rate={quote(str(speech_params["rate_pct"]), safe="")}'
+            if speech_params.get("pitch_hz"):
+                url += f'&pitch={quote(str(speech_params["pitch_hz"]), safe="")}'
+        return f'<Play>{url}</Play>'
+    else:
+        safe_text = xml_escape(text)
+        return f'<Say voice="{RADIM_VOICE_BASIC}" language="{RADIM_LANG}">{safe_text}</Say>'
+
+
+# ============================================================================
+# STATE MANAGEMENT
+# ============================================================================
+
+active_calls = {}
+_ACTIVE_CALLS_MAX = 100
+
+known_callers = {}
+_KNOWN_CALLERS_MAX = 500
+
+
+def _cleanup_active_calls():
+    """Remove calls older than 2h, enforce max size."""
+    cutoff = time.time() - 7200
+    expired = [sid for sid, d in active_calls.items() if d.get("started", 0) < cutoff]
+    for sid in expired:
+        del active_calls[sid]
+    if len(active_calls) > _ACTIVE_CALLS_MAX:
+        sorted_sids = sorted(active_calls.keys(), key=lambda s: active_calls[s].get("started", 0))
+        for sid in sorted_sids[:len(active_calls) - _ACTIVE_CALLS_MAX]:
+            del active_calls[sid]
+
+
+def _cleanup_known_callers():
+    """Remove oldest known_callers entries when over limit."""
+    if len(known_callers) <= _KNOWN_CALLERS_MAX:
+        return
+    sorted_phones = sorted(known_callers.keys(), key=lambda p: known_callers[p].get("registered_at", 0))
+    for phone in sorted_phones[:len(known_callers) - _KNOWN_CALLERS_MAX]:
+        del known_callers[phone]
+
+
+# Intent patterns (Czech)
+TRANSFER_PATTERNS = re.compile(
+    r'(zavolej|přepoj|spojte|přepojte|zavolejte)\s*(na\s+)?(dce[rř]|syn|doktor|lékař|mari[ie]|pet[rř]|rodinu|vnuč)',
+    re.IGNORECASE
+)
+
+CONFERENCE_PATTERNS = re.compile(
+    r'(zůstaň|zůstaňte|buď|buďte)\s*(s\s+námi|mezi\s*(námi|hovorem))',
+    re.IGNORECASE
+)
+
+
+# ============================================================================
+# HELPERS
+# ============================================================================
+
+def twiml_response(twiml_xml):
+    """Return TwiML XML response"""
+    return Response(twiml_xml, content_type="text/xml")
+
+
+def get_ai_response_for_call(user_text, call_sid, user_id=None):
+    """Get Claude AI response for phone conversation."""
+    if not ANTHROPIC_API_KEY:
+        return "Omlouvám se, právě mám technické potíže. Zkuste to prosím za chvíli."
+
+    call_data = active_calls.get(call_sid, {})
+    history = call_data.get("history", [])
+    caller_name = call_data.get("caller_name", "")
+    uid = call_data.get("user_id") or user_id
+
+    messages = []
+    for msg in history[-10:]:
+        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": user_text})
+
+    extra_ctx = ""
+    if uid:
+        if _VOICE_TASK_SERVICE:
+            try:
+                tasks_ctx = _voice_tasks_context(uid)
+                if tasks_ctx:
+                    extra_ctx += f"\n{tasks_ctx}"
+            except Exception:
+                pass
+        if _VOICE_MEMORY:
+            try:
+                profile_ctx = _voice_build_prompt(uid)
+                if profile_ctx:
+                    extra_ctx += f"\n{profile_ctx}"
+            except Exception:
+                pass
+
+    tc = _build_voice_time_context()
+    system_prompt = _build_phone_prompt(
+        time_context=tc,
+        caller_name=caller_name,
+        extra_ctx=extra_ctx
+    )
+
+    try:
+        try:
+            from anthropic import Anthropic
+            client = Anthropic(api_key=ANTHROPIC_API_KEY, timeout=25.0)
+            response = client.messages.create(
+                model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
+                max_tokens=200,
+                system=system_prompt,
+                messages=messages
+            )
+            ai_text = response.content[0].text
+        except ImportError:
+            resp = http_requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 200,
+                    "temperature": 0.7,
+                    "system": system_prompt,
+                    "messages": messages
+                },
+                timeout=25
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                ai_text = data.get("content", [{}])[0].get("text", "")
+            else:
+                return "Omlouvám se, mám krátký výpadek. Můžete to zkusit znovu?"
+
+        if call_sid in active_calls:
+            active_calls[call_sid]["history"].append({"role": "user", "content": user_text})
+            active_calls[call_sid]["history"].append({"role": "assistant", "content": ai_text})
+
+        return ai_text
+
+    except Exception as e:
+        logger.error(f"Twilio AI error: {e}")
+        return "Promiňte, měl jsem technický problém. Jsem tu pro vás, zkuste to prosím znovu."
+
+
+def detect_transfer_intent(text):
+    """Detect if user wants to transfer call"""
+    if TRANSFER_PATTERNS.search(text):
+        text_lower = text.lower()
+        if any(w in text_lower for w in ['dcer', 'mari']):
+            return {"target": "dcera", "name": "dcera"}
+        elif any(w in text_lower for w in ['syn', 'petr']):
+            return {"target": "syn", "name": "syn"}
+        elif any(w in text_lower for w in ['doktor', 'lékař']):
+            return {"target": "doktor", "name": "lékař"}
+        elif 'rodinu' in text_lower or 'vnuč' in text_lower:
+            return {"target": "rodina", "name": "rodina"}
+        return {"target": "unknown", "name": "kontakt"}
+    return None
+
+
+def lookup_contact_phone(target, caller_phone):
+    """Look up contact phone from known callers"""
+    caller_data = known_callers.get(caller_phone, {})
+    contacts = caller_data.get("contacts", {})
+    if target in contacts:
+        return contacts[target]
+    return None
+
+
+logger.info("✅ Twilio Voice Helpers loaded — auth, TTS, state, AI, intent detection")
