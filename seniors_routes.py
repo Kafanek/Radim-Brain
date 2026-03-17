@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import random
 import uuid
 from auth_middleware import require_auth, optional_auth
+from utils import now_iso
 
 seniors_bp = Blueprint('seniors', __name__)
 
@@ -176,10 +177,6 @@ DEMO_SENIORS = {
         "updated_at": None
     }
 }
-
-
-def now_iso():
-    return datetime.utcnow().isoformat() + 'Z'
 
 
 def update_last_interaction(senior_id):

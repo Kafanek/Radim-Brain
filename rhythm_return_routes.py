@@ -25,6 +25,7 @@ import math
 import uuid
 from datetime import datetime
 from flask import Blueprint, request, jsonify
+from utils import now_iso
 import logging
 
 logger = logging.getLogger(__name__)
@@ -166,11 +167,6 @@ def calculate_trend(current, previous, trend_prev, lambda_factor):
         return _ant_calculate_trend(current, previous, trend_prev, lambda_factor)
     delta = current - previous
     return lambda_factor * delta + (1 - lambda_factor) * trend_prev
-
-
-def now_iso():
-    """ISO timestamp"""
-    return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
 
 
 # ============================================

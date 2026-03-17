@@ -8,6 +8,7 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 import random
+from utils import now_iso
 
 library_bp = Blueprint('library', __name__)
 
@@ -230,10 +231,6 @@ def _evict_old_progress():
 # ============================================
 # HELPER FUNCTIONS
 # ============================================
-
-def now_iso():
-    return datetime.utcnow().isoformat() + 'Z'
-
 
 def get_book_compact(book):
     """Vrátí kompaktní verzi knihy (bez chapters/paragraphs)"""

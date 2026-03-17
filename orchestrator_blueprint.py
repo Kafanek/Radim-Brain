@@ -12,6 +12,7 @@ import os
 from datetime import datetime
 import time
 import concurrent.futures
+from utils import now_iso
 
 orchestrator_bp = Blueprint('orchestrator', __name__)
 
@@ -24,10 +25,6 @@ ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
 WP_URL = os.environ.get('WP_URL', 'https://dev.kafanek.com')
 WP_USER = os.environ.get('WP_USER')
 WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD')
-
-
-def now_iso():
-    return datetime.utcnow().isoformat() + 'Z'
 
 
 def safe_get(url, timeout=10):

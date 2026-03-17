@@ -40,6 +40,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 
 from flask import Blueprint, request, jsonify, g
+from utils import now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -80,10 +81,6 @@ def _get_db():
 def _ph(is_pg):
     """Placeholder: %s for PostgreSQL, ? for SQLite."""
     return '%s' if is_pg else '?'
-
-
-def _now_iso():
-    return datetime.utcnow().isoformat() + 'Z'
 
 
 def _parse_timestamp(ts_str):
@@ -368,7 +365,7 @@ def ingest_data():
             'success': True,
             'alerts_triggered': len(alerts),
             'alerts': [a['message'] for a in alerts] if alerts else [],
-            'timestamp': _now_iso()
+            'timestamp': now_iso()
         }), 201
 
     except Exception as e:
@@ -446,7 +443,7 @@ def ingest_batch():
             'inserted': inserted,
             'errors': errors[:10],  # max 10 error messages
             'alerts_triggered': len(all_alerts),
-            'timestamp': _now_iso()
+            'timestamp': now_iso()
         }), 201
 
     except Exception as e:
@@ -526,7 +523,7 @@ def get_room_data(room_id):
             'readings': readings,
             'count': len(readings),
             'hours': hours,
-            'timestamp': _now_iso()
+            'timestamp': now_iso()
         }), 200
 
     except Exception as e:
@@ -610,7 +607,7 @@ def register_device():
             'success': True,
             'device_id': data['device_id'],
             'message': f"Device {data['device_id']} registered in room {data['room_id']}",
-            'timestamp': _now_iso()
+            'timestamp': now_iso()
         }), 201
 
     except Exception as e:
@@ -761,7 +758,7 @@ def dashboard():
         return jsonify({
             'rooms': rooms,
             'room_count': len(rooms),
-            'timestamp': _now_iso()
+            'timestamp': now_iso()
         }), 200
 
     except Exception as e:
@@ -827,7 +824,7 @@ def create_alert_rule():
         return jsonify({
             'success': True,
             'message': f"Alert rule created: {data['sensor_type']} {data['condition']} {data['threshold']} in {data['room_id']}",
-            'timestamp': _now_iso()
+            'timestamp': now_iso()
         }), 201
 
     except Exception as e:
@@ -982,7 +979,7 @@ def acknowledge_alert(alert_id):
         return jsonify({
             'success': True,
             'alert_id': alert_id,
-            'acknowledged_at': _now_iso()
+            'acknowledged_at': now_iso()
         }), 200
 
     except Exception as e:
@@ -1023,7 +1020,7 @@ def iot_health():
             'readings_last_hour': data_count['cnt'] if data_count else 0,
             'unacknowledged_alerts': alert_count['cnt'] if alert_count else 0,
             'version': '5.1',
-            'timestamp': _now_iso()
+            'timestamp': now_iso()
         }), 200
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500

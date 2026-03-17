@@ -17,6 +17,7 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify, g
 from database import get_connection, is_postgres
 from auth_middleware import require_auth, _base64url_encode, WP_JWT_SECRET
+from utils import now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -97,10 +98,6 @@ def _ensure_auth_table():
         if db:
             try: db.close()
             except: pass
-
-
-def now_iso():
-    return datetime.utcnow().isoformat() + 'Z'
 
 
 # Init auth table at startup

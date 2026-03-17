@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import random
 import math
 import os
+from utils import now_iso
 
 predict_bp = Blueprint('predict', __name__)
 
@@ -22,10 +23,6 @@ JANECKUV_VALUES = [
     "MYŠLENKA", "CÍTĚNÍ", "RESPEKT", "ODVAHA", "HRAVOST", "DŮVĚRA",
     "ODPOVĚDNOST", "RACIONALITA", "EMPATIE", "NADĚJE", "POKORA", "SVOBODA"
 ]
-
-
-def now_iso():
-    return datetime.utcnow().isoformat() + 'Z'
 
 
 def phi_score(base, variance=0.1):

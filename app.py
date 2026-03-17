@@ -28,6 +28,7 @@ from flask_cors import CORS
 from flask_socketio import SocketIO
 from dotenv import load_dotenv
 from database import get_db_for_flask, close_db_for_flask, get_connection
+from utils import generate_id, now_iso, today_date
 from database import init_db as db_init_db, is_postgres
 from auth_middleware import require_auth, require_premium, optional_auth, decode_jwt
 from rate_limiter import rate_limit
@@ -497,15 +498,6 @@ def init_db():
 # ============================================
 # HELPERS
 # ============================================
-def generate_id():
-    return str(uuid.uuid4())
-
-def now_iso():
-    return datetime.utcnow().isoformat() + 'Z'
-
-def today_date():
-    return datetime.utcnow().strftime('%Y-%m-%d')
-
 users_online = {}  # In-memory cache of {user_id: socket_sid} for fast lookups
 _USERS_ONLINE_MAX = 500
 # Note: On dyno restart, all users are set offline in init_db_online_reset()

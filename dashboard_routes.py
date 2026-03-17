@@ -11,6 +11,7 @@ import os
 import time
 import logging
 from auth_middleware import optional_auth
+from utils import now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +20,6 @@ dashboard_bp = Blueprint('dashboard', __name__)
 PHI = (1 + math.sqrt(5)) / 2
 FIBONACCI = [1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144]
 LUCAS = [2, 1, 3, 4, 7, 11, 18, 29, 47, 76, 123, 199]
-
-
-def _now_iso():
-    return datetime.utcnow().isoformat() + 'Z'
 
 
 # ============================================
@@ -376,7 +373,7 @@ def get_dashboard_v2():
         'success': True,
         'facility': 'Dům seniorů Háje',
         'version': '4.0.0',
-        'timestamp': _now_iso(),
+        'timestamp': now_iso(),
         'phi': PHI
     }
 
@@ -412,7 +409,7 @@ def get_dashboard_v2_quick():
 
     return jsonify({
         'success': True,
-        'timestamp': _now_iso(),
+        'timestamp': now_iso(),
         # Seniors
         'seniors_count': seniors.get('total', 0),
         # IoT
@@ -525,7 +522,7 @@ def unified_health():
         'healthy': healthy_count,
         'total': total_count,
         'modules': modules,
-        'timestamp': _now_iso(),
+        'timestamp': now_iso(),
         'version': '4.0.0'
     })
 
@@ -546,7 +543,7 @@ def get_dashboard_v1():
         'success': True,
         'facility': 'Dům seniorů Háje',
         'version': '3.1.0',
-        'timestamp': _now_iso(),
+        'timestamp': now_iso(),
         'phi': PHI,
         '_deprecated': 'Use /api/dashboard/v2 for the consolidated version'
     }
@@ -581,7 +578,7 @@ def get_dashboard_v1_quick():
 
     resp = make_response(jsonify({
         'success': True,
-        'timestamp': _now_iso(),
+        'timestamp': now_iso(),
         'seniors_count': seniors.get('total', 0),
         'sensors_online': iot.get('devices_active', 0),
         'sensors_total': iot.get('devices_active', 0),

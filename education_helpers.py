@@ -7,14 +7,11 @@
 from flask import g
 from datetime import datetime
 from database import get_connection, is_postgres
+from utils import now_iso
 import json
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-def now_iso():
-    return datetime.utcnow().isoformat() + 'Z'
 
 
 # ============================================

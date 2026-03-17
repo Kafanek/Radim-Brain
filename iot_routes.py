@@ -10,12 +10,9 @@ from datetime import datetime, timedelta
 import random
 import math
 from auth_middleware import require_auth, optional_auth
+from utils import now_iso
 
 iot_bp = Blueprint('iot', __name__)
-
-
-def now_iso():
-    return datetime.utcnow().isoformat() + 'Z'
 
 
 def hours_ago(h):

@@ -15,6 +15,7 @@ from email.mime.multipart import MIMEMultipart
 from flask import Blueprint, request, jsonify, g
 from database import get_connection, is_postgres
 from auth_middleware import require_auth, require_teacher
+from utils import now_iso
 
 telemedicine_bp = Blueprint('telemedicine', __name__)
 
@@ -25,10 +26,6 @@ telemedicine_bp = Blueprint('telemedicine', __name__)
 def _p():
     """SQL placeholder: %s for Postgres, ? for SQLite"""
     return "%s" if is_postgres() else "?"
-
-
-def _now_iso():
-    return datetime.utcnow().isoformat() + "Z"
 
 
 def _get_user_id():
@@ -314,7 +311,7 @@ def telemed_dashboard():
         "pending_requests": pending['cnt'] if pending else 0,
         "completed_this_month": total['cnt'] if total else 0,
         "date": today,
-        "timestamp": _now_iso()
+        "timestamp": now_iso()
     })
 
 
@@ -378,7 +375,7 @@ def telemed_set_availability():
         "success": True,
         "slot_id": slot_id,
         "message": "Dostupnost nastavena",
-        "timestamp": _now_iso()
+        "timestamp": now_iso()
     }), 201
 
 
@@ -418,7 +415,7 @@ def telemed_get_availability():
         "success": True,
         "slots": slots,
         "total": len(slots),
-        "timestamp": _now_iso()
+        "timestamp": now_iso()
     })
 
 
@@ -454,7 +451,7 @@ def telemed_delete_availability(slot_id):
                 db.close()
             except Exception:
                 pass
-    return jsonify({"success": True, "message": "Slot odstranen", "timestamp": _now_iso()})
+    return jsonify({"success": True, "message": "Slot odstranen", "timestamp": now_iso()})
 
 
 # --- Consultation management ---
@@ -529,7 +526,7 @@ def telemed_list_consultations():
         "total": total,
         "page": page,
         "limit": limit,
-        "timestamp": _now_iso()
+        "timestamp": now_iso()
     })
 
 
@@ -577,7 +574,7 @@ def telemed_confirm(consultation_id):
         'consultation_id': consultation_id, 'teacher_id': teacher_id
     })
 
-    return jsonify({"success": True, "message": "Konzultace potvrzena", "consultation_id": consultation_id, "timestamp": _now_iso()})
+    return jsonify({"success": True, "message": "Konzultace potvrzena", "consultation_id": consultation_id, "timestamp": now_iso()})
 
 
 @telemedicine_bp.route('/api/telemedicine/consultation/<int:consultation_id>/cancel', methods=['PUT'])
@@ -626,7 +623,7 @@ def telemed_teacher_cancel(consultation_id):
         'consultation_id': consultation_id, 'cancelled_by': 'organizer', 'reason': reason
     })
 
-    return jsonify({"success": True, "message": "Konzultace zrusena", "timestamp": _now_iso()})
+    return jsonify({"success": True, "message": "Konzultace zrusena", "timestamp": now_iso()})
 
 
 @telemedicine_bp.route('/api/telemedicine/consultation/<int:consultation_id>/start', methods=['PUT'])
@@ -694,7 +691,7 @@ def telemed_start(consultation_id):
         "jitsi_url": jitsi_url,
         "room_code": room_code,
         "join_page": join_page,
-        "timestamp": _now_iso()
+        "timestamp": now_iso()
     })
 
 
@@ -733,7 +730,7 @@ def telemed_complete(consultation_id):
                 db.close()
             except Exception:
                 pass
-    return jsonify({"success": True, "message": "Konzultace ukoncena", "consultation_id": consultation_id, "timestamp": _now_iso()})
+    return jsonify({"success": True, "message": "Konzultace ukoncena", "consultation_id": consultation_id, "timestamp": now_iso()})
 
 
 @telemedicine_bp.route('/api/telemedicine/consultation/<int:consultation_id>/notes', methods=['PUT'])
@@ -785,7 +782,7 @@ def telemed_notes(consultation_id):
                 pass
     _notify_user(student_id, 'telemedicine_notes_ready', {'consultation_id': consultation_id})
 
-    return jsonify({"success": True, "message": "Nalez zapsan", "consultation_id": consultation_id, "timestamp": _now_iso()})
+    return jsonify({"success": True, "message": "Nalez zapsan", "consultation_id": consultation_id, "timestamp": now_iso()})
 
 
 @telemedicine_bp.route('/api/telemedicine/consultation/<int:consultation_id>/send-summary', methods=['POST'])
@@ -877,7 +874,7 @@ def telemed_send_summary(consultation_id):
         'consultation_id': consultation_id, 'email': to_email
     })
 
-    return jsonify({"success": True, "message": f"Email odeslan na {to_email}", "timestamp": _now_iso()})
+    return jsonify({"success": True, "message": f"Email odeslan na {to_email}", "timestamp": now_iso()})
 
 
 @telemedicine_bp.route('/api/telemedicine/student/<student_id>/history', methods=['GET'])
@@ -916,7 +913,7 @@ def telemed_student_history(student_id):
                 db.close()
             except Exception:
                 pass
-    return jsonify({"success": True, "history": history, "total": len(history), "student_id": student_id, "timestamp": _now_iso()})
+    return jsonify({"success": True, "history": history, "total": len(history), "student_id": student_id, "timestamp": now_iso()})
 
 
 # ============================================
@@ -960,7 +957,7 @@ def telemed_my_upcoming():
                 db.close()
             except Exception:
                 pass
-    return jsonify({"success": True, "upcoming": upcoming, "total": len(upcoming), "timestamp": _now_iso()})
+    return jsonify({"success": True, "upcoming": upcoming, "total": len(upcoming), "timestamp": now_iso()})
 
 
 @telemedicine_bp.route('/api/telemedicine/my/history', methods=['GET'])
@@ -998,7 +995,7 @@ def telemed_my_history():
                 db.close()
             except Exception:
                 pass
-    return jsonify({"success": True, "history": history, "total": len(history), "timestamp": _now_iso()})
+    return jsonify({"success": True, "history": history, "total": len(history), "timestamp": now_iso()})
 
 
 @telemedicine_bp.route('/api/telemedicine/my/request', methods=['POST'])
@@ -1071,7 +1068,7 @@ def telemed_my_request():
         "message": "Zadost o konzultaci odeslana",
         "consultation_id": cid,
         "status": "requested",
-        "timestamp": _now_iso()
+        "timestamp": now_iso()
     }), 201
 
 
@@ -1087,7 +1084,7 @@ def telemed_my_consultation_detail(consultation_id):
     if not consultation or consultation.get('student_id') != student_id:
         return jsonify({"success": False, "error": "Konzultace nenalezena"}), 404
 
-    return jsonify({"success": True, "consultation": consultation, "timestamp": _now_iso()})
+    return jsonify({"success": True, "consultation": consultation, "timestamp": now_iso()})
 
 
 @telemedicine_bp.route('/api/telemedicine/my/teacher/availability', methods=['GET'])
@@ -1128,7 +1125,7 @@ def telemed_my_teacher_availability():
                 db.close()
             except Exception:
                 pass
-    return jsonify({"success": True, "teacher_id": teacher_id, "slots": slots, "total": len(slots), "timestamp": _now_iso()})
+    return jsonify({"success": True, "teacher_id": teacher_id, "slots": slots, "total": len(slots), "timestamp": now_iso()})
 
 
 @telemedicine_bp.route('/api/telemedicine/my/consultation/<int:consultation_id>/cancel', methods=['PUT'])
@@ -1175,7 +1172,7 @@ def telemed_my_cancel(consultation_id):
         'consultation_id': consultation_id, 'cancelled_by': 'student', 'reason': reason
     })
 
-    return jsonify({"success": True, "message": "Konzultace zrusena", "timestamp": _now_iso()})
+    return jsonify({"success": True, "message": "Konzultace zrusena", "timestamp": now_iso()})
 
 
 # ============================================
@@ -1214,7 +1211,7 @@ def telemed_join(consultation_id):
         "room_code": room_code,
         "join_page": join_page,
         "consultation_id": consultation_id,
-        "timestamp": _now_iso()
+        "timestamp": now_iso()
     })
 
 
@@ -1340,7 +1337,7 @@ def telemed_create_multiparty():
         "participants_invited": invited_count,
         "status": "confirmed",
         "is_multiparty": True,
-        "timestamp": _now_iso()
+        "timestamp": now_iso()
     }), 201
 
 
@@ -1426,7 +1423,7 @@ def telemed_invite_participant(consultation_id):
         'role': role, 'specialty': specialty
     })
 
-    return jsonify({"success": True, "participant_id": pid, "message": "Odbornik pozvan", "timestamp": _now_iso()}), 201
+    return jsonify({"success": True, "participant_id": pid, "message": "Odbornik pozvan", "timestamp": now_iso()}), 201
 
 
 @telemedicine_bp.route('/api/telemedicine/consultation/<int:consultation_id>/participants', methods=['GET'])
@@ -1480,7 +1477,7 @@ def telemed_list_participants(consultation_id):
         "participants": participants,
         "total": len(participants),
         "is_multiparty": bool(consultation.get('is_multiparty')),
-        "timestamp": _now_iso()
+        "timestamp": now_iso()
     })
 
 
@@ -1530,7 +1527,7 @@ def telemed_respond_invitation(consultation_id):
             'consultation_id': consultation_id, 'user_id': user_id, 'response': response
         })
 
-    return jsonify({"success": True, "status": response, "message": f"Pozvanka {response}", "timestamp": _now_iso()})
+    return jsonify({"success": True, "status": response, "message": f"Pozvanka {response}", "timestamp": now_iso()})
 
 
 @telemedicine_bp.route('/api/telemedicine/consultation/<int:consultation_id>/participants/notes', methods=['PUT'])
@@ -1592,7 +1589,7 @@ def telemed_participant_notes(consultation_id):
             'consultation_id': consultation_id, 'from_user': user_id
         })
 
-    return jsonify({"success": True, "message": "Poznamky ulozeny", "timestamp": _now_iso()})
+    return jsonify({"success": True, "message": "Poznamky ulozeny", "timestamp": now_iso()})
 
 
 @telemedicine_bp.route('/api/telemedicine/consultation/<int:consultation_id>/all-notes', methods=['GET'])
@@ -1641,7 +1638,7 @@ def telemed_all_notes(consultation_id):
         "organizer_notes": organizer_notes,
         "specialist_notes": specialist_notes,
         "total_contributions": len(specialist_notes),
-        "timestamp": _now_iso()
+        "timestamp": now_iso()
     })
 
 
@@ -1689,7 +1686,7 @@ def telemed_remove_participant(consultation_id, participant_user_id):
         'consultation_id': consultation_id, 'cancelled_by': 'organizer', 'reason': 'Odebrán z konzultace'
     })
 
-    return jsonify({"success": True, "message": "Ucastnik odstranen", "timestamp": _now_iso()})
+    return jsonify({"success": True, "message": "Ucastnik odstranen", "timestamp": now_iso()})
 
 
 # ============================================
