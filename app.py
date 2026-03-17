@@ -35,8 +35,9 @@ from rate_limiter import rate_limit
 
 load_dotenv()
 
-# Import Radim WhatsApp Orchestrator
+# Import Radim WhatsApp Orchestrator + Service routes
 from radim_orchestrator import radim_bp
+from radim_service_routes import radim_service_bp
 
 # 🎭 Import Orchestrator Blueprint
 from orchestrator_blueprint import orchestrator_bp
@@ -132,8 +133,9 @@ except ImportError:
 # ============================================
 app = Flask(__name__)
 
-# Register Radim Blueprint
+# Register Radim Blueprints
 app.register_blueprint(radim_bp)
+app.register_blueprint(radim_service_bp)
 
 # 🎭 Register Orchestrator Blueprint
 app.register_blueprint(orchestrator_bp)
