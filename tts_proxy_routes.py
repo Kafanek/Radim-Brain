@@ -1,0 +1,269 @@
+"""
+TTS Proxy Routes — Azure TTS + ElevenLabs TTS
+Extracted from app.py for cleaner architecture.
+"""
+
+import os
+import re
+import logging
+import requests as http_requests
+from xml.sax.saxutils import escape as xml_escape
+from flask import Blueprint, request, jsonify, Response
+from rate_limiter import rate_limit
+
+logger = logging.getLogger(__name__)
+
+tts_proxy_bp = Blueprint('tts_proxy', __name__)
+
+# ── Config from environment ──────────────────────────────────────────
+AZURE_TTS_KEY = os.environ.get('AZURE_TTS_KEY')
+AZURE_TTS_REGION = os.environ.get('AZURE_TTS_REGION', 'eastus')
+ELEVENLABS_API_KEY = os.environ.get('ELEVENLABS_API_KEY', '')
+
+# ── Anticipation + Brain engine refs (set by init_tts_proxy_routes) ──
+_ant_available = False
+_ant_predict_C = None
+_ant_emotions = None
+_ant_speech = None
+_ant_classify = None
+_brain_available = False
+_brain_speech_fn = None
+
+
+def init_tts_proxy_routes(ant_available=False, predict_C=None, emotions=None,
+                          speech=None, classify=None, brain_available=False,
+                          brain_speech=None):
+    """Inject anticipation-engine and brain-engine function references."""
+    global _ant_available, _ant_predict_C, _ant_emotions, _ant_speech, _ant_classify
+    global _brain_available, _brain_speech_fn
+    _ant_available = ant_available
+    _ant_predict_C = predict_C
+    _ant_emotions = emotions
+    _ant_speech = speech
+    _ant_classify = classify
+    _brain_available = brain_available
+    _brain_speech_fn = brain_speech
+
+
+# ── Valid SSML express-as styles ─────────────────────────────────────
+_VALID_STYLES = {
+    'friendly', 'cheerful', 'sad', 'angry', 'excited', 'gentle', 'serious',
+    'empathetic', 'calm', 'newscast', 'customerservice', 'chat', 'assistant',
+    'newscast-casual', 'newscast-formal', 'advertisement_upbeat',
+    'documentary-narration', 'narration-professional', 'narration-relaxed',
+    'poetry-reading', 'shouting', 'whispering', 'terrified', 'unfriendly',
+    'depressed', 'disgruntled', 'embarrassed', 'fearful', 'hopeful',
+    'lyrical', 'envious', 'sports_commentary', 'sports_commentary_excited',
+}
+
+
+# =====================================================================
+#  Azure TTS Proxy
+# =====================================================================
+
+@tts_proxy_bp.route('/api/azure/tts', methods=['OPTIONS'])
+def azure_tts_preflight():
+    """CORS preflight for Azure TTS"""
+    response = jsonify({'status': 'ok'})
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+    response.headers.add('Access-Control-Max-Age', '3600')
+    return response, 200
+
+
+@tts_proxy_bp.route('/api/azure/tts', methods=['POST'])
+@rate_limit(max_requests=60, window_seconds=60, key_func='ip')
+def azure_tts_proxy():
+    """Azure TTS Proxy - Antonin voice"""
+    if not AZURE_TTS_KEY:
+        return jsonify({'error': 'Azure TTS not configured (AZURE_TTS_KEY missing)'}), 503
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'error': 'Chybi telo pozadavku (JSON)'}), 400
+        text = data.get('text', '')
+        voice = data.get('voice', 'cs-CZ-AntoninNeural')
+        rate = data.get('rate', '0.85')
+        pitch = data.get('pitch', '+0Hz')
+
+        # Optional: Use Anticipation Engine if C/alpha provided
+        C_val = data.get('C')
+        alpha_val = data.get('alpha')
+        ant_state = None
+        if C_val is not None and alpha_val is not None and _ant_available:
+            try:
+                C_pred = _ant_predict_C(float(C_val), 0, float(alpha_val))
+                emo = _ant_emotions(C_pred, float(alpha_val))
+                params = _ant_speech(C_pred, float(alpha_val), emo)
+                ant_state = _ant_classify(C_pred)
+                rate = str(round(params['rate'] * 100)) + '%'
+                pitch = f"{int(params['pitch'])}Hz" if params['pitch'] <= 0 else f"+{int(params['pitch'])}Hz"
+            except Exception:
+                pass  # Fall through to default rate/pitch
+
+        # Brain Engine: override with per-user Psi(t) speech adaptation
+        brain_speech = None
+        uid = data.get('user_id', '')
+        if uid and _brain_available:
+            try:
+                brain_speech = _brain_speech_fn(str(uid))
+                if brain_speech:
+                    rate = str(brain_speech['rate'])
+                    pitch = f"{brain_speech['pitch_pct']:+d}%"
+                    ant_state = brain_speech['mode']
+            except Exception:
+                pass
+
+        if not text:
+            return jsonify({'error': 'Text is required'}), 400
+
+        # Sanitize inputs to prevent SSML injection
+        safe_text = xml_escape(text)
+        if not re.match(r'^[a-zA-Z]{2}-[A-Z]{2}-[a-zA-Z]+$', voice):
+            voice = 'cs-CZ-AntoninNeural'
+        if not re.match(r'^[0-9.]+$', str(rate).replace('%', '')):
+            rate = '0.85'
+        if not re.match(r'^[+-]?[0-9]+(%|Hz)$', pitch):
+            pitch = '+0Hz'
+
+        # Build SSML
+        _style = brain_speech.get('style', 'friendly') if brain_speech else 'friendly'
+        _styledegree = brain_speech.get('styledegree', '1.2') if brain_speech else '1.2'
+        if _style not in _VALID_STYLES:
+            _style = 'friendly'
+        if not re.match(r'^[0-9.]+$', str(_styledegree)):
+            _styledegree = '1.2'
+
+        ssml = f"""<speak version='1.0' xmlns:mstts='https://www.w3.org/2001/mstts' xml:lang='cs-CZ'>
+            <voice name='{voice}'>
+                <mstts:express-as style='{_style}' styledegree='{_styledegree}'>
+                    <prosody rate='{rate}' pitch='{pitch}'>
+                        {safe_text}
+                    </prosody>
+                </mstts:express-as>
+            </voice>
+        </speak>"""
+
+        url = f"https://{AZURE_TTS_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
+        headers = {
+            'Ocp-Apim-Subscription-Key': AZURE_TTS_KEY,
+            'Content-Type': 'application/ssml+xml',
+            'X-Microsoft-OutputFormat': 'audio-16khz-128kbitrate-mono-mp3'
+        }
+
+        try:
+            response = http_requests.post(url, headers=headers, data=ssml.encode('utf-8'), timeout=60)
+        except http_requests.exceptions.Timeout:
+            return jsonify({'error': 'Azure TTS API timeout - try again'}), 504
+        except http_requests.exceptions.RequestException as e:
+            logger.error(f"TTS proxy error: {e}")
+            return jsonify({'error': 'Interni chyba serveru'}), 503
+
+        if response.status_code == 200:
+            resp_headers = {
+                'X-Voice-Name': voice,
+                'X-Voice-Rate': str(rate),
+                'Cache-Control': 'no-cache'
+            }
+            if ant_state:
+                resp_headers['X-Anticipation-State'] = ant_state
+            if brain_speech:
+                resp_headers['X-Brain-Mode'] = brain_speech['mode']
+                resp_headers['X-Brain-Coherence'] = str(brain_speech['coherence'])
+            return Response(
+                response.content,
+                mimetype='audio/mpeg',
+                headers=resp_headers
+            )
+        else:
+            return jsonify({'error': f'Azure TTS error: {response.status_code}'}), response.status_code
+
+    except Exception as e:
+        logger.error(f"TTS proxy error: {e}")
+        return jsonify({'error': 'Interni chyba serveru'}), 500
+
+
+# =====================================================================
+#  ElevenLabs TTS Proxy
+# =====================================================================
+
+@tts_proxy_bp.route('/api/elevenlabs/tts', methods=['OPTIONS'])
+def elevenlabs_tts_preflight():
+    """CORS preflight for ElevenLabs TTS"""
+    response = jsonify({'status': 'ok'})
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+    response.headers.add('Access-Control-Max-Age', '3600')
+    return response, 200
+
+
+@tts_proxy_bp.route('/api/elevenlabs/tts', methods=['POST'])
+@rate_limit(max_requests=40, window_seconds=60, key_func='ip')
+def elevenlabs_tts_proxy():
+    """ElevenLabs TTS Proxy"""
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'error': 'Chybi telo pozadavku (JSON)'}), 400
+        text = data.get('text', '')
+        voice_id = data.get('voice_id', 'JBFqnCBsd6RMkjVDRZzb')
+
+        if not text:
+            return jsonify({'error': 'Text is required'}), 400
+        if not ELEVENLABS_API_KEY:
+            return jsonify({'error': 'ElevenLabs API key not configured'}), 500
+
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+        headers = {
+            'xi-api-key': ELEVENLABS_API_KEY,
+            'Content-Type': 'application/json'
+        }
+        payload = {
+            'text': text,
+            'model_id': 'eleven_multilingual_v2',
+            'voice_settings': {
+                'stability': 0.5,
+                'similarity_boost': 0.75
+            }
+        }
+
+        try:
+            response = http_requests.post(url, headers=headers, json=payload, timeout=30)
+        except http_requests.exceptions.Timeout:
+            return jsonify({'error': 'ElevenLabs API timeout'}), 504
+        except http_requests.exceptions.RequestException as e:
+            logger.error(f"ElevenLabs error: {e}")
+            return jsonify({'error': 'Interni chyba serveru'}), 503
+
+        if response.status_code == 200:
+            return Response(
+                response.content,
+                mimetype='audio/mpeg',
+                headers={'X-Voice-ID': voice_id, 'Cache-Control': 'no-cache'}
+            )
+        else:
+            logger.error(f"ElevenLabs error {response.status_code}: {response.text[:200]}")
+            return jsonify({'error': 'Chyba syntezy hlasu'}), response.status_code
+
+    except Exception as e:
+        logger.error(f"ElevenLabs error: {e}")
+        return jsonify({'error': 'Interni chyba serveru'}), 500
+
+
+# =====================================================================
+#  TTS Health Check
+# =====================================================================
+
+@tts_proxy_bp.route('/api/tts/health', methods=['GET'])
+def tts_health():
+    """Health check for TTS proxy services"""
+    return jsonify({
+        'status': 'healthy',
+        'service': 'TTS Proxy (Azure + ElevenLabs - Flask)',
+        'endpoints': {
+            'azure': '/api/azure/tts',
+            'elevenlabs': '/api/elevenlabs/tts'
+        }
+    })
