@@ -1,8 +1,23 @@
 # ============================================
 # RADIM WHATSAPP ORCHESTRATOR
 # ============================================
-# Version: 1.0.0
+# Version: 2.0.0 (modular)
 # WhatsApp styl chat s action JSON
+#
+# Architecture (v2.0):
+#   radim_helpers.py    — config, intent, safety, time/date extractors
+#   radim_ai_engine.py  — Gemini wrapper, response parser, story templates
+#   radim_orchestrator.py (this file) — Blueprint + route handlers
+#
+# Routes:
+#   POST /api/radim/chat              — Main WhatsApp-style chat
+#   GET|POST|PUT|DELETE /api/radim/tasks — Task management
+#   GET|POST /api/radim/medications   — Medication tracking
+#   GET  /api/radim/stories/templates — Story templates
+#   POST /api/radim/stories/generate  — Story generation
+#   POST /api/radim/voice/speak       — Azure TTS
+#   GET  /api/radim/greeting          — Time-based greeting
+#   GET  /api/radim/health            — Health check
 
 from flask import Blueprint, request, jsonify, g
 from auth_middleware import require_auth, optional_auth
@@ -12,14 +27,27 @@ import json
 import re
 import os
 import base64
-import time as _time
-from datetime import datetime, timedelta, date
+from datetime import datetime
 from xml.sax.saxutils import escape as xml_escape
 import logging
+
+# Import from helper modules
+from radim_helpers import (
+    GEMINI_API_KEY, WP_URL, WP_USER, WP_APP_PASSWORD,
+    _extract_user_id, detect_intent, extract_time, extract_date,
+    _safety_notify_caregivers, _safety_log_crisis_event
+)
+from radim_ai_engine import (
+    call_gemini_whatsapp, parse_radim_response, STORY_TEMPLATES
+)
 
 logger = logging.getLogger(__name__)
 
 radim_bp = Blueprint('radim', __name__)
+
+# ============================================
+# OPTIONAL IMPORTS (graceful fallback)
+# ============================================
 
 # Anticipation Engine integration
 try:
@@ -77,13 +105,6 @@ try:
 except ImportError:
     _ORCH_TEXT_RHYTHM = False
 
-# 🏠 System Prompt v3.0 — domácí asistent s časovým kontextem
-try:
-    from radim_system_prompt import get_radim_prompt as _sys_get_prompt
-    _ORCH_SYS_PROMPT = True
-except ImportError:
-    _ORCH_SYS_PROMPT = False
-
 # 📋 Task Service — úkoly a léky s persistencí
 try:
     from task_service import (
@@ -98,500 +119,6 @@ try:
 except ImportError:
     _ORCH_TASK_SERVICE = False
 
-# ============================================
-# KONFIGURACE
-# ============================================
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-WP_URL = os.environ.get('WP_URL', 'https://dev.kafanek.com')
-WP_USER = os.environ.get('WP_USER')
-WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD')
-
-# ============================================
-# USER ID EXTRACTION (v231 — žádný sdílený default-senior)
-# ============================================
-def _extract_user_id(auth_user_from_g, fallback_from_data=None):
-    """Bezpečná extrakce user_id. Nikdy nevrátí sdílený 'default-senior'."""
-    auth_user = auth_user_from_g or {}
-    uid = str(auth_user.get('id', '')).strip()
-    if uid and uid != '0':
-        return uid
-    # Fallback z request body
-    if fallback_from_data:
-        body_uid = str(fallback_from_data).strip()
-        if body_uid and body_uid not in ('', 'default-senior', '0'):
-            return body_uid
-    # Unikátní anonymous ID — žádné sdílení dat
-    return f'anon-{int(datetime.utcnow().timestamp())}'
-
-
-# Czech holidays — centralized in radim_shared.py
-from radim_shared import CZECH_HOLIDAYS as _CZECH_HOLIDAYS
-
-# ============================================
-# WEATHER CONTEXT (open-meteo.com, free, no API key)
-# ============================================
-_weather_cache = {'data': None, 'ts': 0}
-
-def _fetch_weather_context():
-    """Počasí z open-meteo.com. Cache 30 min, timeout 3s, tichý fail."""
-    if _weather_cache['data'] and (_time.time() - _weather_cache['ts']) < 1800:
-        return _weather_cache['data']
-    try:
-        resp = requests.get('https://api.open-meteo.com/v1/forecast', params={
-            'latitude': 50.08, 'longitude': 14.42,
-            'current': 'temperature_2m,weather_code,wind_speed_10m',
-            'timezone': 'Europe/Prague', 'forecast_days': 1
-        }, timeout=3)
-        if resp.status_code == 200:
-            cur = resp.json().get('current', {})
-            temp = cur.get('temperature_2m')
-            wind = cur.get('wind_speed_10m')
-            code = cur.get('weather_code', 0)
-            wmo = {0: 'jasno', 1: 'převážně jasno', 2: 'polojasno', 3: 'zataženo',
-                   45: 'mlha', 48: 'mrznoucí mlha',
-                   51: 'mrholení', 53: 'mrholení', 55: 'silné mrholení',
-                   61: 'slabý déšť', 63: 'déšť', 65: 'silný déšť',
-                   71: 'slabé sněžení', 73: 'sněžení', 75: 'silné sněžení',
-                   80: 'přeháňky', 81: 'přeháňky', 82: 'silné přeháňky',
-                   95: 'bouřka', 96: 'bouřka s krupobitím'}
-            cond = wmo.get(code, '')
-            wind_str = f", vítr {wind} km/h" if wind and wind > 5 else ""
-            result = f"\nPočasí v Praze: {temp}°C, {cond}{wind_str}."
-            _weather_cache.update(data=result, ts=_time.time())
-            return result
-    except Exception:
-        pass
-    return ""
-
-
-def _build_time_context():
-    """Sestaví časový kontext pro system prompt — delegates to radim_shared + adds weather."""
-    try:
-        from radim_shared import build_time_context_string
-        base = build_time_context_string()
-        # Orchestrator adds weather context on top
-        weather = _fetch_weather_context()
-        return f"{base}{weather}"
-    except Exception as e:
-        logger.warning(f"Time context warning: {e}")
-        return ""
-
-def _get_dynamic_system_prompt(mode='senior'):
-    """Dynamický system prompt s časovým kontextem a rolí asistenta."""
-    if _ORCH_SYS_PROMPT:
-        try:
-            user_type = 'senior' if mode == 'senior' else mode
-            if mode == 'rodina':
-                user_type = 'caregiver'
-            elif mode == 'technik':
-                user_type = 'academic'
-            prompt = _sys_get_prompt(
-                mode='full',
-                user_type=user_type,
-                time_context=_build_time_context()
-            )
-            return prompt + _ORCH_ACTION_HINT
-        except Exception as e:
-            logger.warning(f"Dynamic prompt warning: {e}")
-    # Fallback: short centralized prompt from radim_system_prompt.py
-    from radim_system_prompt import RADIM_SYSTEM_PROMPT_SHORT
-    return RADIM_SYSTEM_PROMPT_SHORT + _ORCH_ACTION_HINT
-
-# Orchestrator-specific action hint (appended to system prompt)
-_ORCH_ACTION_HINT = """
-
-TECHNICKÁ POZNÁMKA (ignoruj ji v konverzaci, slouží jen pro systém):
-Pokud uživatel žádá konkrétní akci (připomínka, úkol, záznam), přidej na konec:
----RADIM_ACTION---
-{"type": "create_task|update_task|log_health|safety_alert|none", "payload": {}, "ui": {"suggested_buttons": []}}
----END_ACTION---
-Pokud akce není potřeba, nepřidávej nic."""
-
-# ============================================
-# INTENT DETECTION
-# ============================================
-TASK_KEYWORDS = ['připomeň', 'nastav', 'úkol', 'připomínka', 'nezapomeň', 'zapiš', 'naplánuj']
-MEDICATION_KEYWORDS = ['lék', 'léky', 'tableta', 'tablety', 'prášek', 'prášky', 'prednison',
-                       'vzal jsem', 'bral jsem', 'zapomněl', 'medikace', 'dávka', 'dávku',
-                       'ibuprofen', 'paralen', 'aspirin', 'inzulín']
-HEALTH_KEYWORDS = ['bolí', 'nemohu', 'špatně', 'doktor', 'nemocnice', 'unavený']
-SAFETY_KEYWORDS = [
-    # Falls
-    'spadl', 'spadla', 'pád', 'upadl', 'upadla', 'padl', 'padla',
-    # Breathing/cardiac
-    'nemohu dýchat', 'nemůžu dýchat', 'nemazu dychat', 'bolest na hrudi', 'infarkt', 'mrtvice',
-    # Emergency services
-    'záchranka', 'zachranka', '155', '112',
-    # Panic/distress
-    'panika', 'pomoc',
-    # Suicidal ideation (v327: C3 fix)
-    'chci umřít', 'chci umrit', 'chci zemřít', 'chci zemrit',
-    'nechci žít', 'nechci zit', 'sebevražd', 'sebevrazd',
-    'oběsit', 'obesit', 'skočit z', 'skocit z', 'předávkov', 'predavkov',
-    # Wandering/disorientation (v327: C4 fix)
-    'ztratil jsem se', 'ztratila jsem se', 'nevím kde jsem', 'nevim kde jsem',
-    'kde to jsem', 'kde jsem', 'zabloudil', 'zabloudila',
-    # Choking/aspiration (v327: C5 fix)
-    'dusím se', 'dusim se', 'nemůžu polykat', 'nemuzu polykat', 'nemůžu polknout',
-    'dávím se', 'davim se',
-    # Immobility
-    'nehýbu se', 'nehybu se', 'nehýbám', 'nehybam', 'nemůžu vstát', 'nemuzu vstat',
-    # Unconsciousness
-    'bezvědomí', 'bezvedomi', 'omdlel', 'omdlela', 'mdloba',
-    # Medication emergency
-    'vzal jsem dvakrát', 'vzala jsem dvakrát', 'moc prášků', 'moc prasek',
-]
-STORY_KEYWORDS = ['příběh', 'story', 'instagram', 'facebook', 'pozvánka']
-
-def detect_intent(message):
-    """Detekce záměru ze zprávy — safety > medication > health > task > story > chat"""
-    msg_lower = message.lower()
-
-    for word in SAFETY_KEYWORDS:
-        if word in msg_lower:
-            return 'safety'
-
-    for word in MEDICATION_KEYWORDS:
-        if word in msg_lower:
-            return 'medication'
-
-    for word in HEALTH_KEYWORDS:
-        if word in msg_lower:
-            return 'health'
-
-    for word in TASK_KEYWORDS:
-        if word in msg_lower:
-            return 'task'
-
-    for word in STORY_KEYWORDS:
-        if word in msg_lower:
-            return 'story'
-
-    return 'chat'
-
-
-# ============================================
-# v327: SAFETY NOTIFICATION & AUDIT TRAIL
-# ============================================
-
-def _safety_notify_caregivers(user_id, message, severity):
-    """Send push notifications to caregivers and log to DB.
-    This is the CRITICAL C1 fix — previously the system said 'calling help'
-    but never actually sent anything.
-    """
-    try:
-        from database import get_connection
-        conn = get_connection()
-        if not conn:
-            logger.error("🚨 SAFETY: Cannot get DB connection for caregiver notification!")
-            return
-
-        # 1. Find caregivers for this user (from iot_caregivers table)
-        cur = conn.execute(
-            "SELECT name, phone, email, notify_push, notify_sms FROM iot_caregivers WHERE active = TRUE"
-        )
-        caregivers = cur.fetchall()
-
-        # 2. Send push notifications to all push subscribers
-        # Import app's send_push_notification
-        try:
-            from app import send_push_notification
-            # Notify all caregivers who have push subscriptions
-            for cg in caregivers:
-                cg_name = cg['name'] if hasattr(cg, '__getitem__') else cg[0]
-                # Send to user's contacts that have push subscriptions
-                logger.info(f"🚨 SAFETY: Notifying caregiver {cg_name} about crisis for user {user_id}")
-
-            # Also send push to all admins/caregivers in chat_users
-            admin_cur = conn.execute(
-                "SELECT id FROM chat_users WHERE role IN ('admin', 'caregiver', 'family') AND id != %s",
-                (user_id,)
-            ) if conn else None
-
-            if admin_cur:
-                admins = admin_cur.fetchall()
-                for admin in admins:
-                    admin_id = admin['id'] if hasattr(admin, '__getitem__') else admin[0]
-                    send_push_notification(
-                        admin_id,
-                        f"🚨 KRIZOVÁ SITUACE — {severity.upper()}",
-                        f"Uživatel {user_id} potřebuje pomoc: {message[:100]}",
-                        data={'type': 'safety_alert', 'severity': severity, 'user_id': user_id}
-                    )
-                    logger.info(f"🚨 SAFETY: Push sent to {admin_id}")
-
-        except ImportError:
-            logger.warning("🚨 SAFETY: Cannot import send_push_notification")
-
-        # 3. Send SMS via Twilio to caregivers with notify_sms=True
-        try:
-            import os
-            twilio_sid = os.environ.get('TWILIO_ACCOUNT_SID')
-            twilio_token = os.environ.get('TWILIO_AUTH_TOKEN')
-            twilio_from = os.environ.get('TWILIO_PHONE_NUMBER')
-
-            if twilio_sid and twilio_token and twilio_from:
-                from twilio.rest import Client as TwilioClient
-                twilio_client = TwilioClient(twilio_sid, twilio_token)
-
-                for cg in caregivers:
-                    cg_phone = cg['phone'] if hasattr(cg, '__getitem__') else cg[1]
-                    cg_sms = cg['notify_sms'] if hasattr(cg, '__getitem__') else cg[4]
-                    if cg_sms and cg_phone:
-                        try:
-                            twilio_client.messages.create(
-                                body=f"🚨 RADIM KRIZOVÝ ALERT [{severity.upper()}]: Uživatel {user_id} - {message[:120]}. Zkontrolujte prosím situaci.",
-                                from_=twilio_from,
-                                to=cg_phone
-                            )
-                            cg_name = cg['name'] if hasattr(cg, '__getitem__') else cg[0]
-                            logger.info(f"🚨 SAFETY: SMS sent to {cg_name} at {cg_phone}")
-                        except Exception as sms_err:
-                            logger.error(f"🚨 SAFETY: SMS failed to {cg_phone}: {sms_err}")
-            else:
-                logger.warning("🚨 SAFETY: Twilio not configured — SMS notifications disabled")
-        except ImportError:
-            logger.warning("🚨 SAFETY: Twilio library not available for SMS")
-
-    except Exception as e:
-        # v327 C2 FIX: Error in safety must NOT default to silent — log loudly
-        logger.error(f"🚨🚨🚨 CRITICAL SAFETY NOTIFICATION FAILURE for user {user_id}: {e}")
-
-
-def _safety_log_crisis_event(user_id, message, severity):
-    """Log crisis event to audit trail (v327 H6 fix).
-    Records in both crisis_events and audit_log tables.
-    """
-    try:
-        from database import get_connection
-        conn = get_connection()
-        if not conn:
-            logger.error("🚨 SAFETY: Cannot log crisis event — no DB connection")
-            return
-
-        # Insert into crisis_events table
-        conn.execute(
-            "INSERT INTO crisis_events (user_id, message_excerpt, brain_c) VALUES (%s, %s, %s)",
-            (user_id, message[:300], 30.0 if severity == 'critical' else 20.0)
-        )
-
-        # Insert into audit_log table
-        conn.execute(
-            "INSERT INTO audit_log (user_id, action, resource, detail) VALUES (%s, %s, %s, %s)",
-            (user_id, 'crisis_alert', 'safety',
-             json.dumps({'severity': severity, 'message': message[:200]}, ensure_ascii=False))
-        )
-
-        conn.commit()
-        logger.info(f"🚨 SAFETY: Crisis event logged for user {user_id}, severity={severity}")
-
-    except Exception as e:
-        logger.error(f"🚨 SAFETY: Failed to log crisis event: {e}")
-
-
-def extract_time(message):
-    """Robustní extrakce času z české zprávy (v231).
-    Zvládá: '15:30', 'v 15 hodin', 'za 2 hodiny', 'za půl hodiny',
-    'za 30 minut', 'ráno', 'odpoledne', 'večer', 'v noci'.
-    """
-    msg = message.lower()
-    now = datetime.now()
-
-    # 1. Relativní: "za N hodin/hodiny/hodinu"
-    m = re.search(r'za\s+(\d+)\s+hodin[yua]?', msg)
-    if m:
-        future = now + timedelta(hours=int(m.group(1)))
-        return f"{future.hour:02d}:{future.minute:02d}"
-
-    # 2. Relativní: "za půl hodiny"
-    if re.search(r'za\s+p[uů]l\s+hodin', msg):
-        future = now + timedelta(minutes=30)
-        return f"{future.hour:02d}:{future.minute:02d}"
-
-    # 3. Relativní: "za N minut"
-    m = re.search(r'za\s+(\d+)\s+minut', msg)
-    if m:
-        future = now + timedelta(minutes=int(m.group(1)))
-        return f"{future.hour:02d}:{future.minute:02d}"
-
-    # 4. Absolutní: "v 15 hodin", "ve 3 hodiny"
-    m = re.search(r'v[e]?\s+(\d{1,2})\s+hodin', msg)
-    if m:
-        hour = int(m.group(1))
-        if 0 <= hour <= 23:
-            return f"{hour:02d}:00"
-
-    # 5. Absolutní: "15:30", "15.30", "8:00"
-    m = re.search(r'(\d{1,2})[:\.](\d{2})', msg)
-    if m:
-        hour, minute = int(m.group(1)), int(m.group(2))
-        if 0 <= hour <= 23 and 0 <= minute <= 59:
-            return f"{hour:02d}:{minute:02d}"
-
-    # 6. Pojmenované: "ráno", "dopoledne", "v poledne", "odpoledne", "večer", "v noci"
-    if 'ráno' in msg or 'dopoledne' in msg:
-        return '08:00'
-    if 'poledne' in msg:
-        return '12:00'
-    if 'odpoledne' in msg:
-        return '14:00'
-    if 'večer' in msg:
-        return '18:00'
-    if 'noci' in msg or 'v noc' in msg:
-        return '22:00'
-
-    return None
-
-
-def extract_date(message):
-    """Extrakce data z české zprávy (v231).
-    Zvládá: 'zítra', 'pozítří', 'dnes', české dny v týdnu ('v pondělí').
-    Vrací YYYY-MM-DD nebo None.
-    """
-    msg = message.lower()
-    today = date.today()
-
-    if 'pozítří' in msg:
-        return (today + timedelta(days=2)).isoformat()
-    if 'zítra' in msg or 'zejtra' in msg:
-        return (today + timedelta(days=1)).isoformat()
-    if 'dnes' in msg or 'dneska' in msg:
-        return today.isoformat()
-
-    # České dny v týdnu → nejbližší budoucí výskyt
-    _cz_days = {
-        'pondělí': 0, 'úterý': 1, 'střed': 2, 'čtvrtek': 3,
-        'pátek': 4, 'sobot': 5, 'neděl': 6
-    }
-    for name, weekday in _cz_days.items():
-        if name in msg:
-            days_ahead = (weekday - today.weekday()) % 7
-            if days_ahead == 0:
-                days_ahead = 7  # příští týden pokud je dnes ten den
-            return (today + timedelta(days=days_ahead)).isoformat()
-
-    return None
-
-# ============================================
-# GEMINI AI CALL
-# ============================================
-def call_gemini_whatsapp(message, context=None, mode='senior', personalized_prompt='', history=None, anticipation_prompt='', gen_config=None):
-    """Volání Gemini s WhatsApp promptem + personalizace + historie + rytmus"""
-    if not GEMINI_API_KEY:
-        return None, None
-
-    try:
-        # 🏠 Dynamický system prompt s časem, rolí, kontextem
-        system = _get_dynamic_system_prompt(mode)
-
-        # 🧠 Add personalized prompt from memory (name, interests, style, mood)
-        if personalized_prompt:
-            system += personalized_prompt
-
-        # 🎵 Add anticipation-driven text rhythm instructions
-        if anticipation_prompt:
-            system += anticipation_prompt
-
-        context_text = ""
-        if context:
-            context_text = f"\n\nKontext:\n{json.dumps(context, ensure_ascii=False)}"
-
-        # 📜 Add conversation history for continuity
-        history_text = ""
-        if history:
-            history_text = "\n\nPředchozí konverzace:\n"
-            for msg in history[-6:]:  # Last 6 messages (3 turns)
-                role_label = "Uživatel" if msg["role"] == "user" else "Radim"
-                history_text += f"{role_label}: {msg['content']}\n"
-
-        full_prompt = f"{system}{context_text}{history_text}\n\nUživatel: {message}\nRadim:"
-
-        # Generation config — adjusted by Anticipation Engine
-        temperature = gen_config["temperature"] if gen_config else 0.7
-        max_tokens = gen_config["max_tokens"] if gen_config else 500
-
-        response = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
-            headers={"Content-Type": "application/json"},
-            json={
-                "contents": [{"parts": [{"text": full_prompt}]}],
-                "generationConfig": {
-                    "temperature": temperature,
-                    "maxOutputTokens": max_tokens,
-                    "topP": 0.9
-                },
-                "safetySettings": [
-                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-                ]
-            },
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            if data.get('candidates'):
-                parts = data['candidates'][0].get('content', {}).get('parts', [])
-                if parts and parts[0].get('text'):
-                    full_response = parts[0]['text'].strip()
-                    return parse_radim_response(full_response)
-        
-        return None, None
-        
-    except Exception as e:
-        logger.error(f"Gemini WhatsApp error: {e}")
-        return None, None
-
-def parse_radim_response(full_response):
-    """Parsovat odpověď Radima"""
-    text_response = full_response
-    action_json = None
-    
-    action_match = re.search(r'---RADIM_ACTION---\s*(\{.*?\})\s*---END_ACTION---', full_response, re.DOTALL)
-    
-    if action_match:
-        try:
-            action_json = json.loads(action_match.group(1))
-            text_response = full_response[:action_match.start()].strip()
-        except json.JSONDecodeError:
-            pass
-    
-    return text_response, action_json
-
-# ============================================
-# STORY TEMPLATES
-# ============================================
-STORY_TEMPLATES = [
-    {
-        'id': 'kolibri_plus_one_01',
-        'title': 'Plus One – pozvánka',
-        'description': 'Pozvánka na akci s filozofií Plus One',
-        'platform': ['instagram', 'facebook'],
-        'fields': {'hook': 'Úvodní věta', 'value': 'Co člověk získá', 'cta': 'Výzva k akci'},
-        'prompt_hint': 'Krátké věty, Kolibri tón, plus jedna.',
-        'emoji': '☕'
-    },
-    {
-        'id': 'kolibri_tip_01',
-        'title': 'Tip od Kafánka',
-        'description': 'Krátký užitečný tip pro seniory',
-        'platform': ['instagram', 'facebook', 'tiktok'],
-        'fields': {'tip_title': 'Název tipu', 'tip_content': 'Obsah tipu', 'benefit': 'Proč to pomůže'},
-        'prompt_hint': 'Senior-friendly, jednoduché slova.',
-        'emoji': '💡'
-    },
-    {
-        'id': 'kolibri_story_01',
-        'title': 'Příběh z kavárny',
-        'description': 'Krátký příběh z Kavárny Kolibri',
-        'platform': ['instagram', 'facebook'],
-        'fields': {'situation': 'Co se stalo', 'emotion': 'Jak se cítili', 'lesson': 'Co jsme se naučili'},
-        'prompt_hint': 'Autentický, lidský, bez přehánění.',
-        'emoji': '📖'
-    }
-]
 
 # ============================================
 # ENDPOINTS
@@ -604,7 +131,7 @@ def radim_chat():
     """Hlavní WhatsApp-styl chat endpoint"""
     if request.method == 'OPTIONS':
         return '', 204
-    
+
     try:
         data = request.json
         message = data.get('message', '')
@@ -624,17 +151,14 @@ def radim_chat():
         # v321: Neuron context from frontend KafanekNeurons
         neuron_ctx = data.get('neuron_context')
         if neuron_ctx and isinstance(neuron_ctx, dict):
-            ntype = neuron_ctx.get('type', 'unknown')
-            ntone = neuron_ctx.get('tone', 'patient')
-            nhint = neuron_ctx.get('hint', '')
             context['neuron_intervention'] = neuron_ctx
 
         intent = detect_intent(message)
-        
+
         if intent == 'task':
             context['extracted_time'] = extract_time(message)
             context['extracted_date'] = extract_date(message)
-        
+
         if intent == 'safety':
             severity = 'critical' if any(w in message.lower() for w in ['155', '112', 'záchranka', 'sebevražd', 'sebevrazd', 'chci umřít', 'chci umrit']) else 'high'
 
@@ -655,7 +179,7 @@ def radim_chat():
                 'intent': 'safety',
                 'mode': mode
             })
-        
+
         # 🧠 Load personalization and history from memory
         personalized = ''
         history = None
@@ -848,7 +372,7 @@ def radim_chat():
         if brain_meta:
             result['brain'] = brain_meta
         return jsonify(result)
-        
+
     except Exception as e:
         logger.error(f"⚠️ radim_orchestrator.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
@@ -953,13 +477,13 @@ def radim_story_templates():
     """Story templates endpoint"""
     if request.method == 'OPTIONS':
         return '', 204
-    
+
     platform = request.args.get('platform')
     templates = STORY_TEMPLATES
-    
+
     if platform:
         templates = [t for t in templates if platform in t['platform']]
-    
+
     return jsonify({
         'success': True,
         'templates': templates,
@@ -972,22 +496,23 @@ def radim_story_generate():
     """Generování story obsahu"""
     if request.method == 'OPTIONS':
         return '', 204
-    
+
     try:
         data = request.json
         template_id = data.get('template_id')
         fields = data.get('fields', {})
         platform = data.get('platform', 'instagram')
-        
+
         prompt = f"""Vytvoř krátký příspěvek pro {platform}.
 Šablona: {template_id}
 Pole: {json.dumps(fields, ensure_ascii=False)}
 
 Pravidla: Max 3 věty, senior-friendly, Kolibri tón.
 Odpověz POUZE textem příspěvku:"""
-        
+
         if GEMINI_API_KEY:
-            response = requests.post(
+            import requests as _req
+            response = _req.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
                 headers={"Content-Type": "application/json"},
                 json={
@@ -996,7 +521,7 @@ Odpověz POUZE textem příspěvku:"""
                 },
                 timeout=30
             )
-            
+
             if response.status_code == 200:
                 result = response.json()
                 if 'candidates' in result:
@@ -1010,9 +535,9 @@ Odpověz POUZE textem příspěvku:"""
                             'hashtags': ['#KavárnaKolibri', '#Senioři', '#PlusOne']
                         }
                     })
-        
+
         return jsonify({'success': False, 'error': 'AI nedostupné'}), 503
-        
+
     except Exception as e:
         logger.error(f"⚠️ radim_orchestrator.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
@@ -1023,19 +548,19 @@ def radim_voice_speak():
     """Azure TTS endpoint"""
     if request.method == 'OPTIONS':
         return '', 204
-    
+
     AZURE_KEY = os.environ.get('AZURE_SPEECH_KEY')
     AZURE_REGION = os.environ.get('AZURE_SPEECH_REGION', 'westeurope')
-    
+
     if not AZURE_KEY:
         return jsonify({'success': False, 'error': 'Azure Speech není nakonfigurován'}), 503
-    
+
     try:
         data = request.json
         text = data.get('text', '')
         voice = data.get('voice', 'cs-CZ-AntoninNeural')
         emotion = data.get('emotion', 'friendly')
-        
+
         if not text:
             return jsonify({'success': False, 'error': 'Text je povinný'}), 400
 
@@ -1128,9 +653,9 @@ def radim_voice_speak():
             if brain_speech:
                 resp_data['brain_speech'] = brain_speech
             return jsonify(resp_data)
-        
+
         return jsonify({'success': False, 'error': f'Azure TTS error: {response.status_code}'}), 500
-        
+
     except Exception as e:
         logger.error(f"⚠️ radim_orchestrator.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
@@ -1174,7 +699,7 @@ def radim_health():
         'success': True,
         'status': 'healthy',
         'service': 'Radim WhatsApp Orchestrator',
-        'version': '1.1.0',
+        'version': '2.0.0',
         'features': {
             'whatsapp_chat': True,
             'task_management': True,
