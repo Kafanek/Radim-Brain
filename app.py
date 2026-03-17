@@ -363,9 +363,11 @@ except ImportError:
 # 🔌 Import IoT Bridge routes - Real sensor data from Zigbee gateways
 try:
     from iot_bridge_routes import iot_bridge_bp
+    from iot_dashboard_routes import iot_dashboard_bp
     app.register_blueprint(iot_bridge_bp)
+    app.register_blueprint(iot_dashboard_bp)
     IOT_BRIDGE_AVAILABLE = True
-    logger.info("🔌 IoT Bridge registered: /api/iot-bridge/*")
+    logger.info("🔌 IoT Bridge registered: /api/iot-bridge/* (2 blueprints)")
 except ImportError:
     IOT_BRIDGE_AVAILABLE = False
     logger.warning("⚠️ IoT Bridge routes not available")
