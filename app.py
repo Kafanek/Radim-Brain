@@ -103,6 +103,7 @@ except ImportError:
 # 🏫 Import Education Teacher Dashboard
 try:
     from education_teacher_routes import education_teacher_bp
+    from education_task_routes import education_task_bp
     EDUCATION_TEACHER_AVAILABLE = True
 except ImportError:
     EDUCATION_TEACHER_AVAILABLE = False
@@ -173,7 +174,8 @@ if EDUCATION_AVAILABLE:
 # 🏫 Register Education Teacher Dashboard Blueprint
 if EDUCATION_TEACHER_AVAILABLE:
     app.register_blueprint(education_teacher_bp)
-    logger.info("✅ Education teacher routes registered: /api/education/teacher-dashboard/*")
+    app.register_blueprint(education_task_bp)
+    logger.info("✅ Education teacher + task routes registered: /api/education/teacher-dashboard/*, /api/education/my-tasks/*")
 
 # 🏥 Register Telemedicine Blueprints
 if TELEMEDICINE_AVAILABLE:
