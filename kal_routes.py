@@ -29,11 +29,17 @@ logger = logging.getLogger(__name__)
 # IMPORTS FROM HELPERS (+ re-exports for backward compat)
 # ============================================================================
 
+import kal_helpers
 from kal_helpers import (
-    MEMORY_AVAILABLE, RADIM_BRAIN_AVAILABLE,
     init_kal_routes, check_idor,
     KAL_AGENT_PROMPTS, get_agent_name,
 )
+
+# NOTE: MEMORY_AVAILABLE and RADIM_BRAIN_AVAILABLE are set AFTER import
+# via init_kal_routes(). We must reference them as kal_helpers.X, not as
+# local names, to see the updated values at runtime.
+MEMORY_AVAILABLE = False       # backward compat; runtime: use kal_helpers.MEMORY_AVAILABLE
+RADIM_BRAIN_AVAILABLE = False  # backward compat; runtime: use kal_helpers.RADIM_BRAIN_AVAILABLE
 
 # Backward compat aliases
 _check_idor = check_idor
@@ -68,7 +74,7 @@ def kal_radim_history(user_id):
     idor = check_idor(user_id)
     if idor: return idor
     try:
-        if MEMORY_AVAILABLE:
+        if kal_helpers.MEMORY_AVAILABLE:
             from memory_routes import get_conversation_messages, get_user_context
             limit = min(request.args.get('limit', 10, type=int), 200)
             history = get_conversation_messages(user_id, limit=limit)
@@ -100,7 +106,7 @@ def kal_radim_register():
     data = request.get_json() or {}
     user_id = data.get('user_id', str(uuid.uuid4()))
     try:
-        if MEMORY_AVAILABLE:
+        if kal_helpers.MEMORY_AVAILABLE:
             from memory_routes import _db_load_profile, _db_save_profile
             profile = _db_load_profile(user_id)
             if not profile:
@@ -125,7 +131,7 @@ def kal_radim_update_user(user_id):
     if idor: return idor
     data = request.get_json() or {}
     try:
-        if MEMORY_AVAILABLE:
+        if kal_helpers.MEMORY_AVAILABLE:
             from memory_routes import _db_load_profile, _db_save_profile
             profile = _db_load_profile(user_id) or {"user_id": user_id}
             profile.update(data)
@@ -143,7 +149,7 @@ def kal_radim_insights(user_id):
     idor = check_idor(user_id)
     if idor: return idor
     try:
-        if MEMORY_AVAILABLE:
+        if kal_helpers.MEMORY_AVAILABLE:
             from memory_routes import get_user_context
             ctx = get_user_context(user_id)
             return jsonify({
@@ -170,7 +176,7 @@ def kal_radim_conversation():
     data = request.get_json() or {}
     user_id = data.get('user_id', 'anonymous')
     try:
-        if MEMORY_AVAILABLE:
+        if kal_helpers.MEMORY_AVAILABLE:
             from memory_routes import record_interaction
             record_interaction(
                 user_id=user_id,
@@ -186,7 +192,7 @@ def kal_radim_conversation():
 def kal_radim_stats():
     """Global Radim stats"""
     try:
-        if MEMORY_AVAILABLE:
+        if kal_helpers.MEMORY_AVAILABLE:
             from database import get_connection
             db = None
             try:
@@ -251,7 +257,7 @@ def kal_agents_interact():
         # Get brain state for consciousness_state field
         consciousness_state = None
         phi_metrics = None
-        if RADIM_BRAIN_AVAILABLE:
+        if kal_helpers.RADIM_BRAIN_AVAILABLE:
             from radim_brain_routes import compute_psi_state, derive_text_empathy_proxies
             proxies = derive_text_empathy_proxies(message, 'neutral', 0.2)
             psi = compute_psi_state(5.0, 0.2, proxies['voice_tone'], proxies['hrv'], proxies['speech_tempo'])
@@ -293,7 +299,7 @@ def kal_timing_calculate():
     text = data.get('text', '')
 
     try:
-        if RADIM_BRAIN_AVAILABLE:
+        if kal_helpers.RADIM_BRAIN_AVAILABLE:
             from radim_brain_routes import compute_unified_speech
             from intent_resolver import quick_estimate_from_text
             C_est, alpha_est = quick_estimate_from_text(text)
@@ -543,7 +549,7 @@ def kal_neurons_save():
 def kal_consciousness_state():
     """Consciousness state — real Psi(t) from brain engine (v281)"""
     try:
-        if RADIM_BRAIN_AVAILABLE:
+        if kal_helpers.RADIM_BRAIN_AVAILABLE:
             from radim_brain_routes import compute_psi_state, get_early_psi
             user_id = request.args.get('user_id', 'default')
             early = get_early_psi(user_id)
