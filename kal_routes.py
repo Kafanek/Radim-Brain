@@ -1,9 +1,17 @@
 # ============================================
-# KAL Routes — Kolibri Abstraction Layer
-# Extracted from app.py (v335)
-# Endpoints: /kal/radim/*, /kal/agents/*, /kal/timing/*,
-#            /kal/safety/*, /kal/emotion/*, /kal/neurons/*,
-#            /kal/consciousness/*
+# KAL Routes v2.1.0 — Kolibri Abstraction Layer
+# ============================================
+# API endpoints for KAL system.
+# Config + helpers in kal_helpers.py.
+#
+# Endpoints:
+#   /kal/radim/health, history, register, update, insights, conversation, stats
+#   /kal/agents/interact
+#   /kal/timing/calculate
+#   /kal/safety/check
+#   /kal/emotion/analyze
+#   /kal/neurons/sync (GET+POST)
+#   /kal/consciousness/state
 # ============================================
 
 import logging
@@ -17,45 +25,31 @@ from utils import now_iso
 
 logger = logging.getLogger(__name__)
 
-# ============================================
-# Feature flags — set by init_kal_routes()
-# ============================================
-MEMORY_AVAILABLE = False
-RADIM_BRAIN_AVAILABLE = False
+# ============================================================================
+# IMPORTS FROM HELPERS (+ re-exports for backward compat)
+# ============================================================================
 
-def init_kal_routes(memory_available=False, radim_brain_available=False):
-    """Call from app.py after determining feature availability."""
-    global MEMORY_AVAILABLE, RADIM_BRAIN_AVAILABLE
-    MEMORY_AVAILABLE = memory_available
-    RADIM_BRAIN_AVAILABLE = radim_brain_available
+from kal_helpers import (
+    MEMORY_AVAILABLE, RADIM_BRAIN_AVAILABLE,
+    init_kal_routes, check_idor,
+    KAL_AGENT_PROMPTS, get_agent_name,
+)
 
+# Backward compat aliases
+_check_idor = check_idor
+_KAL_AGENT_PROMPTS = KAL_AGENT_PROMPTS
+_get_agent_name = get_agent_name
 
-def _check_idor(requested_user_id):
-    """v330: Validate authenticated user matches requested user_id.
-    Returns None if OK, or error response tuple if IDOR detected.
-    Allows 'radim-ai' requests and admins through."""
-    auth_user = getattr(g, 'auth_user', None)
-    if not auth_user:
-        return None  # optional_auth — no token = anonymous access (for senior devices)
-    user_role = auth_user.get('role', 'user') if isinstance(auth_user, dict) else 'user'
-    auth_id = str(auth_user.get('id', '')) if isinstance(auth_user, dict) else ''
-    # Admins bypass IDOR check
-    if user_role in ('administrator', 'admin', 'caregiver'):
-        return None
-    # Check if requesting own data
-    if auth_id and str(requested_user_id) != auth_id:
-        logger.warning(f"IDOR blocked: user {auth_id} tried to access {requested_user_id}")
-        return jsonify({'success': False, 'error': 'Pristup zamitnut'}), 403
-    return None
-
-# ============================================
+# ============================================================================
 # Blueprint
-# ============================================
+# ============================================================================
+
 kal_bp = Blueprint('kal', __name__)
 
-# ============================================
+
+# ============================================================================
 # KAL Radim Memory Endpoints
-# ============================================
+# ============================================================================
 
 @kal_bp.route('/kal/radim/health')
 def kal_radim_health():
@@ -68,10 +62,10 @@ def kal_radim_health():
 
 
 @kal_bp.route('/kal/radim/history/<user_id>')
-@optional_auth  # v330: Add auth
+@optional_auth
 def kal_radim_history(user_id):
     """Get user conversation history + stats"""
-    idor = _check_idor(user_id)
+    idor = check_idor(user_id)
     if idor: return idor
     try:
         if MEMORY_AVAILABLE:
@@ -122,12 +116,12 @@ def kal_radim_register():
 
 
 @kal_bp.route('/kal/radim/user/<user_id>', methods=['PUT', 'OPTIONS'])
-@optional_auth  # v330: Add auth
+@optional_auth
 def kal_radim_update_user(user_id):
     """Update user profile"""
     if request.method == 'OPTIONS':
         return '', 204
-    idor = _check_idor(user_id)
+    idor = check_idor(user_id)
     if idor: return idor
     data = request.get_json() or {}
     try:
@@ -143,10 +137,10 @@ def kal_radim_update_user(user_id):
 
 
 @kal_bp.route('/kal/radim/insights/<user_id>')
-@optional_auth  # v330: Add auth
+@optional_auth
 def kal_radim_insights(user_id):
     """Get user insights from learning data"""
-    idor = _check_idor(user_id)
+    idor = check_idor(user_id)
     if idor: return idor
     try:
         if MEMORY_AVAILABLE:
@@ -219,34 +213,9 @@ def kal_radim_stats():
     return jsonify({"success": True, "message": "Radim stats", "impact": {"total_users": 0, "total_conversations": 0, "active_today": 0}}), 200
 
 
-# ============================================
+# ============================================================================
 # v281: KAL Agent Endpoints — Brain Communication Bridge
-# ============================================
-
-_KAL_AGENT_PROMPTS = {
-    'core': '',
-    'agent_protector': '[Rezim: Pan Ochrance — priorita bezpeci a klid. Odpovidej strucne, uklidnujicim tonem.]',
-    'agent_teacher': '[Rezim: Pan Ucitel — vzdelavaci rezim. Vysvetluj srozumitelne, pouzij priklady.]',
-    'agent_storyteller': '[Rezim: Pan Vypravec — kreativni vypraveni. Bud poeticky, pouzivej obrazy.]',
-    'agent_senior': '[Rezim: Pan Senior — zjednoduseny rezim. Kratke vety, pratelsky ton.]',
-    'agent_caller': '[Rezim: Agent Caller — asistence s telefonaty. Nabidni zavolani, prepojeni.]',
-    'agent_coder': '[Rezim: Pan Programator — technicka podpora. Presne instrukce krok za krokem.]',
-}
-
-
-def _get_agent_name(agent):
-    """Get Czech display name for agent type."""
-    names = {
-        'core': 'Pan Kafanek',
-        'agent_teacher': 'Pan Ucitel Kafanek',
-        'agent_protector': 'Pan Ochrance Kafanek',
-        'agent_storyteller': 'Pan Vypravec Kafanek',
-        'agent_senior': 'Pan Senior Kafanek',
-        'agent_caller': 'Agent Caller',
-        'agent_coder': 'Pan Programator'
-    }
-    return names.get(agent, 'Pan Kafanek')
-
+# ============================================================================
 
 @kal_bp.route('/kal/agents/interact', methods=['POST', 'OPTIONS'])
 @rate_limit(max_requests=30, window_seconds=60, key_func='ip')
@@ -263,7 +232,7 @@ def kal_agents_interact():
     if not message:
         return jsonify({'success': False, 'error': 'Message required'}), 400
 
-    agent_prefix = _KAL_AGENT_PROMPTS.get(agent, '')
+    agent_prefix = KAL_AGENT_PROMPTS.get(agent, '')
 
     try:
         from radim_orchestrator import call_gemini_whatsapp
@@ -303,7 +272,7 @@ def kal_agents_interact():
             'consciousness_state': consciousness_state,
             'phi_metrics': phi_metrics,
             'agent': agent,
-            'agentName': _get_agent_name(agent)
+            'agentName': get_agent_name(agent)
         }), 200
 
     except Exception as e:
@@ -330,9 +299,8 @@ def kal_timing_calculate():
             C_est, alpha_est = quick_estimate_from_text(text)
             mode = "HARMONY" if C_est < 12 else ("ALERT" if C_est < 27 else "CRISIS")
             speech = compute_unified_speech(C_est, alpha_est, mode)
-            # Rate is a float multiplier (1.0=normal, 0.85=slower, 0.7=crisis)
             rate = float(speech.get('rate', 1.0))
-            wpm = round(120 * rate)  # 120 base x rate -> 120/102/84
+            wpm = round(120 * rate)
             return jsonify({
                 'pause_ms': speech.get('pause_ms', 618),
                 'wpm': wpm,
@@ -394,10 +362,9 @@ def kal_safety_check():
         }), 200
 
     except Exception as e:
-        # v327 C2 FIX: Error in safety MUST NOT default to "safe" — escalate on error
         logger.error(f"kal_safety_check CRITICAL error: {e}")
 
-    # v327: On error, default to medium severity (not "safe") — better safe than sorry
+    # v327: On error, default to medium severity — better safe than sorry
     return jsonify({
         'alert': 'unknown_error',
         'severity': 'medium',
@@ -471,9 +438,9 @@ def kal_emotion_analyze():
     }), 200
 
 
-# ============================================
+# ============================================================================
 # Neuron Sync — persist neuron learning to PostgreSQL (v324)
-# ============================================
+# ============================================================================
 
 @kal_bp.route('/kal/neurons/sync', methods=['GET', 'OPTIONS'])
 @optional_auth
@@ -521,9 +488,7 @@ def kal_neurons_save():
     try:
         from memory_routes import _db_load_learning, _db_save_learning
 
-        # Load existing learning, merge neurons into it
         learning = _db_load_learning(user_id)
-
         existing_neurons = learning.get('neurons', {})
 
         # Merge strategy: per-neuron, keep higher activations + newer data
@@ -536,24 +501,19 @@ def kal_neurons_save():
             in_act = incoming.get('activations', 0)
 
             if in_act > ex_act:
-                # Frontend has strictly more data — take it, but keep server patterns too
                 server_patterns = set(existing.get('learnedPatterns', []))
                 client_patterns = set(incoming.get('learnedPatterns', []))
                 incoming['learnedPatterns'] = list(server_patterns | client_patterns)[:30]
                 existing_neurons[neuron_id] = incoming
             else:
-                # Server has same or more data — merge learned patterns + keep better thresholds
                 server_patterns = set(existing.get('learnedPatterns', []))
                 client_patterns = set(incoming.get('learnedPatterns', []))
                 merged = list(server_patterns | client_patterns)[:30]
                 existing['learnedPatterns'] = merged
-                # Keep lower threshold (= more sensitive = more learned)
                 if incoming.get('thresholdAdjust', 0) < existing.get('thresholdAdjust', 0):
                     existing['thresholdAdjust'] = incoming['thresholdAdjust']
-                # Keep higher helpful count
                 existing['helpfulCount'] = max(
                     existing.get('helpfulCount', 0), incoming.get('helpfulCount', 0))
-                # Merge rhythm data if incoming has it
                 if incoming.get('rhythm') and not existing.get('rhythm'):
                     existing['rhythm'] = incoming['rhythm']
                 existing_neurons[neuron_id] = existing
@@ -574,6 +534,10 @@ def kal_neurons_save():
         logger.warning(f"kal_neurons_save error: {e}")
         return jsonify({'success': False, 'error': 'Chyba synchronizace neuronu'}), 500
 
+
+# ============================================================================
+# Consciousness State
+# ============================================================================
 
 @kal_bp.route("/kal/consciousness/state")
 def kal_consciousness_state():
@@ -600,7 +564,6 @@ def kal_consciousness_state():
                 "status": "active",
                 "timestamp": now_iso()
             }
-            # v282: Include rhythm return data if available
             if psi.get("rhythm_return"):
                 result["rhythm_return"] = psi["rhythm_return"]
             return jsonify(result), 200
@@ -611,3 +574,10 @@ def kal_consciousness_state():
         "chaos_index": 0.1, "iteration": 5.0, "mode": "HARMONY",
         "status": "active", "timestamp": now_iso()
     }), 200
+
+
+# ============================================================================
+# STARTUP
+# ============================================================================
+logger.info("🔌 KAL Routes v2.1.0 loaded — /kal/*")
+logger.info("   Helpers module: kal_helpers.py")
