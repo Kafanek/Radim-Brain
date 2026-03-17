@@ -393,19 +393,7 @@ init_tts_proxy_routes(
 app.register_blueprint(tts_proxy_bp)
 logger.info("✅ TTS Proxy routes registered: /api/azure/tts, /api/elevenlabs/tts")
 
-# Media & Push Notification Routes
-from media_push_routes import media_push_bp, init_media_push_routes
-init_media_push_routes(
-    upload_fn=upload_to_cloudinary,
-    push_fn=send_push_notification,
-)
-app.register_blueprint(media_push_bp)
-logger.info("✅ Media & Push routes registered: /api/media/*, /api/push/*")
-
-# Admin, WordPress, AI Settings, Stubs, Client/Emergency Routes
-from admin_routes import admin_bp
-app.register_blueprint(admin_bp)
-logger.info("✅ Admin routes registered: /api/admin/*, /api/ai/*, /api/wordpress/*")
+# Media & Push + Admin routes registered after helper functions are defined (see below)
 
 # ============================================
 # ⏰ BACKGROUND SCHEDULER — push reminders (v231)
@@ -808,7 +796,24 @@ def sync_wp_user(wp_user):
         logger.error(f"Sync WP user error: {e}")
         return None
 
-# Chat, media, push, admin routes now in separate blueprints
+# ============================================
+# REGISTER BLUEPRINTS THAT DEPEND ON HELPER FUNCTIONS
+# (must be after upload_to_cloudinary, send_push_notification etc.)
+# ============================================
+
+# Media & Push Notification Routes
+from media_push_routes import media_push_bp, init_media_push_routes
+init_media_push_routes(
+    upload_fn=upload_to_cloudinary,
+    push_fn=send_push_notification,
+)
+app.register_blueprint(media_push_bp)
+logger.info("✅ Media & Push routes registered: /api/media/*, /api/push/*")
+
+# Admin, WordPress, AI Settings, Stubs, Client/Emergency Routes
+from admin_routes import admin_bp
+app.register_blueprint(admin_bp)
+logger.info("✅ Admin routes registered: /api/admin/*, /api/ai/*, /api/wordpress/*")
 
 # update_daily_stats — re-export for backward compat (now in admin_routes.py)
 from admin_routes import update_daily_stats
