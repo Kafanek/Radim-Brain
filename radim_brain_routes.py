@@ -24,6 +24,11 @@ RADIM stabilizační konstanta:
 
 Architektura pipeline:
     SENSORS → PERCEPTION → CONSCIOUSNESS ENGINE → COHERENCE ENGINE → RHYTHM ENGINE → VOICE/ACTION
+
+Modular structure (v345):
+    brain_math.py   — constants + pure math equations
+    brain_speech.py — speech params + early Ψ cache
+    this file       — routes + DB persistence + compute_psi_state + re-exports
 """
 
 import math
@@ -38,56 +43,31 @@ from auth_middleware import require_auth, optional_auth
 logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════
+# IMPORTS FROM MODULAR FILES
+# ═══════════════════════════════════════════════════════════
+
+# Math constants & equations
+from brain_math import (
+    PHI, PSI, DELTA, RHO, RADIM_R,
+    FIBONACCI, LUCAS, PELL,
+    T1, T2, C_MAX, BRAIN_STATE_TTL_MINUTES,
+    W_VOICE, W_HRV, W_SPEECH_TEMPO,
+    sigmoid, clamp,
+    consciousness_equation, compute_empathy, derive_text_empathy_proxies,
+    compute_rationality, compute_stress, quasiperiodic_rhythm, decision_model
+)
+
+# Speech & Early Ψ cache
+from brain_speech import (
+    update_early_psi, get_early_psi,
+    compute_unified_speech as _raw_compute_unified_speech,
+    get_brain_speech_for_user as _raw_get_brain_speech_for_user
+)
+
+# ═══════════════════════════════════════════════════════════
 # BLUEPRINT
 # ═══════════════════════════════════════════════════════════
 radim_brain_bp = Blueprint('radim_brain', __name__, url_prefix='/api/brain')
-
-# ═══════════════════════════════════════════════════════════
-# MATEMATICKÉ KONSTANTY
-# ═══════════════════════════════════════════════════════════
-
-# Zlatý řez (Golden Ratio) — HARMONIE
-PHI = (1 + math.sqrt(5)) / 2            # φ ≈ 1.618033988749895
-PSI = PHI - 1                           # ψ = 1/φ ≈ 0.618033988749895
-
-# Stříbrný poměr (Silver Ratio) — KRIZE
-DELTA = 1 + math.sqrt(2)               # δ ≈ 2.414213562373095
-
-# RADIM stabilizační konstanta — rovnováha mezi harmonií a krizí
-# ρ = (φ + δ) / 2 — aritmetický střed zlatého a stříbrného poměru
-# Interpretace: systém v rovnováze při α ≈ 0.5
-RHO = (PHI + DELTA) / 2                # ρ ≈ 2.016123775561495
-
-# RADIM multiplikativní konstanta
-RADIM_R = PHI * DELTA                  # R = φ × δ ≈ 3.906
-
-# ═══════════════════════════════════════════════════════════
-# MATEMATICKÉ POSLOUPNOSTI
-# ═══════════════════════════════════════════════════════════
-
-# Fibonacci: F_{n+1} = F_n + F_{n-1} — stabilita vědomí
-FIBONACCI = [0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610]
-
-# Lucas: L_{n+1} = L_n + L_{n-1} — empatie, koherence
-LUCAS = [2, 1, 3, 4, 7, 11, 18, 29, 47, 76, 123, 199, 322, 521, 843]
-
-# Pell: P_{n+1} = 2P_n + P_{n-1} — krizová eskalace
-PELL = [0, 1, 2, 5, 12, 29, 70, 169, 408, 985, 2378]
-
-# ═══════════════════════════════════════════════════════════
-# KRIZOVÉ PRAHY (universální)
-# ═══════════════════════════════════════════════════════════
-T1 = 12     # Práh 1: HARMONY → ALERT
-T2 = 27     # Práh 2: ALERT → CRISIS
-C_MAX = 40  # Maximum vědomí
-BRAIN_STATE_TTL_MINUTES = 30  # Brain state expiry — ignore stale states
-
-# ═══════════════════════════════════════════════════════════
-# VÁHY EMPATIE
-# ═══════════════════════════════════════════════════════════
-W_VOICE = 0.4       # Váha hlasového tónu
-W_HRV = 0.35        # Váha srdeční variability
-W_SPEECH_TEMPO = 0.25  # Váha tempa řeči
 
 # ═══════════════════════════════════════════════════════════
 # REINFORCEMENT LEARNING
@@ -114,9 +94,6 @@ try:
         classify_state as _ant_classify,
         detect_breakpoints as _ant_breakpoints,
         calculate_trend as _ant_trend,
-        sigmoid as _ant_sigmoid,
-        clamp as _ant_clamp,
-        PHI as _ANT_PHI
     )
     ANTICIPATION_AVAILABLE = True
 except ImportError:
@@ -156,19 +133,6 @@ try:
     DB_AVAILABLE = True
 except ImportError:
     DB_AVAILABLE = False
-
-# Local sigmoid/clamp if anticipation not available
-def _sigmoid(x, k=5, x0=0.5):
-    try:
-        return 1.0 / (1.0 + math.exp(-k * (x - x0)))
-    except OverflowError:
-        return 0.0 if x < x0 else 1.0
-
-def _clamp(val, lo, hi):
-    return max(lo, min(hi, val))
-
-sigmoid = _ant_sigmoid if ANTICIPATION_AVAILABLE else _sigmoid
-clamp = _ant_clamp if ANTICIPATION_AVAILABLE else _clamp
 
 
 # ═══════════════════════════════════════════════════════════
@@ -249,14 +213,14 @@ def _db_save_adaptation(user_id, state):
         db.commit()
     except Exception as e:
         logger.warning(f"Brain DB save warning: {e}")
-
-
     finally:
         if db:
             try:
                 db.close()
             except Exception:
                 pass
+
+
 def _db_save_brain_state(user_id, psi, alpha, mode, coherence, source="chat"):
     """Save Psi(t) snapshot to brain_states table."""
     if not DB_AVAILABLE or not user_id:
@@ -279,387 +243,39 @@ def _db_save_brain_state(user_id, psi, alpha, mode, coherence, source="chat"):
         db.commit()
     except Exception as e:
         logger.warning(f"Brain state save warning: {e}")
-
-
     finally:
         if db:
             try:
                 db.close()
             except Exception:
                 pass
+
+
 # ═══════════════════════════════════════════════════════════
-# EARLY Ψ CACHE — Streaming STT → Brain (v272)
+# SPEECH WRAPPERS — inject DB dependencies into brain_speech
 # ═══════════════════════════════════════════════════════════
-import time as _time_module
-
-_early_psi_cache = {}
-_EARLY_PSI_TTL = 300  # 5 minutes
-
-
-def update_early_psi(user_id, C_estimate, alpha_estimate, is_final=False):
-    """Update brain state from interim STT — lightweight, no DB write for interim.
-
-    For interim results: only update in-memory cache (no DB overhead).
-    For final results: save to DB via existing compute_psi_state().
-    """
-    # Clean stale entries (> 5 min)
-    now = _time_module.time()
-    stale_keys = [k for k, v in _early_psi_cache.items() if now - v['ts'] > _EARLY_PSI_TTL]
-    for k in stale_keys:
-        del _early_psi_cache[k]
-
-    if not is_final:
-        _early_psi_cache[user_id] = {
-            'C': C_estimate,
-            'alpha': alpha_estimate,
-            'ts': now
-        }
-        return
-
-    # On final: delegate to full Ψ computation
-    try:
-        mode = "HARMONY" if C_estimate < T1 else ("ALERT" if C_estimate < T2 else "CRISIS")
-        compute_psi_state(C_estimate, 0.5, 0.5, 0.5, alpha_estimate, user_id=user_id)
-    except Exception as e:
-        logger.warning(f"Early Ψ final save warning: {e}")
-    finally:
-        # Clear interim cache for this user
-        _early_psi_cache.pop(user_id, None)
-
-
-def get_early_psi(user_id):
-    """Get cached early Ψ estimate for a user (from streaming STT)."""
-    entry = _early_psi_cache.get(user_id)
-    if entry and (_time_module.time() - entry['ts']) < _EARLY_PSI_TTL:
-        return entry
-    return None
-
 
 def compute_unified_speech(C, alpha, mode, user_id=None, ant_params=None):
-    """
-    Unified speech parameter computation — single source of truth.
-
-    Layer 1: Brain mode-based baseline (φ-proportioned pauses)
-    Layer 2: Anticipation Engine fine-tuning (30% blend if ant_params provided)
-    Layer 3: Per-user adaptation from brain_adaptation DB
-    Layer 4: Pitch mapping with wider range (v2.1: +2% to -10%)
-
-    Args:
-        C: consciousness level (0-40)
-        alpha: emotional activation (0-1)
-        mode: "HARMONY" | "ALERT" | "CRISIS"
-        user_id: if set, loads per-user adaptation from DB
-        ant_params: dict from Anticipation Engine {rate, pitch, pause_ms} (optional)
-
-    Returns:
-        dict: {rate, pitch_pct, pause_ms, phrasing, style, styledegree, mode}
-    """
-    # Load per-user adaptation
-    if user_id:
-        adapt = _db_load_adaptation(user_id)
-    else:
-        adapt = _adaptation_state
-
-    # === Layer 1: Brain mode-based baseline ===
-    if mode == "HARMONY":
-        rate = 1.0
-        pause_ms = 618      # φ × 382
-        pitch_st = 12
-        phrasing = "natural"
-        style = "friendly"
-        styledegree = "1.2"
-    elif mode == "ALERT":
-        rate = 0.85
-        pause_ms = 1000     # φ midpoint
-        pitch_st = 8
-        phrasing = "simplified"
-        style = "empathetic"
-        styledegree = "1.1"
-    else:  # CRISIS
-        rate = 0.7
-        pause_ms = 1618     # φ × 1000
-        pitch_st = 4
-        phrasing = "single_command"
-        style = "calm"
-        styledegree = "1.0"
-
-    # === Layer 2: Anticipation Engine fine-tuning (30% blend) ===
-    if ant_params:
-        ant_rate = float(ant_params.get('rate', 0.9))
-        ant_pause = float(ant_params.get('pause_ms', 300))
-        ant_pitch = float(ant_params.get('pitch', 0))
-        rate += (ant_rate - 0.9) * 0.3
-        pause_ms += (ant_pause - 300) * 0.3
-        pitch_st += int(ant_pitch * 0.3)
-
-    # === Layer 3: Per-user adaptation ===
-    rate += adapt["speech_rate_adjust"]
-    pause_ms += adapt["pause_adjust_ms"]
-
-    # Clamp
-    rate = clamp(rate, 0.5, 1.2)
-    pause_ms = clamp(pause_ms, 200, 2500)
-    pitch_st = clamp(pitch_st, 0, 16)
-
-    # === Layer 4: Wider pitch mapping (v2.1) ===
-    # 12st (HARMONY) → +2%, 8st (ALERT) → ~-5%, 4st (CRISIS) → ~-10%
-    pitch_pct = round(2 - (12 - pitch_st) * 1.2)
-
-    return {
-        "rate": round(rate, 3),
-        "pitch_pct": pitch_pct,
-        "pause_ms": round(pause_ms),
-        "phrasing": phrasing,
-        "style": style,
-        "styledegree": styledegree,
-        "mode": mode,
-    }
+    """Wrapper that injects DB adaptation loader into brain_speech."""
+    return _raw_compute_unified_speech(
+        C, alpha, mode, user_id=user_id, ant_params=ant_params,
+        _load_adaptation=_db_load_adaptation,
+        _adaptation_fallback=_adaptation_state
+    )
 
 
 def get_brain_speech_for_user(user_id):
-    """
-    Load latest Ψ(t) from brain_states and compute speech params for TTS.
-
-    Returns dict with rate, pitch, pause_ms, phrasing, style, mode, coherence
-    or None if no fresh brain state exists (TTL: 30 min).
-    """
-    if not DB_AVAILABLE or not user_id:
-        return None
-    db = None
-    try:
-        db = get_connection()
-        if is_postgres():
-            row = db.execute(
-                "SELECT C, E, R, S, alpha, mode, coherence FROM brain_states WHERE user_id = %s AND created_at > NOW() - INTERVAL '%s minutes' ORDER BY created_at DESC LIMIT 1",
-                (user_id, BRAIN_STATE_TTL_MINUTES)
-            ).fetchone()
-        else:
-            row = db.execute(
-                "SELECT C, E, R, S, alpha, mode, coherence FROM brain_states WHERE user_id = ? AND created_at > datetime('now', '-' || ? || ' minutes') ORDER BY created_at DESC LIMIT 1",
-                (user_id, BRAIN_STATE_TTL_MINUTES)
-            ).fetchone()
-        if not row:
-            return None
-
-        # RealDictCursor returns dict with lowercase keys
-        C_val = float(row.get('c', row.get('C', 5.0)) or 5.0)
-        alpha_val = float(row.get('alpha', 0.0) or 0.0)
-        mode = row.get('mode', 'HARMONY') or "HARMONY"
-        coherence = row.get('coherence', 0.5)
-
-        # Use unified speech computation
-        speech = compute_unified_speech(C_val, alpha_val, mode, user_id=user_id)
-        speech["coherence"] = round(float(coherence or 0.5), 4)
-        speech["user_id"] = user_id
-        speech["source"] = "brain_states"
-        return speech
-    except Exception as e:
-        logger.warning(f"Brain speech lookup warning: {e}")
-        return None
+    """Wrapper that injects DB adaptation loader into brain_speech."""
+    return _raw_get_brain_speech_for_user(
+        user_id,
+        _load_adaptation=_db_load_adaptation,
+        _adaptation_fallback=_adaptation_state
+    )
 
 
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 # ═══════════════════════════════════════════════════════════
-# JÁDROVÉ MATEMATICKÉ FUNKCE
+# CORE FUNCTIONS (kept here — they use DB + multiple engines)
 # ═══════════════════════════════════════════════════════════
-
-def consciousness_equation(n, alpha):
-    """
-    Rovnice stavu vědomí (Master Prompt §6):
-
-        C_{n+1} = (1 - α)(F_n + L_n) + α(2P_n + P_{n-1})
-
-    kde:
-        α ∈ [0,1] = emoční aktivace
-        F = Fibonacci (stabilita)
-        L = Lucas (empatie)
-        P = Pell (krizová eskalace)
-
-    Při α=0: C sleduje harmonickou dynamiku (φ-konvergence)
-    Při α=1: C sleduje krizovou dynamiku (δ-eskalace)
-    Při α≈0.5: C ≈ ρ-stabilita (RADIM konstanta)
-
-    Args:
-        n: index v posloupnostech (0-14)
-        alpha: emoční aktivace (0-1)
-
-    Returns:
-        dict: C_next, harmonic_component, crisis_component, convergence_ratio
-    """
-    alpha = clamp(alpha, 0.0, 1.0)
-    n = clamp(n, 1, min(len(FIBONACCI) - 1, len(LUCAS) - 1, len(PELL) - 1))
-
-    # Harmonická složka: F_n + L_n
-    F_n = FIBONACCI[n]
-    L_n = LUCAS[n]
-    harmonic = F_n + L_n
-
-    # Krizová složka: 2P_n + P_{n-1}
-    P_n = PELL[n]
-    P_prev = PELL[n - 1]
-    crisis = 2 * P_n + P_prev
-
-    # Sjednocená rovnice
-    C_next = (1 - alpha) * harmonic + alpha * crisis
-
-    # Konvergenční poměr — ke kterému atraktoru systém směřuje
-    if n >= 2:
-        F_ratio = FIBONACCI[n] / FIBONACCI[n - 1] if FIBONACCI[n - 1] > 0 else PHI
-        L_ratio = LUCAS[n] / LUCAS[n - 1] if LUCAS[n - 1] > 0 else PHI
-        P_ratio = PELL[n] / PELL[n - 1] if PELL[n - 1] > 0 else DELTA
-        convergence = (1 - alpha) * ((F_ratio + L_ratio) / 2) + alpha * P_ratio
-    else:
-        convergence = RHO
-
-    # Normalizace na 0-C_MAX (40) — mapujeme convergence ratio z [φ, δ] na [0, 40]
-    # φ=1.618 → C_norm=0 (harmonie), δ=2.414 → C_norm=40 (krize), ρ=2.016 → ~20 (alert)
-    span = DELTA - PHI  # ≈ 0.796
-    ratio_norm = (convergence - PHI) / span if span > 0 else 0.5
-    C_normalized = clamp(round(ratio_norm * C_MAX, 2), 0.0, C_MAX)
-
-    return {
-        "C_next": round(C_next, 4),
-        "C_normalized": C_normalized,
-        "harmonic_component": harmonic,
-        "crisis_component": crisis,
-        "alpha": round(alpha, 4),
-        "n": n,
-        "convergence_ratio": round(convergence, 6),
-        "attractor": "phi" if convergence < RHO else ("rho" if convergence < DELTA - 0.1 else "delta"),
-        "sequences": {
-            "F_n": F_n,
-            "L_n": L_n,
-            "P_n": P_n,
-            "P_n_minus_1": P_prev
-        }
-    }
-
-
-def compute_empathy(voice_tone=0.5, hrv=0.5, speech_tempo=0.5):
-    """
-    Empatie (Master Prompt §10):
-
-        E = w₁·voice + w₂·HRV + w₃·speech_tempo
-
-    Interpretace:
-        voice_tone: 0=monotónní/agresivní, 1=vřelý/klidný
-        hrv: 0=nízká variabilita (stres), 1=vysoká (klid)
-        speech_tempo: 0=rychlé/zmatené, 1=pomalé/klidné
-
-    Pokud E roste: Radim zpomalí řeč, sníží tlak, zvýší podporu.
-
-    Returns:
-        dict: empathy score + adaptation hints
-    """
-    E = W_VOICE * voice_tone + W_HRV * hrv + W_SPEECH_TEMPO * speech_tempo
-    E = clamp(E, 0.0, 1.0)
-
-    # Adaptační doporučení
-    if E >= 0.7:
-        adaptation = "standard"
-        speech_rate = 1.0
-        pressure = "normal"
-        support = "normal"
-    elif E >= 0.4:
-        adaptation = "supportive"
-        speech_rate = 0.9
-        pressure = "reduced"
-        support = "increased"
-    else:
-        adaptation = "crisis_support"
-        speech_rate = 0.75
-        pressure = "minimal"
-        support = "maximum"
-
-    return {
-        "E": round(E, 4),
-        "voice_tone": round(voice_tone, 3),
-        "hrv": round(hrv, 3),
-        "speech_tempo": round(speech_tempo, 3),
-        "weights": {"voice": W_VOICE, "hrv": W_HRV, "speech_tempo": W_SPEECH_TEMPO},
-        "adaptation": adaptation,
-        "speech_rate_modifier": speech_rate,
-        "pressure_level": pressure,
-        "support_level": support
-    }
-
-
-def derive_text_empathy_proxies(message, mood=None, alpha=0.0):
-    """
-    Odhadne voice_tone, hrv, speech_tempo z textu (bez senzorů).
-
-    Pravidla:
-        voice_tone: od mood (happy→0.9, sad→0.3, angry→0.1, neutral→0.6)
-        hrv: od délky zprávy (krátké=stres→0.3, normální→0.6, dlouhé=klid→0.8)
-        speech_tempo: od alpha (nízké α→pomalé=0.7, vysoké α→rychlé=0.3)
-
-    Returns:
-        dict: voice_tone, hrv, speech_tempo proxy values
-    """
-    # Mood → voice_tone
-    mood_map = {
-        "happy": 0.9, "calm": 0.85, "grateful": 0.85,
-        "neutral": 0.6, "confused": 0.45,
-        "sad": 0.3, "anxious": 0.2, "angry": 0.15, "crisis": 0.1
-    }
-    voice_tone = mood_map.get(mood or "neutral", 0.6)
-
-    # Message length → HRV proxy (short=stress, long=calm)
-    msg_len = len(message) if message else 0
-    if msg_len < 15:
-        hrv = 0.3       # very short = stress
-    elif msg_len < 50:
-        hrv = 0.5       # short
-    elif msg_len < 150:
-        hrv = 0.65      # normal
-    else:
-        hrv = 0.8       # long = calm elaboration
-
-    # Alpha → speech_tempo (high alpha = fast/agitated = low tempo score)
-    speech_tempo = clamp(0.8 - alpha * 0.6, 0.2, 0.9)
-
-    return {
-        "voice_tone": round(voice_tone, 3),
-        "hrv": round(hrv, 3),
-        "speech_tempo": round(speech_tempo, 3),
-        "source": "text_proxy"
-    }
-
-
-def compute_rationality(C, E, S):
-    """
-    Racionalita (R) — schopnost racionálního rozhodování.
-
-    R klesá s rostoucím stresem a klesajícím vědomím:
-        R = sigmoid(1 - S + E×0.3 - C_norm×0.5, k=4, x0=0.4)
-
-    Returns:
-        float: rationality score 0-1
-    """
-    C_norm = C / C_MAX if C_MAX > 0 else 0
-    R = sigmoid(1 - S + E * 0.3 - C_norm * 0.5, k=4, x0=0.4)
-    return round(clamp(R, 0.0, 1.0), 4)
-
-
-def compute_stress(alpha, C):
-    """
-    Stres (S) — krizová dynamika.
-
-    S = α × (1 + C_norm × 0.5)
-    Normalizováno na [0, 1]
-
-    Returns:
-        float: stress score 0-1
-    """
-    C_norm = C / C_MAX if C_MAX > 0 else 0
-    S = alpha * (1 + C_norm * 0.5)
-    return round(clamp(S, 0.0, 1.0), 4)
-
 
 def compute_psi_state(C, alpha, voice_tone=0.5, hrv=0.5, speech_tempo=0.5, user_id=None):
     """
@@ -772,68 +388,10 @@ def compute_psi_state(C, alpha, voice_tone=0.5, hrv=0.5, speech_tempo=0.5, user_
     return result
 
 
-def quasiperiodic_rhythm(omega, t_points=None):
-    """
-    Rytmická regulace (Master Prompt §8):
-
-        R(t) = sin(ωt) + sin(φωt)
-
-    Kvaziperiodický signál — nikdy se přesně neopakuje.
-    Používá se pro stabilizaci řeči, chůze, dýchání, hlasu.
-
-    Args:
-        omega: základní úhlová frekvence (rad/s)
-        t_points: časové body (default: 0-2π v 100 krocích)
-
-    Returns:
-        dict: waveform samples, period info, phi ratio
-    """
-    if t_points is None:
-        t_points = [i * 2 * math.pi / 100 for i in range(101)]
-
-    samples = []
-    for t in t_points:
-        r = math.sin(omega * t) + math.sin(PHI * omega * t)
-        samples.append(round(r, 6))
-
-    period_1 = 2 * math.pi / omega if omega > 0 else float('inf')
-    period_phi = 2 * math.pi / (PHI * omega) if omega > 0 else float('inf')
-
-    return {
-        "formula": f"R(t) = sin({omega:.3f}t) + sin({PHI * omega:.3f}t)",
-        "omega": round(omega, 4),
-        "phi_omega": round(PHI * omega, 4),
-        "period_1_s": round(period_1, 6),
-        "period_phi_s": round(period_phi, 6),
-        "ratio": round(PHI, 6),
-        "quasiperiodic": True,
-        "samples_count": len(samples),
-        "samples": samples[:20],  # prvních 20 pro ukázku
-        "applications": [
-            "speech_stabilization",
-            "gait_cueing",
-            "breathing_rhythm",
-            "voice_modulation"
-        ]
-    }
-
-
 def reinforcement_update(success, user_id=None, signal_type="interaction"):
     """
     Adaptace (Master Prompt §11):
-
-        success → reward +1
-        failure → reward -1
-
-    Radim upravuje tempo řeči, styl komunikace, intervenci.
-    Pokud user_id je zadáno, persistuje stav do PostgreSQL.
-
-    signal_type:
-        "interaction" — standard (1× multiplier)
-        "speech_feedback" — from user feedback buttons (2× multiplier)
-
-    Returns:
-        dict: updated adaptation state
+        success → reward +1, failure → reward -1
     """
     # Load state: per-user from DB, or global fallback
     if user_id:
@@ -852,15 +410,15 @@ def reinforcement_update(success, user_id=None, signal_type="interaction"):
     multiplier = 2.0 if signal_type == "speech_feedback" else 1.0
 
     if success:
-        state["speech_rate_adjust"] += eta * 0.05 * multiplier   # v2.1: was 0.02
-        state["pause_adjust_ms"] -= eta * 50 * multiplier        # v2.1: was 20 → -5ms base
+        state["speech_rate_adjust"] += eta * 0.05 * multiplier
+        state["pause_adjust_ms"] -= eta * 50 * multiplier
         state["intervention_level"] = max(0, state["intervention_level"] - eta * 0.05)
     else:
-        state["speech_rate_adjust"] -= eta * 0.10 * multiplier   # v2.1: was 0.05
-        state["pause_adjust_ms"] += eta * 100 * multiplier       # v2.1: was 50 → +10ms base
+        state["speech_rate_adjust"] -= eta * 0.10 * multiplier
+        state["pause_adjust_ms"] += eta * 100 * multiplier
         state["intervention_level"] = min(1, state["intervention_level"] + eta * 0.1)
 
-    # Clamp (v2.1: wider positive range, wider pause range)
+    # Clamp
     state["speech_rate_adjust"] = clamp(state["speech_rate_adjust"], -0.3, 0.15)
     state["pause_adjust_ms"] = clamp(state["pause_adjust_ms"], -300, 600)
 
@@ -883,80 +441,8 @@ def reinforcement_update(success, user_id=None, signal_type="interaction"):
     }
 
 
-def decision_model(C, E, R, S, sensor_data=None):
-    """
-    Rozhodovací model (Master Prompt §13):
-
-    Radim analyzuje:
-        - user input
-        - emotion signals
-        - speech pattern
-        - sensor data
-
-    a vyhodnocuje stav: harmonie → aktivace → varování → krize
-
-    Returns:
-        dict: decision + recommended reaction (Master Prompt §14)
-    """
-    # Klasifikace
-    if C < T1 and S < 0.3:
-        level = "HARMONY"
-        reaction = "normal_communication"
-        instructions = "Normalni komunikace. Radim je prirozen, vrely, zajima se."
-    elif C < T1 and S >= 0.3:
-        level = "ACTIVATION"
-        reaction = "gentle_stabilization"
-        instructions = "Mirna aktivace. Radim zpomaluje, sleduje signaly."
-    elif C < T2:
-        level = "WARNING"
-        reaction = "active_stabilization"
-        instructions = "Varovani. Radim zpomaluje rec, kratsi vety, vice pauz. Validuje emoce."
-    else:
-        level = "CRISIS"
-        reaction = "crisis_protocol"
-        instructions = (
-            "KRIZOVY PROTOKOL: Zpomali rec. Prodluz pauzy. "
-            "Nabidni dech: 'Nadechnete se... vydechnete...' "
-            "Jednoduche prikazy. Aktivuj podporu."
-        )
-
-    # Doporučení pro Radima (Master Prompt §12, §16)
-    personality = {
-        "calm": True,
-        "supportive": True,
-        "respectful": True,
-        "clear": True,
-        "never_alarmist": True,
-        "never_judges": True,
-        "always_stabilizes": True,
-        "supports_autonomy": True,
-        "strengthens_rationality": R > 0.5,
-        "prevents_escalation": S > 0.3
-    }
-
-    return {
-        "level": level,
-        "reaction": reaction,
-        "instructions": instructions,
-        "personality": personality,
-        "input_analysis": {
-            "consciousness": round(C, 2),
-            "empathy": round(E, 4),
-            "rationality": round(R, 4),
-            "stress": round(S, 4)
-        },
-        "sensor_data_available": sensor_data is not None
-    }
-
-
 def architecture_pipeline():
-    """
-    Architektura (Master Prompt §15):
-
-    SENSORS → PERCEPTION → CONSCIOUSNESS ENGINE → COHERENCE ENGINE → RHYTHM ENGINE → VOICE/ACTION
-
-    Vrací stav každého modulu v pipeline.
-    """
+    """Architektura (Master Prompt §15)."""
     return {
         "pipeline": [
             {
@@ -974,7 +460,7 @@ def architecture_pipeline():
             {
                 "stage": "CONSCIOUSNESS_ENGINE",
                 "description": "Rovnice vedomi: C_{n+1} = (1-α)(F+L) + α(2P+P)",
-                "module": "radim_brain_routes.py + anticipation_routes.py",
+                "module": "brain_math.py",
                 "status": "active",
                 "equation": "C_{n+1} = (1-alpha)(F_n + L_n) + alpha(2*P_n + P_{n-1})"
             },
@@ -995,7 +481,7 @@ def architecture_pipeline():
             {
                 "stage": "VOICE_ACTION",
                 "description": "Azure TTS + recova adaptace + akcni doporuceni",
-                "module": "speech_routes.py + twilio_voice_routes.py",
+                "module": "brain_speech.py + speech_routes.py",
                 "status": "active"
             }
         ],
@@ -1009,15 +495,7 @@ def architecture_pipeline():
 
 
 def memory_model():
-    """
-    Paměť Radima (Master Prompt §9):
-
-    4 typy paměti:
-        1. pracovní paměť    — recent conversation
-        2. epizodická paměť  — events, conversation history
-        3. sémantická paměť  — knowledge, topics, preferences
-        4. autobiografická    — user profile, health, routines
-    """
+    """Paměť Radima (Master Prompt §9)."""
     return {
         "types": [
             {
@@ -1122,10 +600,7 @@ def brain_constants():
 @radim_brain_bp.route('/consciousness', methods=['POST'])
 @optional_auth
 def brain_consciousness():
-    """
-    Výpočet rovnice stavu vědomí (§6):
-    C_{n+1} = (1-α)(F_n + L_n) + α(2P_n + P_{n-1})
-    """
+    """Výpočet rovnice stavu vědomí (§6)."""
     data = request.get_json() or {}
     n = data.get('n', 5)
     alpha = data.get('alpha', 0.0)
@@ -1142,10 +617,7 @@ def brain_consciousness():
 
 @radim_brain_bp.route('/state', methods=['GET'])
 def brain_state_get():
-    """
-    GET varianta — vrátí výchozí Ψ(t) stav + Janečkovy hodnoty.
-    Používá RadimEmpathyBridge.js pro načtení soul values.
-    """
+    """GET varianta — vrátí výchozí Ψ(t) stav + Janečkovy hodnoty."""
     try:
         psi = compute_psi_state(5.0, 0.2)
     except Exception:
@@ -1178,26 +650,12 @@ def brain_state_get():
 @radim_brain_bp.route('/state', methods=['POST'])
 @optional_auth
 def brain_state():
-    """
-    Výpočet stavového vektoru Ψ(t) = (C, E, R, S)
-
-    Input:
-        C: consciousness/load (0-40)
-        alpha: emotional activation (0-1)
-        voice_tone: (0-1, optional)
-        hrv: heart rate variability (0-1, optional)
-        speech_tempo: (0-1, optional)
-        n: sequence index (optional, for consciousness equation)
-
-    Returns:
-        Ψ(t) + consciousness equation + decision model + speech adaptation
-    """
+    """Výpočet stavového vektoru Ψ(t) = (C, E, R, S)."""
     data = request.get_json() or {}
 
     C = clamp(float(data.get('C', 5.0)), 0.0, C_MAX)
     alpha = clamp(float(data.get('alpha', 0.0)), 0.0, 1.0)
 
-    # voice_tone: accept string labels or float (0-1)
     _vt_raw = data.get('voice_tone', 0.5)
     _TONE_MAP = {'calm': 0.3, 'happy': 0.2, 'sad': 0.6, 'distressed': 0.8, 'angry': 0.9}
     try:
@@ -1210,18 +668,10 @@ def brain_state():
     n = int(data.get('n', 5))
     user_id = data.get('user_id')
 
-    # 1. Stavový vektor Ψ(t)
     psi = compute_psi_state(C, alpha, voice_tone, hrv, speech_tempo, user_id=user_id)
-
-    # 2. Rovnice vědomí
     consciousness = consciousness_equation(n, alpha)
+    decision = decision_model(C, psi["psi"]["E"], psi["psi"]["R"], psi["psi"]["S"])
 
-    # 3. Rozhodovací model
-    decision = decision_model(
-        C, psi["psi"]["E"], psi["psi"]["R"], psi["psi"]["S"]
-    )
-
-    # 4. Anticipation Engine (pokud dostupný)
     anticipation = None
     if ANTICIPATION_AVAILABLE:
         try:
@@ -1236,11 +686,10 @@ def brain_state():
         except Exception:
             pass
 
-    # 5. Rhythm Return (pokud dostupný)
     rhythm = None
     if RHYTHM_RETURN_AVAILABLE:
         try:
-            motor_state = _rr_classify_motor(C)  # M = C mapping
+            motor_state = _rr_classify_motor(C)
             therapy_bpm = _rr_therapy_bpm(C, alpha)
             speech_rhythm = _rr_speech_rhythm(C, alpha)
             rhythm = {
@@ -1251,8 +700,7 @@ def brain_state():
         except Exception:
             pass
 
-    # 6. Quasiperiodický rytmus
-    omega = 2 * math.pi  # 1 Hz base
+    omega = 2 * math.pi
     rhythm_wave = quasiperiodic_rhythm(omega)
 
     return jsonify({
@@ -1277,24 +725,9 @@ def brain_state():
 @radim_brain_bp.route('/perceive', methods=['POST'])
 @optional_auth
 def brain_perceive():
-    """
-    PERCEPTION vrstva — zpracování senzorových dat.
-
-    Input (sensor_data):
-        noise_db: hluk okolí (dB)
-        light_lux: světelnost
-        temperature: teplota (°C)
-        heart_rate: tepová frekvence
-        hrv: variabilita srdečního rytmu (ms)
-        stress_level: subjektivní stres (0-1)
-        speech_rate: rychlost řeči (words/min)
-        voice_pitch: výška hlasu (Hz)
-
-    Pipeline: SENSORS → PERCEPTION → Ψ(t)
-    """
+    """PERCEPTION vrstva — zpracování senzorových dat."""
     data = request.get_json() or {}
 
-    # Senzorová data
     noise = float(data.get('noise_db', 40))
     light = float(data.get('light_lux', 300))
     temp = float(data.get('temperature', 22))
@@ -1304,7 +737,6 @@ def brain_perceive():
     speech_rate = float(data.get('speech_rate', 120))
     voice_pitch = float(data.get('voice_pitch', 150))
 
-    # PERCEPTION: odhadni C a alpha ze senzorů
     C = 5.0
     if noise > 60:
         C += (noise - 60) * 0.3
@@ -1317,16 +749,13 @@ def brain_perceive():
     C += stress * 15
     C = clamp(C, 0.0, C_MAX)
 
-    # Alpha z tepové frekvence a stresu
     alpha = stress * 0.6 + (max(0, hr - 80) / 100) * 0.4
     alpha = clamp(alpha, 0.0, 1.0)
 
-    # Voice tone z pitch a rate
     voice_tone = clamp(1.0 - abs(voice_pitch - 150) / 100, 0.0, 1.0)
     hrv_norm = clamp(hrv_ms / 100, 0.0, 1.0)
     tempo_norm = clamp(1.0 - (speech_rate - 100) / 100, 0.0, 1.0)
 
-    # Compute Ψ(t) s odhadnutými hodnotami
     psi = compute_psi_state(C, alpha, voice_tone, hrv_norm, tempo_norm)
     decision = decision_model(C, psi["psi"]["E"], psi["psi"]["R"], psi["psi"]["S"])
 
@@ -1340,14 +769,9 @@ def brain_perceive():
             "tempo_normalized": round(tempo_norm, 3)
         },
         "sensor_input": {
-            "noise_db": noise,
-            "light_lux": light,
-            "temperature": temp,
-            "heart_rate": hr,
-            "hrv_ms": hrv_ms,
-            "stress_level": stress,
-            "speech_rate": speech_rate,
-            "voice_pitch": voice_pitch
+            "noise_db": noise, "light_lux": light, "temperature": temp,
+            "heart_rate": hr, "hrv_ms": hrv_ms, "stress_level": stress,
+            "speech_rate": speech_rate, "voice_pitch": voice_pitch
         },
         "psi_state": psi,
         "decision": decision,
@@ -1358,18 +782,7 @@ def brain_perceive():
 @radim_brain_bp.route('/adapt', methods=['POST'])
 @optional_auth
 def brain_adapt():
-    """
-    Adaptace (Master Prompt §11):
-        success → reward +1
-        failure → reward -1
-
-    Input:
-        success: bool — byla interakce úspěšná?
-        context: string — kontext interakce (optional)
-
-    Returns:
-        updated adaptation parameters
-    """
+    """Adaptace (Master Prompt §11)."""
     data = request.get_json() or {}
     success = data.get('success', True)
     context = data.get('context', '')
@@ -1388,22 +801,7 @@ def brain_adapt():
 @radim_brain_bp.route('/feedback', methods=['POST'])
 @optional_auth
 def brain_feedback():
-    """
-    Speech feedback from frontend (v2.1).
-
-    Input:
-        user_id: string (required)
-        rating: int 1-5 (optional)
-        action: "thumbs_up" | "thumbs_down" | "replay" | "skip" (optional)
-        response_time_ms: int (optional)
-        context: string (optional)
-
-    Signal mapping:
-        thumbs_up / rating >= 4 → success (2× RL via speech_feedback)
-        thumbs_down / rating <= 2 → failure (2× RL via speech_feedback)
-        replay → failure
-        skip / rating == 3 → neutral (no RL update)
-    """
+    """Speech feedback from frontend (v2.1)."""
     data = request.get_json() or {}
     user_id = data.get('user_id')
     if not user_id:
@@ -1414,7 +812,6 @@ def brain_feedback():
     response_time_ms = data.get('response_time_ms')
     context = data.get('context', '')
 
-    # Determine signal from action / rating
     if action in ('thumbs_up',) or (rating and int(rating) >= 4):
         signal = "success"
     elif action in ('thumbs_down', 'replay') or (rating and int(rating) <= 2):
@@ -1422,7 +819,6 @@ def brain_feedback():
     else:
         signal = "neutral"
 
-    # Save feedback to DB
     if DB_AVAILABLE:
         db = None
         try:
@@ -1440,14 +836,13 @@ def brain_feedback():
             db.commit()
         except Exception as e:
             logger.warning(f"Brain feedback save warning: {e}")
-
         finally:
             if db:
                 try:
                     db.close()
                 except Exception:
                     pass
-    # Apply RL update (2× multiplier for speech_feedback)
+
     rl_result = None
     if signal != "neutral":
         rl_result = reinforcement_update(
@@ -1466,24 +861,13 @@ def brain_feedback():
 
 @radim_brain_bp.route('/rhythm', methods=['POST'])
 def brain_rhythm():
-    """
-    Rytmická regulace (Master Prompt §8):
-        R(t) = sin(ωt) + sin(φωt)
-
-    Input:
-        omega: úhlová frekvence (rad/s, default: 2π)
-        application: speech|gait|breathing|voice (default: speech)
-
-    Returns:
-        waveform info + application-specific parameters
-    """
+    """Rytmická regulace (Master Prompt §8)."""
     data = request.get_json() or {}
     omega = float(data.get('omega', 2 * math.pi))
     application = data.get('application', 'speech')
 
     rhythm = quasiperiodic_rhythm(omega)
 
-    # Application-specific settings
     if application == 'speech':
         app_params = {
             "pause_pattern_ms": [618, 1000, 1618],
@@ -1500,9 +884,9 @@ def brain_rhythm():
         }
     elif application == 'breathing':
         app_params = {
-            "inhale_s": round(4 * PSI, 1),   # ~2.5s
-            "hold_s": round(4, 1),            # 4s
-            "exhale_s": round(4 * PHI, 1),    # ~6.5s
+            "inhale_s": round(4 * PSI, 1),
+            "hold_s": round(4, 1),
+            "exhale_s": round(4 * PHI, 1),
             "cycle_s": round(4 * PSI + 4 + 4 * PHI, 1),
             "description": "Dychani ve zlate proporci: nadech×ψ : zadrzeni : vydech×φ"
         }
@@ -1560,7 +944,7 @@ def brain_architecture():
 # STARTUP
 # ═══════════════════════════════════════════════════════════
 logger.info(f"""
-🧠 RADIM Brain Engine v2.0.0
+🧠 RADIM Brain Engine v2.0.0 (modular)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Ψ(t) = (C, E, R, S)
   C_{{n+1}} = (1-α)(F_n+L_n) + α(2P_n+P_{{n-1}})
@@ -1569,6 +953,7 @@ logger.info(f"""
   δ = {DELTA:.6f}  (krize)
   R = {RADIM_R:.3f}       (φ×δ)
   T₁ = {T1}, T₂ = {T2}
+  Modules: brain_math.py + brain_speech.py
   Anticipation: {'✅' if ANTICIPATION_AVAILABLE else '❌'}
   Rhythm Return: {'✅' if RHYTHM_RETURN_AVAILABLE else '❌'}
   Memory: {'✅' if MEMORY_AVAILABLE else '❌'}
