@@ -804,8 +804,8 @@ def sync_wp_user(wp_user):
 # Media & Push Notification Routes
 from media_push_routes import media_push_bp, init_media_push_routes
 init_media_push_routes(
-    upload_fn=upload_to_cloudinary,
-    push_fn=send_push_notification,
+    upload_to_cloudinary=upload_to_cloudinary,
+    send_push_notification=send_push_notification,
 )
 app.register_blueprint(media_push_bp)
 logger.info("✅ Media & Push routes registered: /api/media/*, /api/push/*")
