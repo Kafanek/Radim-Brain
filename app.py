@@ -44,6 +44,7 @@ from orchestrator_blueprint import orchestrator_bp
 # Import Memory & Learning routes
 try:
     from memory_routes import memory_bp
+    from gdpr_routes import gdpr_bp
     MEMORY_AVAILABLE = True
 except ImportError:
     MEMORY_AVAILABLE = False
@@ -365,7 +366,9 @@ except ImportError:
 # 🧠 Import Memory & Learning routes
 if MEMORY_AVAILABLE:
     app.register_blueprint(memory_bp)
+    app.register_blueprint(gdpr_bp)
     logger.info("✅ Memory routes registered: /api/memory/*")
+    logger.info("✅ GDPR routes registered: /api/memory/gdpr/*")
 
 # KAL Routes (Kolibri Abstraction Layer)
 from kal_routes import kal_bp, init_kal_routes
