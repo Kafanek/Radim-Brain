@@ -93,6 +93,8 @@ except ImportError:
 # 🎓 Import Education / Rare Diseases API
 try:
     from education_routes import education_bp
+    from education_assessment_routes import education_assessment_bp
+    from education_scenario_routes import education_scenario_bp
     EDUCATION_AVAILABLE = True
 except ImportError:
     EDUCATION_AVAILABLE = False
@@ -163,7 +165,9 @@ if LIBRARY_AVAILABLE:
 # 🎓 Register Education Blueprint
 if EDUCATION_AVAILABLE:
     app.register_blueprint(education_bp)
-    logger.info("✅ Education routes registered: /api/education/*")
+    app.register_blueprint(education_assessment_bp)
+    app.register_blueprint(education_scenario_bp)
+    logger.info("✅ Education routes registered: /api/education/* (3 blueprints)")
 
 # 🏫 Register Education Teacher Dashboard Blueprint
 if EDUCATION_TEACHER_AVAILABLE:
