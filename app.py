@@ -288,8 +288,11 @@ app.register_blueprint(speech_bp)
 
 # 🤖 Import Claude AI routes - Radim s web search (nahrazuje Gemini)
 from claude_routes import claude_bp
+from claude_content_routes import claude_content_bp
 app.register_blueprint(claude_bp)
+app.register_blueprint(claude_content_bp)
 logger.info("✅ Claude AI routes registered: /api/claude/*")
+logger.info("✅ Claude Content routes registered: /api/claude/news,weather,quiz,story")
 
 # 💝 Import Soul routes - Duše Radima
 from soul_routes import soul_bp
