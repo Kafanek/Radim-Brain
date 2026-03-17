@@ -1,188 +1,65 @@
 """
-🤖 CLAUDE AI ROUTES - Flask Blueprint
-Kompletní AI služba s web search pro seniory
-Nahrazuje Gemini - chat, zprávy, počasí, kvíz, příběhy
+🤖 CLAUDE AI ROUTES v2.1.0 — Flask Blueprint
+Chat, dashboard, memory endpoints.
+Config + helpers in claude_helpers.py.
+Emotion endpoints in claude_emotion_routes.py.
+Content endpoints in claude_content_routes.py.
 
-Version: 2.0.0 (modular)
-Emotion endpoints moved to claude_emotion_routes.py
+Routes:
+  GET  /api/claude/health
+  GET  /api/claude/nameday
+  POST /api/claude/chat
+  GET  /api/claude/dashboard-data
+  POST /api/claude/memory/save
+  POST /api/claude/memory/recall
 """
 
-import os
-import json
-import re
 import logging
 from datetime import datetime
 from flask import Blueprint, request, jsonify, g
 from auth_middleware import require_auth, optional_auth
 from rate_limiter import rate_limit
 
-# Anthropic Claude SDK
-try:
-    from anthropic import Anthropic
-    ANTHROPIC_AVAILABLE = True
-except ImportError:
-    ANTHROPIC_AVAILABLE = False
-    logger.warning("⚠️ Anthropic SDK not installed. Run: pip install anthropic")
-
 logger = logging.getLogger(__name__)
-
-# Intent Resolver (v272 — local NLU)
-try:
-    from intent_resolver import resolve_intent as _cl_resolve_intent
-    _CL_INTENT_RESOLVER = True
-except ImportError:
-    _CL_INTENT_RESOLVER = False
-
-# Anticipation Engine integration
-try:
-    from anticipation_routes import (
-        predict_C as _cl_predict_C, calculate_emotions as _cl_ant_emotions,
-        calculate_speech_params as _cl_ant_speech, classify_state as _cl_classify,
-        C_HARMONY as _CL_C_HARMONY, C_ALERT as _CL_C_ALERT, C_MAX as _CL_C_MAX
-    )
-    _CL_ANT_AVAILABLE = True
-except ImportError:
-    _CL_ANT_AVAILABLE = False
-
-# Memory persistence
-try:
-    from memory_routes import record_interaction, get_conversation_messages, get_user_context, get_personalized_system_prompt, detect_mood as _cl_detect_mood
-    _CL_MEMORY_AVAILABLE = True
-except ImportError:
-    _CL_MEMORY_AVAILABLE = False
-
-# 🎵 Text Rhythm Engine — matematika řídí styl textu
-try:
-    from text_rhythm import (
-        estimate_C_alpha_from_text as _cl_tr_estimate,
-        calculate_text_params as _cl_tr_calc,
-        build_anticipation_prompt as _cl_tr_prompt,
-        get_anticipation_metadata as _cl_tr_meta,
-        get_adjusted_generation_config as _cl_tr_gen_config
-    )
-    _CL_TEXT_RHYTHM = True
-except ImportError:
-    _CL_TEXT_RHYTHM = False
-
-# DB access for memory notes
-try:
-    from database import get_connection, is_postgres
-    _CL_DB_AVAILABLE = True
-except ImportError:
-    _CL_DB_AVAILABLE = False
-
-# v283: Brain Engine integration for /api/claude/chat
-try:
-    from radim_brain_routes import (
-        compute_psi_state as _cl_brain_psi,
-        derive_text_empathy_proxies as _cl_brain_proxies,
-        decision_model as _cl_brain_decision
-    )
-    _CL_BRAIN_AVAILABLE = True
-except ImportError:
-    _CL_BRAIN_AVAILABLE = False
 
 # Flask Blueprint
 claude_bp = Blueprint('claude', __name__, url_prefix='/api/claude')
 
 # ============================================================================
-# CONFIGURATION
+# IMPORTS FROM HELPERS (+ re-exports for backward compat)
 # ============================================================================
 
-ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
-CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-sonnet-4-6-20250514')
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+from claude_helpers import (
+    # Config
+    ANTHROPIC_API_KEY, CLAUDE_MODEL, GEMINI_API_KEY,
+    ANTHROPIC_AVAILABLE, NAMEDAY_CALENDAR,
+    # Feature flags
+    CL_INTENT_RESOLVER, CL_ANT_AVAILABLE, CL_MEMORY_AVAILABLE,
+    CL_TEXT_RHYTHM, CL_DB_AVAILABLE, CL_BRAIN_AVAILABLE,
+    # Feature flag imports (for use in routes)
+    cl_resolve_intent, cl_detect_mood,
+    cl_tr_estimate, cl_tr_calc, cl_tr_prompt, cl_tr_meta, cl_tr_gen_config,
+    cl_brain_psi, cl_brain_proxies, cl_brain_decision,
+    # Memory functions
+    record_interaction, get_conversation_messages,
+    get_user_context, get_personalized_system_prompt,
+    # Helper functions
+    get_claude_client, call_gemini_fallback, is_credit_error,
+    get_today_info, extract_text_from_response, get_greeting,
+)
 
-# České jmeniny - kompletní kalendář
-NAMEDAY_CALENDAR = {
-    1: {1: 'Nový rok', 2: 'Karina', 3: 'Radmila', 4: 'Diana', 5: 'Dalimil', 6: 'Tři králové', 7: 'Vilma', 8: 'Čestmír', 9: 'Vladan', 10: 'Břetislav', 11: 'Bohdana', 12: 'Pravoslav', 13: 'Edita', 14: 'Radovan', 15: 'Alice', 16: 'Ctirad', 17: 'Drahoslav', 18: 'Vladislav', 19: 'Doubravka', 20: 'Ilona', 21: 'Běla', 22: 'Slavomír', 23: 'Zdeněk', 24: 'Milena', 25: 'Miloš', 26: 'Zora', 27: 'Ingrid', 28: 'Otýlie', 29: 'Zdislava', 30: 'Robin', 31: 'Marika'},
-    2: {1: 'Hynek', 2: 'Nela', 3: 'Blažej', 4: 'Jarmila', 5: 'Dobromila', 6: 'Vanda', 7: 'Veronika', 8: 'Milada', 9: 'Apolena', 10: 'Mojmír', 11: 'Božena', 12: 'Slavěna', 13: 'Věnceslav', 14: 'Valentýn', 15: 'Jiřina', 16: 'Ljuba', 17: 'Miloslava', 18: 'Gizela', 19: 'Patrik', 20: 'Oldřich', 21: 'Lenka', 22: 'Petr', 23: 'Svatopluk', 24: 'Matěj', 25: 'Liliana', 26: 'Dorota', 27: 'Alexandr', 28: 'Lumír', 29: 'Horymír'},
-    3: {1: 'Bedřich', 2: 'Anežka', 3: 'Kamil', 4: 'Stela', 5: 'Kazimír', 6: 'Miroslav', 7: 'Tomáš', 8: 'Gabriela', 9: 'Františka', 10: 'Viktorie', 11: 'Anděla', 12: 'Řehoř', 13: 'Růžena', 14: 'Rút', 15: 'Ida', 16: 'Elena', 17: 'Vlastimil', 18: 'Eduard', 19: 'Josef', 20: 'Světlana', 21: 'Radek', 22: 'Leona', 23: 'Ivona', 24: 'Gabriel', 25: 'Marián', 26: 'Emanuel', 27: 'Dita', 28: 'Soňa', 29: 'Taťána', 30: 'Arnošt', 31: 'Kvido'},
-    4: {1: 'Hugo', 2: 'Erika', 3: 'Richard', 4: 'Ivana', 5: 'Miroslava', 6: 'Vendula', 7: 'Heřman', 8: 'Ema', 9: 'Dušan', 10: 'Darja', 11: 'Izabela', 12: 'Julius', 13: 'Aleš', 14: 'Vincenc', 15: 'Anastázie', 16: 'Irena', 17: 'Rudolf', 18: 'Valérie', 19: 'Rostislav', 20: 'Marcela', 21: 'Alexandra', 22: 'Evženie', 23: 'Vojtěch', 24: 'Jiří', 25: 'Marek', 26: 'Oto', 27: 'Jaroslav', 28: 'Vlastislav', 29: 'Robert', 30: 'Blahoslav'},
-    5: {1: 'Svátek práce', 2: 'Zikmund', 3: 'Alexej', 4: 'Květoslav', 5: 'Klaudie', 6: 'Radoslav', 7: 'Stanislav', 8: 'Den vítězství', 9: 'Ctibor', 10: 'Blažena', 11: 'Svatava', 12: 'Pankrác', 13: 'Servác', 14: 'Bonifác', 15: 'Žofie', 16: 'Přemysl', 17: 'Aneta', 18: 'Nataša', 19: 'Ivo', 20: 'Zbyšek', 21: 'Monika', 22: 'Emil', 23: 'Vladimír', 24: 'Jana', 25: 'Viola', 26: 'Filip', 27: 'Valdemar', 28: 'Vilém', 29: 'Maxim', 30: 'Ferdinand', 31: 'Kamila'},
-    6: {1: 'Laura', 2: 'Jarmil', 3: 'Tamara', 4: 'Dalibor', 5: 'Dobroslav', 6: 'Norbert', 7: 'Iveta', 8: 'Medard', 9: 'Stanislava', 10: 'Gita', 11: 'Bruno', 12: 'Antonie', 13: 'Antonín', 14: 'Roland', 15: 'Vít', 16: 'Zbyněk', 17: 'Adolf', 18: 'Milan', 19: 'Leoš', 20: 'Květa', 21: 'Alois', 22: 'Pavla', 23: 'Zdeňka', 24: 'Jan', 25: 'Ivan', 26: 'Adriana', 27: 'Ladislav', 28: 'Lubomír', 29: 'Petr a Pavel', 30: 'Šárka'},
-    7: {1: 'Jaroslava', 2: 'Patricie', 3: 'Radomír', 4: 'Prokop', 5: 'Cyril a Metoděj', 6: 'Jan Hus', 7: 'Bohuslava', 8: 'Nora', 9: 'Drahoslava', 10: 'Libuše', 11: 'Olga', 12: 'Bořek', 13: 'Markéta', 14: 'Karolína', 15: 'Jindřich', 16: 'Luboš', 17: 'Martina', 18: 'Drahomíra', 19: 'Čeněk', 20: 'Ilja', 21: 'Vítězslav', 22: 'Magdaléna', 23: 'Libor', 24: 'Kristýna', 25: 'Jakub', 26: 'Anna', 27: 'Věroslav', 28: 'Viktor', 29: 'Marta', 30: 'Bořivoj', 31: 'Ignác'},
-    8: {1: 'Oskar', 2: 'Gustav', 3: 'Miluše', 4: 'Dominik', 5: 'Kristián', 6: 'Oldřiška', 7: 'Lada', 8: 'Soběslav', 9: 'Roman', 10: 'Vavřinec', 11: 'Zuzana', 12: 'Klára', 13: 'Alena', 14: 'Alan', 15: 'Hana', 16: 'Jáchym', 17: 'Petra', 18: 'Helena', 19: 'Ludvík', 20: 'Bernard', 21: 'Johana', 22: 'Bohuslav', 23: 'Sandra', 24: 'Bartoloměj', 25: 'Radim', 26: 'Luděk', 27: 'Otakar', 28: 'Augustýn', 29: 'Evelína', 30: 'Vladěna', 31: 'Pavlína'},
-    9: {1: 'Linda', 2: 'Adéla', 3: 'Bronislav', 4: 'Jindřiška', 5: 'Boris', 6: 'Boleslav', 7: 'Regína', 8: 'Mariana', 9: 'Daniela', 10: 'Irma', 11: 'Denisa', 12: 'Marie', 13: 'Lubor', 14: 'Radka', 15: 'Jolana', 16: 'Ludmila', 17: 'Naděžda', 18: 'Kryštof', 19: 'Zita', 20: 'Oleg', 21: 'Matouš', 22: 'Darina', 23: 'Berta', 24: 'Jaromír', 25: 'Zlata', 26: 'Andrea', 27: 'Jonáš', 28: 'Václav', 29: 'Michal', 30: 'Jeroným'},
-    10: {1: 'Igor', 2: 'Olivie', 3: 'Bohumil', 4: 'František', 5: 'Eliška', 6: 'Hanuš', 7: 'Justýna', 8: 'Věra', 9: 'Štefan', 10: 'Marina', 11: 'Andrej', 12: 'Marcel', 13: 'Renáta', 14: 'Agáta', 15: 'Tereza', 16: 'Havel', 17: 'Hedvika', 18: 'Lukáš', 19: 'Michaela', 20: 'Vendelín', 21: 'Brigita', 22: 'Sabina', 23: 'Teodor', 24: 'Nina', 25: 'Beáta', 26: 'Erik', 27: 'Šarlota', 28: 'Den vzniku ČSR', 29: 'Silvie', 30: 'Tadeáš', 31: 'Štěpánka'},
-    11: {1: 'Felix', 2: 'Památka zesnulých', 3: 'Hubert', 4: 'Karel', 5: 'Miriam', 6: 'Liběna', 7: 'Saskie', 8: 'Bohumír', 9: 'Bohdan', 10: 'Evžen', 11: 'Martin', 12: 'Benedikt', 13: 'Tibor', 14: 'Sáva', 15: 'Leopold', 16: 'Otmar', 17: 'Den svobody', 18: 'Romana', 19: 'Alžběta', 20: 'Nikola', 21: 'Albert', 22: 'Cecílie', 23: 'Klement', 24: 'Emílie', 25: 'Kateřina', 26: 'Artur', 27: 'Xenie', 28: 'René', 29: 'Zina', 30: 'Ondřej'},
-    12: {1: 'Iva', 2: 'Blanka', 3: 'Svatoslav', 4: 'Barbora', 5: 'Jitka', 6: 'Mikuláš', 7: 'Ambrož', 8: 'Květoslava', 9: 'Vratislav', 10: 'Julie', 11: 'Dana', 12: 'Simona', 13: 'Lucie', 14: 'Lýdie', 15: 'Radana', 16: 'Albína', 17: 'Daniel', 18: 'Miloslav', 19: 'Ester', 20: 'Dagmar', 21: 'Natálie', 22: 'Šimon', 23: 'Vlasta', 24: 'Štědrý den', 25: 'Boží hod', 26: 'Štěpán', 27: 'Žaneta', 28: 'Bohumila', 29: 'Judita', 30: 'David', 31: 'Silvestr'}
-}
+# Backward compat aliases (used by other modules)
+_CL_INTENT_RESOLVER = CL_INTENT_RESOLVER
+_CL_ANT_AVAILABLE = CL_ANT_AVAILABLE
+_CL_MEMORY_AVAILABLE = CL_MEMORY_AVAILABLE
+_CL_TEXT_RHYTHM = CL_TEXT_RHYTHM
+_CL_DB_AVAILABLE = CL_DB_AVAILABLE
+_CL_BRAIN_AVAILABLE = CL_BRAIN_AVAILABLE
 
-# System prompt pro Radima — centralized in radim_system_prompt.py
+# System prompt
 from radim_system_prompt import get_radim_prompt, RADIM_SYSTEM_PROMPT_CS
 from radim_shared import build_time_context_string
 
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
-
-def get_claude_client():
-    """Get Anthropic client with 25s timeout (under Heroku 30s limit)"""
-    if not ANTHROPIC_AVAILABLE:
-        return None
-    if not ANTHROPIC_API_KEY:
-        return None
-    return Anthropic(api_key=ANTHROPIC_API_KEY, timeout=25.0)
-
-def call_gemini_fallback(prompt, system_prompt="", max_tokens=1024):
-    """Gemini fallback when Claude API is unavailable (e.g. credits exhausted)"""
-    if not GEMINI_API_KEY:
-        return None
-    try:
-        import requests as req
-        parts = [{"text": f"{system_prompt}\n\n{prompt}" if system_prompt else prompt}]
-        resp = req.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
-            headers={"Content-Type": "application/json"},
-            json={
-                "contents": [{"parts": parts}],
-                "generationConfig": {
-                    "temperature": 0.7,
-                    "maxOutputTokens": max_tokens,
-                    "topP": 0.9
-                }
-            },
-            timeout=30
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            if 'candidates' in data and data['candidates']:
-                return data['candidates'][0]['content']['parts'][0]['text'].strip()
-        logger.warning(f"Gemini fallback error: {resp.status_code}")
-        return None
-    except Exception as e:
-        logger.error(f"Gemini fallback exception: {e}")
-        return None
-
-def is_credit_error(error):
-    """Check if the error is an Anthropic credit balance error"""
-    error_str = str(error).lower()
-    return 'credit balance' in error_str or 'billing' in error_str
-
-def get_today_info():
-    """Get today's date info — delegates to radim_shared."""
-    from radim_shared import build_time_context, get_nameday
-    tc = build_time_context()
-    return {
-        "date": f"{tc['date_str']} {tc['year']}",
-        "day_name": tc["day_name"].capitalize(),
-        "nameday": tc["nameday"] or "Neznámý",
-        "iso_date": datetime.now().strftime("%Y-%m-%d")
-    }
-
-def extract_text_from_response(response):
-    """Extract text from Claude response"""
-    text_parts = []
-    for block in response.content:
-        if hasattr(block, 'text'):
-            text_parts.append(block.text)
-    return "\n".join(text_parts)
-
-def get_greeting():
-    """Získat pozdrav podle denní doby — delegates to radim_shared"""
-    from radim_shared import get_greeting as _shared_greeting
-    return _shared_greeting(with_emoji=True)
 
 # ============================================================================
 # ROUTES
@@ -197,9 +74,10 @@ def health_check():
         "timestamp": datetime.utcnow().isoformat()
     })
 
+
 @claude_bp.route('/nameday', methods=['GET'])
 def get_nameday():
-    """Získat dnešní svátek"""
+    """Ziskat dnesni svatek"""
     info = get_today_info()
     return jsonify({
         "success": True,
@@ -208,71 +86,70 @@ def get_nameday():
         "timestamp": datetime.utcnow().isoformat()
     })
 
+
 @claude_bp.route('/chat', methods=['POST'])
 @require_auth
 @rate_limit(max_requests=30, window_seconds=60, key_func='user')
 def chat_with_radim():
-    """
-    💬 Hlavní chat endpoint s Claude + Web Search
-    """
+    """Hlavni chat endpoint s Claude + Web Search"""
     try:
         data = request.get_json() or {}
         message = data.get('message', '')
-        # Prefer JWT user_id, fallback to request body
         auth_user = getattr(g, 'auth_user', None) or {}
         user_id = str(auth_user.get('id', '')) or data.get('user_id', 'anonymous')
         use_search = data.get('use_search', True)
         emotional_context = data.get('emotional_context', '')
-        
+
         if not message:
             return jsonify({
                 "success": False,
-                "response": "Prosím, napište mi nějakou zprávu.",
+                "response": "Prosim, napiste mi nejakou zpravu.",
                 "timestamp": datetime.utcnow().isoformat()
             })
-        
+
         client = get_claude_client()
-        
+
         if not client:
-            # Fallback bez AI
             return jsonify({
                 "success": True,
-                "response": f"Promiňte, AI služba je momentálně nedostupná. Zkuste to prosím později. Dnes má svátek {get_today_info()['nameday']}.",
+                "response": f"Prominte, AI sluzba je momentalne nedostupna. Zkuste to prosim pozdeji. Dnes ma svatek {get_today_info()['nameday']}.",
                 "intent": "fallback",
                 "timestamp": datetime.utcnow().isoformat()
             })
-        
-        # System prompt — centralized from radim_system_prompt.py
+
+        # System prompt
         time_ctx = build_time_context_string()
         system = get_radim_prompt(mode='full', user_type='senior', time_context=time_ctx)
 
-        # 🧠 Personalize from learning data (name, interests, style, mood)
-        if _CL_MEMORY_AVAILABLE:
+        # Personalize from learning data
+        if CL_MEMORY_AVAILABLE:
             try:
                 system = get_personalized_system_prompt(user_id, system)
             except Exception as pers_err:
                 logger.warning(f"Personalization failed (non-fatal): {pers_err}")
 
-        # 💚 Add emotional context from frontend (RadimEmpathyBridge)
+        # Emotional context from frontend
         if emotional_context:
-            system += f"\n\n═══ EMOČNÍ KONTEXT (aktuální stav uživatele) ═══\n{emotional_context}"
+            system += f"\n\n═══ EMOCNI KONTEXT ═══\n{emotional_context}"
 
-        # 🧠 v320: Neuron context from frontend KafanekNeurons
+        # Neuron context from frontend
         neuron_ctx = data.get('neuron_context')
         if neuron_ctx and isinstance(neuron_ctx, dict):
             ntype = neuron_ctx.get('type', 'unknown')
             ntone = neuron_ctx.get('tone', 'patient')
             nhint = neuron_ctx.get('hint', '')
-            system += f"\n\n═══ NEURONOVÁ INTERVENCE ({ntype}) ═══\n"
-            system += f"Tón odpovědi: {ntone}.\n"
+            system += f"\n\n═══ NEURONOVA INTERVENCE ({ntype}) ═══\n"
+            system += f"Ton odpovedi: {ntone}.\n"
             if nhint:
-                system += f"Doporučená odpověď neuronu: {nhint}\n"
-            system += "Přizpůsob svou odpověď tomuto kontextu — buď extra trpělivý, klidný a empatický."
+                system += f"Doporucena odpoved neuronu: {nhint}\n"
+            system += "Prizpusob svou odpoved tomuto kontextu."
 
-        # 🎵 Text Rhythm: matematika → styl textu
+        # Text Rhythm
         anticipation_meta = None
         gen_config_override = None
-        if _CL_TEXT_RHYTHM:
+        C = 5.0
+        alpha = 0.2
+        if CL_TEXT_RHYTHM:
             try:
                 C_val = data.get('C')
                 alpha_val = data.get('alpha')
@@ -281,19 +158,19 @@ def chat_with_radim():
                     C = float(C_val)
                     alpha = float(alpha_val)
                 else:
-                    mood = _cl_detect_mood(message) if _CL_MEMORY_AVAILABLE else "neutral"
-                    C, alpha = _cl_tr_estimate(message, mood)
+                    mood = cl_detect_mood(message) if CL_MEMORY_AVAILABLE else "neutral"
+                    C, alpha = cl_tr_estimate(message, mood)
 
-                text_result = _cl_tr_calc(C, alpha)
-                system += _cl_tr_prompt(text_result)
-                anticipation_meta = _cl_tr_meta(text_result)
-                gen_config_override = _cl_tr_gen_config(text_result)
+                text_result = cl_tr_calc(C, alpha)
+                system += cl_tr_prompt(text_result)
+                anticipation_meta = cl_tr_meta(text_result)
+                gen_config_override = cl_tr_gen_config(text_result)
             except Exception as tr_err:
                 logger.warning(f"Text rhythm in claude chat (non-fatal): {tr_err}")
 
-        # 📜 Build messages array with conversation history
+        # Build messages with conversation history
         messages = []
-        if _CL_MEMORY_AVAILABLE:
+        if CL_MEMORY_AVAILABLE:
             try:
                 history_msgs = get_conversation_messages(user_id, limit=10)
                 messages.extend(history_msgs)
@@ -301,10 +178,10 @@ def chat_with_radim():
                 logger.warning(f"History load failed (non-fatal): {hist_err}")
         messages.append({"role": "user", "content": message})
 
-        # 🎯 Intent Resolver: short-circuit simple queries locally (v272)
-        if _CL_INTENT_RESOLVER:
+        # Intent Resolver: short-circuit simple queries locally
+        if CL_INTENT_RESOLVER:
             try:
-                _ir_text, _ir_intent, _ir_meta = _cl_resolve_intent(message, user_id)
+                _ir_text, _ir_intent, _ir_meta = cl_resolve_intent(message, user_id)
                 if _ir_text:
                     logger.info(f"Intent '{_ir_intent}' resolved locally for user={user_id}")
                     result = {
@@ -320,7 +197,7 @@ def chat_with_radim():
             except Exception as ir_err:
                 logger.warning(f"Intent resolver warning (non-fatal): {ir_err}")
 
-        # Volání Claude API
+        # Claude API call
         max_tokens = gen_config_override["max_tokens"] if gen_config_override else 1024
         api_kwargs = {
             "model": CLAUDE_MODEL,
@@ -328,38 +205,35 @@ def chat_with_radim():
             "system": system,
             "messages": messages
         }
-        
-        # Web search tool (volitelný)
+
         if use_search:
             api_kwargs["tools"] = [{
                 "type": "web_search_20250305",
                 "name": "web_search",
                 "max_uses": 3
             }]
-        
+
         response = client.messages.create(**api_kwargs)
-        
         text = extract_text_from_response(response)
 
-        # v283: Brain Engine — compute Ψ(t) for this interaction
+        # Brain Engine — compute Psi(t) for this interaction
         brain_meta = None
         brain_C_val = None
         brain_mode_val = None
-        if _CL_BRAIN_AVAILABLE:
+        if CL_BRAIN_AVAILABLE:
             try:
-                mood_for_brain = _cl_detect_mood(message) if _CL_MEMORY_AVAILABLE else "neutral"
-                # Použij C/alpha z text rhythm pokud jsou k dispozici
+                mood_for_brain = cl_detect_mood(message) if CL_MEMORY_AVAILABLE else "neutral"
                 try:
                     C_brain, alpha_brain = float(C), float(alpha)
                 except Exception:
-                    C_brain, alpha_brain = _cl_tr_estimate(message, mood_for_brain) if _CL_TEXT_RHYTHM else (5.0, 0.2)
-                proxies = _cl_brain_proxies(message, mood_for_brain, alpha_brain)
-                psi_state = _cl_brain_psi(
+                    C_brain, alpha_brain = cl_tr_estimate(message, mood_for_brain) if CL_TEXT_RHYTHM else (5.0, 0.2)
+                proxies = cl_brain_proxies(message, mood_for_brain, alpha_brain)
+                psi_state = cl_brain_psi(
                     C_brain, alpha_brain,
                     proxies["voice_tone"], proxies["hrv"], proxies["speech_tempo"],
                     user_id=user_id
                 )
-                decision = _cl_brain_decision(
+                decision = cl_brain_decision(
                     C_brain, psi_state["psi"]["E"], psi_state["psi"]["R"], psi_state["psi"]["S"]
                 )
                 brain_meta = {
@@ -373,27 +247,27 @@ def chat_with_radim():
             except Exception as brain_err:
                 logger.warning(f"Brain in claude chat (non-fatal): {brain_err}")
 
-        # 🧠 Record interaction to memory (v283: + brain state for baseline_C learning)
-        if _CL_MEMORY_AVAILABLE:
+        # Record interaction to memory
+        if CL_MEMORY_AVAILABLE:
             try:
                 record_interaction(user_id, message, text, brain_C=brain_C_val, brain_mode=brain_mode_val)
             except Exception as mem_err:
                 logger.warning(f"Memory record failed (non-fatal): {mem_err}")
 
-        # Detekovat intent
+        # Detect intent
         intent = "general"
         msg_lower = message.lower()
-        if any(w in msg_lower for w in ["počasí", "teplota", "prší"]):
+        if any(w in msg_lower for w in ["pocasi", "teplota", "prsi"]):
             intent = "weather"
-        elif any(w in msg_lower for w in ["zprávy", "novinky"]):
+        elif any(w in msg_lower for w in ["zpravy", "novinky"]):
             intent = "news"
-        elif any(w in msg_lower for w in ["kvíz", "otázky"]):
+        elif any(w in msg_lower for w in ["kviz", "otazky"]):
             intent = "quiz"
-        elif any(w in msg_lower for w in ["příběh", "povídka"]):
+        elif any(w in msg_lower for w in ["pribeh", "povidka"]):
             intent = "story"
-        
-        logger.info(f"Chat | User: {user_id} | Intent: {intent} | Memory: {_CL_MEMORY_AVAILABLE}")
-        
+
+        logger.info(f"Chat | User: {user_id} | Intent: {intent} | Memory: {CL_MEMORY_AVAILABLE}")
+
         result = {
             "success": True,
             "response": text,
@@ -405,18 +279,16 @@ def chat_with_radim():
         if brain_meta:
             result["brain"] = brain_meta
         return jsonify(result)
-        
+
     except Exception as e:
         logger.error(f"Chat error: {e}")
-        # Gemini fallback on credit/billing errors
         if is_credit_error(e):
             info = get_today_info()
-            time_ctx = f"Dnes je {info['day_name']} {info['date']}. Svátek má {info['nameday']}."
+            time_ctx = f"Dnes je {info['day_name']} {info['date']}. Svatek ma {info['nameday']}."
             system = get_radim_prompt(mode='full', user_type='senior', time_context=time_ctx)
             gemini_text = call_gemini_fallback(message, system)
             if gemini_text:
-                # Record Gemini fallback interaction too
-                if _CL_MEMORY_AVAILABLE:
+                if CL_MEMORY_AVAILABLE:
                     try:
                         record_interaction(user_id, message, gemini_text)
                     except Exception:
@@ -430,20 +302,18 @@ def chat_with_radim():
                 })
         return jsonify({
             "success": False,
-            "response": "Promiňte, něco se pokazilo. Zkuste to prosím znovu.",
+            "response": "Prominte, neco se pokazilo. Zkuste to prosim znovu.",
             "intent": "error",
             "timestamp": datetime.utcnow().isoformat()
         })
 
 
-# News, Weather, Quiz, Story routes moved to claude_content_routes.py
-
 @claude_bp.route('/dashboard-data', methods=['GET'])
 @optional_auth
 def get_dashboard_data():
-    """📊 Všechna data pro dashboard"""
+    """Vsechna data pro dashboard"""
     info = get_today_info()
-    
+
     result = {
         "success": True,
         "date": info["date"],
@@ -453,8 +323,7 @@ def get_dashboard_data():
         "greeting": get_greeting(),
         "timestamp": datetime.utcnow().isoformat()
     }
-    
-    # Použít fallback weather (rychlé, bez Claude API)
+
     try:
         from claude_content_routes import get_fallback_weather
         fallback = get_fallback_weather("Praha")
@@ -466,19 +335,18 @@ def get_dashboard_data():
         }
     except Exception:
         pass
-    
+
     return jsonify(result)
 
 
-# Emotion analysis + consciousness state moved to claude_emotion_routes.py
-# Re-export for backward compatibility
+# Emotion analysis + consciousness state — re-export for backward compat
 from claude_emotion_routes import analyze_emotions_local, calculate_harmony
 
 
 @claude_bp.route('/memory/save', methods=['POST'])
 @require_auth
 def save_memory_note():
-    """📝 Uložit poznámku do paměti (persisted to PostgreSQL)"""
+    """Ulozit poznamku do pameti (persisted to PostgreSQL)"""
     try:
         data = request.get_json() or {}
         user_id = data.get('user_id', 'anonymous')
@@ -488,29 +356,28 @@ def save_memory_note():
         if not content:
             return jsonify({"success": False, "error": "Empty content"}), 400
 
-        # Persist via memory_routes (saves to DB)
-        if _CL_MEMORY_AVAILABLE:
-            record_interaction(user_id, f"[{note_type}] {content[:500]}", "Poznámka uložena.")
+        if CL_MEMORY_AVAILABLE:
+            record_interaction(user_id, f"[{note_type}] {content[:500]}", "Poznamka ulozena.")
 
         logger.info(f"Memory note saved | User: {user_id} | Type: {note_type}")
 
         return jsonify({
             "success": True,
-            "persisted": _CL_MEMORY_AVAILABLE,
+            "persisted": CL_MEMORY_AVAILABLE,
             "note_id": f"note_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
-            "message": "Poznámka uložena",
+            "message": "Poznamka ulozena",
             "timestamp": datetime.utcnow().isoformat()
         })
 
     except Exception as e:
         logger.error(f"Memory save error: {e}")
-        return jsonify({"success": False, "error": "Nepodařilo se uložit vzpomínku"})
+        return jsonify({"success": False, "error": "Nepodarilo se ulozit vzpominku"})
 
 
 @claude_bp.route('/memory/recall', methods=['POST'])
 @require_auth
 def recall_memory():
-    """🔍 Vybavit si vzpomínky (from PostgreSQL)"""
+    """Vybavit si vzpominky (from PostgreSQL)"""
     try:
         data = request.get_json() or {}
         user_id = data.get('user_id', 'anonymous')
@@ -519,9 +386,8 @@ def recall_memory():
         memories = []
         context = {}
 
-        if _CL_MEMORY_AVAILABLE:
-            messages = get_conversation_messages(user_id, limit=limit)
-            memories = messages
+        if CL_MEMORY_AVAILABLE:
+            memories = get_conversation_messages(user_id, limit=limit)
             context = get_user_context(user_id)
 
         return jsonify({
@@ -529,25 +395,21 @@ def recall_memory():
             "memories": memories,
             "context": context,
             "count": len(memories),
-            "message": f"{len(memories)} vzpomínek nalezeno" if memories else "Paměť zatím prázdná",
+            "message": f"{len(memories)} vzpominek nalezeno" if memories else "Pamet zatim prazdna",
             "timestamp": datetime.utcnow().isoformat()
         })
 
     except Exception as e:
         logger.error(f"Memory recall error: {e}")
-        return jsonify({"success": False, "error": "Nepodařilo se vybavit vzpomínky", "memories": []})
+        return jsonify({"success": False, "error": "Nepodarilo se vybavit vzpominky", "memories": []})
 
 
-# Fallback data functions moved to claude_content_routes.py
-# Re-export for backward compatibility
+# Content functions — re-export for backward compat
 from claude_content_routes import get_fallback_news, get_fallback_weather, get_fallback_quiz
 
 
 # ============================================================================
-# LOGGING
+# STARTUP
 # ============================================================================
-
-logger.info("✅ Claude AI Blueprint loaded - /api/claude/* core endpoints ready")
-logger.info("🧠 Emotion Analysis endpoint: /api/claude/analyze-emotion")
-logger.info("🧠 Consciousness State endpoint: /api/claude/consciousness-state")
-logger.info("📝 Memory endpoints: /api/claude/memory/save, /api/claude/memory/recall")
+logger.info("🤖 Claude AI Routes v2.1.0 loaded — /api/claude/*")
+logger.info("   Helpers module: claude_helpers.py")
