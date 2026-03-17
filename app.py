@@ -108,6 +108,7 @@ except ImportError:
 # 🏥 Import Telemedicine Routes
 try:
     from telemedicine_routes import telemedicine_bp, get_upcoming_consultations_for_reminder
+    from telemedicine_multiparty_routes import telemedicine_multiparty_bp
     TELEMEDICINE_AVAILABLE = True
 except ImportError:
     TELEMEDICINE_AVAILABLE = False
@@ -168,10 +169,12 @@ if EDUCATION_TEACHER_AVAILABLE:
     app.register_blueprint(education_teacher_bp)
     logger.info("✅ Education teacher routes registered: /api/education/teacher-dashboard/*")
 
-# 🏥 Register Telemedicine Blueprint
+# 🏥 Register Telemedicine Blueprints
 if TELEMEDICINE_AVAILABLE:
     app.register_blueprint(telemedicine_bp)
+    app.register_blueprint(telemedicine_multiparty_bp)
     logger.info("✅ Telemedicine routes registered: /api/telemedicine/*")
+    logger.info("✅ Telemedicine multiparty routes registered: /api/telemedicine/*/participants")
 
 # 📧 Register Email Blueprint
 if EMAIL_AVAILABLE:
