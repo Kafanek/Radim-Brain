@@ -13,6 +13,7 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify, g
 from auth_middleware import optional_auth
 from rate_limiter import rate_limit
+from utils import now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +28,6 @@ def init_kal_routes(memory_available=False, radim_brain_available=False):
     global MEMORY_AVAILABLE, RADIM_BRAIN_AVAILABLE
     MEMORY_AVAILABLE = memory_available
     RADIM_BRAIN_AVAILABLE = radim_brain_available
-
-# ============================================
-# Helpers (copied from app.py)
-# ============================================
-def now_iso():
-    return datetime.utcnow().isoformat() + 'Z'
 
 
 def _check_idor(requested_user_id):

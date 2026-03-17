@@ -14,6 +14,7 @@ from flask import Blueprint, request, jsonify
 from database import get_db_for_flask
 from auth_middleware import require_auth
 from rate_limiter import rate_limit
+from utils import generate_id, now_iso, today_date
 
 logger = logging.getLogger(__name__)
 
@@ -45,17 +46,6 @@ def _get_app_helpers():
 def get_db():
     return get_db_for_flask()
 
-
-def generate_id():
-    return str(uuid.uuid4())
-
-
-def now_iso():
-    return datetime.utcnow().isoformat() + 'Z'
-
-
-def today_date():
-    return datetime.utcnow().strftime('%Y-%m-%d')
 
 
 def update_daily_stats(field):

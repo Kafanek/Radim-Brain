@@ -13,6 +13,7 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify, g
 from rate_limiter import rate_limit
 from database import get_db_for_flask, is_postgres
+from utils import generate_id, now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -51,13 +52,6 @@ def _get_push_fn():
 def get_db():
     return get_db_for_flask(g)
 
-
-def generate_id():
-    return str(uuid.uuid4())
-
-
-def now_iso():
-    return datetime.utcnow().isoformat() + 'Z'
 
 
 # ============================================================================

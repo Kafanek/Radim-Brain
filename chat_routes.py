@@ -19,6 +19,7 @@ from flask import Blueprint, request, jsonify, g
 from database import get_db_for_flask
 from auth_middleware import optional_auth
 from rate_limiter import rate_limit
+from utils import generate_id, now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +31,6 @@ chat_bp = Blueprint('chat', __name__)
 
 def get_db():
     return get_db_for_flask(g)
-
-def generate_id():
-    return str(uuid.uuid4())
-
-def now_iso():
-    return datetime.utcnow().isoformat() + 'Z'
 
 
 def _get_app_helpers():
