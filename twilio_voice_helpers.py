@@ -263,7 +263,15 @@ def generate_azure_tts(text, rate_pct=None, pitch_hz=None):
             timeout=8
         )
         if resp.status_code == 200:
-            return resp.content
+            audio = resp.content
+            # v388: Apply Radim voice filter (warmth, compression)
+            try:
+                from voice_filter import apply_radim_filter, is_available
+                if is_available():
+                    audio = apply_radim_filter(audio, mode="HARMONY", format="mp3")
+            except ImportError:
+                pass
+            return audio
         else:
             logger.error(f"Azure TTS error: {resp.status_code} {resp.text[:200]}")
             return None

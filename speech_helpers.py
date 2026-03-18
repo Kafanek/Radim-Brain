@@ -182,7 +182,17 @@ def radim_speak(text, emotion='friendly', C=None, alpha=None, user_id=None):
         )
 
         if response.status_code == 200:
-            return response.content
+            audio = response.content
+            # v388: Apply Radim voice filter (warmth, compression)
+            try:
+                from voice_filter import apply_radim_filter, is_available as _vf_ok
+                if _vf_ok():
+                    # Determine mode from brain speech or default
+                    _mode = brain_speech.get("mode", "HARMONY") if brain_speech else "HARMONY"
+                    audio = apply_radim_filter(audio, mode=_mode, format="mp3")
+            except ImportError:
+                pass
+            return audio
 
         return None
 
