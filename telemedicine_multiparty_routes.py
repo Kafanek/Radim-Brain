@@ -1,7 +1,7 @@
 # ============================================
-# TELEMEDICINE MULTI-PARTY ROUTES
+# TELEMEDICINE MULTI-PARTY ROUTES v2.0.0
 # Team consultations: create, participants CRUD, notes, all-notes
-# Extracted from telemedicine_routes.py for modularity
+# v2.0: db_context(), ? placeholders throughout.
 # ============================================
 
 import json
@@ -10,7 +10,7 @@ import os
 from flask import Blueprint, request, jsonify
 
 logger = logging.getLogger(__name__)
-from database import get_connection, is_postgres, db_insert
+from database import db_context, db_insert
 from auth_middleware import require_auth, require_teacher
 from utils import now_iso
 from telemedicine_helpers import (
@@ -42,7 +42,7 @@ def telemed_create_multiparty():
     duration = data.get('duration_minutes', 30)
     consultation_type = data.get('consultation_type', 'video')
     complaint = data.get('complaint', '').strip()[:MAX_TEXT]
-    participants = data.get('participants', [])  # [{"user_id": "...", "specialty": "neurologist"}, ...]
+    participants = data.get('participants', [])
 
     if not patient_id:
         return jsonify({"success": False, "error": "patient_id je povinny"}), 400
@@ -54,78 +54,53 @@ def telemed_create_multiparty():
         return jsonify({"success": False, "error": "Cas musi byt ve formatu HH:MM"}), 400
     if consultation_type not in ('video', 'audio'):
         consultation_type = 'video'
-
-    # Verify organizer has relationship with patient
     if not _verify_teacher_student_local(organizer_id, patient_id):
         return jsonify({"success": False, "error": "Pacient vam neni prirazen"}), 403
 
-    db = None
     try:
-        db = get_connection()
+        with db_context(commit=True) as db:
+            cid = db_insert(db, 'telemedicine_consultations',
+                ['teacher_id', 'student_id', 'scheduled_date', 'scheduled_time', 'duration_minutes',
+                 'consultation_type', 'complaint', 'title', 'is_multiparty', 'status'],
+                (organizer_id, patient_id, scheduled_date, scheduled_time, duration,
+                 consultation_type, complaint, title, 1, 'confirmed')
+            )
 
+            db.execute(
+                "INSERT INTO telemedicine_participants (consultation_id, user_id, role, specialty, status) VALUES (?, ?, 'organizer', ?, 'accepted')",
+                (cid, organizer_id, data.get('organizer_specialty', 'other'))
+            )
+            db.execute(
+                "INSERT INTO telemedicine_participants (consultation_id, user_id, role, status) VALUES (?, ?, 'patient', 'accepted')",
+                (cid, patient_id)
+            )
 
-        # Create consultation
-        cid = db_insert(db, 'telemedicine_consultations',
-            ['teacher_id', 'student_id', 'scheduled_date', 'scheduled_time', 'duration_minutes',
-             'consultation_type', 'complaint', 'title', 'is_multiparty', 'status'],
-            (organizer_id, patient_id, scheduled_date, scheduled_time, duration,
-             consultation_type, complaint, title, 1, 'confirmed')
-        )
-
-        # Auto-insert organizer as participant
-        db.execute(
-            f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, specialty, status) VALUES (?, ?, 'organizer', ?, 'accepted')",
-            (cid, organizer_id, data.get('organizer_specialty', 'other'))
-        )
-
-        # Auto-insert patient as participant
-        db.execute(
-            f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, status) VALUES (?, ?, 'patient', 'accepted')",
-            (cid, patient_id)
-        )
-
-        # Invite specialists
-        invited_count = 0
-        for part in participants[:20]:  # max 20 participants
-            uid = str(part.get('user_id', '')).strip()
-            specialty = part.get('specialty', 'other')
-            role = part.get('role', 'specialist')
-            if not uid or uid in (organizer_id, patient_id):
-                continue
-            if specialty not in SPECIALTIES:
-                specialty = 'other'
-            if role not in ('specialist', 'observer'):
-                role = 'specialist'
-            try:
-                db.execute(
-                    f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, specialty, status) VALUES (?, ?, ?, ?, 'invited')",
-                    (cid, uid, role, specialty)
-                )
-                invited_count += 1
-            except Exception:
-                pass  # duplicate — skip
-
-        db.commit()
+            invited_count = 0
+            for part in participants[:20]:
+                uid = str(part.get('user_id', '')).strip()
+                specialty = part.get('specialty', 'other')
+                role = part.get('role', 'specialist')
+                if not uid or uid in (organizer_id, patient_id):
+                    continue
+                if specialty not in SPECIALTIES:
+                    specialty = 'other'
+                if role not in ('specialist', 'observer'):
+                    role = 'specialist'
+                try:
+                    db.execute(
+                        "INSERT INTO telemedicine_participants (consultation_id, user_id, role, specialty, status) VALUES (?, ?, ?, ?, 'invited')",
+                        (cid, uid, role, specialty)
+                    )
+                    invited_count += 1
+                except Exception:
+                    pass
     except Exception as e:
-        logger.error(f"Telemedicine multiparty DB error: {e}")
-        if db:
-            try:
-                db.rollback()
-            except Exception:
-                pass
+        logger.error(f"telemed_create_multiparty DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
-    # Notify patient
     _notify_user(patient_id, 'telemedicine_confirmed', {
         'consultation_id': cid, 'teacher_id': organizer_id, 'title': title, 'multiparty': True
     })
-    # Notify invited participants
     for part in participants[:20]:
         uid = str(part.get('user_id', '')).strip()
         if uid and uid not in (organizer_id, patient_id):
@@ -135,13 +110,9 @@ def telemed_create_multiparty():
             })
 
     return jsonify({
-        "success": True,
-        "message": "Multiparty konzultace vytvorena",
-        "consultation_id": cid,
-        "participants_invited": invited_count,
-        "status": "confirmed",
-        "is_multiparty": True,
-        "timestamp": now_iso()
+        "success": True, "message": "Multiparty konzultace vytvorena",
+        "consultation_id": cid, "participants_invited": invited_count,
+        "status": "confirmed", "is_multiparty": True, "timestamp": now_iso()
     }), 201
 
 
@@ -155,7 +126,6 @@ def telemed_invite_participant(consultation_id):
     consultation = _get_consultation(consultation_id)
     if not consultation or consultation.get('teacher_id') != organizer_id:
         return jsonify({"success": False, "error": "Konzultace nenalezena nebo nejste organizator"}), 404
-
     if consultation.get('status') in ('completed', 'cancelled', 'archived'):
         return jsonify({"success": False, "error": "Nelze pridavat ucastniky k ukoncene konzultaci"}), 400
 
@@ -167,51 +137,39 @@ def telemed_invite_participant(consultation_id):
     if not user_id:
         return jsonify({"success": False, "error": "user_id je povinny"}), 400
     if role not in ('specialist', 'observer'):
-        return jsonify({"success": False, "error": f"role musi byt specialist nebo observer"}), 400
+        return jsonify({"success": False, "error": "role musi byt specialist nebo observer"}), 400
     if specialty not in SPECIALTIES:
         specialty = 'other'
 
-    db = None
     try:
-        db = get_connection()
+        with db_context(commit=True) as db:
+            if not consultation.get('is_multiparty'):
+                db.execute("UPDATE telemedicine_consultations SET is_multiparty = 1 WHERE id = ?", (consultation_id,))
+                try:
+                    db.execute(
+                        "INSERT INTO telemedicine_participants (consultation_id, user_id, role, status) VALUES (?, ?, 'organizer', 'accepted')",
+                        (consultation_id, organizer_id)
+                    )
+                except Exception:
+                    pass
+                try:
+                    db.execute(
+                        "INSERT INTO telemedicine_participants (consultation_id, user_id, role, status) VALUES (?, ?, 'patient', 'accepted')",
+                        (consultation_id, consultation.get('student_id'))
+                    )
+                except Exception:
+                    pass
 
-
-        # Mark as multiparty if not already
-        if not consultation.get('is_multiparty'):
-            db.execute(f"UPDATE telemedicine_consultations SET is_multiparty = 1 WHERE id = ?", (consultation_id,))
-            # Auto-insert organizer and patient if first time
-            try:
-                db.execute(
-                    f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, status) VALUES (?, ?, 'organizer', 'accepted')",
-                    (consultation_id, organizer_id)
-                )
-            except Exception:
-                pass
-            try:
-                db.execute(
-                    f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, status) VALUES (?, ?, 'patient', 'accepted')",
-                    (consultation_id, consultation.get('student_id'))
-                )
-            except Exception:
-                pass
-
-        pid = db_insert(db, 'telemedicine_participants',
-            ['consultation_id', 'user_id', 'role', 'specialty', 'status'],
-            (consultation_id, user_id, role, specialty, 'invited')
-        )
-
-        db.commit()
+            pid = db_insert(db, 'telemedicine_participants',
+                ['consultation_id', 'user_id', 'role', 'specialty', 'status'],
+                (consultation_id, user_id, role, specialty, 'invited')
+            )
     except Exception as e:
         if 'UNIQUE' in str(e).upper() or 'unique' in str(e):
             return jsonify({"success": False, "error": "Uzivatel je jiz pozvan"}), 409
+        logger.error(f"telemed_invite_participant DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
     _notify_user(user_id, 'telemedicine_invited', {
         'consultation_id': consultation_id, 'organizer_id': organizer_id,
         'role': role, 'specialty': specialty
@@ -232,39 +190,25 @@ def telemed_list_participants(consultation_id):
     if not _is_participant(user_id, consultation):
         return jsonify({"success": False, "error": "Nemate opravneni"}), 403
 
-    db = None
     try:
-        db = get_connection()
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT id, user_id, role, specialty, status, notes_contribution, joined_at, left_at, created_at "
+                "FROM telemedicine_participants WHERE consultation_id = ? ORDER BY created_at",
+                (consultation_id,)
+            ).fetchall()
 
-        rows = db.execute(
-            f"SELECT id, user_id, role, specialty, status, notes_contribution, joined_at, left_at, created_at "
-            f"FROM telemedicine_participants WHERE consultation_id = ? ORDER BY created_at",
-            (consultation_id,)
-        ).fetchall()
-
-        participants = []
-        for r in rows:
-            d = dict(r)
-            for k in ('joined_at', 'left_at', 'created_at'):
-                if d.get(k) and hasattr(d[k], 'isoformat'):
-                    d[k] = d[k].isoformat()
-            participants.append(d)
+            participants = []
+            for r in rows:
+                d = dict(r)
+                for k in ('joined_at', 'left_at', 'created_at'):
+                    if d.get(k) and hasattr(d[k], 'isoformat'):
+                        d[k] = d[k].isoformat()
+                participants.append(d)
     except Exception as e:
-        logger.error(f"Telemedicine multiparty DB error: {e}")
-        if db:
-            try:
-                db.rollback()
-            except Exception:
-                pass
+        logger.error(f"telemed_list_participants DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
-    # If no participants rows (legacy 1:1), return synthetic list
     if not participants:
         participants = [
             {"user_id": consultation.get('teacher_id'), "role": "organizer", "status": "accepted"},
@@ -272,12 +216,9 @@ def telemed_list_participants(consultation_id):
         ]
 
     return jsonify({
-        "success": True,
-        "consultation_id": consultation_id,
-        "participants": participants,
-        "total": len(participants),
-        "is_multiparty": bool(consultation.get('is_multiparty')),
-        "timestamp": now_iso()
+        "success": True, "consultation_id": consultation_id,
+        "participants": participants, "total": len(participants),
+        "is_multiparty": bool(consultation.get('is_multiparty')), "timestamp": now_iso()
     })
 
 
@@ -292,41 +233,23 @@ def telemed_respond_invitation(consultation_id):
     if response not in ('accepted', 'declined'):
         return jsonify({"success": False, "error": "response musi byt 'accepted' nebo 'declined'"}), 400
 
-    db = None
     try:
-        db = get_connection()
+        with db_context(commit=True) as db:
+            row = db.execute(
+                "SELECT id, status, consultation_id FROM telemedicine_participants WHERE consultation_id = ? AND user_id = ?",
+                (consultation_id, user_id)
+            ).fetchone()
 
-        row = db.execute(
-            f"SELECT id, status, consultation_id FROM telemedicine_participants WHERE consultation_id = ? AND user_id = ?",
-            (consultation_id, user_id)
-        ).fetchone()
+            if not row:
+                return jsonify({"success": False, "error": "Pozvanka nenalezena"}), 404
+            if row['status'] != 'invited':
+                return jsonify({"success": False, "error": f"Pozvanka je jiz ve stavu '{row['status']}'"}), 400
 
-        if not row:
-            return jsonify({"success": False, "error": "Pozvanka nenalezena"}), 404
-        if row['status'] != 'invited':
-            return jsonify({"success": False, "error": f"Pozvanka je jiz ve stavu '{row['status']}'"}), 400
-
-        db.execute(
-            f"UPDATE telemedicine_participants SET status = ? WHERE id = ?",
-            (response, row['id'])
-        )
-        db.commit()
+            db.execute("UPDATE telemedicine_participants SET status = ? WHERE id = ?", (response, row['id']))
     except Exception as e:
-        logger.error(f"Telemedicine multiparty DB error: {e}")
-        if db:
-            try:
-                db.rollback()
-            except Exception:
-                pass
+        logger.error(f"telemed_respond_invitation DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
-    # Notify organizer
     consultation = _get_consultation(consultation_id)
     if consultation:
         _notify_user(consultation.get('teacher_id'), 'telemedicine_invitation_response', {
@@ -354,48 +277,28 @@ def telemed_participant_notes(consultation_id):
     if consultation.get('status') not in ('in_progress', 'completed'):
         return jsonify({"success": False, "error": "Poznamky lze zapsat jen u probihajici/dokoncene konzultace"}), 400
 
-    db = None
     try:
-        db = get_connection()
+        with db_context(commit=True) as db:
+            row = db.execute(
+                "SELECT id, role FROM telemedicine_participants WHERE consultation_id = ? AND user_id = ? AND status = 'accepted'",
+                (consultation_id, user_id)
+            ).fetchone()
 
-        row = db.execute(
-            f"SELECT id, role FROM telemedicine_participants WHERE consultation_id = ? AND user_id = ? AND status = 'accepted'",
-            (consultation_id, user_id)
-        ).fetchone()
-
-        if not row:
-            # Allow organizer to write even without participant row (legacy 1:1)
-            if user_id != consultation.get('teacher_id'):
-                return jsonify({"success": False, "error": "Nejste ucastnikem konzultace"}), 403
-            # Auto-create participant row for organizer
-            db.execute(
-                f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, status, notes_contribution) "
-                f"VALUES (?, ?, 'organizer', 'accepted', ?)",
-                (consultation_id, user_id, notes_contribution)
-            )
-        else:
-            db.execute(
-                f"UPDATE telemedicine_participants SET notes_contribution = ? WHERE id = ?",
-                (notes_contribution, row['id'])
-            )
-
-        db.commit()
+            if not row:
+                if user_id != consultation.get('teacher_id'):
+                    return jsonify({"success": False, "error": "Nejste ucastnikem konzultace"}), 403
+                db.execute(
+                    "INSERT INTO telemedicine_participants (consultation_id, user_id, role, status, notes_contribution) "
+                    "VALUES (?, ?, 'organizer', 'accepted', ?)",
+                    (consultation_id, user_id, notes_contribution)
+                )
+            else:
+                db.execute("UPDATE telemedicine_participants SET notes_contribution = ? WHERE id = ?",
+                    (notes_contribution, row['id']))
     except Exception as e:
-        logger.error(f"Telemedicine multiparty DB error: {e}")
-        if db:
-            try:
-                db.rollback()
-            except Exception:
-                pass
+        logger.error(f"telemed_participant_notes DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
-    # Notify organizer if specialist wrote notes
     if user_id != consultation.get('teacher_id'):
         _notify_user(consultation.get('teacher_id'), 'telemedicine_notes_ready', {
             'consultation_id': consultation_id, 'from_user': user_id
@@ -416,41 +319,28 @@ def telemed_all_notes(consultation_id):
     if not _is_participant(user_id, consultation):
         return jsonify({"success": False, "error": "Nemate opravneni"}), 403
 
-    # Organizer's main notes
     organizer_notes = {
         "complaint": consultation.get('complaint', ''),
         "findings": consultation.get('findings', ''),
         "recommendations": consultation.get('recommendations', '')
     }
 
-    # Specialist contributions
     specialist_notes = []
-    db = None
     try:
-        db = get_connection()
-
-        rows = db.execute(
-            f"SELECT user_id, role, specialty, notes_contribution FROM telemedicine_participants "
-            f"WHERE consultation_id = ? AND notes_contribution IS NOT NULL AND notes_contribution != ''",
-            (consultation_id,)
-        ).fetchall()
-        specialist_notes = [dict(r) for r in rows]
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT user_id, role, specialty, notes_contribution FROM telemedicine_participants "
+                "WHERE consultation_id = ? AND notes_contribution IS NOT NULL AND notes_contribution != ''",
+                (consultation_id,)
+            ).fetchall()
+            specialist_notes = [dict(r) for r in rows]
     except Exception:
         pass
 
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
     return jsonify({
-        "success": True,
-        "consultation_id": consultation_id,
-        "organizer_notes": organizer_notes,
-        "specialist_notes": specialist_notes,
-        "total_contributions": len(specialist_notes),
-        "timestamp": now_iso()
+        "success": True, "consultation_id": consultation_id,
+        "organizer_notes": organizer_notes, "specialist_notes": specialist_notes,
+        "total_contributions": len(specialist_notes), "timestamp": now_iso()
     })
 
 
@@ -464,44 +354,28 @@ def telemed_remove_participant(consultation_id, participant_user_id):
     consultation = _get_consultation(consultation_id)
     if not consultation or consultation.get('teacher_id') != organizer_id:
         return jsonify({"success": False, "error": "Konzultace nenalezena nebo nejste organizator"}), 404
-
-    # Cannot remove organizer or patient
     if participant_user_id == organizer_id:
         return jsonify({"success": False, "error": "Nelze odebrat organizatora"}), 400
     if participant_user_id == consultation.get('student_id'):
         return jsonify({"success": False, "error": "Nelze odebrat pacienta"}), 400
 
-    db = None
     try:
-        db = get_connection()
+        with db_context(commit=True) as db:
+            row = db.execute(
+                "SELECT id FROM telemedicine_participants WHERE consultation_id = ? AND user_id = ?",
+                (consultation_id, participant_user_id)
+            ).fetchone()
 
-        row = db.execute(
-            f"SELECT id FROM telemedicine_participants WHERE consultation_id = ? AND user_id = ?",
-            (consultation_id, participant_user_id)
-        ).fetchone()
+            if not row:
+                return jsonify({"success": False, "error": "Ucastnik nenalezen"}), 404
 
-        if not row:
-            return jsonify({"success": False, "error": "Ucastnik nenalezen"}), 404
-
-        db.execute(f"DELETE FROM telemedicine_participants WHERE id = ?", (row['id'],))
-        db.commit()
+            db.execute("DELETE FROM telemedicine_participants WHERE id = ?", (row['id'],))
     except Exception as e:
-        logger.error(f"Telemedicine multiparty DB error: {e}")
-        if db:
-            try:
-                db.rollback()
-            except Exception:
-                pass
+        logger.error(f"telemed_remove_participant DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
     _notify_user(participant_user_id, 'telemedicine_cancelled', {
-        'consultation_id': consultation_id, 'cancelled_by': 'organizer', 'reason': 'Odebr\u00e1n z konzultace'
+        'consultation_id': consultation_id, 'cancelled_by': 'organizer', 'reason': 'Odebrán z konzultace'
     })
 
     return jsonify({"success": True, "message": "Ucastnik odstranen", "timestamp": now_iso()})
