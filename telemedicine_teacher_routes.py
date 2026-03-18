@@ -14,7 +14,7 @@ from email.mime.multipart import MIMEMultipart
 from flask import Blueprint, request, jsonify
 
 logger = logging.getLogger(__name__)
-from database import get_connection, db_context, db_insert
+from database import db_context, db_insert
 from auth_middleware import require_auth, require_teacher
 from utils import now_iso
 from telemedicine_helpers import (

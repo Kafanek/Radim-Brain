@@ -85,7 +85,7 @@ except ImportError:
 
 # DB access for memory notes
 try:
-    from database import get_connection, is_postgres
+    from database import db_context  # noqa: F401
     CL_DB_AVAILABLE = True
 except ImportError:
     CL_DB_AVAILABLE = False

@@ -19,7 +19,7 @@ from datetime import datetime
 import json
 import logging
 
-from database import get_connection, is_postgres, db_context
+from database import is_postgres, db_context
 
 from education_data import (
     EDUCATION_COURSES, TEACHERS, COURSE_TO_NEEDS

@@ -6,7 +6,7 @@
 
 from flask import g
 from datetime import datetime
-from database import get_connection, is_postgres, db_context
+from database import is_postgres, db_context
 from utils import now_iso
 import json
 import logging

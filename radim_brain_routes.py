@@ -79,7 +79,7 @@ except ImportError:
 
 # Database (for feedback route)
 try:
-    from database import get_connection, is_postgres, db_context
+    from database import db_context
 except ImportError:
     pass
 

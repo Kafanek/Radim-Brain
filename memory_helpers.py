@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 try:
-    from database import get_connection, is_postgres, db_context
+    from database import is_postgres, db_context
     _DB_AVAILABLE = True
 except ImportError:
     _DB_AVAILABLE = False
