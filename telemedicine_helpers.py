@@ -22,8 +22,8 @@ from utils import now_iso
 # ============================================
 
 def _p():
-    """SQL placeholder: %s for Postgres, ? for SQLite"""
-    return "%s" if is_postgres() else "?"
+    """SQL placeholder — always ? (PgCursorWrapper converts to %s automatically)"""
+    return "?"
 
 
 def _get_user_id():

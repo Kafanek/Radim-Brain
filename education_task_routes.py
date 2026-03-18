@@ -1,9 +1,12 @@
 # ============================================
-# 📋 EDUCATION TASK ROUTES v1.0.0
+# EDUCATION TASK ROUTES v1.1.0
 # ============================================
 # Task CRUD: teacher creates/grades/updates/deletes tasks,
 # student views/submits tasks, student views assigned teacher.
 # Extracted from education_teacher_routes.py for modularity.
+#
+# v1.1.0: Unified ? placeholders (PgCursorWrapper converts to %s),
+#          rollback + logging on all DB errors.
 # ============================================
 
 import json
@@ -74,7 +77,7 @@ def teacher_create_task(student_id):
             row = db.execute(
                 '''INSERT INTO education_teacher_tasks
                    (teacher_id, student_id, title, description, task_type, course_id, module_id, due_date)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                    RETURNING id''',
                 (teacher_id, student_id, title, description, task_type, course_id, module_id, due_date)
             ).fetchone()
@@ -142,27 +145,15 @@ def teacher_get_student_tasks(student_id):
     try:
         db = get_connection()
         if status_filter:
-            if is_postgres():
-                rows = db.execute(
-                    "SELECT * FROM education_teacher_tasks WHERE student_id = %s AND teacher_id = %s AND status = %s ORDER BY created_at DESC LIMIT 100",
-                    (student_id, teacher_id, status_filter)
-                ).fetchall()
-            else:
-                rows = db.execute(
-                    "SELECT * FROM education_teacher_tasks WHERE student_id = ? AND teacher_id = ? AND status = ? ORDER BY created_at DESC LIMIT 100",
-                    (student_id, teacher_id, status_filter)
-                ).fetchall()
+            rows = db.execute(
+                "SELECT * FROM education_teacher_tasks WHERE student_id = ? AND teacher_id = ? AND status = ? ORDER BY created_at DESC LIMIT 100",
+                (student_id, teacher_id, status_filter)
+            ).fetchall()
         else:
-            if is_postgres():
-                rows = db.execute(
-                    "SELECT * FROM education_teacher_tasks WHERE student_id = %s AND teacher_id = %s AND status != 'deleted' ORDER BY created_at DESC LIMIT 100",
-                    (student_id, teacher_id)
-                ).fetchall()
-            else:
-                rows = db.execute(
-                    "SELECT * FROM education_teacher_tasks WHERE student_id = ? AND teacher_id = ? AND status != 'deleted' ORDER BY created_at DESC LIMIT 100",
-                    (student_id, teacher_id)
-                ).fetchall()
+            rows = db.execute(
+                "SELECT * FROM education_teacher_tasks WHERE student_id = ? AND teacher_id = ? AND status != 'deleted' ORDER BY created_at DESC LIMIT 100",
+                (student_id, teacher_id)
+            ).fetchall()
 
         tasks = []
         for r in rows:
@@ -219,32 +210,20 @@ def teacher_grade_task(task_id):
     db = None
     try:
         db = get_connection()
-        if is_postgres():
-            row = db.execute(
-                "SELECT id, student_id, status FROM education_teacher_tasks WHERE id = %s AND teacher_id = %s",
-                (task_id, teacher_id)
-            ).fetchone()
-        else:
-            row = db.execute(
-                "SELECT id, student_id, status FROM education_teacher_tasks WHERE id = ? AND teacher_id = ?",
-                (task_id, teacher_id)
-            ).fetchone()
+        row = db.execute(
+            "SELECT id, student_id, status FROM education_teacher_tasks WHERE id = ? AND teacher_id = ?",
+            (task_id, teacher_id)
+        ).fetchone()
 
         if not row:
             return jsonify({"success": False, "error": "Úkol nenalezen nebo vám nepatří"}), 404
 
         student_id = row['student_id']
 
-        if is_postgres():
-            db.execute(
-                "UPDATE education_teacher_tasks SET grade = %s, teacher_feedback = %s, status = 'graded', updated_at = CURRENT_TIMESTAMP WHERE id = %s",
-                (grade, feedback, task_id)
-            )
-        else:
-            db.execute(
-                "UPDATE education_teacher_tasks SET grade = ?, teacher_feedback = ?, status = 'graded', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (grade, feedback, task_id)
-            )
+        db.execute(
+            "UPDATE education_teacher_tasks SET grade = ?, teacher_feedback = ?, status = 'graded', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (grade, feedback, task_id)
+        )
         db.commit()
     except Exception as e:
         logger.error(f"teacher_grade_task DB error: {e}")
@@ -294,16 +273,10 @@ def teacher_update_task(task_id):
     db = None
     try:
         db = get_connection()
-        if is_postgres():
-            row = db.execute(
-                "SELECT id, status FROM education_teacher_tasks WHERE id = %s AND teacher_id = %s",
-                (task_id, teacher_id)
-            ).fetchone()
-        else:
-            row = db.execute(
-                "SELECT id, status FROM education_teacher_tasks WHERE id = ? AND teacher_id = ?",
-                (task_id, teacher_id)
-            ).fetchone()
+        row = db.execute(
+            "SELECT id, status FROM education_teacher_tasks WHERE id = ? AND teacher_id = ?",
+            (task_id, teacher_id)
+        ).fetchone()
 
         if not row:
             return jsonify({"success": False, "error": "Úkol nenalezen nebo vám nepatří"}), 404
@@ -325,17 +298,15 @@ def teacher_update_task(task_id):
                     return jsonify({"success": False, "error": "description max 50 000 znaků"}), 400
                 if field == 'task_type' and val not in ('homework', 'reading', 'quiz', 'scenario', 'exercise'):
                     val = 'homework'
-                ph = "%s" if is_postgres() else "?"
-                updates.append(f"{field} = {ph}")
+                updates.append(f"{field} = ?")
                 params.append(val.strip() if isinstance(val, str) else val)
 
         if not updates:
             return jsonify({"success": False, "error": "Žádné pole k aktualizaci"}), 400
 
-        ph = "%s" if is_postgres() else "?"
         updates.append("updated_at = CURRENT_TIMESTAMP")
         params.append(task_id)
-        sql = f"UPDATE education_teacher_tasks SET {', '.join(updates)} WHERE id = {ph}"
+        sql = f"UPDATE education_teacher_tasks SET {', '.join(updates)} WHERE id = ?"
         db.execute(sql, tuple(params))
         db.commit()
     except Exception as e:
@@ -371,30 +342,18 @@ def teacher_delete_task(task_id):
     db = None
     try:
         db = get_connection()
-        if is_postgres():
-            row = db.execute(
-                "SELECT id FROM education_teacher_tasks WHERE id = %s AND teacher_id = %s",
-                (task_id, teacher_id)
-            ).fetchone()
-        else:
-            row = db.execute(
-                "SELECT id FROM education_teacher_tasks WHERE id = ? AND teacher_id = ?",
-                (task_id, teacher_id)
-            ).fetchone()
+        row = db.execute(
+            "SELECT id FROM education_teacher_tasks WHERE id = ? AND teacher_id = ?",
+            (task_id, teacher_id)
+        ).fetchone()
 
         if not row:
             return jsonify({"success": False, "error": "Úkol nenalezen nebo vám nepatří"}), 404
 
-        if is_postgres():
-            db.execute(
-                "UPDATE education_teacher_tasks SET status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = %s",
-                (task_id,)
-            )
-        else:
-            db.execute(
-                "UPDATE education_teacher_tasks SET status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (task_id,)
-            )
+        db.execute(
+            "UPDATE education_teacher_tasks SET status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (task_id,)
+        )
         db.commit()
     except Exception as e:
         logger.error(f"teacher_delete_task DB error: {e}")
@@ -439,31 +398,17 @@ def student_my_tasks():
     try:
         db = get_connection()
         if status_filter:
-            if is_postgres():
-                rows = db.execute(
-                    "SELECT id, title, description, task_type, course_id, module_id, due_date, status, grade, teacher_feedback, created_at "
-                    "FROM education_teacher_tasks WHERE student_id = %s AND status = %s ORDER BY created_at DESC",
-                    (student_id, status_filter)
-                ).fetchall()
-            else:
-                rows = db.execute(
-                    "SELECT id, title, description, task_type, course_id, module_id, due_date, status, grade, teacher_feedback, created_at "
-                    "FROM education_teacher_tasks WHERE student_id = ? AND status = ? ORDER BY created_at DESC",
-                    (student_id, status_filter)
-                ).fetchall()
+            rows = db.execute(
+                "SELECT id, title, description, task_type, course_id, module_id, due_date, status, grade, teacher_feedback, created_at "
+                "FROM education_teacher_tasks WHERE student_id = ? AND status = ? ORDER BY created_at DESC",
+                (student_id, status_filter)
+            ).fetchall()
         else:
-            if is_postgres():
-                rows = db.execute(
-                    "SELECT id, title, description, task_type, course_id, module_id, due_date, status, grade, teacher_feedback, created_at "
-                    "FROM education_teacher_tasks WHERE student_id = %s AND status != 'deleted' ORDER BY created_at DESC",
-                    (student_id,)
-                ).fetchall()
-            else:
-                rows = db.execute(
-                    "SELECT id, title, description, task_type, course_id, module_id, due_date, status, grade, teacher_feedback, created_at "
-                    "FROM education_teacher_tasks WHERE student_id = ? AND status != 'deleted' ORDER BY created_at DESC",
-                    (student_id,)
-                ).fetchall()
+            rows = db.execute(
+                "SELECT id, title, description, task_type, course_id, module_id, due_date, status, grade, teacher_feedback, created_at "
+                "FROM education_teacher_tasks WHERE student_id = ? AND status != 'deleted' ORDER BY created_at DESC",
+                (student_id,)
+            ).fetchall()
 
         tasks = []
         for r in rows:
@@ -514,16 +459,10 @@ def student_submit_task(task_id):
     db = None
     try:
         db = get_connection()
-        if is_postgres():
-            row = db.execute(
-                "SELECT id, teacher_id, status FROM education_teacher_tasks WHERE id = %s AND student_id = %s",
-                (task_id, student_id)
-            ).fetchone()
-        else:
-            row = db.execute(
-                "SELECT id, teacher_id, status FROM education_teacher_tasks WHERE id = ? AND student_id = ?",
-                (task_id, student_id)
-            ).fetchone()
+        row = db.execute(
+            "SELECT id, teacher_id, status FROM education_teacher_tasks WHERE id = ? AND student_id = ?",
+            (task_id, student_id)
+        ).fetchone()
 
         if not row:
             return jsonify({"success": False, "error": "Úkol nenalezen"}), 404
@@ -533,16 +472,10 @@ def student_submit_task(task_id):
 
         teacher_id = row['teacher_id']
 
-        if is_postgres():
-            db.execute(
-                "UPDATE education_teacher_tasks SET student_submission = %s, status = 'submitted', updated_at = CURRENT_TIMESTAMP WHERE id = %s",
-                (submission_json, task_id)
-            )
-        else:
-            db.execute(
-                "UPDATE education_teacher_tasks SET student_submission = ?, status = 'submitted', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (submission_json, task_id)
-            )
+        db.execute(
+            "UPDATE education_teacher_tasks SET student_submission = ?, status = 'submitted', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (submission_json, task_id)
+        )
         db.commit()
     except Exception as e:
         logger.error(f"student_submit_task DB error: {e}")
@@ -593,16 +526,10 @@ def student_my_teacher():
     db = None
     try:
         db = get_connection()
-        if is_postgres():
-            rows = db.execute(
-                "SELECT teacher_id, teacher_type, created_at FROM education_assignments WHERE student_id = %s AND status = 'active' ORDER BY created_at DESC",
-                (student_id,)
-            ).fetchall()
-        else:
-            rows = db.execute(
-                "SELECT teacher_id, teacher_type, created_at FROM education_assignments WHERE student_id = ? AND status = 'active' ORDER BY created_at DESC",
-                (student_id,)
-            ).fetchall()
+        rows = db.execute(
+            "SELECT teacher_id, teacher_type, created_at FROM education_assignments WHERE student_id = ? AND status = 'active' ORDER BY created_at DESC",
+            (student_id,)
+        ).fetchall()
     except Exception:
         rows = []
     finally:

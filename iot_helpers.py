@@ -51,8 +51,8 @@ def _get_db():
 
 
 def _ph(is_pg):
-    """Placeholder: %s for PostgreSQL, ? for SQLite."""
-    return '%s' if is_pg else '?'
+    """Placeholder — always ? (PgCursorWrapper converts to %s automatically)."""
+    return '?'
 
 
 def _parse_timestamp(ts_str):
