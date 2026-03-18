@@ -15,7 +15,7 @@ import requests as http_requests
 
 from datetime import datetime
 from flask import Blueprint, request, jsonify, g
-from database import get_connection, is_postgres
+from database import get_connection, is_postgres, db_context, db_insert
 from auth_middleware import require_auth, _base64url_encode, WP_JWT_SECRET
 from utils import now_iso
 
@@ -66,38 +66,32 @@ def _hash_password(password):
 
 def _ensure_auth_table():
     """Create auth_users table if not exists."""
-    db = None
     try:
-        db = get_connection()
-        if is_postgres():
-            db.execute("""
-                CREATE TABLE IF NOT EXISTS auth_users (
-                    id SERIAL PRIMARY KEY,
-                    email VARCHAR(255) UNIQUE NOT NULL,
-                    password_hash VARCHAR(255) NOT NULL,
-                    name VARCHAR(255) DEFAULT '',
-                    role VARCHAR(50) DEFAULT 'subscriber',
-                    created_at TIMESTAMP DEFAULT NOW()
-                )
-            """)
-        else:
-            db.execute("""
-                CREATE TABLE IF NOT EXISTS auth_users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    email TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    name TEXT DEFAULT '',
-                    role TEXT DEFAULT 'subscriber',
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-        db.commit()
+        with db_context(commit=True) as db:
+            if is_postgres():
+                db.execute("""
+                    CREATE TABLE IF NOT EXISTS auth_users (
+                        id SERIAL PRIMARY KEY,
+                        email VARCHAR(255) UNIQUE NOT NULL,
+                        password_hash VARCHAR(255) NOT NULL,
+                        name VARCHAR(255) DEFAULT '',
+                        role VARCHAR(50) DEFAULT 'subscriber',
+                        created_at TIMESTAMP DEFAULT NOW()
+                    )
+                """)
+            else:
+                db.execute("""
+                    CREATE TABLE IF NOT EXISTS auth_users (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        email TEXT UNIQUE NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        name TEXT DEFAULT '',
+                        role TEXT DEFAULT 'subscriber',
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
     except Exception as e:
         logger.warning(f"Auth table init: {e}")
-    finally:
-        if db:
-            try: db.close()
-            except: pass
 
 
 # Init auth table at startup
@@ -126,22 +120,17 @@ def auth_register():
     if len(password) < 6:
         return jsonify({"success": False, "error": "Heslo musí mít alespoň 6 znaků", "code": "password_weak"}), 400
 
-    db = None
     try:
-        db = get_connection()
-        # Check if exists
-        row = db.execute("SELECT id FROM auth_users WHERE email = ?", (email,)).fetchone()
-        if row:
-            return jsonify({"success": False, "error": "Účet s tímto emailem již existuje", "code": "email_exists"}), 409
+        with db_context(commit=True) as db:
+            row = db.execute("SELECT id FROM auth_users WHERE email = ?", (email,)).fetchone()
+            if row:
+                return jsonify({"success": False, "error": "Účet s tímto emailem již existuje", "code": "email_exists"}), 409
 
-        # Insert
-        pw_hash = _hash_password(password)
-        from database import db_insert
-        user_id = db_insert(db, 'auth_users',
-            ['email', 'password_hash', 'name'],
-            (email, pw_hash, name)
-        )
-        db.commit()
+            pw_hash = _hash_password(password)
+            user_id = db_insert(db, 'auth_users',
+                ['email', 'password_hash', 'name'],
+                (email, pw_hash, name)
+            )
 
         token = _create_jwt(user_id, email, name)
 
@@ -151,23 +140,17 @@ def auth_register():
                 "email": email, "password": password, "name": name
             }, headers=WP_PROXY_HEADERS, timeout=5)
         except Exception:
-            pass  # WP sync is optional
+            pass
 
         return jsonify({
-            "success": True,
-            "token": token,
+            "success": True, "token": token,
             "user": {"id": user_id, "email": email, "name": name, "role": "subscriber"},
-            "gdpr_consent": False,
-            "message": "Registrace úspěšná!"
+            "gdpr_consent": False, "message": "Registrace úspěšná!"
         })
 
     except Exception as e:
         logger.error(f"Auth register error: {e}")
         return jsonify({"success": False, "error": "Chyba při registraci", "code": "db_error"}), 500
-    finally:
-        if db:
-            try: db.close()
-            except: pass
 
 
 @auth_bp.route('/api/auth/login', methods=['POST', 'OPTIONS'])
@@ -182,85 +165,73 @@ def auth_login():
     if not email or not password:
         return jsonify({"success": False, "error": "Email a heslo jsou povinné", "code": "missing_fields"}), 400
 
-    db = None
     try:
-        db = get_connection()
-        ph = '%s' if is_postgres() else '?'
-        row = db.execute(
-            f"SELECT id, email, name, role, password_hash FROM auth_users WHERE email = {ph}", (email,)
-        ).fetchone()
+        with db_context(commit=True) as db:
+            row = db.execute(
+                "SELECT id, email, name, role, password_hash FROM auth_users WHERE email = ?", (email,)
+            ).fetchone()
 
-        if row:
-            user_id = row['id'] if isinstance(row, dict) else row[0]
-            user_email = row['email'] if isinstance(row, dict) else row[1]
-            user_name = row['name'] if isinstance(row, dict) else row[2]
-            role = row['role'] if isinstance(row, dict) else row[3]
-            pw_hash = row['password_hash'] if isinstance(row, dict) else row[4]
-            if pw_hash == _hash_password(password):
-                token = _create_jwt(user_id, user_email, user_name, role or 'subscriber')
-                # Fetch GDPR consent status (one response = no extra API call)
-                gdpr_consent = False
-                try:
-                    from memory_routes import get_gdpr_consent
-                    consent = get_gdpr_consent(str(user_id))
-                    gdpr_consent = bool(consent.get("data_processing", False))
-                except Exception:
-                    pass
-                return jsonify({
-                    "success": True,
-                    "token": token,
-                    "user": {"id": user_id, "email": user_email, "name": user_name, "role": role},
-                    "gdpr_consent": gdpr_consent,
-                    "message": "Přihlášení úspěšné"
-                })
+            if row:
+                user_id = row['id'] if isinstance(row, dict) else row[0]
+                user_email = row['email'] if isinstance(row, dict) else row[1]
+                user_name = row['name'] if isinstance(row, dict) else row[2]
+                role = row['role'] if isinstance(row, dict) else row[3]
+                pw_hash = row['password_hash'] if isinstance(row, dict) else row[4]
+                if pw_hash == _hash_password(password):
+                    token = _create_jwt(user_id, user_email, user_name, role or 'subscriber')
+                    gdpr_consent = False
+                    try:
+                        from memory_routes import get_gdpr_consent
+                        consent = get_gdpr_consent(str(user_id))
+                        gdpr_consent = bool(consent.get("data_processing", False))
+                    except Exception:
+                        pass
+                    return jsonify({
+                        "success": True, "token": token,
+                        "user": {"id": user_id, "email": user_email, "name": user_name, "role": role},
+                        "gdpr_consent": gdpr_consent, "message": "Přihlášení úspěšné"
+                    })
 
-        # Not found locally or wrong password -> try WordPress
-        try:
-            wp_resp = http_requests.post(f"{WP_AUTH_BASE}/login", json={
-                "email": email, "password": password
-            }, headers=WP_PROXY_HEADERS, timeout=8)
-            wp_data = wp_resp.json()
-            if wp_resp.status_code == 200 and wp_data.get('success'):
-                user = wp_data.get('data', {})
-                wp_id = user.get('user_id', 0)
-                wp_name = user.get('display_name', email)
-                wp_role = user.get('role', 'subscriber')
-                token = _create_jwt(wp_id, email, wp_name, wp_role)
-                # Sync to local DB for next time
-                try:
-                    pw_hash = _hash_password(password)
-                    if is_postgres():
-                        db.execute(
-                            "INSERT INTO auth_users (email, password_hash, name, role) VALUES (%s, %s, %s, %s) ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, name = EXCLUDED.name",
-                            (email, pw_hash, wp_name, wp_role)
-                        )
-                    else:
-                        db.execute(
-                            "INSERT OR REPLACE INTO auth_users (email, password_hash, name, role) VALUES (?, ?, ?, ?)",
-                            (email, pw_hash, wp_name, wp_role)
-                        )
-                    db.commit()
-                except Exception:
-                    pass
-                return jsonify({
-                    "success": True,
-                    "token": token,
-                    "user": {"id": wp_id, "email": email, "name": wp_name, "role": wp_role},
-                    "gdpr_consent": False,
-                    "message": "Přihlášení úspěšné"
-                })
-        except Exception:
-            pass  # WP unreachable -- use only local result
+            # Not found locally or wrong password -> try WordPress
+            try:
+                wp_resp = http_requests.post(f"{WP_AUTH_BASE}/login", json={
+                    "email": email, "password": password
+                }, headers=WP_PROXY_HEADERS, timeout=8)
+                wp_data = wp_resp.json()
+                if wp_resp.status_code == 200 and wp_data.get('success'):
+                    user = wp_data.get('data', {})
+                    wp_id = user.get('user_id', 0)
+                    wp_name = user.get('display_name', email)
+                    wp_role = user.get('role', 'subscriber')
+                    token = _create_jwt(wp_id, email, wp_name, wp_role)
+                    # Sync to local DB — PG uses ON CONFLICT, SQLite uses INSERT OR REPLACE
+                    try:
+                        pw_hash = _hash_password(password)
+                        if is_postgres():
+                            db.execute(
+                                "INSERT INTO auth_users (email, password_hash, name, role) VALUES (?, ?, ?, ?) ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, name = EXCLUDED.name",
+                                (email, pw_hash, wp_name, wp_role)
+                            )
+                        else:
+                            db.execute(
+                                "INSERT OR REPLACE INTO auth_users (email, password_hash, name, role) VALUES (?, ?, ?, ?)",
+                                (email, pw_hash, wp_name, wp_role)
+                            )
+                    except Exception:
+                        pass
+                    return jsonify({
+                        "success": True, "token": token,
+                        "user": {"id": wp_id, "email": email, "name": wp_name, "role": wp_role},
+                        "gdpr_consent": False, "message": "Přihlášení úspěšné"
+                    })
+            except Exception:
+                pass
 
         return jsonify({"success": False, "error": "Nesprávný email nebo heslo", "code": "invalid_credentials"}), 401
 
     except Exception as e:
         logger.error(f"Auth login error: {e}")
         return jsonify({"success": False, "error": "Chyba při přihlášení", "code": "db_error"}), 500
-    finally:
-        if db:
-            try: db.close()
-            except: pass
 
 
 @auth_bp.route('/api/auth/lost-password', methods=['POST', 'OPTIONS'])

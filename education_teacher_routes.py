@@ -7,7 +7,7 @@
 
 import logging
 from flask import Blueprint, request, jsonify
-from database import get_connection, is_postgres
+from database import db_context
 from auth_middleware import require_auth, require_teacher
 from education_helpers import (
     now_iso, get_teacher_id, get_teacher_students, verify_teacher_student,
@@ -56,22 +56,15 @@ def teacher_dashboard():
 
     # Pending tasks count
     pending_tasks = 0
-    db = None
     try:
-        db = get_connection()
-        row = db.execute(
-            "SELECT COUNT(*) as cnt FROM education_teacher_tasks WHERE teacher_id = ? AND status = 'submitted'",
-            (teacher_id,)
-        ).fetchone()
-        pending_tasks = row['cnt'] if row else 0
+        with db_context() as db:
+            row = db.execute(
+                "SELECT COUNT(*) as cnt FROM education_teacher_tasks WHERE teacher_id = ? AND status = 'submitted'",
+                (teacher_id,)
+            ).fetchone()
+            pending_tasks = row['cnt'] if row else 0
     except Exception:
         pass
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
     return jsonify({
         "success": True,
@@ -197,23 +190,16 @@ def teacher_dashboard_student_detail(student_id):
 
     # Tasks for this student
     tasks = []
-    db = None
     try:
-        db = get_connection()
-        rows = db.execute(
-            "SELECT id, title, task_type, status, grade, due_date, created_at FROM education_teacher_tasks "
-            "WHERE student_id = ? AND teacher_id = ? ORDER BY created_at DESC LIMIT 20",
-            (student_id, teacher_id)
-        ).fetchall()
-        tasks = [dict(r) for r in rows]
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT id, title, task_type, status, grade, due_date, created_at FROM education_teacher_tasks "
+                "WHERE student_id = ? AND teacher_id = ? ORDER BY created_at DESC LIMIT 20",
+                (student_id, teacher_id)
+            ).fetchall()
+            tasks = [dict(r) for r in rows]
     except Exception:
         pass
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
     return jsonify({
         "success": True,

@@ -32,7 +32,7 @@ memory_bp = Blueprint('memory', __name__, url_prefix='/api/memory')
 
 # DB availability check
 try:
-    from database import get_connection, is_postgres
+    from database import get_connection, is_postgres, db_context
     _DB_AVAILABLE = True
 except ImportError:
     _DB_AVAILABLE = False
@@ -325,28 +325,20 @@ def get_crisis_history(user_id):
         return jsonify({"success": True, "events": []})
 
     events = []
-    db = None
     try:
-        db = get_connection()
-        cursor = db.execute(
-            "SELECT * FROM crisis_events WHERE user_id = ? ORDER BY created_at DESC LIMIT 20", (user_id,)
-        )
-        rows = cursor.fetchall() if cursor else []
-        for row in rows:
-            events.append({
-                "user_id": row[1] if isinstance(row, (list, tuple)) else row.get("user_id", user_id),
-                "brain_c": row[3] if isinstance(row, (list, tuple)) else row.get("brain_c"),
-                "message_excerpt": row[4] if isinstance(row, (list, tuple)) else row.get("message_excerpt", ""),
-                "created_at": row[5] if isinstance(row, (list, tuple)) else row.get("created_at", "")
-            })
+        with db_context() as db:
+            cursor = db.execute(
+                "SELECT * FROM crisis_events WHERE user_id = ? ORDER BY created_at DESC LIMIT 20", (user_id,)
+            )
+            for row in (cursor.fetchall() if cursor else []):
+                events.append({
+                    "user_id": row[1] if isinstance(row, (list, tuple)) else row.get("user_id", user_id),
+                    "brain_c": row[3] if isinstance(row, (list, tuple)) else row.get("brain_c"),
+                    "message_excerpt": row[4] if isinstance(row, (list, tuple)) else row.get("message_excerpt", ""),
+                    "created_at": row[5] if isinstance(row, (list, tuple)) else row.get("created_at", "")
+                })
     except Exception as e:
         logger.debug(f"Crisis history fetch non-fatal: {e}")
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
     return jsonify({"success": True, "events": events})
 

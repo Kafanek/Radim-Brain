@@ -193,18 +193,10 @@ def kal_radim_stats():
     """Global Radim stats"""
     try:
         if kal_helpers.MEMORY_AVAILABLE:
-            from database import get_connection
-            db = None
-            try:
-                db = get_connection()
+            from database import db_context
+            with db_context() as db:
                 profiles_count = db.execute("SELECT COUNT(*) as cnt FROM memory_profiles").fetchone()['cnt']
                 history_count = db.execute("SELECT COUNT(*) as cnt FROM memory_history").fetchone()['cnt']
-            finally:
-                if db:
-                    try:
-                        db.close()
-                    except Exception:
-                        pass
             return jsonify({
                 "success": True,
                 "message": f"Radim pomohl {profiles_count} lidem v {history_count} konverzacich",

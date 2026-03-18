@@ -79,7 +79,7 @@ except ImportError:
 
 # Database (for feedback route)
 try:
-    from database import get_connection, is_postgres
+    from database import get_connection, is_postgres, db_context
 except ImportError:
     pass
 
@@ -379,22 +379,14 @@ def brain_feedback():
         signal = "neutral"
 
     if DB_AVAILABLE:
-        db = None
         try:
-            db = get_connection()
-            db.execute(
-                "INSERT INTO brain_feedback (user_id, rating, action, response_time_ms, signal, context) VALUES (?, ?, ?, ?, ?, ?)",
-                (user_id, rating, action, response_time_ms, signal, context)
-            )
-            db.commit()
+            with db_context(commit=True) as db:
+                db.execute(
+                    "INSERT INTO brain_feedback (user_id, rating, action, response_time_ms, signal, context) VALUES (?, ?, ?, ?, ?, ?)",
+                    (user_id, rating, action, response_time_ms, signal, context)
+                )
         except Exception as e:
             logger.warning(f"Brain feedback save warning: {e}")
-        finally:
-            if db:
-                try:
-                    db.close()
-                except Exception:
-                    pass
 
     rl_result = None
     if signal != "neutral":

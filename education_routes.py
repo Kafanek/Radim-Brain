@@ -19,7 +19,7 @@ from datetime import datetime
 import json
 import logging
 
-from database import get_connection, is_postgres
+from database import get_connection, is_postgres, db_context
 
 from education_data import (
     EDUCATION_COURSES, TEACHERS, COURSE_TO_NEEDS
@@ -240,53 +240,42 @@ def lesson_progress_sync():
         return jsonify({"success": True, "synced": 0, "timestamp": now_iso()})
 
     synced = 0
-    db = None
     try:
-        db = get_connection()
-        ph = "%s" if is_postgres() else "?"
+        with db_context(commit=True) as db:
+            for entry in lessons:
+                course_id = entry.get('courseId')
+                module_id = entry.get('moduleId')
+                lesson_id = entry.get('lessonId')
+                completed_at = entry.get('completedAt', now_iso())
 
-        for entry in lessons:
-            course_id = entry.get('courseId')
-            module_id = entry.get('moduleId')
-            lesson_id = entry.get('lessonId')
-            completed_at = entry.get('completedAt', now_iso())
+                if not (course_id and module_id and lesson_id):
+                    continue
 
-            if not (course_id and module_id and lesson_id):
-                continue
+                # Upsert — PG uses ON CONFLICT, SQLite uses INSERT OR REPLACE
+                if is_postgres():
+                    db.execute(
+                        "INSERT INTO education_lesson_progress (user_id, course_id, module_id, lesson_id, completed_at) "
+                        "VALUES (?, ?, ?, ?, ?) "
+                        "ON CONFLICT (user_id, course_id, module_id, lesson_id) DO UPDATE SET completed_at = EXCLUDED.completed_at",
+                        (user_id, course_id, module_id, lesson_id, completed_at))
+                else:
+                    db.execute(
+                        "INSERT OR REPLACE INTO education_lesson_progress (user_id, course_id, module_id, lesson_id, completed_at) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (user_id, course_id, module_id, lesson_id, completed_at))
+                synced += 1
 
-            # Upsert
-            if is_postgres():
-                db.execute(f"""
-                    INSERT INTO education_lesson_progress (user_id, course_id, module_id, lesson_id, completed_at)
-                    VALUES ({ph}, {ph}, {ph}, {ph}, {ph})
-                    ON CONFLICT (user_id, course_id, module_id, lesson_id) DO UPDATE SET completed_at = EXCLUDED.completed_at
-                """, (user_id, course_id, module_id, lesson_id, completed_at))
-            else:
-                db.execute(f"""
-                    INSERT OR REPLACE INTO education_lesson_progress (user_id, course_id, module_id, lesson_id, completed_at)
-                    VALUES ({ph}, {ph}, {ph}, {ph}, {ph})
-                """, (user_id, course_id, module_id, lesson_id, completed_at))
-            synced += 1
-
-        db.commit()
-
-        # Notify teacher about batch completion
-        if synced > 0:
-            notify_teacher(user_id, 'education_student_completed', {
-                'type': 'lesson_batch',
-                'synced_count': synced,
-                'course_id': lessons[0].get('courseId', ''),
-            })
+            # Notify teacher about batch completion
+            if synced > 0:
+                notify_teacher(user_id, 'education_student_completed', {
+                    'type': 'lesson_batch',
+                    'synced_count': synced,
+                    'course_id': lessons[0].get('courseId', ''),
+                })
 
     except Exception as e:
         logger.error(f"Lesson progress sync error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
     return jsonify({"success": True, "user_id": user_id, "synced": synced, "timestamp": now_iso()})
 
