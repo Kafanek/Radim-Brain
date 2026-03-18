@@ -32,8 +32,8 @@ def require_iot_auth(f):
     def decorated(*args, **kwargs):
         token = request.headers.get('X-IoT-Token') or request.args.get('token')
         if not IOT_GATEWAY_TOKEN:
-            logger.warning("⚠️ IoT: No IOT_GATEWAY_TOKEN configured — accepting all requests")
-            return f(*args, **kwargs)
+            logger.warning("IoT: No IOT_GATEWAY_TOKEN configured — rejecting request")
+            return jsonify({'error': 'IoT gateway not configured. Set IOT_GATEWAY_TOKEN env var.'}), 503
         if token != IOT_GATEWAY_TOKEN:
             return jsonify({'error': 'Invalid IoT gateway token'}), 401
         return f(*args, **kwargs)

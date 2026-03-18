@@ -29,7 +29,7 @@ from flask_socketio import SocketIO
 from dotenv import load_dotenv
 from database import get_db_for_flask, close_db_for_flask, get_connection
 from utils import generate_id, now_iso, today_date
-from database import init_db as db_init_db, is_postgres
+from database import init_db as db_init_db, is_postgres, db_context
 from auth_middleware import require_auth, require_premium, optional_auth, decode_jwt
 from rate_limiter import rate_limit
 
@@ -789,19 +789,38 @@ def health():
     if TELEMEDICINE_AVAILABLE:
         blueprints['telemedicine'] = {'prefix': '/api/telemedicine/*', 'version': '1.0.0', 'status': 'active'}
 
+    # v382: Real DB connectivity check
+    db_ok = False
+    db_latency_ms = None
+    try:
+        import time as _t
+        _t0 = _t.time()
+        with db_context() as db:
+            db.execute("SELECT 1").fetchone()
+        db_latency_ms = round((_t.time() - _t0) * 1000, 1)
+        db_ok = True
+    except Exception as e:
+        logger.error(f"Health check DB fail: {e}")
+
+    status_code = 200 if db_ok else 503
+
     return jsonify({
-        'status': 'healthy',
+        'status': 'healthy' if db_ok else 'degraded',
         'service': 'Radim Brain + Chat',
-        'version': '3.4.0',
+        'version': '3.5.0',
         'auth': 'JWT (WordPress)',
         'gdpr': True,
         'timestamp': now_iso(),
         'blueprints': blueprints,
         'blueprint_count': len(blueprints),
+        'db': {
+            'type': 'postgresql' if is_postgres() else 'sqlite',
+            'connected': db_ok,
+            'latency_ms': db_latency_ms
+        },
         'modules': {
             'chat': 'active',
             'websocket': True,
-            'database': 'postgresql' if is_postgres() else 'sqlite',
             'speech': bool(os.environ.get('AZURE_SPEECH_KEY')),
             'azure_tts_proxy': bool(AZURE_TTS_KEY),
             'ai': {
@@ -811,10 +830,23 @@ def health():
             'media': bool(CLOUDINARY_URL),
             'push': bool(VAPID_PRIVATE_KEY),
             'wordpress': bool(WP_URL and WP_USER),
-            'twilio_voice': {'configured': bool(os.environ.get('TWILIO_ACCOUNT_SID')), 'phone': os.environ.get('TWILIO_PHONE_NUMBER')}
+            'twilio_voice': {'configured': bool(os.environ.get('TWILIO_ACCOUNT_SID')), 'phone': os.environ.get('TWILIO_PHONE_NUMBER')},
+            'agent_loop': True
         },
         'online_users': len(users_online)
-    })
+    }), status_code
+
+# v382: Admin seed demo data
+@app.route('/api/admin/seed-demo', methods=['POST'])
+def admin_seed_demo():
+    """Create demo senior with 7 days of brain_states for agent loop testing."""
+    try:
+        from seed_demo import seed_demo_data
+        result = seed_demo_data()
+        return jsonify({'success': True, **result}), 201
+    except Exception as e:
+        logger.error(f"Seed demo error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # Auth routes — now in auth_routes.py blueprint
 
