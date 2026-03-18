@@ -69,38 +69,30 @@ def _evict_oldest_sessions():
 
 def _load_session_from_db(session_id):
     """Load session from DB, return dict or None."""
-    db = None
     try:
-        from database import get_connection, is_postgres
-        db = get_connection()
-        p = "%s" if is_postgres() else "?"
-        row = db.execute(
-            f'SELECT state, "C", kappa, alpha, last_tts_text, conversation, wake_count, created_at '
-            f'FROM voice_sessions WHERE session_id = {p}',
-            (session_id,)
-        ).fetchone()
-        if row:
-            conv = row['conversation']
-            if isinstance(conv, str):
-                conv = json.loads(conv)
-            return {
-                'state': row['state'] or STATES['IDLE'],
-                'C': float(row['C'] or 5.0),
-                'kappa': float(row['kappa'] or 0.8),
-                'alpha': float(row['alpha'] or 0.0),
-                'last_tts_text': row['last_tts_text'] or '',
-                'conversation': conv if conv else [],
-                'wake_count': int(row['wake_count'] or 0),
-                'created': str(row['created_at'] or datetime.now().isoformat()),
-            }
+        from database import db_context
+        with db_context() as db:
+            row = db.execute(
+                'SELECT state, "C", kappa, alpha, last_tts_text, conversation, wake_count, created_at '
+                'FROM voice_sessions WHERE session_id = ?',
+                (session_id,)
+            ).fetchone()
+            if row:
+                conv = row['conversation']
+                if isinstance(conv, str):
+                    conv = json.loads(conv)
+                return {
+                    'state': row['state'] or STATES['IDLE'],
+                    'C': float(row['C'] or 5.0),
+                    'kappa': float(row['kappa'] or 0.8),
+                    'alpha': float(row['alpha'] or 0.0),
+                    'last_tts_text': row['last_tts_text'] or '',
+                    'conversation': conv if conv else [],
+                    'wake_count': int(row['wake_count'] or 0),
+                    'created': str(row['created_at'] or datetime.now().isoformat()),
+                }
     except Exception as e:
         logger.warning(f"DB load session {session_id} (non-fatal): {e}")
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
     return None
 
 
@@ -109,39 +101,31 @@ def save_session(session_id):
     session = _sessions_cache.get(session_id)
     if not session:
         return
-    db = None
     try:
-        from database import get_connection, is_postgres
-        db = get_connection()
-        conv_json = json.dumps(session['conversation'][-50:])  # Keep last 50 messages
-        if is_postgres():
-            db.execute(
-                'INSERT INTO voice_sessions (session_id, state, "C", kappa, alpha, last_tts_text, conversation, wake_count, updated_at) '
-                'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP) '
-                'ON CONFLICT (session_id) DO UPDATE SET '
-                'state=EXCLUDED.state, "C"=EXCLUDED."C", kappa=EXCLUDED.kappa, alpha=EXCLUDED.alpha, '
-                'last_tts_text=EXCLUDED.last_tts_text, conversation=EXCLUDED.conversation, '
-                'wake_count=EXCLUDED.wake_count, updated_at=CURRENT_TIMESTAMP',
-                (session_id, session['state'], session['C'], session['kappa'],
-                 session['alpha'], session['last_tts_text'], conv_json, session['wake_count'])
-            )
-        else:
-            db.execute(
-                'INSERT OR REPLACE INTO voice_sessions '
-                '(session_id, state, C, kappa, alpha, last_tts_text, conversation, wake_count, updated_at) '
-                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
-                (session_id, session['state'], session['C'], session['kappa'],
-                 session['alpha'], session['last_tts_text'], conv_json, session['wake_count'])
-            )
-        db.commit()
+        from database import is_postgres, db_context
+        conv_json = json.dumps(session['conversation'][-50:])
+        with db_context(commit=True) as db:
+            if is_postgres():
+                db.execute(
+                    'INSERT INTO voice_sessions (session_id, state, "C", kappa, alpha, last_tts_text, conversation, wake_count, updated_at) '
+                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) '
+                    'ON CONFLICT (session_id) DO UPDATE SET '
+                    'state=EXCLUDED.state, "C"=EXCLUDED."C", kappa=EXCLUDED.kappa, alpha=EXCLUDED.alpha, '
+                    'last_tts_text=EXCLUDED.last_tts_text, conversation=EXCLUDED.conversation, '
+                    'wake_count=EXCLUDED.wake_count, updated_at=CURRENT_TIMESTAMP',
+                    (session_id, session['state'], session['C'], session['kappa'],
+                     session['alpha'], session['last_tts_text'], conv_json, session['wake_count'])
+                )
+            else:
+                db.execute(
+                    'INSERT OR REPLACE INTO voice_sessions '
+                    '(session_id, state, C, kappa, alpha, last_tts_text, conversation, wake_count, updated_at) '
+                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
+                    (session_id, session['state'], session['C'], session['kappa'],
+                     session['alpha'], session['last_tts_text'], conv_json, session['wake_count'])
+                )
     except Exception as e:
         logger.warning(f"DB save session {session_id} (non-fatal): {e}")
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
 
 def get_session(session_id):

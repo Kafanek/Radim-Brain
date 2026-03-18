@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════
 
 try:
-    from database import get_connection, is_postgres
+    from database import get_connection, is_postgres, db_context
     DB_AVAILABLE = True
 except ImportError:
     DB_AVAILABLE = False
@@ -176,47 +176,40 @@ def get_brain_speech_for_user(user_id, _load_adaptation=None, _adaptation_fallba
     """
     if not DB_AVAILABLE or not user_id:
         return None
-    db = None
     try:
-        db = get_connection()
-        if is_postgres():
-            row = db.execute(
-                "SELECT C, E, R, S, alpha, mode, coherence FROM brain_states WHERE user_id = %s AND created_at > NOW() - INTERVAL '%s minutes' ORDER BY created_at DESC LIMIT 1",
-                (user_id, BRAIN_STATE_TTL_MINUTES)
-            ).fetchone()
-        else:
-            row = db.execute(
-                "SELECT C, E, R, S, alpha, mode, coherence FROM brain_states WHERE user_id = ? AND created_at > datetime('now', '-' || ? || ' minutes') ORDER BY created_at DESC LIMIT 1",
-                (user_id, BRAIN_STATE_TTL_MINUTES)
-            ).fetchone()
-        if not row:
-            return None
+        with db_context() as db:
+            if is_postgres():
+                row = db.execute(
+                    "SELECT C, E, R, S, alpha, mode, coherence FROM brain_states "
+                    "WHERE user_id = ? AND created_at > NOW() - INTERVAL '? minutes' ORDER BY created_at DESC LIMIT 1",
+                    (user_id, BRAIN_STATE_TTL_MINUTES)
+                ).fetchone()
+            else:
+                row = db.execute(
+                    "SELECT C, E, R, S, alpha, mode, coherence FROM brain_states "
+                    "WHERE user_id = ? AND created_at > datetime('now', '-' || ? || ' minutes') ORDER BY created_at DESC LIMIT 1",
+                    (user_id, BRAIN_STATE_TTL_MINUTES)
+                ).fetchone()
+            if not row:
+                return None
 
-        # RealDictCursor returns dict with lowercase keys
-        C_val = float(row.get('c', row.get('C', 5.0)) or 5.0)
-        alpha_val = float(row.get('alpha', 0.0) or 0.0)
-        mode = row.get('mode', 'HARMONY') or "HARMONY"
-        coherence = row.get('coherence', 0.5)
+            C_val = float(row.get('c', row.get('C', 5.0)) or 5.0)
+            alpha_val = float(row.get('alpha', 0.0) or 0.0)
+            mode = row.get('mode', 'HARMONY') or "HARMONY"
+            coherence = row.get('coherence', 0.5)
 
-        # Use unified speech computation
-        speech = compute_unified_speech(
-            C_val, alpha_val, mode, user_id=user_id,
-            _load_adaptation=_load_adaptation,
-            _adaptation_fallback=_adaptation_fallback
-        )
-        speech["coherence"] = round(float(coherence or 0.5), 4)
-        speech["user_id"] = user_id
-        speech["source"] = "brain_states"
-        return speech
+            speech = compute_unified_speech(
+                C_val, alpha_val, mode, user_id=user_id,
+                _load_adaptation=_load_adaptation,
+                _adaptation_fallback=_adaptation_fallback
+            )
+            speech["coherence"] = round(float(coherence or 0.5), 4)
+            speech["user_id"] = user_id
+            speech["source"] = "brain_states"
+            return speech
     except Exception as e:
         logger.warning(f"Brain speech lookup warning: {e}")
         return None
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
 
 logger.info("✅ Brain Speech module loaded — unified speech + early Ψ cache")

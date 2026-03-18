@@ -106,7 +106,7 @@ except ImportError:
 
 # Database (for brain persistence)
 try:
-    from database import get_connection, is_postgres
+    from database import get_connection, is_postgres, db_context
     DB_AVAILABLE = True
 except ImportError:
     DB_AVAILABLE = False
@@ -120,31 +120,21 @@ def _db_load_adaptation(user_id):
     """Load per-user adaptation state from PostgreSQL, or return defaults."""
     if not DB_AVAILABLE or not user_id:
         return dict(_ADAPTATION_DEFAULTS)
-    db = None
     try:
-        db = get_connection()
-        ph = "%s" if is_postgres() else "?"
-        row = db.execute(
-            f"SELECT reward_sum, interactions, speech_rate_adjust, pause_adjust_ms, style, intervention_level FROM brain_adaptation WHERE user_id = {ph}",
-            (user_id,)
-        ).fetchone()
-        if row:
-            return {
-                "reward_sum": row[0],
-                "interactions": row[1],
-                "speech_rate_adjust": float(row[2]),
-                "pause_adjust_ms": float(row[3]),
-                "style": row[4] or "warm",
-                "intervention_level": float(row[5]),
-            }
+        with db_context() as db:
+            row = db.execute(
+                "SELECT reward_sum, interactions, speech_rate_adjust, pause_adjust_ms, style, intervention_level "
+                "FROM brain_adaptation WHERE user_id = ?",
+                (user_id,)
+            ).fetchone()
+            if row:
+                return {
+                    "reward_sum": row[0], "interactions": row[1],
+                    "speech_rate_adjust": float(row[2]), "pause_adjust_ms": float(row[3]),
+                    "style": row[4] or "warm", "intervention_level": float(row[5]),
+                }
     except Exception as e:
         logger.warning(f"Brain DB load warning: {e}")
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
     return dict(_ADAPTATION_DEFAULTS)
 
 
@@ -152,70 +142,47 @@ def _db_save_adaptation(user_id, state):
     """Upsert per-user adaptation state to PostgreSQL."""
     if not DB_AVAILABLE or not user_id:
         return
-    db = None
     try:
-        db = get_connection()
-        if is_postgres():
-            db.execute('''
-                INSERT INTO brain_adaptation (user_id, reward_sum, interactions, speech_rate_adjust, pause_adjust_ms, style, intervention_level, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
-                ON CONFLICT (user_id) DO UPDATE SET
-                    reward_sum = EXCLUDED.reward_sum,
-                    interactions = EXCLUDED.interactions,
-                    speech_rate_adjust = EXCLUDED.speech_rate_adjust,
-                    pause_adjust_ms = EXCLUDED.pause_adjust_ms,
-                    style = EXCLUDED.style,
-                    intervention_level = EXCLUDED.intervention_level,
-                    updated_at = NOW()
-            ''', (user_id, state["reward_sum"], state["interactions"],
-                  state["speech_rate_adjust"], state["pause_adjust_ms"],
-                  state["style"], state["intervention_level"]))
-        else:
-            db.execute('''
-                INSERT OR REPLACE INTO brain_adaptation (user_id, reward_sum, interactions, speech_rate_adjust, pause_adjust_ms, style, intervention_level, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-            ''', (user_id, state["reward_sum"], state["interactions"],
-                  state["speech_rate_adjust"], state["pause_adjust_ms"],
-                  state["style"], state["intervention_level"]))
-        db.commit()
+        with db_context(commit=True) as db:
+            if is_postgres():
+                db.execute(
+                    "INSERT INTO brain_adaptation (user_id, reward_sum, interactions, speech_rate_adjust, pause_adjust_ms, style, intervention_level, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, NOW()) "
+                    "ON CONFLICT (user_id) DO UPDATE SET "
+                    "reward_sum=EXCLUDED.reward_sum, interactions=EXCLUDED.interactions, speech_rate_adjust=EXCLUDED.speech_rate_adjust, "
+                    "pause_adjust_ms=EXCLUDED.pause_adjust_ms, style=EXCLUDED.style, intervention_level=EXCLUDED.intervention_level, updated_at=NOW()",
+                    (user_id, state["reward_sum"], state["interactions"],
+                     state["speech_rate_adjust"], state["pause_adjust_ms"],
+                     state["style"], state["intervention_level"]))
+            else:
+                db.execute(
+                    "INSERT OR REPLACE INTO brain_adaptation (user_id, reward_sum, interactions, speech_rate_adjust, pause_adjust_ms, style, intervention_level, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+                    (user_id, state["reward_sum"], state["interactions"],
+                     state["speech_rate_adjust"], state["pause_adjust_ms"],
+                     state["style"], state["intervention_level"]))
     except Exception as e:
         logger.warning(f"Brain DB save warning: {e}")
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
 
 def _db_save_brain_state(user_id, psi, alpha, mode, coherence, source="chat"):
     """Save Psi(t) snapshot to brain_states table."""
     if not DB_AVAILABLE or not user_id:
         return
-    db = None
     try:
-        db = get_connection()
-        if is_postgres():
-            db.execute('''
-                INSERT INTO brain_states (user_id, C, E, R, S, alpha, mode, coherence, source, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-            ''', (user_id, psi["C"], psi["E"], psi["R"], psi["S"],
-                  alpha, mode, coherence, source))
-        else:
-            db.execute('''
-                INSERT INTO brain_states (user_id, C, E, R, S, alpha, mode, coherence, source, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-            ''', (user_id, psi["C"], psi["E"], psi["R"], psi["S"],
-                  alpha, mode, coherence, source))
-        db.commit()
+        with db_context(commit=True) as db:
+            if is_postgres():
+                db.execute(
+                    "INSERT INTO brain_states (user_id, C, E, R, S, alpha, mode, coherence, source, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+                    (user_id, psi["C"], psi["E"], psi["R"], psi["S"], alpha, mode, coherence, source))
+            else:
+                db.execute(
+                    "INSERT INTO brain_states (user_id, C, E, R, S, alpha, mode, coherence, source, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+                    (user_id, psi["C"], psi["E"], psi["R"], psi["S"], alpha, mode, coherence, source))
     except Exception as e:
         logger.warning(f"Brain state save warning: {e}")
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
 
 # ═══════════════════════════════════════════════════════════
