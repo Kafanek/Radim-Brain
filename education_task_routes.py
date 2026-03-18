@@ -12,7 +12,7 @@
 import json
 import logging
 from flask import Blueprint, request, jsonify, g
-from database import get_connection, is_postgres
+from database import get_connection, db_insert
 from auth_middleware import require_auth, require_teacher
 from education_helpers import (
     now_iso, get_teacher_id, verify_teacher_student, get_adaptive_profile
@@ -73,23 +73,10 @@ def teacher_create_task(student_id):
     db = None
     try:
         db = get_connection()
-        if is_postgres():
-            row = db.execute(
-                '''INSERT INTO education_teacher_tasks
-                   (teacher_id, student_id, title, description, task_type, course_id, module_id, due_date)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                   RETURNING id''',
-                (teacher_id, student_id, title, description, task_type, course_id, module_id, due_date)
-            ).fetchone()
-            task_id = row['id'] if row else None
-        else:
-            cursor = db.execute(
-                '''INSERT INTO education_teacher_tasks
-                   (teacher_id, student_id, title, description, task_type, course_id, module_id, due_date)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                (teacher_id, student_id, title, description, task_type, course_id, module_id, due_date)
-            )
-            task_id = cursor.lastrowid
+        task_id = db_insert(db, 'education_teacher_tasks',
+            ['teacher_id', 'student_id', 'title', 'description', 'task_type', 'course_id', 'module_id', 'due_date'],
+            (teacher_id, student_id, title, description, task_type, course_id, module_id, due_date)
+        )
         db.commit()
     except Exception as e:
         logger.error(f"teacher_create_task DB error: {e}")

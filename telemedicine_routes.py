@@ -12,7 +12,7 @@ from datetime import date
 from flask import Blueprint, request, jsonify
 
 logger = logging.getLogger(__name__)
-from database import get_connection, is_postgres
+from database import get_connection, is_postgres, db_insert
 from auth_middleware import require_auth
 from utils import now_iso
 from telemedicine_helpers import (
@@ -157,21 +157,10 @@ def telemed_my_request():
     db = None
     try:
         db = get_connection()
-        p = _p()
-        if is_postgres():
-            row = db.execute(
-                f"INSERT INTO telemedicine_consultations (teacher_id, student_id, scheduled_date, scheduled_time, complaint, consultation_type) "
-                f"VALUES ({p}, {p}, {p}, {p}, {p}, {p}) RETURNING id",
-                (teacher_id, student_id, preferred_date, preferred_time, complaint, consultation_type)
-            ).fetchone()
-            cid = row['id'] if row else None
-        else:
-            cursor = db.execute(
-                f"INSERT INTO telemedicine_consultations (teacher_id, student_id, scheduled_date, scheduled_time, complaint, consultation_type) "
-                f"VALUES ({p}, {p}, {p}, {p}, {p}, {p})",
-                (teacher_id, student_id, preferred_date, preferred_time, complaint, consultation_type)
-            )
-            cid = cursor.lastrowid
+        cid = db_insert(db, 'telemedicine_consultations',
+            ['teacher_id', 'student_id', 'scheduled_date', 'scheduled_time', 'complaint', 'consultation_type'],
+            (teacher_id, student_id, preferred_date, preferred_time, complaint, consultation_type)
+        )
         db.commit()
     except Exception as e:
         logger.error(f"Telemedicine DB error: {e}")

@@ -382,16 +382,10 @@ def brain_feedback():
         db = None
         try:
             db = get_connection()
-            if is_postgres():
-                db.execute(
-                    "INSERT INTO brain_feedback (user_id, rating, action, response_time_ms, signal, context) VALUES (%s, %s, %s, %s, %s, %s)",
-                    (user_id, rating, action, response_time_ms, signal, context)
-                )
-            else:
-                db.execute(
-                    "INSERT INTO brain_feedback (user_id, rating, action, response_time_ms, signal, context) VALUES (?, ?, ?, ?, ?, ?)",
-                    (user_id, rating, action, response_time_ms, signal, context)
-                )
+            db.execute(
+                "INSERT INTO brain_feedback (user_id, rating, action, response_time_ms, signal, context) VALUES (?, ?, ?, ?, ?, ?)",
+                (user_id, rating, action, response_time_ms, signal, context)
+            )
             db.commit()
         except Exception as e:
             logger.warning(f"Brain feedback save warning: {e}")

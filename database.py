@@ -332,3 +332,25 @@ def init_db():
 def is_postgres():
     """Check if using PostgreSQL"""
     return USE_POSTGRES
+
+
+def db_insert(db, table, columns, values):
+    """Insert a row and return its ID (works on both PostgreSQL and SQLite).
+
+    Usage:
+        row_id = db_insert(db, 'my_table', ['col1', 'col2'], (val1, val2))
+    """
+    placeholders = ', '.join(['?'] * len(values))
+    col_str = ', '.join(columns)
+    if USE_POSTGRES:
+        row = db.execute(
+            f"INSERT INTO {table} ({col_str}) VALUES ({placeholders}) RETURNING id",
+            values
+        ).fetchone()
+        return row['id'] if row else None
+    else:
+        cursor = db.execute(
+            f"INSERT INTO {table} ({col_str}) VALUES ({placeholders})",
+            values
+        )
+        return cursor.lastrowid

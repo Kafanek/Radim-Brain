@@ -10,7 +10,7 @@ import os
 from flask import Blueprint, request, jsonify
 
 logger = logging.getLogger(__name__)
-from database import get_connection, is_postgres
+from database import get_connection, is_postgres, db_insert
 from auth_middleware import require_auth, require_teacher
 from utils import now_iso
 from telemedicine_helpers import (
@@ -65,22 +65,12 @@ def telemed_create_multiparty():
         p = _p()
 
         # Create consultation
-        if is_postgres():
-            row = db.execute(
-                f"INSERT INTO telemedicine_consultations (teacher_id, student_id, scheduled_date, scheduled_time, duration_minutes, "
-                f"consultation_type, complaint, title, is_multiparty, status) "
-                f"VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, 1, 'confirmed') RETURNING id",
-                (organizer_id, patient_id, scheduled_date, scheduled_time, duration, consultation_type, complaint, title)
-            ).fetchone()
-            cid = row['id'] if row else None
-        else:
-            cursor = db.execute(
-                f"INSERT INTO telemedicine_consultations (teacher_id, student_id, scheduled_date, scheduled_time, duration_minutes, "
-                f"consultation_type, complaint, title, is_multiparty, status) "
-                f"VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, 1, 'confirmed')",
-                (organizer_id, patient_id, scheduled_date, scheduled_time, duration, consultation_type, complaint, title)
-            )
-            cid = cursor.lastrowid
+        cid = db_insert(db, 'telemedicine_consultations',
+            ['teacher_id', 'student_id', 'scheduled_date', 'scheduled_time', 'duration_minutes',
+             'consultation_type', 'complaint', 'title', 'is_multiparty', 'status'],
+            (organizer_id, patient_id, scheduled_date, scheduled_time, duration,
+             consultation_type, complaint, title, 1, 'confirmed')
+        )
 
         # Auto-insert organizer as participant
         db.execute(
@@ -205,20 +195,10 @@ def telemed_invite_participant(consultation_id):
             except Exception:
                 pass
 
-        if is_postgres():
-            row = db.execute(
-                f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, specialty, status) "
-                f"VALUES ({p}, {p}, {p}, {p}, 'invited') RETURNING id",
-                (consultation_id, user_id, role, specialty)
-            ).fetchone()
-            pid = row['id'] if row else None
-        else:
-            cursor = db.execute(
-                f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, specialty, status) "
-                f"VALUES ({p}, {p}, {p}, {p}, 'invited')",
-                (consultation_id, user_id, role, specialty)
-            )
-            pid = cursor.lastrowid
+        pid = db_insert(db, 'telemedicine_participants',
+            ['consultation_id', 'user_id', 'role', 'specialty', 'status'],
+            (consultation_id, user_id, role, specialty, 'invited')
+        )
 
         db.commit()
     except Exception as e:

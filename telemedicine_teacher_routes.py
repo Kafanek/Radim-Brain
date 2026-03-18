@@ -14,7 +14,7 @@ from email.mime.multipart import MIMEMultipart
 from flask import Blueprint, request, jsonify
 
 logger = logging.getLogger(__name__)
-from database import get_connection, is_postgres
+from database import get_connection, is_postgres, db_insert
 from auth_middleware import require_auth, require_teacher
 from utils import now_iso
 from telemedicine_helpers import (
@@ -125,21 +125,10 @@ def telemed_set_availability():
     db = None
     try:
         db = get_connection()
-        p = _p()
-        if is_postgres():
-            row = db.execute(
-                f"INSERT INTO telemedicine_availability (teacher_id, day_of_week, specific_date, start_time, end_time, slot_duration_minutes) "
-                f"VALUES ({p}, {p}, {p}, {p}, {p}, {p}) RETURNING id",
-                (teacher_id, day_of_week, specific_date, start_time, end_time, slot_duration)
-            ).fetchone()
-            slot_id = row['id'] if row else None
-        else:
-            cursor = db.execute(
-                f"INSERT INTO telemedicine_availability (teacher_id, day_of_week, specific_date, start_time, end_time, slot_duration_minutes) "
-                f"VALUES ({p}, {p}, {p}, {p}, {p}, {p})",
-                (teacher_id, day_of_week, specific_date, start_time, end_time, slot_duration)
-            )
-            slot_id = cursor.lastrowid
+        slot_id = db_insert(db, 'telemedicine_availability',
+            ['teacher_id', 'day_of_week', 'specific_date', 'start_time', 'end_time', 'slot_duration_minutes'],
+            (teacher_id, day_of_week, specific_date, start_time, end_time, slot_duration)
+        )
         db.commit()
     except Exception as e:
         logger.error(f"Telemedicine DB error: {e}")

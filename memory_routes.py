@@ -328,14 +328,9 @@ def get_crisis_history(user_id):
     db = None
     try:
         db = get_connection()
-        if is_postgres():
-            cursor = db.execute(
-                "SELECT * FROM crisis_events WHERE user_id = %s ORDER BY created_at DESC LIMIT 20", (user_id,)
-            )
-        else:
-            cursor = db.execute(
-                "SELECT * FROM crisis_events WHERE user_id = ? ORDER BY created_at DESC LIMIT 20", (user_id,)
-            )
+        cursor = db.execute(
+            "SELECT * FROM crisis_events WHERE user_id = ? ORDER BY created_at DESC LIMIT 20", (user_id,)
+        )
         rows = cursor.fetchall() if cursor else []
         for row in rows:
             events.append({

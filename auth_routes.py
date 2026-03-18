@@ -130,26 +130,17 @@ def auth_register():
     try:
         db = get_connection()
         # Check if exists
-        ph = '%s' if is_postgres() else '?'
-        row = db.execute(f"SELECT id FROM auth_users WHERE email = {ph}", (email,)).fetchone()
+        row = db.execute("SELECT id FROM auth_users WHERE email = ?", (email,)).fetchone()
         if row:
             return jsonify({"success": False, "error": "Účet s tímto emailem již existuje", "code": "email_exists"}), 409
 
         # Insert
         pw_hash = _hash_password(password)
-        if is_postgres():
-            cur = db.execute(
-                "INSERT INTO auth_users (email, password_hash, name) VALUES (%s, %s, %s) RETURNING id",
-                (email, pw_hash, name)
-            )
-            ret = cur.fetchone()
-            user_id = ret['id'] if isinstance(ret, dict) else ret[0]
-        else:
-            cur = db.execute(
-                "INSERT INTO auth_users (email, password_hash, name) VALUES (?, ?, ?)",
-                (email, pw_hash, name)
-            )
-            user_id = cur.lastrowid
+        from database import db_insert
+        user_id = db_insert(db, 'auth_users',
+            ['email', 'password_hash', 'name'],
+            (email, pw_hash, name)
+        )
         db.commit()
 
         token = _create_jwt(user_id, email, name)

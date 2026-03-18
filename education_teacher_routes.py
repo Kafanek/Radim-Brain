@@ -59,16 +59,10 @@ def teacher_dashboard():
     db = None
     try:
         db = get_connection()
-        if is_postgres():
-            row = db.execute(
-                "SELECT COUNT(*) as cnt FROM education_teacher_tasks WHERE teacher_id = %s AND status = 'submitted'",
-                (teacher_id,)
-            ).fetchone()
-        else:
-            row = db.execute(
-                "SELECT COUNT(*) as cnt FROM education_teacher_tasks WHERE teacher_id = ? AND status = 'submitted'",
-                (teacher_id,)
-            ).fetchone()
+        row = db.execute(
+            "SELECT COUNT(*) as cnt FROM education_teacher_tasks WHERE teacher_id = ? AND status = 'submitted'",
+            (teacher_id,)
+        ).fetchone()
         pending_tasks = row['cnt'] if row else 0
     except Exception:
         pass
@@ -206,18 +200,11 @@ def teacher_dashboard_student_detail(student_id):
     db = None
     try:
         db = get_connection()
-        if is_postgres():
-            rows = db.execute(
-                "SELECT id, title, task_type, status, grade, due_date, created_at FROM education_teacher_tasks "
-                "WHERE student_id = %s AND teacher_id = %s ORDER BY created_at DESC LIMIT 20",
-                (student_id, teacher_id)
-            ).fetchall()
-        else:
-            rows = db.execute(
-                "SELECT id, title, task_type, status, grade, due_date, created_at FROM education_teacher_tasks "
-                "WHERE student_id = ? AND teacher_id = ? ORDER BY created_at DESC LIMIT 20",
-                (student_id, teacher_id)
-            ).fetchall()
+        rows = db.execute(
+            "SELECT id, title, task_type, status, grade, due_date, created_at FROM education_teacher_tasks "
+            "WHERE student_id = ? AND teacher_id = ? ORDER BY created_at DESC LIMIT 20",
+            (student_id, teacher_id)
+        ).fetchall()
         tasks = [dict(r) for r in rows]
     except Exception:
         pass
