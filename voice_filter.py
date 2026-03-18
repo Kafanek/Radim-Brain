@@ -1,177 +1,142 @@
 """
-🎙️ RADIM VOICE FILTER v1.0
+🎙️ RADIM VOICE FILTER v2.0
 ============================
-Audio post-processing to give Radim a distinctive, warm voice character.
+Creates Radim's distinctive warm voice using advanced Azure SSML features.
 
-Applied after Azure TTS (AntoninNeural) to create a recognizable "Radim sound":
-- Low-pass warmth: gentle roll-off above 6kHz (removes digital harshness)
-- Bass presence: +3dB boost at 150-300Hz (warm, trustworthy tone)
-- Presence dip: slight reduction at 3-4kHz (less "sharp", more gentle)
-- Soft compression: reduce dynamic range (consistent volume for seniors with hearing issues)
-- Optional: slight reverb tail (0.05s) for "room presence"
+Instead of audio post-processing (which requires ffmpeg), we use Azure's
+built-in voice styling capabilities:
+- mstts:express-as: emotion style + degree
+- prosody: rate, pitch, volume per brain mode
+- break: φ-proportioned pauses between sentences
+- emphasis: key words get gentle emphasis
 
-Dependencies: pydub (required), scipy (optional, for EQ)
-Fallback: returns original audio if processing fails (graceful degradation)
+Mode-adaptive: HARMONY/ALERT/CRISIS each have distinct voice profiles.
+Falls back gracefully if Azure doesn't support a feature.
 """
 
-import io
+import re
 import logging
-from functools import lru_cache
+from xml.sax.saxutils import escape as xml_escape
 
 logger = logging.getLogger(__name__)
 
-# Try to import audio libraries
-try:
-    from pydub import AudioSegment
-    from pydub.effects import normalize, compress_dynamic_range
-    _PYDUB = True
-except ImportError:
-    _PYDUB = False
-    logger.info("pydub not installed — voice filter disabled (pip install pydub)")
-
-try:
-    import numpy as np
-    from scipy.signal import butter, lfilter
-    _SCIPY = True
-except ImportError:
-    _SCIPY = False
-
-
 # ============================================================================
-# RADIM VOICE PROFILE
+# RADIM VOICE PROFILES (Azure SSML parameters)
 # ============================================================================
 
-# Adjustable parameters for Radim's voice character
-RADIM_PROFILE = {
-    "warmth_cutoff_hz": 6000,       # Low-pass filter cutoff (remove digital harshness)
-    "bass_boost_db": 3.0,           # Bass boost at 150-300Hz
-    "presence_cut_db": -2.0,        # Slight cut at 3-4kHz (gentler sound)
-    "compression_threshold": -20.0, # dBFS threshold for compression
-    "compression_ratio": 3.0,       # Compression ratio
-    "normalize_headroom": 1.0,      # dB headroom after normalization
-    "output_gain_db": 1.5,          # Final gain boost
-}
-
-# Mode-specific adjustments
-MODE_ADJUSTMENTS = {
+VOICE_PROFILES = {
     "HARMONY": {
-        "warmth_cutoff_hz": 6500,  # Brighter, more natural
-        "bass_boost_db": 2.0,
-        "output_gain_db": 1.0,
+        "style": "friendly",
+        "styledegree": "1.3",
+        "rate": "-5%",
+        "pitch": "-2%",
+        "volume": "loud",
+        "pause_ms": 618,        # φ × 382 — golden ratio pause
+        "emphasis": False,      # natural, no emphasis
     },
     "ALERT": {
-        "warmth_cutoff_hz": 5500,  # Warmer, calmer
-        "bass_boost_db": 3.5,
-        "output_gain_db": 2.0,     # Slightly louder for attention
+        "style": "empathetic",
+        "styledegree": "1.5",
+        "rate": "-15%",         # noticeably slower
+        "pitch": "-5%",         # lower = calmer
+        "volume": "loud",
+        "pause_ms": 1000,       # longer pauses for processing
+        "emphasis": True,       # gentle emphasis on key words
     },
     "CRISIS": {
-        "warmth_cutoff_hz": 5000,  # Maximum warmth, zero harshness
-        "bass_boost_db": 4.0,
-        "presence_cut_db": -3.0,   # Extra gentle
-        "output_gain_db": 3.0,     # Louder for clarity
+        "style": "calm",
+        "styledegree": "2.0",   # maximum emotional expression
+        "rate": "-25%",         # very slow, deliberate
+        "pitch": "-8%",         # deep, reassuring
+        "volume": "x-loud",    # louder for clarity
+        "pause_ms": 1618,       # φ × 1000 — maximum pause
+        "emphasis": True,
     },
 }
 
-
-def _apply_lowpass(samples, sample_rate, cutoff_hz):
-    """Apply Butterworth low-pass filter."""
-    if not _SCIPY:
-        return samples
-    nyquist = sample_rate / 2
-    normalized_cutoff = min(cutoff_hz / nyquist, 0.99)
-    b, a = butter(4, normalized_cutoff, btype='low')
-    return lfilter(b, a, samples)
+# Words that should get gentle emphasis in ALERT/CRISIS
+EMPHASIS_WORDS = {
+    "klid", "klidně", "pomoc", "pomohu", "dýchejte", "nadechněte",
+    "vydechněte", "zavolám", "jste", "bezpečí", "poradím", "společně",
+    "rodina", "doktor", "lékař", "záchranku",
+}
 
 
-def _apply_bass_boost(samples, sample_rate, boost_db, low_hz=150, high_hz=300):
-    """Boost bass frequencies using bandpass + mix."""
-    if not _SCIPY or boost_db == 0:
-        return samples
-    nyquist = sample_rate / 2
-    low = max(low_hz / nyquist, 0.01)
-    high = min(high_hz / nyquist, 0.99)
-    if low >= high:
-        return samples
-    b, a = butter(2, [low, high], btype='band')
-    bass = lfilter(b, a, samples)
-    # Convert dB to linear gain
-    gain = 10 ** (boost_db / 20)
-    return samples + bass * (gain - 1)
+def _add_sentence_pauses(text, pause_ms):
+    """Insert SSML breaks between sentences."""
+    # Split on sentence boundaries
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    if len(sentences) <= 1:
+        return xml_escape(text)
+
+    parts = []
+    for i, s in enumerate(sentences):
+        parts.append(xml_escape(s.strip()))
+        if i < len(sentences) - 1:
+            parts.append(f'<break time="{pause_ms}ms"/>')
+    return " ".join(parts)
+
+
+def _add_emphasis(text_with_breaks):
+    """Add gentle emphasis to key words (for ALERT/CRISIS)."""
+    for word in EMPHASIS_WORDS:
+        # Case-insensitive replace, preserve original case
+        pattern = re.compile(rf'\b({re.escape(word)})\b', re.IGNORECASE)
+        text_with_breaks = pattern.sub(
+            r'<emphasis level="moderate">\1</emphasis>',
+            text_with_breaks
+        )
+    return text_with_breaks
+
+
+def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural"):
+    """
+    Build rich SSML for Radim's voice with mode-adaptive styling.
+
+    Args:
+        text: Czech text to speak
+        mode: "HARMONY", "ALERT", or "CRISIS"
+        voice: Azure voice name
+
+    Returns:
+        str: Complete SSML string
+    """
+    profile = VOICE_PROFILES.get(mode, VOICE_PROFILES["HARMONY"])
+
+    # Add pauses between sentences
+    styled_text = _add_sentence_pauses(text, profile["pause_ms"])
+
+    # Add emphasis in ALERT/CRISIS
+    if profile["emphasis"]:
+        styled_text = _add_emphasis(styled_text)
+
+    ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
+           xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="cs-CZ">
+    <voice name="{voice}">
+        <mstts:express-as style="{profile['style']}" styledegree="{profile['styledegree']}">
+            <prosody rate="{profile['rate']}" pitch="{profile['pitch']}" volume="{profile['volume']}">
+                {styled_text}
+            </prosody>
+        </mstts:express-as>
+    </voice>
+</speak>'''
+
+    return ssml
 
 
 def apply_radim_filter(audio_bytes, mode="HARMONY", format="mp3"):
     """
-    Apply Radim's voice character filter to audio bytes.
+    v2.0: No-op pass-through. Voice filtering is now done at SSML level
+    via build_radim_ssml(). This function exists for backward compatibility.
 
-    Args:
-        audio_bytes: Raw audio data (MP3 or WAV from Azure TTS)
-        mode: "HARMONY", "ALERT", or "CRISIS" — adjusts warmth
-        format: Input format ("mp3" or "wav")
-
-    Returns:
-        bytes: Processed audio (MP3), or original if processing fails
+    Returns audio_bytes unchanged.
     """
-    if not _PYDUB or not audio_bytes:
-        return audio_bytes
-
-    try:
-        # Load audio
-        audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format=format)
-
-        # Get profile (base + mode adjustments)
-        profile = dict(RADIM_PROFILE)
-        mode_adj = MODE_ADJUSTMENTS.get(mode, {})
-        profile.update(mode_adj)
-
-        # Step 1: Low-pass warmth filter (remove digital harshness)
-        if _SCIPY:
-            samples = np.array(audio.get_array_of_samples(), dtype=np.float64)
-            sample_rate = audio.frame_rate
-
-            # Low-pass
-            samples = _apply_lowpass(samples, sample_rate, profile["warmth_cutoff_hz"])
-
-            # Bass boost
-            samples = _apply_bass_boost(samples, sample_rate, profile["bass_boost_db"])
-
-            # Clip and convert back
-            max_val = 2 ** (audio.sample_width * 8 - 1) - 1
-            samples = np.clip(samples, -max_val, max_val).astype(np.int16)
-
-            # Reconstruct AudioSegment
-            audio = AudioSegment(
-                samples.tobytes(),
-                frame_rate=sample_rate,
-                sample_width=audio.sample_width,
-                channels=audio.channels,
-            )
-
-        # Step 2: Compression (consistent volume for seniors)
-        audio = compress_dynamic_range(
-            audio,
-            threshold=profile["compression_threshold"],
-            ratio=profile["compression_ratio"],
-        )
-
-        # Step 3: Normalize
-        audio = normalize(audio, headroom=profile["normalize_headroom"])
-
-        # Step 4: Final gain
-        audio = audio + profile["output_gain_db"]
-
-        # Export as MP3
-        buf = io.BytesIO()
-        audio.export(buf, format="mp3", bitrate="32k")
-        return buf.getvalue()
-
-    except Exception as e:
-        logger.warning(f"Voice filter error (returning original): {e}")
-        return audio_bytes
+    return audio_bytes
 
 
 def is_available():
-    """Check if voice filter can process audio."""
-    return _PYDUB
+    """Voice filter is always available (SSML-based, no dependencies)."""
+    return True
 
 
-logger.info(f"Voice Filter loaded — pydub={'✅' if _PYDUB else '❌'}, scipy={'✅' if _SCIPY else '❌'}")
+logger.info("✅ Voice Filter v2.0 loaded — SSML-based, no ffmpeg needed")

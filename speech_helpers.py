@@ -163,18 +163,23 @@ def radim_speak(text, emotion='friendly', C=None, alpha=None, user_id=None):
             if s:
                 style, degree = s, d
 
-        safe_text = xml_escape(text)
-
-        ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
-               xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="cs-CZ">
-            <voice name="cs-CZ-AntoninNeural">
-                <mstts:express-as style="{style}" styledegree="{degree}">
-                    <prosody rate="{rate}" pitch="{pitch}">
-                        {safe_text}
-                    </prosody>
-                </mstts:express-as>
-            </voice>
-        </speak>'''
+        # v389: Use rich SSML from voice_filter (emotion + pauses + emphasis)
+        _mode = brain_speech.get("mode", "HARMONY") if brain_speech else "HARMONY"
+        try:
+            from voice_filter import build_radim_ssml
+            ssml = build_radim_ssml(text, mode=_mode)
+        except ImportError:
+            safe_text = xml_escape(text)
+            ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
+                   xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="cs-CZ">
+                <voice name="cs-CZ-AntoninNeural">
+                    <mstts:express-as style="{style}" styledegree="{degree}">
+                        <prosody rate="{rate}" pitch="{pitch}">
+                            {safe_text}
+                        </prosody>
+                    </mstts:express-as>
+                </voice>
+            </speak>'''
 
         response = requests.post(
             get_tts_url(), headers=get_tts_headers(),
@@ -182,17 +187,7 @@ def radim_speak(text, emotion='friendly', C=None, alpha=None, user_id=None):
         )
 
         if response.status_code == 200:
-            audio = response.content
-            # v388: Apply Radim voice filter (warmth, compression)
-            try:
-                from voice_filter import apply_radim_filter, is_available as _vf_ok
-                if _vf_ok():
-                    # Determine mode from brain speech or default
-                    _mode = brain_speech.get("mode", "HARMONY") if brain_speech else "HARMONY"
-                    audio = apply_radim_filter(audio, mode=_mode, format="mp3")
-            except ImportError:
-                pass
-            return audio
+            return response.content
 
         return None
 

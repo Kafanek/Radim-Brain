@@ -245,12 +245,18 @@ def generate_azure_tts(text, rate_pct=None, pitch_hz=None):
 
     try:
         url = f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
-        safe_text = xml_escape(text)
-        ssml = f"""<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='cs-CZ'>
-            <voice name='{RADIM_AZURE_VOICE}'>
-                <prosody rate='{rate_pct}' pitch='{pitch_hz}'>{safe_text}</prosody>
-            </voice>
-        </speak>"""
+
+        # v389: Use rich SSML from voice_filter (emotion + pauses + emphasis)
+        try:
+            from voice_filter import build_radim_ssml
+            ssml = build_radim_ssml(text, mode="HARMONY", voice=RADIM_AZURE_VOICE)
+        except ImportError:
+            safe_text = xml_escape(text)
+            ssml = f"""<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='cs-CZ'>
+                <voice name='{RADIM_AZURE_VOICE}'>
+                    <prosody rate='{rate_pct}' pitch='{pitch_hz}'>{safe_text}</prosody>
+                </voice>
+            </speak>"""
 
         resp = http_requests.post(
             url,
@@ -263,15 +269,7 @@ def generate_azure_tts(text, rate_pct=None, pitch_hz=None):
             timeout=8
         )
         if resp.status_code == 200:
-            audio = resp.content
-            # v388: Apply Radim voice filter (warmth, compression)
-            try:
-                from voice_filter import apply_radim_filter, is_available
-                if is_available():
-                    audio = apply_radim_filter(audio, mode="HARMONY", format="mp3")
-            except ImportError:
-                pass
-            return audio
+            return resp.content
         else:
             logger.error(f"Azure TTS error: {resp.status_code} {resp.text[:200]}")
             return None
