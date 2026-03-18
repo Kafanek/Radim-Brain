@@ -848,31 +848,29 @@ def admin_seed_demo():
         logger.error(f"Seed demo error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-# v382: Manual agent loop trigger for diagnostics
+# v382: Manual agent loop trigger (full cycle with saves)
 @app.route('/api/admin/agent-run', methods=['POST'])
 def admin_agent_run():
-    """Manually trigger one agent loop cycle and return observations."""
+    """Manually trigger one full agent loop cycle."""
     try:
-        from agent_loop import _get_active_users, _evaluate_user, _check_c_trend, _check_interaction_silence
-        from behavior_baseline import get_baselines
-        from memory_helpers import db_load_learning
-        active = _get_active_users()
-        results = []
-        for uid in active[:10]:
-            baselines = get_baselines(uid)
-            learning = db_load_learning(uid)
-            obs_list = []
-            for check in (_check_c_trend, _check_interaction_silence):
-                obs = check(uid, baselines)
-                if obs:
-                    obs_list.append(obs)
-            results.append({
-                'user_id': uid,
-                'avg_C': baselines.get('avg_C'),
-                'c_history_len': len(learning.get('C_history', [])),
-                'observations': obs_list
-            })
-        return jsonify({'active_users': len(active), 'evaluations': results}), 200
+        from agent_loop import run_agent_cycle
+        run_agent_cycle(app)
+        # Return observations created in last 5 min
+        with db_context() as db:
+            if is_postgres():
+                rows = db.execute(
+                    "SELECT user_id, observation_type, severity, message, action_taken, created_at "
+                    "FROM agent_observations WHERE created_at > NOW() - INTERVAL '5 minutes' "
+                    "ORDER BY created_at DESC"
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT user_id, observation_type, severity, message, action_taken, created_at "
+                    "FROM agent_observations WHERE created_at > datetime('now', '-5 minutes') "
+                    "ORDER BY created_at DESC"
+                ).fetchall()
+        obs = [dict(r) for r in rows]
+        return jsonify({'success': True, 'observations_created': len(obs), 'observations': obs}), 200
     except Exception as e:
         logger.error(f"Agent run error: {e}")
         return jsonify({'error': str(e)}), 500
