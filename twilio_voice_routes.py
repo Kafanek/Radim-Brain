@@ -526,6 +526,73 @@ def twilio_tts():
         return Response(b'', content_type='audio/mpeg', status=500)
 
 
+# ============================================================================
+# WHATSAPP INCOMING MESSAGE WEBHOOK (v387)
+# ============================================================================
+
+@twilio_bp.route('/whatsapp', methods=['POST'])
+def whatsapp_incoming():
+    """Handle incoming WhatsApp messages from seniors.
+
+    Twilio sends POST with: Body, From (whatsapp:+420...), To, MessageSid
+    We respond with Radim's AI response via TwiML <Message>.
+    """
+    body = request.form.get('Body', '').strip()
+    from_number = request.form.get('From', '')  # whatsapp:+420123456789
+    message_sid = request.form.get('MessageSid', '')
+
+    if not body:
+        return '<Response></Response>', 200, {'Content-Type': 'text/xml'}
+
+    # Extract phone number
+    phone = from_number.replace('whatsapp:', '')
+
+    # Look up user_id by phone
+    user_id = _lookup_user_by_phone(phone)
+
+    logger.info(f"💬 WhatsApp from {phone}: {body[:50]}...")
+
+    try:
+        # Use same pipeline as /api/radim/chat
+        from radim_orchestrator import radim_chat_internal
+        result = radim_chat_internal(body, user_id=user_id, mode="senior")
+        response_text = result.get("response", "Omlouvám se, zkuste to znovu.")
+    except ImportError:
+        # Fallback: direct Gemini call
+        try:
+            from radim_ai_engine import call_gemini_whatsapp
+            response_text, _ = call_gemini_whatsapp(body, {}, "senior", "", None, "", None)
+        except Exception:
+            response_text = "Dobrý den, momentálně nejsem dostupný. Zkuste to prosím později."
+    except Exception as e:
+        logger.error(f"WhatsApp AI error: {e}")
+        response_text = "Omlouvám se, nastala chyba. Zkuste to prosím znovu."
+
+    # Truncate for SMS limits (1600 chars for WhatsApp)
+    if len(response_text) > 1500:
+        response_text = response_text[:1497] + "..."
+
+    # TwiML response
+    twiml = f'<Response><Message>{xml_escape(response_text)}</Message></Response>'
+    return twiml, 200, {'Content-Type': 'text/xml'}
+
+
+def _lookup_user_by_phone(phone):
+    """Find user_id by phone number in memory_profiles."""
+    try:
+        from database import db_context
+        with db_context() as db:
+            row = db.execute(
+                "SELECT user_id FROM memory_profiles WHERE data->>'phone' = ?",
+                (phone,)
+            ).fetchone()
+            if row:
+                return row['user_id'] or row[0]
+    except Exception:
+        pass
+    return None
+
+
 @twilio_bp.route('/health', methods=['GET'])
 def twilio_health():
     """Twilio Voice health check"""

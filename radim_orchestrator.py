@@ -152,7 +152,7 @@ def radim_chat():
         if _ORCH_MEMORY_AVAILABLE:
             try:
                 personalized = _orch_build_prompt(user_id)
-                history = _orch_get_history(user_id, limit=6)
+                history = _orch_get_history(user_id, limit=15)
             except Exception as mem_err:
                 logger.warning(f"Memory load warning: {mem_err}")
 
@@ -340,6 +340,68 @@ def radim_chat():
     except Exception as e:
         logger.error(f"⚠️ radim_orchestrator.py error: {e}")
         return jsonify({'success': False, 'error': 'Interní chyba serveru'}), 500
+
+
+# ============================================
+# INTERNAL CHAT API (v387 — for WhatsApp, proactive calls, etc.)
+# ============================================
+
+def radim_chat_internal(message, user_id=None, mode="senior"):
+    """Call Radim chat pipeline without HTTP request context.
+
+    Used by: WhatsApp webhook, proactive calls, scheduled reminders.
+
+    Returns:
+        dict: {success, response, intent}
+    """
+    try:
+        if not message:
+            return {"success": False, "response": "Promiňte, nerozuměl jsem.", "intent": None}
+
+        user_id = user_id or "anonymous"
+
+        # Intent resolver first
+        text_response = None
+        intent = detect_intent(message)
+
+        if _INTENT_RESOLVER:
+            try:
+                _resolved_text, intent, _ = _resolve_intent(message, user_id, "HARMONY")
+                if _resolved_text:
+                    text_response = _resolved_text
+            except Exception:
+                pass
+
+        # AI call if intent not resolved locally
+        if text_response is None:
+            personalized = ""
+            history = None
+            if _ORCH_MEMORY_AVAILABLE:
+                try:
+                    personalized = _orch_build_prompt(user_id)
+                    history = _orch_get_history(user_id, limit=15)
+                except Exception:
+                    pass
+
+            text_response, _ = call_gemini_whatsapp(
+                message, {}, mode, personalized, history, "", None
+            )
+
+        if not text_response:
+            text_response = "Omlouvám se, zkuste to prosím později."
+
+        # Record to memory
+        if _ORCH_MEMORY_AVAILABLE:
+            try:
+                _orch_record(user_id, message, text_response)
+            except Exception:
+                pass
+
+        return {"success": True, "response": text_response, "intent": intent}
+
+    except Exception as e:
+        logger.error(f"radim_chat_internal error: {e}")
+        return {"success": False, "response": "Nastala chyba, omlouvám se.", "intent": None}
 
 
 # ============================================

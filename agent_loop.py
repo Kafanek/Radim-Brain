@@ -358,6 +358,7 @@ def _execute_action(user_id, obs, app):
 
     if severity in (ALERT, CRISIS):
         _alert_caregiver(user_id, obs, app)
+        _call_senior(user_id, obs)  # v387: proactive phone call
 
     if severity == CRISIS:
         _crisis_escalate(user_id, obs, app)
@@ -429,4 +430,33 @@ def _crisis_escalate(user_id, obs, app):
         logger.debug(f"crisis_escalate error: {e}")
 
 
-logger.info("Agent Loop v1.0 loaded — proactive senior monitoring")
+def _call_senior(user_id, obs):
+    """Proactive phone call to senior (v387)."""
+    try:
+        from twilio_voice_helpers import initiate_proactive_call, get_senior_phone
+        phone = get_senior_phone(user_id)
+        if not phone:
+            logger.debug(f"No phone for {user_id}, skipping proactive call")
+            return
+
+        # Build greeting based on observation type
+        greetings = {
+            "c_trend_rising": "Dobrý den, tady Radim. Všiml jsem si, že v posledních rozhovorech jste byl trochu napjatější. Chtěl jsem se zeptat, jestli je vše v pořádku.",
+            "activity_drop": "Dobrý den, tady Radim. Dnes jste byl méně aktivní než obvykle, tak jsem vám chtěl zavolat a zeptat se, jak se máte.",
+            "vital_anomaly": "Dobrý den, tady Radim. Zaznamenal jsem neobvyklou hodnotu vašich životních funkcí. Jak se cítíte?",
+            "no_interaction": "Dobrý den, tady Radim. Už jsme spolu delší dobu nemluvili, tak jsem vám chtěl zavolat. Jak se vám daří?",
+        }
+        greeting = greetings.get(obs["type"], "Dobrý den, tady Radim. Chtěl jsem se zeptat, jak se máte.")
+
+        result = initiate_proactive_call(phone, greeting, user_id=user_id, reason=obs["type"])
+        if result.get("success"):
+            logger.info(f"📞 Proactive call to {user_id}: {result['call_sid']}")
+        else:
+            logger.debug(f"Proactive call failed for {user_id}: {result.get('error')}")
+    except ImportError:
+        logger.debug("Twilio not available for proactive calls")
+    except Exception as e:
+        logger.debug(f"call_senior error: {e}")
+
+
+logger.info("Agent Loop v1.1 loaded — proactive monitoring + phone calls")

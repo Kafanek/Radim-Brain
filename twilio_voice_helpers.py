@@ -452,4 +452,94 @@ def lookup_contact_phone(target, caller_phone):
     return None
 
 
-logger.info("✅ Twilio Voice Helpers loaded — auth, TTS, state, AI, intent detection")
+# ============================================================================
+# PROACTIVE OUTBOUND CALLS (v387 — agent loop integration)
+# ============================================================================
+
+def initiate_proactive_call(phone_number, greeting, user_id=None, reason="check_in"):
+    """
+    Initiate outbound call from Radim to a senior or caregiver.
+
+    Called by agent_loop when severity >= ALERT, or for scheduled check-ins.
+
+    Args:
+        phone_number: E.164 format (+420...)
+        greeting: Czech text Radim will say when call connects
+        user_id: senior's user_id (for tracking)
+        reason: 'check_in', 'alert', 'crisis', 'medication_reminder'
+
+    Returns:
+        dict: {success, call_sid, error}
+    """
+    client = get_twilio_client()
+    if not client or not TWILIO_PHONE_NUMBER:
+        logger.warning("Proactive call skipped — Twilio not configured")
+        return {"success": False, "error": "Twilio not configured"}
+
+    if not phone_number or not phone_number.startswith('+'):
+        return {"success": False, "error": f"Invalid phone: {phone_number}"}
+
+    try:
+        from xml.sax.saxutils import escape as esc
+        safe_greeting = esc(greeting)
+        safe_listen = esc("Poslouchám vás.")
+
+        twiml = (
+            f'<Response>'
+            f'<Say language="cs-CZ" voice="Polly.Adela">{safe_greeting}</Say>'
+            f'<Gather input="speech" language="cs-CZ" '
+            f'action="/api/twilio/gather" method="POST" speechTimeout="auto" timeout="10">'
+            f'<Say language="cs-CZ" voice="Polly.Adela">{safe_listen}</Say>'
+            f'</Gather>'
+            f'<Say language="cs-CZ" voice="Polly.Adela">Neslyšel jsem vás. Zkusím zavolat později.</Say>'
+            f'</Response>'
+        )
+
+        call = client.calls.create(
+            to=phone_number,
+            from_=TWILIO_PHONE_NUMBER,
+            twiml=twiml,
+            status_callback="/api/twilio/status",
+            status_callback_method="POST",
+            timeout=30,  # ring for 30s max
+        )
+
+        active_calls[call.sid] = {
+            "from": TWILIO_PHONE_NUMBER,
+            "to": phone_number,
+            "started": time.time(),
+            "history": [],
+            "caller_name": "Radim",
+            "status": "initiated",
+            "direction": "proactive",
+            "reason": reason,
+            "user_id": user_id,
+        }
+
+        logger.info(f"📞 Proactive call initiated: {call.sid} → {phone_number} (reason={reason})")
+        return {"success": True, "call_sid": call.sid}
+
+    except Exception as e:
+        logger.error(f"Proactive call error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def get_senior_phone(user_id):
+    """Get senior's phone number from memory_profiles."""
+    try:
+        from memory_helpers import db_load_profile
+        profile = db_load_profile(user_id)
+        # Direct phone number
+        phone = profile.get("phone")
+        if phone and phone.startswith('+'):
+            return phone
+        # Fallback: first emergency contact
+        ec = profile.get("emergency_contacts", [])
+        if ec and isinstance(ec, list) and len(ec) > 0:
+            return ec[0].get("phone")
+    except Exception:
+        pass
+    return None
+
+
+logger.info("✅ Twilio Voice Helpers loaded — auth, TTS, state, AI, intent, proactive calls")
