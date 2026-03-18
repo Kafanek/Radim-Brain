@@ -836,6 +836,29 @@ def health():
         'online_users': len(users_online)
     }), status_code
 
+# v383: Admin IoT simulator
+@app.route('/api/admin/iot-simulate', methods=['POST'])
+def admin_iot_simulate():
+    """Seed IoT devices + 7 days of sensor data for demo_senior_1."""
+    try:
+        from iot_simulator import run_full_iot_seed
+        result = run_full_iot_seed()
+        return jsonify({'success': True, **result}), 201
+    except Exception as e:
+        logger.error(f"IoT simulate error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# v383: Debug personalized prompt (check if agent observations appear)
+@app.route('/api/admin/debug-prompt/<user_id>')
+def admin_debug_prompt(user_id):
+    """Show the personalized system prompt for a user."""
+    try:
+        from memory_logic import build_personalized_prompt
+        prompt = build_personalized_prompt(user_id)
+        return jsonify({'user_id': user_id, 'prompt_length': len(prompt), 'prompt': prompt}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # v382: Admin seed demo data
 @app.route('/api/admin/seed-demo', methods=['POST'])
 def admin_seed_demo():
