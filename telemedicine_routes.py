@@ -6,9 +6,12 @@
 # Helpers in telemedicine_helpers.py
 # ============================================
 
+import logging
 import os
 from datetime import date
 from flask import Blueprint, request, jsonify
+
+logger = logging.getLogger(__name__)
 from database import get_connection, is_postgres
 from auth_middleware import require_auth
 from utils import now_iso
@@ -58,6 +61,12 @@ def telemed_my_upcoming():
                     d[k] = d[k].isoformat()
             upcoming.append(d)
     except Exception as e:
+        logger.error(f"Telemedicine DB error: {e}")
+        if db:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
     finally:
         if db:
@@ -96,6 +105,12 @@ def telemed_my_history():
                     d[k] = d[k].isoformat()
             history.append(d)
     except Exception as e:
+        logger.error(f"Telemedicine DB error: {e}")
+        if db:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
     finally:
         if db:
@@ -159,6 +174,12 @@ def telemed_my_request():
             cid = cursor.lastrowid
         db.commit()
     except Exception as e:
+        logger.error(f"Telemedicine DB error: {e}")
+        if db:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
     finally:
         if db:
@@ -226,6 +247,12 @@ def telemed_my_teacher_availability():
                     d[k] = d[k].isoformat()
             slots.append(d)
     except Exception as e:
+        logger.error(f"Telemedicine DB error: {e}")
+        if db:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
     finally:
         if db:
@@ -269,6 +296,12 @@ def telemed_my_cancel(consultation_id):
         db.commit()
         teacher_id = row['teacher_id']
     except Exception as e:
+        logger.error(f"Telemedicine DB error: {e}")
+        if db:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
     finally:
         if db:

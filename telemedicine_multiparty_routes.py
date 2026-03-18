@@ -5,8 +5,11 @@
 # ============================================
 
 import json
+import logging
 import os
 from flask import Blueprint, request, jsonify
+
+logger = logging.getLogger(__name__)
 from database import get_connection, is_postgres
 from auth_middleware import require_auth, require_teacher
 from utils import now_iso
@@ -114,6 +117,12 @@ def telemed_create_multiparty():
 
         db.commit()
     except Exception as e:
+        logger.error(f"Telemedicine multiparty DB error: {e}")
+        if db:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
     finally:
@@ -261,6 +270,12 @@ def telemed_list_participants(consultation_id):
                     d[k] = d[k].isoformat()
             participants.append(d)
     except Exception as e:
+        logger.error(f"Telemedicine multiparty DB error: {e}")
+        if db:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
     finally:
@@ -317,6 +332,12 @@ def telemed_respond_invitation(consultation_id):
         )
         db.commit()
     except Exception as e:
+        logger.error(f"Telemedicine multiparty DB error: {e}")
+        if db:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
     finally:
@@ -380,6 +401,12 @@ def telemed_participant_notes(consultation_id):
 
         db.commit()
     except Exception as e:
+        logger.error(f"Telemedicine multiparty DB error: {e}")
+        if db:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
     finally:
@@ -479,6 +506,12 @@ def telemed_remove_participant(consultation_id, participant_user_id):
         db.execute(f"DELETE FROM telemedicine_participants WHERE id = {p}", (row['id'],))
         db.commit()
     except Exception as e:
+        logger.error(f"Telemedicine multiparty DB error: {e}")
+        if db:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
     finally:

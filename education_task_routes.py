@@ -89,6 +89,12 @@ def teacher_create_task(student_id):
             task_id = cursor.lastrowid
         db.commit()
     except Exception as e:
+        logger.error(f"teacher_create_task DB error: {e}")
+        if db:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
     finally:
         if db:
@@ -175,6 +181,7 @@ def teacher_get_student_tasks(student_id):
             tasks.append(task)
 
     except Exception as e:
+        logger.error(f"teacher_get_student_tasks DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
     finally:
         if db:
@@ -240,6 +247,12 @@ def teacher_grade_task(task_id):
             )
         db.commit()
     except Exception as e:
+        logger.error(f"teacher_grade_task DB error: {e}")
+        if db:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
     finally:
         if db:
@@ -326,6 +339,12 @@ def teacher_update_task(task_id):
         db.execute(sql, tuple(params))
         db.commit()
     except Exception as e:
+        logger.error(f"teacher_update_task DB error: {e}")
+        if db:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
     finally:
         if db:
@@ -378,6 +397,12 @@ def teacher_delete_task(task_id):
             )
         db.commit()
     except Exception as e:
+        logger.error(f"teacher_delete_task DB error: {e}")
+        if db:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
     finally:
         if db:
@@ -449,6 +474,7 @@ def student_my_tasks():
             tasks.append(task)
 
     except Exception as e:
+        logger.error(f"student_my_tasks DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
     finally:
         if db:
@@ -519,6 +545,12 @@ def student_submit_task(task_id):
             )
         db.commit()
     except Exception as e:
+        logger.error(f"student_submit_task DB error: {e}")
+        if db:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
     finally:
         if db:

@@ -224,6 +224,7 @@ def _send_sms_alert(alert, room_id):
 
 def _get_room_caregivers(room_id):
     """Get active caregivers with SMS enabled for a room."""
+    db = None
     try:
         db, is_pg = _get_db()
         ph = _ph(is_pg)
@@ -231,27 +232,38 @@ def _get_room_caregivers(room_id):
             SELECT name, phone FROM iot_caregivers
             WHERE room_id = {ph} AND active = {ph} AND notify_sms = {ph}
         ''', (room_id, True if is_pg else 1, True if is_pg else 1)).fetchall()
-        db.close()
         return [{'name': r['name'], 'phone': r['phone']} for r in rows]
     except Exception as e:
         logger.warning(f"Caregiver lookup error: {e}")
         return []
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def _get_room_display_name(room_id):
     """Get user-friendly room name from device registry."""
+    db = None
     try:
         db, is_pg = _get_db()
         ph = _ph(is_pg)
         row = db.execute(f'''
             SELECT user_id FROM iot_devices WHERE room_id = {ph} LIMIT 1
         ''', (room_id,)).fetchone()
-        db.close()
         if row and row['user_id']:
             return f"{room_id} ({row['user_id']})"
         return room_id
     except Exception:
         return room_id
+    finally:
+        if db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 logger.info("✅ IoT Helpers loaded — auth, DB, alert engine, room helpers")
