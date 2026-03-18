@@ -16,7 +16,7 @@ from database import get_connection, is_postgres, db_insert
 from auth_middleware import require_auth
 from utils import now_iso
 from telemedicine_helpers import (
-    _p, _get_user_id,
+    _get_user_id,
     _get_consultation, _get_assigned_teacher,
     _notify_user, _is_participant,
     _validate_date, _validate_time,
@@ -45,10 +45,10 @@ def telemed_my_upcoming():
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         rows = db.execute(
             f"SELECT id, teacher_id, scheduled_date, scheduled_time, duration_minutes, status, consultation_type, room_code, jitsi_url "
-            f"FROM telemedicine_consultations WHERE student_id = {p} AND scheduled_date >= {p} AND status IN ('requested', 'confirmed', 'in_progress') "
+            f"FROM telemedicine_consultations WHERE student_id = ? AND scheduled_date >= ? AND status IN ('requested', 'confirmed', 'in_progress') "
             f"ORDER BY scheduled_date, scheduled_time",
             (student_id, today)
         ).fetchall()
@@ -89,10 +89,10 @@ def telemed_my_history():
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         rows = db.execute(
             f"SELECT id, teacher_id, scheduled_date, scheduled_time, status, consultation_type, complaint, findings, recommendations, created_at "
-            f"FROM telemedicine_consultations WHERE student_id = {p} AND status IN ('completed', 'archived') "
+            f"FROM telemedicine_consultations WHERE student_id = ? AND status IN ('completed', 'archived') "
             f"ORDER BY scheduled_date DESC LIMIT 50",
             (student_id,)
         ).fetchall()
@@ -221,10 +221,10 @@ def telemed_my_teacher_availability():
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         rows = db.execute(
             f"SELECT id, day_of_week, specific_date, start_time, end_time, slot_duration_minutes "
-            f"FROM telemedicine_availability WHERE teacher_id = {p} AND is_active = 1 ORDER BY day_of_week, start_time",
+            f"FROM telemedicine_availability WHERE teacher_id = ? AND is_active = 1 ORDER BY day_of_week, start_time",
             (teacher_id,)
         ).fetchall()
 
@@ -267,9 +267,9 @@ def telemed_my_cancel(consultation_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         row = db.execute(
-            f"SELECT id, teacher_id, status FROM telemedicine_consultations WHERE id = {p} AND student_id = {p}",
+            f"SELECT id, teacher_id, status FROM telemedicine_consultations WHERE id = ? AND student_id = ?",
             (consultation_id, student_id)
         ).fetchone()
 
@@ -279,7 +279,7 @@ def telemed_my_cancel(consultation_id):
             return jsonify({"success": False, "error": f"Nelze zrusit konzultaci ve stavu '{row['status']}'"}), 400
 
         db.execute(
-            f"UPDATE telemedicine_consultations SET status = 'cancelled', cancel_reason = {p}, updated_at = CURRENT_TIMESTAMP WHERE id = {p}",
+            f"UPDATE telemedicine_consultations SET status = 'cancelled', cancel_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (reason, consultation_id)
         )
         db.commit()

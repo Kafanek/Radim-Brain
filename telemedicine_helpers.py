@@ -21,10 +21,6 @@ from utils import now_iso
 # SQL + AUTH HELPERS
 # ============================================
 
-def _p():
-    """SQL placeholder — always ? (PgCursorWrapper converts to %s automatically)"""
-    return "?"
-
 
 def _get_user_id():
     """Get current user ID from JWT"""
@@ -47,9 +43,9 @@ def _verify_teacher_owns_consultation(teacher_id, consultation_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         row = db.execute(
-            f"SELECT id FROM telemedicine_consultations WHERE id = {p} AND teacher_id = {p}",
+            f"SELECT id FROM telemedicine_consultations WHERE id = ? AND teacher_id = ?",
             (consultation_id, teacher_id)
         ).fetchone()
         return row is not None
@@ -69,9 +65,9 @@ def _verify_student_owns_consultation(student_id, consultation_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         row = db.execute(
-            f"SELECT id FROM telemedicine_consultations WHERE id = {p} AND student_id = {p}",
+            f"SELECT id FROM telemedicine_consultations WHERE id = ? AND student_id = ?",
             (consultation_id, student_id)
         ).fetchone()
         return row is not None
@@ -91,9 +87,9 @@ def _get_consultation(consultation_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         row = db.execute(
-            f"SELECT * FROM telemedicine_consultations WHERE id = {p}",
+            f"SELECT * FROM telemedicine_consultations WHERE id = ?",
             (consultation_id,)
         ).fetchone()
         if row:
@@ -147,9 +143,9 @@ def _notify_all_participants(consultation_id, event, data):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         rows = db.execute(
-            f"SELECT user_id FROM telemedicine_participants WHERE consultation_id = {p} AND status = 'accepted'",
+            f"SELECT user_id FROM telemedicine_participants WHERE consultation_id = ? AND status = 'accepted'",
             (consultation_id,)
         ).fetchall()
         for r in rows:
@@ -195,9 +191,9 @@ def _get_teacher_students_local(teacher_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         rows = db.execute(
-            f"SELECT student_id FROM education_assignments WHERE teacher_id = {p} AND status = 'active'",
+            f"SELECT student_id FROM education_assignments WHERE teacher_id = ? AND status = 'active'",
             (teacher_id,)
         ).fetchall()
         return [r['student_id'] for r in rows]
@@ -222,9 +218,9 @@ def _get_assigned_teacher(student_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         row = db.execute(
-            f"SELECT teacher_id FROM education_assignments WHERE student_id = {p} AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+            f"SELECT teacher_id FROM education_assignments WHERE student_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
             (student_id,)
         ).fetchone()
         return row['teacher_id'] if row else None
@@ -251,9 +247,9 @@ def _is_participant(user_id, consultation):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         row = db.execute(
-            f"SELECT id FROM telemedicine_participants WHERE consultation_id = {p} AND user_id = {p} AND status = 'accepted'",
+            f"SELECT id FROM telemedicine_participants WHERE consultation_id = ? AND user_id = ? AND status = 'accepted'",
             (consultation.get('id'), user_id)
         ).fetchone()
         return row is not None
@@ -296,11 +292,11 @@ def get_upcoming_consultations_for_reminder(window_minutes=15):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         rows = db.execute(
             f"SELECT id, teacher_id, student_id, scheduled_time, scheduled_date "
             f"FROM telemedicine_consultations "
-            f"WHERE status = 'confirmed' AND scheduled_date = {p} AND scheduled_time >= {p} AND scheduled_time <= {p}",
+            f"WHERE status = 'confirmed' AND scheduled_date = ? AND scheduled_time >= ? AND scheduled_time <= ?",
             (current_date, current_time, future_time)
         ).fetchall()
 
@@ -319,7 +315,7 @@ def get_upcoming_consultations_for_reminder(window_minutes=15):
             # Multi-party: include participant IDs
             try:
                 part_rows = db.execute(
-                    f"SELECT user_id FROM telemedicine_participants WHERE consultation_id = {p} AND status = 'accepted'",
+                    f"SELECT user_id FROM telemedicine_participants WHERE consultation_id = ? AND status = 'accepted'",
                     (d['id'],)
                 ).fetchall()
                 d['participant_ids'] = [pr['user_id'] for pr in part_rows]

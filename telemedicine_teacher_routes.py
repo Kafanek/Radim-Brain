@@ -18,7 +18,7 @@ from database import get_connection, is_postgres, db_insert
 from auth_middleware import require_auth, require_teacher
 from utils import now_iso
 from telemedicine_helpers import (
-    _p, _get_teacher_id_local,
+    _get_teacher_id_local,
     _get_consultation, _generate_room_code,
     _notify_user, _notify_all_participants,
     _validate_date, _validate_time,
@@ -44,22 +44,22 @@ def telemed_dashboard():
     db = None
     try:
         db = get_connection()
-        p = _p()
+
 
         today_rows = db.execute(
             f"SELECT id, student_id, scheduled_time, status, consultation_type FROM telemedicine_consultations "
-            f"WHERE teacher_id = {p} AND scheduled_date = {p} AND status != 'cancelled' ORDER BY scheduled_time",
+            f"WHERE teacher_id = ? AND scheduled_date = ? AND status != 'cancelled' ORDER BY scheduled_time",
             (teacher_id, today)
         ).fetchall()
 
         pending = db.execute(
-            f"SELECT COUNT(*) as cnt FROM telemedicine_consultations WHERE teacher_id = {p} AND status = 'requested'",
+            f"SELECT COUNT(*) as cnt FROM telemedicine_consultations WHERE teacher_id = ? AND status = 'requested'",
             (teacher_id,)
         ).fetchone()
 
         month_start = date.today().replace(day=1).isoformat()
         total = db.execute(
-            f"SELECT COUNT(*) as cnt FROM telemedicine_consultations WHERE teacher_id = {p} AND scheduled_date >= {p} AND status = 'completed'",
+            f"SELECT COUNT(*) as cnt FROM telemedicine_consultations WHERE teacher_id = ? AND scheduled_date >= ? AND status = 'completed'",
             (teacher_id, month_start)
         ).fetchone()
 
@@ -161,9 +161,9 @@ def telemed_get_availability():
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         rows = db.execute(
-            f"SELECT * FROM telemedicine_availability WHERE teacher_id = {p} AND is_active = 1 ORDER BY day_of_week, start_time",
+            f"SELECT * FROM telemedicine_availability WHERE teacher_id = ? AND is_active = 1 ORDER BY day_of_week, start_time",
             (teacher_id,)
         ).fetchall()
 
@@ -202,15 +202,15 @@ def telemed_delete_availability(slot_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         row = db.execute(
-            f"SELECT id FROM telemedicine_availability WHERE id = {p} AND teacher_id = {p}",
+            f"SELECT id FROM telemedicine_availability WHERE id = ? AND teacher_id = ?",
             (slot_id, teacher_id)
         ).fetchone()
         if not row:
             return jsonify({"success": False, "error": "Slot nenalezen"}), 404
 
-        db.execute(f"UPDATE telemedicine_availability SET is_active = 0 WHERE id = {p}", (slot_id,))
+        db.execute(f"UPDATE telemedicine_availability SET is_active = 0 WHERE id = ?", (slot_id,))
         db.commit()
     except Exception as e:
         logger.error(f"Telemedicine DB error: {e}")
@@ -247,18 +247,18 @@ def telemed_list_consultations():
     db = None
     try:
         db = get_connection()
-        p = _p()
-        conditions = [f"teacher_id = {p}"]
+
+        conditions = [f"teacher_id = ?"]
         params = [teacher_id]
 
         if status_filter:
-            conditions.append(f"status = {p}")
+            conditions.append(f"status = ?")
             params.append(status_filter)
         if date_filter:
-            conditions.append(f"scheduled_date = {p}")
+            conditions.append(f"scheduled_date = ?")
             params.append(date_filter)
         if student_filter:
-            conditions.append(f"student_id = {p}")
+            conditions.append(f"student_id = ?")
             params.append(student_filter)
 
         where = " AND ".join(conditions)
@@ -315,9 +315,9 @@ def telemed_confirm(consultation_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         row = db.execute(
-            f"SELECT id, student_id, status FROM telemedicine_consultations WHERE id = {p} AND teacher_id = {p}",
+            f"SELECT id, student_id, status FROM telemedicine_consultations WHERE id = ? AND teacher_id = ?",
             (consultation_id, teacher_id)
         ).fetchone()
 
@@ -327,7 +327,7 @@ def telemed_confirm(consultation_id):
             return jsonify({"success": False, "error": f"Nelze potvrdit konzultaci ve stavu '{row['status']}'"}), 400
 
         db.execute(
-            f"UPDATE telemedicine_consultations SET status = 'confirmed', updated_at = CURRENT_TIMESTAMP WHERE id = {p}",
+            f"UPDATE telemedicine_consultations SET status = 'confirmed', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (consultation_id,)
         )
         db.commit()
@@ -369,9 +369,9 @@ def telemed_teacher_cancel(consultation_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         row = db.execute(
-            f"SELECT id, student_id, status FROM telemedicine_consultations WHERE id = {p} AND teacher_id = {p}",
+            f"SELECT id, student_id, status FROM telemedicine_consultations WHERE id = ? AND teacher_id = ?",
             (consultation_id, teacher_id)
         ).fetchone()
 
@@ -381,7 +381,7 @@ def telemed_teacher_cancel(consultation_id):
             return jsonify({"success": False, "error": f"Nelze zrusit konzultaci ve stavu '{row['status']}'"}), 400
 
         db.execute(
-            f"UPDATE telemedicine_consultations SET status = 'cancelled', cancel_reason = {p}, updated_at = CURRENT_TIMESTAMP WHERE id = {p}",
+            f"UPDATE telemedicine_consultations SET status = 'cancelled', cancel_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (reason, consultation_id)
         )
         db.commit()
@@ -421,9 +421,9 @@ def telemed_start(consultation_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         row = db.execute(
-            f"SELECT id, student_id, status, is_multiparty FROM telemedicine_consultations WHERE id = {p} AND teacher_id = {p}",
+            f"SELECT id, student_id, status, is_multiparty FROM telemedicine_consultations WHERE id = ? AND teacher_id = ?",
             (consultation_id, teacher_id)
         ).fetchone()
 
@@ -438,7 +438,7 @@ def telemed_start(consultation_id):
         jitsi_url = f"https://meet.jit.si/{room_code}"
 
         db.execute(
-            f"UPDATE telemedicine_consultations SET status = 'in_progress', room_code = {p}, jitsi_url = {p}, updated_at = CURRENT_TIMESTAMP WHERE id = {p}",
+            f"UPDATE telemedicine_consultations SET status = 'in_progress', room_code = ?, jitsi_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (room_code, jitsi_url, consultation_id)
         )
         db.commit()
@@ -486,9 +486,9 @@ def telemed_complete(consultation_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         row = db.execute(
-            f"SELECT id, status FROM telemedicine_consultations WHERE id = {p} AND teacher_id = {p}",
+            f"SELECT id, status FROM telemedicine_consultations WHERE id = ? AND teacher_id = ?",
             (consultation_id, teacher_id)
         ).fetchone()
 
@@ -498,7 +498,7 @@ def telemed_complete(consultation_id):
             return jsonify({"success": False, "error": f"Nelze ukoncit konzultaci ve stavu '{row['status']}'"}), 400
 
         db.execute(
-            f"UPDATE telemedicine_consultations SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = {p}",
+            f"UPDATE telemedicine_consultations SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (consultation_id,)
         )
         db.commit()
@@ -539,9 +539,9 @@ def telemed_notes(consultation_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         row = db.execute(
-            f"SELECT id, student_id, status FROM telemedicine_consultations WHERE id = {p} AND teacher_id = {p}",
+            f"SELECT id, student_id, status FROM telemedicine_consultations WHERE id = ? AND teacher_id = ?",
             (consultation_id, teacher_id)
         ).fetchone()
 
@@ -554,7 +554,7 @@ def telemed_notes(consultation_id):
         student_id = row['student_id']
 
         db.execute(
-            f"UPDATE telemedicine_consultations SET complaint = {p}, findings = {p}, recommendations = {p}, notes = {p}, updated_at = CURRENT_TIMESTAMP WHERE id = {p}",
+            f"UPDATE telemedicine_consultations SET complaint = ?, findings = ?, recommendations = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (complaint, findings, recommendations, notes_json, consultation_id)
         )
         db.commit()
@@ -642,9 +642,9 @@ def telemed_send_summary(consultation_id):
         db2 = None
         try:
             db2 = get_connection()
-            p = _p()
+    
             db2.execute(
-                f"UPDATE telemedicine_consultations SET email_sent = 1, updated_at = CURRENT_TIMESTAMP WHERE id = {p}",
+                f"UPDATE telemedicine_consultations SET email_sent = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (consultation_id,)
             )
             db2.commit()
@@ -677,10 +677,10 @@ def telemed_student_history(student_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         rows = db.execute(
             f"SELECT id, scheduled_date, scheduled_time, status, consultation_type, complaint, findings, recommendations, created_at "
-            f"FROM telemedicine_consultations WHERE teacher_id = {p} AND student_id = {p} AND status != 'cancelled' "
+            f"FROM telemedicine_consultations WHERE teacher_id = ? AND student_id = ? AND status != 'cancelled' "
             f"ORDER BY scheduled_date DESC, scheduled_time DESC LIMIT 50",
             (teacher_id, student_id)
         ).fetchall()

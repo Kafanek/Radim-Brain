@@ -334,6 +334,48 @@ def is_postgres():
     return USE_POSTGRES
 
 
+class db_context:
+    """Context manager for database connections with auto-commit/rollback/close.
+
+    Usage (read-only):
+        with db_context() as db:
+            rows = db.execute("SELECT ...").fetchall()
+
+    Usage (write):
+        with db_context(commit=True) as db:
+            db.execute("INSERT ...")
+
+    On success: commits (if commit=True), then closes connection.
+    On exception: rolls back, closes connection, re-raises.
+    """
+
+    def __init__(self, commit=False):
+        self._commit = commit
+        self._db = None
+
+    def __enter__(self):
+        self._db = get_connection()
+        return self._db
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._db is None:
+            return False
+        try:
+            if exc_type is not None:
+                try:
+                    self._db.rollback()
+                except Exception:
+                    pass
+            elif self._commit:
+                self._db.commit()
+        finally:
+            try:
+                self._db.close()
+            except Exception:
+                pass
+        return False  # don't suppress exceptions
+
+
 def db_insert(db, table, columns, values):
     """Insert a row and return its ID (works on both PostgreSQL and SQLite).
 

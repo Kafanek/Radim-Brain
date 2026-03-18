@@ -14,7 +14,7 @@ from database import get_connection, is_postgres, db_insert
 from auth_middleware import require_auth, require_teacher
 from utils import now_iso
 from telemedicine_helpers import (
-    _p, _get_user_id, _get_teacher_id_local,
+    _get_user_id, _get_teacher_id_local,
     _get_consultation, _is_participant, _notify_user, _notify_all_participants,
     _validate_date, _validate_time, _verify_teacher_student_local,
     MAX_TEXT, SPECIALTIES
@@ -62,7 +62,7 @@ def telemed_create_multiparty():
     db = None
     try:
         db = get_connection()
-        p = _p()
+
 
         # Create consultation
         cid = db_insert(db, 'telemedicine_consultations',
@@ -74,13 +74,13 @@ def telemed_create_multiparty():
 
         # Auto-insert organizer as participant
         db.execute(
-            f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, specialty, status) VALUES ({p}, {p}, 'organizer', {p}, 'accepted')",
+            f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, specialty, status) VALUES (?, ?, 'organizer', ?, 'accepted')",
             (cid, organizer_id, data.get('organizer_specialty', 'other'))
         )
 
         # Auto-insert patient as participant
         db.execute(
-            f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, status) VALUES ({p}, {p}, 'patient', 'accepted')",
+            f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, status) VALUES (?, ?, 'patient', 'accepted')",
             (cid, patient_id)
         )
 
@@ -98,7 +98,7 @@ def telemed_create_multiparty():
                 role = 'specialist'
             try:
                 db.execute(
-                    f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, specialty, status) VALUES ({p}, {p}, {p}, {p}, 'invited')",
+                    f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, specialty, status) VALUES (?, ?, ?, ?, 'invited')",
                     (cid, uid, role, specialty)
                 )
                 invited_count += 1
@@ -174,22 +174,22 @@ def telemed_invite_participant(consultation_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
 
         # Mark as multiparty if not already
         if not consultation.get('is_multiparty'):
-            db.execute(f"UPDATE telemedicine_consultations SET is_multiparty = 1 WHERE id = {p}", (consultation_id,))
+            db.execute(f"UPDATE telemedicine_consultations SET is_multiparty = 1 WHERE id = ?", (consultation_id,))
             # Auto-insert organizer and patient if first time
             try:
                 db.execute(
-                    f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, status) VALUES ({p}, {p}, 'organizer', 'accepted')",
+                    f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, status) VALUES (?, ?, 'organizer', 'accepted')",
                     (consultation_id, organizer_id)
                 )
             except Exception:
                 pass
             try:
                 db.execute(
-                    f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, status) VALUES ({p}, {p}, 'patient', 'accepted')",
+                    f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, status) VALUES (?, ?, 'patient', 'accepted')",
                     (consultation_id, consultation.get('student_id'))
                 )
             except Exception:
@@ -235,10 +235,10 @@ def telemed_list_participants(consultation_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         rows = db.execute(
             f"SELECT id, user_id, role, specialty, status, notes_contribution, joined_at, left_at, created_at "
-            f"FROM telemedicine_participants WHERE consultation_id = {p} ORDER BY created_at",
+            f"FROM telemedicine_participants WHERE consultation_id = ? ORDER BY created_at",
             (consultation_id,)
         ).fetchall()
 
@@ -295,9 +295,9 @@ def telemed_respond_invitation(consultation_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         row = db.execute(
-            f"SELECT id, status, consultation_id FROM telemedicine_participants WHERE consultation_id = {p} AND user_id = {p}",
+            f"SELECT id, status, consultation_id FROM telemedicine_participants WHERE consultation_id = ? AND user_id = ?",
             (consultation_id, user_id)
         ).fetchone()
 
@@ -307,7 +307,7 @@ def telemed_respond_invitation(consultation_id):
             return jsonify({"success": False, "error": f"Pozvanka je jiz ve stavu '{row['status']}'"}), 400
 
         db.execute(
-            f"UPDATE telemedicine_participants SET status = {p} WHERE id = {p}",
+            f"UPDATE telemedicine_participants SET status = ? WHERE id = ?",
             (response, row['id'])
         )
         db.commit()
@@ -357,9 +357,9 @@ def telemed_participant_notes(consultation_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         row = db.execute(
-            f"SELECT id, role FROM telemedicine_participants WHERE consultation_id = {p} AND user_id = {p} AND status = 'accepted'",
+            f"SELECT id, role FROM telemedicine_participants WHERE consultation_id = ? AND user_id = ? AND status = 'accepted'",
             (consultation_id, user_id)
         ).fetchone()
 
@@ -370,12 +370,12 @@ def telemed_participant_notes(consultation_id):
             # Auto-create participant row for organizer
             db.execute(
                 f"INSERT INTO telemedicine_participants (consultation_id, user_id, role, status, notes_contribution) "
-                f"VALUES ({p}, {p}, 'organizer', 'accepted', {p})",
+                f"VALUES (?, ?, 'organizer', 'accepted', ?)",
                 (consultation_id, user_id, notes_contribution)
             )
         else:
             db.execute(
-                f"UPDATE telemedicine_participants SET notes_contribution = {p} WHERE id = {p}",
+                f"UPDATE telemedicine_participants SET notes_contribution = ? WHERE id = ?",
                 (notes_contribution, row['id'])
             )
 
@@ -428,10 +428,10 @@ def telemed_all_notes(consultation_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         rows = db.execute(
             f"SELECT user_id, role, specialty, notes_contribution FROM telemedicine_participants "
-            f"WHERE consultation_id = {p} AND notes_contribution IS NOT NULL AND notes_contribution != ''",
+            f"WHERE consultation_id = ? AND notes_contribution IS NOT NULL AND notes_contribution != ''",
             (consultation_id,)
         ).fetchall()
         specialist_notes = [dict(r) for r in rows]
@@ -474,16 +474,16 @@ def telemed_remove_participant(consultation_id, participant_user_id):
     db = None
     try:
         db = get_connection()
-        p = _p()
+
         row = db.execute(
-            f"SELECT id FROM telemedicine_participants WHERE consultation_id = {p} AND user_id = {p}",
+            f"SELECT id FROM telemedicine_participants WHERE consultation_id = ? AND user_id = ?",
             (consultation_id, participant_user_id)
         ).fetchone()
 
         if not row:
             return jsonify({"success": False, "error": "Ucastnik nenalezen"}), 404
 
-        db.execute(f"DELETE FROM telemedicine_participants WHERE id = {p}", (row['id'],))
+        db.execute(f"DELETE FROM telemedicine_participants WHERE id = ?", (row['id'],))
         db.commit()
     except Exception as e:
         logger.error(f"Telemedicine multiparty DB error: {e}")

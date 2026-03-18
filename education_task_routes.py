@@ -1,18 +1,17 @@
 # ============================================
-# EDUCATION TASK ROUTES v1.1.0
+# EDUCATION TASK ROUTES v2.0.0
 # ============================================
 # Task CRUD: teacher creates/grades/updates/deletes tasks,
 # student views/submits tasks, student views assigned teacher.
-# Extracted from education_teacher_routes.py for modularity.
 #
-# v1.1.0: Unified ? placeholders (PgCursorWrapper converts to %s),
-#          rollback + logging on all DB errors.
+# v2.0: db_context() eliminates boilerplate try/except/finally.
+#        Unified ? placeholders, rollback + logging on all DB errors.
 # ============================================
 
 import json
 import logging
 from flask import Blueprint, request, jsonify, g
-from database import get_connection, db_insert
+from database import db_context, db_insert
 from auth_middleware import require_auth, require_teacher
 from education_helpers import (
     now_iso, get_teacher_id, verify_teacher_student, get_adaptive_profile
@@ -58,7 +57,6 @@ def teacher_create_task(student_id):
     module_id = data.get('module_id')
     due_date = data.get('due_date')
 
-    # Validate due_date format
     if due_date:
         try:
             from datetime import datetime as _dt
@@ -70,28 +68,15 @@ def teacher_create_task(student_id):
     if task_type not in valid_types:
         task_type = 'homework'
 
-    db = None
     try:
-        db = get_connection()
-        task_id = db_insert(db, 'education_teacher_tasks',
-            ['teacher_id', 'student_id', 'title', 'description', 'task_type', 'course_id', 'module_id', 'due_date'],
-            (teacher_id, student_id, title, description, task_type, course_id, module_id, due_date)
-        )
-        db.commit()
+        with db_context(commit=True) as db:
+            task_id = db_insert(db, 'education_teacher_tasks',
+                ['teacher_id', 'student_id', 'title', 'description', 'task_type', 'course_id', 'module_id', 'due_date'],
+                (teacher_id, student_id, title, description, task_type, course_id, module_id, due_date)
+            )
     except Exception as e:
         logger.error(f"teacher_create_task DB error: {e}")
-        if db:
-            try:
-                db.rollback()
-            except Exception:
-                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
     # SocketIO notification (if available)
     try:
@@ -99,21 +84,15 @@ def teacher_create_task(student_id):
         socketio = current_app.extensions.get('socketio')
         if socketio:
             socketio.emit('education_new_task', {
-                'task_id': task_id,
-                'title': title,
-                'task_type': task_type,
-                'teacher_id': teacher_id,
-                'due_date': due_date
+                'task_id': task_id, 'title': title, 'task_type': task_type,
+                'teacher_id': teacher_id, 'due_date': due_date
             }, room=f'user_{student_id}')
     except Exception:
         pass
 
     return jsonify({
-        "success": True,
-        "message": f"Úkol '{title}' zadán",
-        "task_id": task_id,
-        "student_id": student_id,
-        "timestamp": now_iso()
+        "success": True, "message": f"Úkol '{title}' zadán",
+        "task_id": task_id, "student_id": student_id, "timestamp": now_iso()
     }), 201
 
 
@@ -128,52 +107,39 @@ def teacher_get_student_tasks(student_id):
 
     status_filter = request.args.get('status')
 
-    db = None
     try:
-        db = get_connection()
-        if status_filter:
-            rows = db.execute(
-                "SELECT * FROM education_teacher_tasks WHERE student_id = ? AND teacher_id = ? AND status = ? ORDER BY created_at DESC LIMIT 100",
-                (student_id, teacher_id, status_filter)
-            ).fetchall()
-        else:
-            rows = db.execute(
-                "SELECT * FROM education_teacher_tasks WHERE student_id = ? AND teacher_id = ? AND status != 'deleted' ORDER BY created_at DESC LIMIT 100",
-                (student_id, teacher_id)
-            ).fetchall()
+        with db_context() as db:
+            if status_filter:
+                rows = db.execute(
+                    "SELECT * FROM education_teacher_tasks WHERE student_id = ? AND teacher_id = ? AND status = ? ORDER BY created_at DESC LIMIT 100",
+                    (student_id, teacher_id, status_filter)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT * FROM education_teacher_tasks WHERE student_id = ? AND teacher_id = ? AND status != 'deleted' ORDER BY created_at DESC LIMIT 100",
+                    (student_id, teacher_id)
+                ).fetchall()
 
-        tasks = []
-        for r in rows:
-            task = dict(r)
-            # Parse student_submission if string
-            sub = task.get('student_submission')
-            if isinstance(sub, str):
-                try:
-                    task['student_submission'] = json.loads(sub)
-                except Exception:
-                    task['student_submission'] = {}
-            # Serialize dates
-            for k in ('created_at', 'updated_at', 'due_date'):
-                if task.get(k) and hasattr(task[k], 'isoformat'):
-                    task[k] = task[k].isoformat()
-            tasks.append(task)
-
+            tasks = []
+            for r in rows:
+                task = dict(r)
+                sub = task.get('student_submission')
+                if isinstance(sub, str):
+                    try:
+                        task['student_submission'] = json.loads(sub)
+                    except Exception:
+                        task['student_submission'] = {}
+                for k in ('created_at', 'updated_at', 'due_date'):
+                    if task.get(k) and hasattr(task[k], 'isoformat'):
+                        task[k] = task[k].isoformat()
+                tasks.append(task)
     except Exception as e:
         logger.error(f"teacher_get_student_tasks DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
     return jsonify({
-        "success": True,
-        "tasks": tasks,
-        "total": len(tasks),
-        "student_id": student_id,
-        "timestamp": now_iso()
+        "success": True, "tasks": tasks, "total": len(tasks),
+        "student_id": student_id, "timestamp": now_iso()
     })
 
 
@@ -194,38 +160,25 @@ def teacher_grade_task(task_id):
     if len(feedback) > 10000:
         return jsonify({"success": False, "error": "feedback max 10 000 znaků"}), 400
 
-    db = None
     try:
-        db = get_connection()
-        row = db.execute(
-            "SELECT id, student_id, status FROM education_teacher_tasks WHERE id = ? AND teacher_id = ?",
-            (task_id, teacher_id)
-        ).fetchone()
+        with db_context(commit=True) as db:
+            row = db.execute(
+                "SELECT id, student_id, status FROM education_teacher_tasks WHERE id = ? AND teacher_id = ?",
+                (task_id, teacher_id)
+            ).fetchone()
 
-        if not row:
-            return jsonify({"success": False, "error": "Úkol nenalezen nebo vám nepatří"}), 404
+            if not row:
+                return jsonify({"success": False, "error": "Úkol nenalezen nebo vám nepatří"}), 404
 
-        student_id = row['student_id']
+            student_id = row['student_id']
 
-        db.execute(
-            "UPDATE education_teacher_tasks SET grade = ?, teacher_feedback = ?, status = 'graded', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (grade, feedback, task_id)
-        )
-        db.commit()
+            db.execute(
+                "UPDATE education_teacher_tasks SET grade = ?, teacher_feedback = ?, status = 'graded', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (grade, feedback, task_id)
+            )
     except Exception as e:
         logger.error(f"teacher_grade_task DB error: {e}")
-        if db:
-            try:
-                db.rollback()
-            except Exception:
-                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
     # SocketIO notification
     try:
@@ -233,19 +186,14 @@ def teacher_grade_task(task_id):
         socketio = current_app.extensions.get('socketio')
         if socketio:
             socketio.emit('education_task_graded', {
-                'task_id': task_id,
-                'grade': grade,
-                'feedback': feedback
+                'task_id': task_id, 'grade': grade, 'feedback': feedback
             }, room=f'user_{student_id}')
     except Exception:
         pass
 
     return jsonify({
-        "success": True,
-        "message": f"Úkol ohodnocen: {grade}",
-        "task_id": task_id,
-        "grade": grade,
-        "timestamp": now_iso()
+        "success": True, "message": f"Úkol ohodnocen: {grade}",
+        "task_id": task_id, "grade": grade, "timestamp": now_iso()
     })
 
 
@@ -257,66 +205,46 @@ def teacher_update_task(task_id):
     teacher_id = get_teacher_id()
     data = request.json or {}
 
-    db = None
     try:
-        db = get_connection()
-        row = db.execute(
-            "SELECT id, status FROM education_teacher_tasks WHERE id = ? AND teacher_id = ?",
-            (task_id, teacher_id)
-        ).fetchone()
+        with db_context(commit=True) as db:
+            row = db.execute(
+                "SELECT id, status FROM education_teacher_tasks WHERE id = ? AND teacher_id = ?",
+                (task_id, teacher_id)
+            ).fetchone()
 
-        if not row:
-            return jsonify({"success": False, "error": "Úkol nenalezen nebo vám nepatří"}), 404
+            if not row:
+                return jsonify({"success": False, "error": "Úkol nenalezen nebo vám nepatří"}), 404
 
-        if row['status'] == 'graded':
-            return jsonify({"success": False, "error": "Ohodnocený úkol nelze upravit"}), 400
+            if row['status'] == 'graded':
+                return jsonify({"success": False, "error": "Ohodnocený úkol nelze upravit"}), 400
 
-        # Build SET clause dynamically
-        updates = []
-        params = []
-        for field in ('title', 'description', 'task_type', 'course_id', 'module_id', 'due_date'):
-            if field in data:
-                val = data[field]
-                if field == 'title' and (not val or not val.strip()):
-                    return jsonify({"success": False, "error": "title nemůže být prázdné"}), 400
-                if field == 'title' and len(val) > 500:
-                    return jsonify({"success": False, "error": "title max 500 znaků"}), 400
-                if field == 'description' and len(str(val)) > 50000:
-                    return jsonify({"success": False, "error": "description max 50 000 znaků"}), 400
-                if field == 'task_type' and val not in ('homework', 'reading', 'quiz', 'scenario', 'exercise'):
-                    val = 'homework'
-                updates.append(f"{field} = ?")
-                params.append(val.strip() if isinstance(val, str) else val)
+            updates = []
+            params = []
+            for field in ('title', 'description', 'task_type', 'course_id', 'module_id', 'due_date'):
+                if field in data:
+                    val = data[field]
+                    if field == 'title' and (not val or not val.strip()):
+                        return jsonify({"success": False, "error": "title nemůže být prázdné"}), 400
+                    if field == 'title' and len(val) > 500:
+                        return jsonify({"success": False, "error": "title max 500 znaků"}), 400
+                    if field == 'description' and len(str(val)) > 50000:
+                        return jsonify({"success": False, "error": "description max 50 000 znaků"}), 400
+                    if field == 'task_type' and val not in ('homework', 'reading', 'quiz', 'scenario', 'exercise'):
+                        val = 'homework'
+                    updates.append(f"{field} = ?")
+                    params.append(val.strip() if isinstance(val, str) else val)
 
-        if not updates:
-            return jsonify({"success": False, "error": "Žádné pole k aktualizaci"}), 400
+            if not updates:
+                return jsonify({"success": False, "error": "Žádné pole k aktualizaci"}), 400
 
-        updates.append("updated_at = CURRENT_TIMESTAMP")
-        params.append(task_id)
-        sql = f"UPDATE education_teacher_tasks SET {', '.join(updates)} WHERE id = ?"
-        db.execute(sql, tuple(params))
-        db.commit()
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(task_id)
+            db.execute(f"UPDATE education_teacher_tasks SET {', '.join(updates)} WHERE id = ?", tuple(params))
     except Exception as e:
         logger.error(f"teacher_update_task DB error: {e}")
-        if db:
-            try:
-                db.rollback()
-            except Exception:
-                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
-    return jsonify({
-        "success": True,
-        "message": "Úkol aktualizován",
-        "task_id": task_id,
-        "timestamp": now_iso()
-    })
+    return jsonify({"success": True, "message": "Úkol aktualizován", "task_id": task_id, "timestamp": now_iso()})
 
 
 @education_task_bp.route('/api/education/teacher-dashboard/task/<int:task_id>', methods=['DELETE'])
@@ -326,43 +254,25 @@ def teacher_delete_task(task_id):
     """Učitel smaže úkol (soft-delete -> status='deleted')"""
     teacher_id = get_teacher_id()
 
-    db = None
     try:
-        db = get_connection()
-        row = db.execute(
-            "SELECT id FROM education_teacher_tasks WHERE id = ? AND teacher_id = ?",
-            (task_id, teacher_id)
-        ).fetchone()
+        with db_context(commit=True) as db:
+            row = db.execute(
+                "SELECT id FROM education_teacher_tasks WHERE id = ? AND teacher_id = ?",
+                (task_id, teacher_id)
+            ).fetchone()
 
-        if not row:
-            return jsonify({"success": False, "error": "Úkol nenalezen nebo vám nepatří"}), 404
+            if not row:
+                return jsonify({"success": False, "error": "Úkol nenalezen nebo vám nepatří"}), 404
 
-        db.execute(
-            "UPDATE education_teacher_tasks SET status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (task_id,)
-        )
-        db.commit()
+            db.execute(
+                "UPDATE education_teacher_tasks SET status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (task_id,)
+            )
     except Exception as e:
         logger.error(f"teacher_delete_task DB error: {e}")
-        if db:
-            try:
-                db.rollback()
-            except Exception:
-                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
-    return jsonify({
-        "success": True,
-        "message": "Úkol smazán",
-        "task_id": task_id,
-        "timestamp": now_iso()
-    })
+    return jsonify({"success": True, "message": "Úkol smazán", "task_id": task_id, "timestamp": now_iso()})
 
 
 # ============================================
@@ -381,46 +291,33 @@ def student_my_tasks():
 
     status_filter = request.args.get('status')
 
-    db = None
     try:
-        db = get_connection()
-        if status_filter:
-            rows = db.execute(
-                "SELECT id, title, description, task_type, course_id, module_id, due_date, status, grade, teacher_feedback, created_at "
-                "FROM education_teacher_tasks WHERE student_id = ? AND status = ? ORDER BY created_at DESC",
-                (student_id, status_filter)
-            ).fetchall()
-        else:
-            rows = db.execute(
-                "SELECT id, title, description, task_type, course_id, module_id, due_date, status, grade, teacher_feedback, created_at "
-                "FROM education_teacher_tasks WHERE student_id = ? AND status != 'deleted' ORDER BY created_at DESC",
-                (student_id,)
-            ).fetchall()
+        with db_context() as db:
+            if status_filter:
+                rows = db.execute(
+                    "SELECT id, title, description, task_type, course_id, module_id, due_date, status, grade, teacher_feedback, created_at "
+                    "FROM education_teacher_tasks WHERE student_id = ? AND status = ? ORDER BY created_at DESC",
+                    (student_id, status_filter)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT id, title, description, task_type, course_id, module_id, due_date, status, grade, teacher_feedback, created_at "
+                    "FROM education_teacher_tasks WHERE student_id = ? AND status != 'deleted' ORDER BY created_at DESC",
+                    (student_id,)
+                ).fetchall()
 
-        tasks = []
-        for r in rows:
-            task = dict(r)
-            for k in ('created_at', 'due_date'):
-                if task.get(k) and hasattr(task[k], 'isoformat'):
-                    task[k] = task[k].isoformat()
-            tasks.append(task)
-
+            tasks = []
+            for r in rows:
+                task = dict(r)
+                for k in ('created_at', 'due_date'):
+                    if task.get(k) and hasattr(task[k], 'isoformat'):
+                        task[k] = task[k].isoformat()
+                tasks.append(task)
     except Exception as e:
         logger.error(f"student_my_tasks DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
-    return jsonify({
-        "success": True,
-        "tasks": tasks,
-        "total": len(tasks),
-        "timestamp": now_iso()
-    })
+    return jsonify({"success": True, "tasks": tasks, "total": len(tasks), "timestamp": now_iso()})
 
 
 @education_task_bp.route('/api/education/my-tasks/<int:task_id>/submit', methods=['POST'])
@@ -435,7 +332,6 @@ def student_submit_task(task_id):
     if not student_id:
         return jsonify({"success": False, "error": "Neplatný uživatel"}), 401
 
-    # Validate submission size (max 1 MB serialized)
     try:
         submission_json = json.dumps(submission)
         if len(submission_json) > 1_000_000:
@@ -443,41 +339,28 @@ def student_submit_task(task_id):
     except (TypeError, ValueError):
         return jsonify({"success": False, "error": "Neplatný formát submission"}), 400
 
-    db = None
     try:
-        db = get_connection()
-        row = db.execute(
-            "SELECT id, teacher_id, status FROM education_teacher_tasks WHERE id = ? AND student_id = ?",
-            (task_id, student_id)
-        ).fetchone()
+        with db_context(commit=True) as db:
+            row = db.execute(
+                "SELECT id, teacher_id, status FROM education_teacher_tasks WHERE id = ? AND student_id = ?",
+                (task_id, student_id)
+            ).fetchone()
 
-        if not row:
-            return jsonify({"success": False, "error": "Úkol nenalezen"}), 404
+            if not row:
+                return jsonify({"success": False, "error": "Úkol nenalezen"}), 404
 
-        if row['status'] == 'graded':
-            return jsonify({"success": False, "error": "Úkol je již ohodnocen"}), 400
+            if row['status'] == 'graded':
+                return jsonify({"success": False, "error": "Úkol je již ohodnocen"}), 400
 
-        teacher_id = row['teacher_id']
+            teacher_id = row['teacher_id']
 
-        db.execute(
-            "UPDATE education_teacher_tasks SET student_submission = ?, status = 'submitted', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (submission_json, task_id)
-        )
-        db.commit()
+            db.execute(
+                "UPDATE education_teacher_tasks SET student_submission = ?, status = 'submitted', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (submission_json, task_id)
+            )
     except Exception as e:
         logger.error(f"student_submit_task DB error: {e}")
-        if db:
-            try:
-                db.rollback()
-            except Exception:
-                pass
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
     # SocketIO notification to teacher
     try:
@@ -485,18 +368,12 @@ def student_submit_task(task_id):
         socketio = current_app.extensions.get('socketio')
         if socketio:
             socketio.emit('education_task_submitted', {
-                'task_id': task_id,
-                'student_id': student_id
+                'task_id': task_id, 'student_id': student_id
             }, room=f'user_{teacher_id}')
     except Exception:
         pass
 
-    return jsonify({
-        "success": True,
-        "message": "Úkol odevzdán",
-        "task_id": task_id,
-        "timestamp": now_iso()
-    })
+    return jsonify({"success": True, "message": "Úkol odevzdán", "task_id": task_id, "timestamp": now_iso()})
 
 
 @education_task_bp.route('/api/education/my-teacher', methods=['GET'])
@@ -509,22 +386,14 @@ def student_my_teacher():
     if not student_id:
         return jsonify({"success": False, "error": "Neplatný uživatel"}), 401
 
-    # Get all assignments (human + AI)
-    db = None
     try:
-        db = get_connection()
-        rows = db.execute(
-            "SELECT teacher_id, teacher_type, created_at FROM education_assignments WHERE student_id = ? AND status = 'active' ORDER BY created_at DESC",
-            (student_id,)
-        ).fetchall()
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT teacher_id, teacher_type, created_at FROM education_assignments WHERE student_id = ? AND status = 'active' ORDER BY created_at DESC",
+                (student_id,)
+            ).fetchall()
     except Exception:
         rows = []
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
     teachers = []
     for r in rows:
@@ -533,7 +402,6 @@ def student_my_teacher():
             "teacher_type": r['teacher_type'],
             "assigned_at": r['created_at'].isoformat() if hasattr(r['created_at'], 'isoformat') else str(r['created_at'])
         }
-        # If AI teacher, add info from TEACHERS dict
         if r['teacher_type'] == 'ai':
             ai_info = _get_teachers().get(r['teacher_id'], {})
             t["name"] = ai_info.get("name", r['teacher_id'])
@@ -542,13 +410,10 @@ def student_my_teacher():
             t["name"] = f"Učitel #{r['teacher_id']}"
         teachers.append(t)
 
-    # Teacher notes from profile
     profile = get_adaptive_profile(student_id)
     notes = profile.get("teacher_notes", [])
 
     return jsonify({
-        "success": True,
-        "teachers": teachers,
-        "teacher_notes": notes[-10:],  # last 10 notes
-        "timestamp": now_iso()
+        "success": True, "teachers": teachers,
+        "teacher_notes": notes[-10:], "timestamp": now_iso()
     })
