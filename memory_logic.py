@@ -171,12 +171,15 @@ def build_personalized_prompt(user_id: str) -> str:
     if crisis_count >= 3:
         parts.append(f"- Historicky {crisis_count}x krizovy stav — zvysena opatrnost")
 
-    # v381: Agent observations — Radim proactively mentions them in conversation
+    # v381: Agent observations — Radim MUST mention these proactively
     agent_obs = learning_raw.get("agent_observations", [])
     if agent_obs:
-        parts.append("- Postrehy Radima (zmin prirozene v konverzaci):")
+        parts.append("")
+        parts.append("DULEZITE — Radim si vsiml nasledujiciho a MUSI to zminit v odpovedi (prirozene, s empatii):")
         for obs in agent_obs[-3:]:
-            parts.append(f"  - {obs.get('message', '')}")
+            parts.append(f"  >>> {obs.get('message', '')}")
+        parts.append("Zmin to na zacatku odpovedi, napriklad: 'Vsiml jsem si, ze...' nebo 'Chtel bych se zeptat...'")
+        parts.append("")
 
     parts.append("===============================================================")
 

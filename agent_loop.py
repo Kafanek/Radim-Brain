@@ -136,15 +136,15 @@ def _check_c_trend(user_id, baselines):
 
     if recent_avg > T2:
         return {"type": "c_trend_rising", "severity": CRISIS,
-                "message": f"Krizovy stav: prumerne C = {recent_avg:.1f} (prah {T2})",
+                "message": "Uzivatel je ve velmi silnem stresu a potrebuje okamzitou pomoc.",
                 "details": {"recent_avg": recent_avg, "baseline_avg": baseline_avg}}
     elif recent_avg > T1:
         return {"type": "c_trend_rising", "severity": ALERT,
-                "message": f"Zvyseny stres: prumerne C = {recent_avg:.1f} (prah {T1})",
+                "message": "Uzivatel je ve zvysenem stresu — budte extra klidny a empaticky.",
                 "details": {"recent_avg": recent_avg, "baseline_avg": baseline_avg}}
     elif recent_avg > baseline_avg + 1.5 * baseline_std:
         return {"type": "c_trend_rising", "severity": WARNING,
-                "message": f"C roste: {recent_avg:.1f} vs bezny {baseline_avg:.1f}",
+                "message": "Vsimli jsme si, ze jste v poslednich rozhovorech napjatejsi nez obvykle. Je vse v poradku?",
                 "details": {"recent_avg": recent_avg, "baseline_avg": baseline_avg, "std": baseline_std}}
     return None
 
@@ -188,11 +188,11 @@ def _check_activity_drop(user_id, baselines):
 
     if current == 0 and avg > 3:
         return {"type": "activity_drop", "severity": ALERT,
-                "message": f"Zadna aktivita za poslednich 6 hodin (obvykle {avg:.0f} pohybu)",
+                "message": "Za poslednich 6 hodin jsme nezaznamenali zadny pohyb. Zeptejte se, jestli je vse v poradku.",
                 "details": {"current": current, "baseline_avg": avg, "window": window}}
     elif current < avg - 2 * std or current < avg * 0.5:
         return {"type": "activity_drop", "severity": WARNING,
-                "message": f"Nizsi aktivita: {current} pohybu vs obvyklych {avg:.0f}",
+                "message": "Dnes jste mene aktivni nez obvykle. Jak se citite?",
                 "details": {"current": current, "baseline_avg": avg, "window": window}}
     return None
 
@@ -236,16 +236,17 @@ def _check_vitals(user_id, baselines):
                 # SpO2 < 90 is always crisis
                 if sensor == 'spo2' and val < 90:
                     return {"type": "vital_anomaly", "severity": CRISIS,
-                            "message": f"Kriticka SpO2: {val:.0f}% (< 90%)",
+                            "message": f"Hladina kysliku v krvi je nebezpecne nizka ({val:.0f}%). Je treba zavolat pomoc.",
                             "details": {"sensor": sensor, "value": val, "baseline_avg": avg}}
 
+                sensor_name = "tepova frekvence" if sensor == "heart_rate" else "hladina kysliku"
                 if deviation > 3:
                     return {"type": "vital_anomaly", "severity": ALERT,
-                            "message": f"Anomalie {sensor}: {val:.1f} (bezne {avg:.1f} +/- {std:.1f})",
+                            "message": f"Vase {sensor_name} ({val:.0f}) je vyrazne mimo obvykly rozsah. Informujeme pecovately.",
                             "details": {"sensor": sensor, "value": val, "baseline_avg": avg, "deviation_sigma": round(deviation, 1)}}
                 elif deviation > 2:
                     return {"type": "vital_anomaly", "severity": WARNING,
-                            "message": f"Odchylka {sensor}: {val:.1f} (bezne {avg:.1f})",
+                            "message": f"Vase {sensor_name} ({val:.0f}) je mirne mimo obvykly rozsah. Jak se citite?",
                             "details": {"sensor": sensor, "value": val, "baseline_avg": avg, "deviation_sigma": round(deviation, 1)}}
     except Exception:
         pass
@@ -267,15 +268,15 @@ def _check_interaction_silence(user_id, baselines):
 
     if hours_since > 48:
         return {"type": "no_interaction", "severity": ALERT,
-                "message": f"Zadna interakce {hours_since:.0f} hodin",
+                "message": f"Uzivatel se neozval uz {hours_since:.0f} hodin. Zeptejte se, jak se ma, a nabidnete pomoc.",
                 "details": {"hours_since": round(hours_since, 1), "last": str(last)}}
     elif hours_since > 24:
         return {"type": "no_interaction", "severity": WARNING,
-                "message": f"Zadna interakce {hours_since:.0f} hodin",
+                "message": "Nebyli jsme spolu v kontaktu cely den. Rad bych vedel, jak se vam dari.",
                 "details": {"hours_since": round(hours_since, 1)}}
     elif hours_since > 12:
         return {"type": "no_interaction", "severity": INFO,
-                "message": f"Delsi odmlka — {hours_since:.0f} hodin bez kontaktu",
+                "message": "Uzivatel se delsi dobu neozval. Pri pristim rozhovoru se zeptejte, jak se ma.",
                 "details": {"hours_since": round(hours_since, 1)}}
     return None
 
