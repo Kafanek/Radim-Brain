@@ -490,10 +490,18 @@ try:
     scheduler = BackgroundScheduler(daemon=True)
     scheduler.add_job(_check_reminders, 'interval', minutes=5, id='radim_reminders')
     scheduler.add_job(_check_consultation_reminders, 'interval', minutes=5, id='telemed_reminders')
+    # Proactive agent loop — autonomous senior monitoring
+    try:
+        from agent_loop import run_agent_cycle
+        scheduler.add_job(lambda: run_agent_cycle(app), 'interval', minutes=5,
+                          id='agent_loop', max_instances=1, misfire_grace_time=120)
+        logger.info("✅ Agent loop registered (every 5 min)")
+    except ImportError:
+        logger.warning("⚠️ agent_loop not available — proactive agent disabled")
+
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
-    logger.info("✅ APScheduler started: reminder check every 5 min")
-    logger.info("✅ APScheduler started: telemed reminders every 5 min")
+    logger.info("✅ APScheduler started: 3 jobs (reminders + telemed + agent loop)")
 
 except ImportError:
     logger.warning("⚠️ APScheduler not installed — reminders will not auto-send")
@@ -623,10 +631,13 @@ def send_push_notification(user_id, title, body, data=None):
                     db.commit()
         
         return True
-        
+
     except Exception as e:
         logger.error(f"Push notification error: {e}")
         return False
+
+# Make send_push available to agent_loop via app.config
+app.config['SEND_PUSH_FN'] = send_push_notification
 
 # ============================================
 # WORDPRESS INTEGRATION

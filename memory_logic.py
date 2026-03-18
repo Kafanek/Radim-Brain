@@ -169,9 +169,16 @@ def build_personalized_prompt(user_id: str) -> str:
         else:
             parts.append(f"- 🧠 Mozek: Uživatel bývá ve stresu (avg C={avg_C:.1f}) → buď extra klidný")
     if crisis_count >= 3:
-        parts.append(f"- ⚠️ Historicky {crisis_count}× krizový stav → zvýšená opatrnost")
+        parts.append(f"- Historicky {crisis_count}x krizovy stav — zvysena opatrnost")
 
-    parts.append("═══════════════════════════════════════════════════════════════")
+    # v381: Agent observations — Radim proactively mentions them in conversation
+    agent_obs = learning_raw.get("agent_observations", [])
+    if agent_obs:
+        parts.append("- Postrehy Radima (zmin prirozene v konverzaci):")
+        for obs in agent_obs[-3:]:
+            parts.append(f"  - {obs.get('message', '')}")
+
+    parts.append("===============================================================")
 
     return "\n".join(parts)
 

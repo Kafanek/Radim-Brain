@@ -506,6 +506,24 @@ PG_IOT_TABLES = [
         "CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action)",
     ]),
+
+    # Agent observations (v4.1 — proactive agent loop)
+    ('''CREATE TABLE IF NOT EXISTS agent_observations (
+            id SERIAL PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            observation_type TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            message TEXT NOT NULL,
+            details JSONB DEFAULT '{}',
+            action_taken TEXT,
+            acknowledged_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''', [
+        "CREATE INDEX IF NOT EXISTS idx_agent_obs_user ON agent_observations(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_obs_created ON agent_observations(created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_obs_severity ON agent_observations(severity)",
+    ]),
 ]
 
 # PostgreSQL: ALTER TABLE migrations
@@ -969,6 +987,21 @@ SQLITE_SCHEMA = '''
     CREATE INDEX IF NOT EXISTS idx_iot_alerts_room ON iot_alerts(room_id);
     CREATE INDEX IF NOT EXISTS idx_iot_alerts_created ON iot_alerts(created_at);
     CREATE INDEX IF NOT EXISTS idx_iot_alerts_severity ON iot_alerts(severity);
+
+    CREATE TABLE IF NOT EXISTS agent_observations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        observation_type TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        message TEXT NOT NULL,
+        details TEXT DEFAULT '{}',
+        action_taken TEXT,
+        acknowledged_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_obs_user ON agent_observations(user_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_obs_created ON agent_observations(created_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_obs_severity ON agent_observations(severity);
 '''
 
 # SQLite: ALTER TABLE migrations
