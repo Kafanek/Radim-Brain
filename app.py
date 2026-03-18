@@ -499,9 +499,26 @@ try:
     except ImportError:
         logger.warning("⚠️ agent_loop not available — proactive agent disabled")
 
+    # v384: Daily cleanup of old observations (keep last 30 days)
+    def _cleanup_old_data():
+        with app.app_context():
+            try:
+                with db_context(commit=True) as db:
+                    if is_postgres():
+                        db.execute("DELETE FROM agent_observations WHERE created_at < NOW() - INTERVAL '30 days'")
+                        db.execute("DELETE FROM brain_states WHERE created_at < NOW() - INTERVAL '90 days'")
+                    else:
+                        db.execute("DELETE FROM agent_observations WHERE created_at < datetime('now', '-30 days')")
+                        db.execute("DELETE FROM brain_states WHERE created_at < datetime('now', '-90 days')")
+                logger.info("Cleanup: old observations (30d) + brain_states (90d) purged")
+            except Exception as e:
+                logger.warning(f"Cleanup error (non-fatal): {e}")
+
+    scheduler.add_job(_cleanup_old_data, 'cron', hour=3, minute=0, id='daily_cleanup')
+
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
-    logger.info("✅ APScheduler started: 3 jobs (reminders + telemed + agent loop)")
+    logger.info("✅ APScheduler started: 4 jobs (reminders + telemed + agent_loop + cleanup)")
 
 except ImportError:
     logger.warning("⚠️ APScheduler not installed — reminders will not auto-send")
@@ -836,10 +853,22 @@ def health():
         'online_users': len(users_online)
     }), status_code
 
+# v384: Admin auth guard
+ADMIN_SECRET = os.environ.get('ADMIN_SECRET', '')
+
+def _check_admin():
+    """Check admin auth via X-Admin-Secret header or ?secret= param."""
+    if not ADMIN_SECRET:
+        return True  # dev mode — no secret configured
+    token = request.headers.get('X-Admin-Secret') or request.args.get('secret')
+    return token == ADMIN_SECRET
+
 # v383: Admin IoT simulator
 @app.route('/api/admin/iot-simulate', methods=['POST'])
 def admin_iot_simulate():
     """Seed IoT devices + 7 days of sensor data for demo_senior_1."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
     try:
         from iot_simulator import run_full_iot_seed
         result = run_full_iot_seed()
@@ -852,6 +881,8 @@ def admin_iot_simulate():
 @app.route('/api/admin/debug-prompt/<user_id>')
 def admin_debug_prompt(user_id):
     """Show the personalized system prompt for a user."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
     try:
         from memory_logic import build_personalized_prompt
         prompt = build_personalized_prompt(user_id)
@@ -863,6 +894,8 @@ def admin_debug_prompt(user_id):
 @app.route('/api/admin/seed-demo', methods=['POST'])
 def admin_seed_demo():
     """Create demo senior with 7 days of brain_states for agent loop testing."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
     try:
         from seed_demo import seed_demo_data
         result = seed_demo_data()
@@ -875,6 +908,8 @@ def admin_seed_demo():
 @app.route('/api/admin/agent-run', methods=['POST'])
 def admin_agent_run():
     """Manually trigger one full agent loop cycle."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
     try:
         from agent_loop import run_agent_cycle
         run_agent_cycle(app)
