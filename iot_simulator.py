@@ -39,20 +39,20 @@ def seed_iot_devices():
     ]
 
     with db_context(commit=True) as db:
-        for dev_id, room_id, sensor_type, name, user_id in devices:
+        for dev_id, room_id, device_type, name, user_id in devices:
             if is_postgres():
                 db.execute("""
-                    INSERT INTO iot_devices (device_id, room_id, sensor_type, name, user_id, status, created_at)
+                    INSERT INTO iot_devices (device_id, room_id, device_type, name, user_id, status, created_at)
                     VALUES (?, ?, ?, ?, ?, 'active', NOW())
                     ON CONFLICT (device_id) DO UPDATE SET
                         room_id = EXCLUDED.room_id, user_id = EXCLUDED.user_id,
                         status = 'active'
-                """, (dev_id, room_id, sensor_type, name, user_id))
+                """, (dev_id, room_id, device_type, name, user_id))
             else:
                 db.execute("""
-                    INSERT OR REPLACE INTO iot_devices (device_id, room_id, sensor_type, name, user_id, status, created_at)
+                    INSERT OR REPLACE INTO iot_devices (device_id, room_id, device_type, name, user_id, status, created_at)
                     VALUES (?, ?, ?, ?, ?, 'active', datetime('now'))
-                """, (dev_id, room_id, sensor_type, name, user_id))
+                """, (dev_id, room_id, device_type, name, user_id))
 
     logger.info(f"IoT: {len(devices)} devices registered for {DEMO_USER}")
     return len(devices)
