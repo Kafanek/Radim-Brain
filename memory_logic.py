@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # DB availability check
 try:
-    from database import get_connection, is_postgres
+    from database import get_connection, is_postgres, db_context
     _DB_AVAILABLE = True
 except ImportError:
     _DB_AVAILABLE = False
@@ -207,30 +207,15 @@ def _crisis_escalate(user_id: str, brain_C: float = None, message: str = ""):
 
         # Ulož krizovou událost do DB
         if _DB_AVAILABLE:
-            db = None
             try:
-                db = get_connection()
-                if is_postgres():
-                    db.execute(
-                        "INSERT INTO crisis_events (user_id, caregiver_id, brain_c, message_excerpt, created_at) "
-                        "VALUES (%s, %s, %s, %s, %s)",
-                        (user_id, caregiver_id, brain_C, (message or "")[:100], datetime.utcnow().isoformat())
-                    )
-                else:
+                with db_context(commit=True) as db:
                     db.execute(
                         "INSERT INTO crisis_events (user_id, caregiver_id, brain_c, message_excerpt, created_at) "
                         "VALUES (?, ?, ?, ?, ?)",
                         (user_id, caregiver_id, brain_C, (message or "")[:100], datetime.utcnow().isoformat())
                     )
-                db.commit()
             except Exception as db_err:
                 logger.debug(f"Crisis event DB save non-fatal: {db_err}")
-            finally:
-                if db:
-                    try:
-                        db.close()
-                    except Exception:
-                        pass
 
         # Push notifikace pečovateli (fire & forget)
         try:

@@ -1,12 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-📋 RADIM Task & Medication Service v1.1.0
+RADIM Task & Medication Service v2.0.0
 Persistentní úkoly, připomínky a sledování léků.
-PostgreSQL / SQLite backed.
 
-Používá database.py adapter — stejný pattern jako memory_routes.py.
-
-v1.1.0 — Fixed connection leak: all get_connection() calls now use try/finally
+v2.0: db_context, unified ? placeholders, killed _p()
 """
 
 import json
@@ -15,21 +12,12 @@ from datetime import datetime, date, timedelta
 
 logger = logging.getLogger(__name__)
 
-# ============================================
-# DATABASE IMPORT
-# ============================================
 try:
-    from database import get_connection, USE_POSTGRES
+    from database import db_context, db_insert
     _DB_AVAILABLE = True
 except ImportError:
     _DB_AVAILABLE = False
-    USE_POSTGRES = False
-    logger.warning("⚠️ task_service: database module not available")
-
-
-def _p():
-    """Placeholder pro SQL parametry — %s pro Postgres, ? pro SQLite."""
-    return "%s" if USE_POSTGRES else "?"
+    logger.warning("task_service: database module not available")
 
 
 # ============================================
@@ -39,332 +27,200 @@ def _p():
 def create_task(user_id, title, task_type='reminder', scheduled_time=None,
                 scheduled_date=None, recurrence='once', priority='normal',
                 description=None, metadata=None):
-    """
-    Vytvořit nový úkol. Vrací dict s ID.
-    """
+    """Vytvořit nový úkol. Vrací dict s ID."""
     if not _DB_AVAILABLE:
         return None
-
-    db = None
     try:
-        db = get_connection()
-        p = _p()
         meta_json = json.dumps(metadata or {}, ensure_ascii=False)
-
-        # Default: dnes
         if scheduled_date is None and scheduled_time is not None:
             scheduled_date = date.today().isoformat()
 
-        if USE_POSTGRES:
-            row = db.execute(
-                f"""INSERT INTO radim_tasks
-                    (user_id, title, task_type, scheduled_time, scheduled_date,
-                     recurrence, priority, description, metadata)
-                    VALUES ({p},{p},{p},{p},{p},{p},{p},{p},{p})
-                    RETURNING id""",
-                (user_id, title, task_type, scheduled_time, scheduled_date,
-                 recurrence, priority, description, meta_json)
-            ).fetchone()
-            task_id = row['id'] if row else None
-        else:
-            cursor = db.execute(
-                f"""INSERT INTO radim_tasks
-                    (user_id, title, task_type, scheduled_time, scheduled_date,
-                     recurrence, priority, description, metadata)
-                    VALUES ({p},{p},{p},{p},{p},{p},{p},{p},{p})""",
+        with db_context(commit=True) as db:
+            task_id = db_insert(db, 'radim_tasks',
+                ['user_id', 'title', 'task_type', 'scheduled_time', 'scheduled_date',
+                 'recurrence', 'priority', 'description', 'metadata'],
                 (user_id, title, task_type, scheduled_time, scheduled_date,
                  recurrence, priority, description, meta_json)
             )
-            task_id = cursor.lastrowid
-
-        db.commit()
 
         if task_id:
-            logger.info(f"✅ Task created: #{task_id} '{title}' for {user_id}")
+            logger.info(f"Task created: #{task_id} '{title}' for {user_id}")
             return {
                 'id': task_id, 'title': title, 'task_type': task_type,
-                'scheduled_time': scheduled_time,
-                'scheduled_date': scheduled_date,
+                'scheduled_time': scheduled_time, 'scheduled_date': scheduled_date,
                 'recurrence': recurrence, 'status': 'pending',
                 'priority': priority, 'description': description
             }
         return None
-
     except Exception as e:
         logger.error(f"create_task error: {e}")
         return None
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
 
 def get_tasks(user_id, status=None, task_type=None, date_filter=None):
-    """
-    Získat úkoly uživatele s volitelnými filtry.
-    """
+    """Získat úkoly uživatele s volitelnými filtry."""
     if not _DB_AVAILABLE:
         return []
-
-    db = None
     try:
-        db = get_connection()
-        p = _p()
+        with db_context() as db:
+            query = "SELECT * FROM radim_tasks WHERE user_id = ?"
+            params = [user_id]
 
-        query = f"SELECT * FROM radim_tasks WHERE user_id = {p}"
-        params = [user_id]
+            if status:
+                query += " AND status = ?"
+                params.append(status)
+            if task_type:
+                query += " AND task_type = ?"
+                params.append(task_type)
+            if date_filter:
+                query += " AND (scheduled_date = ? OR scheduled_date IS NULL)"
+                params.append(date_filter)
 
-        if status:
-            query += f" AND status = {p}"
-            params.append(status)
-        if task_type:
-            query += f" AND task_type = {p}"
-            params.append(task_type)
-        if date_filter:
-            query += f" AND (scheduled_date = {p} OR scheduled_date IS NULL)"
-            params.append(date_filter)
+            query += " ORDER BY scheduled_time ASC, priority DESC LIMIT 200"
+            rows = db.execute(query, tuple(params)).fetchall()
 
-        query += " ORDER BY scheduled_time ASC, priority DESC LIMIT 200"
-
-        rows = db.execute(query, tuple(params)).fetchall()
-
-        result = []
-        for r in rows:
-            d = dict(r)
-            # Serialize datetime objects
-            for key in ['created_at', 'updated_at', 'completed_at']:
-                if key in d and d[key] and hasattr(d[key], 'isoformat'):
-                    d[key] = d[key].isoformat()
-            if 'scheduled_date' in d and d['scheduled_date'] and hasattr(d['scheduled_date'], 'isoformat'):
-                d['scheduled_date'] = d['scheduled_date'].isoformat()
-            if 'scheduled_time' in d and d['scheduled_time'] and hasattr(d['scheduled_time'], 'isoformat'):
-                d['scheduled_time'] = d['scheduled_time'].isoformat()
-            # Parse metadata
-            if 'metadata' in d and isinstance(d['metadata'], str):
-                try:
-                    d['metadata'] = json.loads(d['metadata'])
-                except (json.JSONDecodeError, TypeError):
-                    d['metadata'] = {}
-            result.append(d)
-
-        return result
-
+            result = []
+            for r in rows:
+                d = dict(r)
+                for key in ['created_at', 'updated_at', 'completed_at']:
+                    if key in d and d[key] and hasattr(d[key], 'isoformat'):
+                        d[key] = d[key].isoformat()
+                for key in ['scheduled_date', 'scheduled_time']:
+                    if key in d and d[key] and hasattr(d[key], 'isoformat'):
+                        d[key] = d[key].isoformat()
+                if 'metadata' in d and isinstance(d['metadata'], str):
+                    try:
+                        d['metadata'] = json.loads(d['metadata'])
+                    except (json.JSONDecodeError, TypeError):
+                        d['metadata'] = {}
+                result.append(d)
+            return result
     except Exception as e:
         logger.error(f"get_tasks error: {e}")
         return []
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
 
 def complete_task(task_id, user_id):
     """Označit úkol jako splněný."""
     if not _DB_AVAILABLE:
         return False
-
-    db = None
     try:
-        db = get_connection()
-        p = _p()
         now = datetime.utcnow()
-
-        db.execute(
-            f"""UPDATE radim_tasks
-                SET status = 'done', completed_at = {p}, updated_at = {p}
-                WHERE id = {p} AND user_id = {p}""",
-            (now, now, task_id, user_id)
-        )
-        db.commit()
-
-        logger.info(f"✅ Task #{task_id} completed by {user_id}")
+        with db_context(commit=True) as db:
+            db.execute(
+                "UPDATE radim_tasks SET status = 'done', completed_at = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+                (now, now, task_id, user_id)
+            )
+        logger.info(f"Task #{task_id} completed by {user_id}")
         return True
-
     except Exception as e:
         logger.error(f"complete_task error: {e}")
         return False
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
 
 def delete_task(task_id, user_id):
     """Smazat úkol."""
     if not _DB_AVAILABLE:
         return False
-
-    db = None
     try:
-        db = get_connection()
-        p = _p()
-
-        db.execute(
-            f"DELETE FROM radim_tasks WHERE id = {p} AND user_id = {p}",
-            (task_id, user_id)
-        )
-        db.commit()
-
-        logger.info(f"🗑️ Task #{task_id} deleted by {user_id}")
+        with db_context(commit=True) as db:
+            db.execute("DELETE FROM radim_tasks WHERE id = ? AND user_id = ?", (task_id, user_id))
+        logger.info(f"Task #{task_id} deleted by {user_id}")
         return True
-
     except Exception as e:
         logger.error(f"delete_task error: {e}")
         return False
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
 
 def get_due_tasks(user_id, window_minutes=30):
-    """
-    Získat úkoly, které jsou splatné v příštích N minutách.
-    """
+    """Získat úkoly, které jsou splatné v příštích N minutách."""
     if not _DB_AVAILABLE:
         return []
-
-    db = None
     try:
         now = datetime.now()
         current_time = now.strftime('%H:%M:%S')
         future_time = (now + timedelta(minutes=window_minutes)).strftime('%H:%M:%S')
         current_date = now.date().isoformat()
 
-        db = get_connection()
-        p = _p()
-
-        rows = db.execute(
-            f"""SELECT * FROM radim_tasks
-                WHERE user_id = {p} AND status = 'pending'
-                AND scheduled_time IS NOT NULL
-                AND (scheduled_date = {p} OR scheduled_date IS NULL OR recurrence != 'once')
-                AND scheduled_time >= {p} AND scheduled_time <= {p}
-                ORDER BY scheduled_time""",
-            (user_id, current_date, current_time, future_time)
-        ).fetchall()
-
-        return [dict(r) for r in rows]
-
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT * FROM radim_tasks WHERE user_id = ? AND status = 'pending' "
+                "AND scheduled_time IS NOT NULL "
+                "AND (scheduled_date = ? OR scheduled_date IS NULL OR recurrence != 'once') "
+                "AND scheduled_time >= ? AND scheduled_time <= ? ORDER BY scheduled_time",
+                (user_id, current_date, current_time, future_time)
+            ).fetchall()
+            return [dict(r) for r in rows]
     except Exception as e:
         logger.error(f"get_due_tasks error: {e}")
         return []
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
 
 # ============================================
-# SCHEDULER HELPERS (v231 — background reminder checks)
+# SCHEDULER HELPERS
 # ============================================
 
 def get_all_due_tasks(window_minutes=5):
-    """
-    Získat VŠECHNY splatné úkoly napříč uživateli (pro scheduler).
-    """
+    """Získat VŠECHNY splatné úkoly napříč uživateli (pro scheduler)."""
     if not _DB_AVAILABLE:
         return []
-
-    db = None
     try:
         now = datetime.now()
         current_time = now.strftime('%H:%M')
         future_time = (now + timedelta(minutes=window_minutes)).strftime('%H:%M')
         current_date = now.date().isoformat()
 
-        db = get_connection()
-        p = _p()
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT * FROM radim_tasks WHERE status = 'pending' "
+                "AND scheduled_time IS NOT NULL "
+                "AND (scheduled_date = ? OR scheduled_date IS NULL OR recurrence != 'once') "
+                "AND scheduled_time >= ? AND scheduled_time <= ? ORDER BY scheduled_time",
+                (current_date, current_time, future_time)
+            ).fetchall()
 
-        rows = db.execute(
-            f"""SELECT * FROM radim_tasks
-                WHERE status = 'pending'
-                AND scheduled_time IS NOT NULL
-                AND (scheduled_date = {p} OR scheduled_date IS NULL OR recurrence != 'once')
-                AND scheduled_time >= {p} AND scheduled_time <= {p}
-                ORDER BY scheduled_time""",
-            (current_date, current_time, future_time)
-        ).fetchall()
-
-        # Filter out already-notified tasks
-        results = []
-        for r in rows:
-            d = dict(r)
-            meta = {}
-            if d.get('metadata'):
-                try:
-                    meta = json.loads(d['metadata']) if isinstance(d['metadata'], str) else d['metadata']
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            if not meta.get('notified'):
-                results.append(d)
-
-        return results
-
+            results = []
+            for r in rows:
+                d = dict(r)
+                meta = {}
+                if d.get('metadata'):
+                    try:
+                        meta = json.loads(d['metadata']) if isinstance(d['metadata'], str) else d['metadata']
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                if not meta.get('notified'):
+                    results.append(d)
+            return results
     except Exception as e:
         logger.error(f"get_all_due_tasks error: {e}")
         return []
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
 
 def mark_task_notified(task_id):
-    """Označit úkol jako notifikovaný (zabránit dvojitému odeslání)."""
+    """Označit úkol jako notifikovaný."""
     if not _DB_AVAILABLE:
         return False
-
-    db = None
     try:
-        db = get_connection()
-        p = _p()
+        with db_context(commit=True) as db:
+            row = db.execute("SELECT metadata FROM radim_tasks WHERE id = ?", (task_id,)).fetchone()
 
-        # Read existing metadata
-        row = db.execute(
-            f"SELECT metadata FROM radim_tasks WHERE id = {p}", (task_id,)
-        ).fetchone()
+            meta = {}
+            if row and row['metadata']:
+                try:
+                    meta = json.loads(row['metadata']) if isinstance(row['metadata'], str) else dict(row['metadata'])
+                except (json.JSONDecodeError, TypeError):
+                    pass
 
-        meta = {}
-        if row and row['metadata']:
-            try:
-                meta = json.loads(row['metadata']) if isinstance(row['metadata'], str) else dict(row['metadata'])
-            except (json.JSONDecodeError, TypeError):
-                pass
+            meta['notified'] = True
+            meta['notified_at'] = datetime.now().isoformat()
 
-        meta['notified'] = True
-        meta['notified_at'] = datetime.now().isoformat()
+            db.execute("UPDATE radim_tasks SET metadata = ? WHERE id = ?", (json.dumps(meta), task_id))
 
-        db.execute(
-            f"UPDATE radim_tasks SET metadata = {p} WHERE id = {p}",
-            (json.dumps(meta), task_id)
-        )
-        db.commit()
-
-        logger.info(f"🔔 Task #{task_id} marked as notified")
+        logger.info(f"Task #{task_id} marked as notified")
         return True
-
     except Exception as e:
         logger.error(f"mark_task_notified error: {e}")
         return False
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
 
 # ============================================
@@ -372,100 +228,62 @@ def mark_task_notified(task_id):
 # ============================================
 
 def log_medication(user_id, medication_name, task_id=None, dosage=None, notes=None):
-    """
-    Zaznamenat užití léku.
-    v329: Added double-dose protection — warns if same medication logged within 2 hours.
-    """
+    """Zaznamenat užití léku. Includes double-dose protection (2h window)."""
     if not _DB_AVAILABLE:
         return False
-
-    db = None
     try:
-        db = get_connection()
-        p = _p()
+        with db_context(commit=True) as db:
+            two_hours_ago = (datetime.utcnow() - timedelta(hours=2)).isoformat()
+            recent = db.execute(
+                "SELECT id, taken_at FROM radim_medication_log "
+                "WHERE user_id = ? AND medication_name = ? AND taken_at > ? ORDER BY taken_at DESC LIMIT 1",
+                (user_id, medication_name, two_hours_ago)
+            ).fetchone()
 
-        # v329: Double-dose protection — check if same medication was logged recently
-        two_hours_ago = (datetime.utcnow() - timedelta(hours=2)).isoformat()
-        cursor = db.execute(
-            f"""SELECT id, taken_at FROM radim_medication_log
-                WHERE user_id = {p} AND medication_name = {p} AND taken_at > {p}
-                ORDER BY taken_at DESC LIMIT 1""",
-            (user_id, medication_name, two_hours_ago)
-        )
-        recent = cursor.fetchone()
-        if recent:
-            recent_time = recent['taken_at'] if hasattr(recent, '__getitem__') and isinstance(recent, dict) else recent[1]
-            logger.warning(f"⚠️ DOUBLE-DOSE WARNING: {medication_name} for {user_id} — already taken at {recent_time}")
-            # Still log it but return a warning dict instead of True
+            if recent:
+                recent_time = recent['taken_at'] if isinstance(recent, dict) else recent[1]
+                logger.warning(f"DOUBLE-DOSE WARNING: {medication_name} for {user_id} — already taken at {recent_time}")
+                db.execute(
+                    "INSERT INTO radim_medication_log (user_id, task_id, medication_name, dosage, notes) VALUES (?,?,?,?,?)",
+                    (user_id, task_id, medication_name, dosage,
+                     f"MOŽNÝ DVOJITÝ DÁVEK — předchozí v {recent_time}. {notes or ''}")
+                )
+                return {'logged': True, 'double_dose_warning': True, 'previous_at': str(recent_time)}
+
             db.execute(
-                f"""INSERT INTO radim_medication_log
-                    (user_id, task_id, medication_name, dosage, notes)
-                    VALUES ({p},{p},{p},{p},{p})""",
-                (user_id, task_id, medication_name, dosage,
-                 f"⚠️ MOŽNÝ DVOJITÝ DÁVEK — předchozí v {recent_time}. {notes or ''}")
-            )
-            db.commit()
-            return {'logged': True, 'double_dose_warning': True, 'previous_at': str(recent_time)}
-
-        db.execute(
-            f"""INSERT INTO radim_medication_log
+                "INSERT INTO radim_medication_log (user_id, task_id, medication_name, dosage, notes) VALUES (?,?,?,?,?)",
                 (user_id, task_id, medication_name, dosage, notes)
-                VALUES ({p},{p},{p},{p},{p})""",
-            (user_id, task_id, medication_name, dosage, notes)
-        )
-        db.commit()
+            )
 
-        logger.info(f"💊 Medication logged: {medication_name} for {user_id}")
+        logger.info(f"Medication logged: {medication_name} for {user_id}")
         return True
-
     except Exception as e:
         logger.error(f"log_medication error: {e}")
         return False
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
 
 def get_medication_history(user_id, days=7):
-    """
-    Získat historii užívání léků za posledních N dní.
-    """
+    """Získat historii užívání léků za posledních N dní."""
     if not _DB_AVAILABLE:
         return []
-
-    db = None
     try:
-        db = get_connection()
-        p = _p()
         since = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT * FROM radim_medication_log WHERE user_id = ? AND taken_at >= ? ORDER BY taken_at DESC LIMIT 500",
+                (user_id, since)
+            ).fetchall()
 
-        rows = db.execute(
-            f"""SELECT * FROM radim_medication_log
-                WHERE user_id = {p} AND taken_at >= {p}
-                ORDER BY taken_at DESC LIMIT 500""",
-            (user_id, since)
-        ).fetchall()
-
-        result = []
-        for r in rows:
-            d = dict(r)
-            if 'taken_at' in d and d['taken_at'] and hasattr(d['taken_at'], 'isoformat'):
-                d['taken_at'] = d['taken_at'].isoformat()
-            result.append(d)
-        return result
-
+            result = []
+            for r in rows:
+                d = dict(r)
+                if 'taken_at' in d and d['taken_at'] and hasattr(d['taken_at'], 'isoformat'):
+                    d['taken_at'] = d['taken_at'].isoformat()
+                result.append(d)
+            return result
     except Exception as e:
         logger.error(f"get_medication_history error: {e}")
         return []
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
 
 # ============================================
@@ -473,10 +291,7 @@ def get_medication_history(user_id, days=7):
 # ============================================
 
 def build_tasks_context(user_id):
-    """
-    Sestavit kontext o úkolech uživatele pro injekci do system promptu.
-    Radim tak bude vědět o čekajících úkolech a může na ně reagovat.
-    """
+    """Sestavit kontext o úkolech pro injekci do system promptu."""
     try:
         today = date.today().isoformat()
         tasks = get_tasks(user_id, status='pending', date_filter=today)
@@ -484,14 +299,11 @@ def build_tasks_context(user_id):
         if not tasks:
             return ""
 
-        type_emoji = {
-            'medication': '💊', 'reminder': '🔔',
-            'appointment': '📅', 'custom': '📌'
-        }
+        type_emoji = {'medication': '\U0001f48a', 'reminder': '\U0001f514', 'appointment': '\U0001f4c5', 'custom': '\U0001f4cc'}
 
-        lines = ["\n═══ DNEŠNÍ ÚKOLY A PŘIPOMÍNKY ═══"]
-        for t in tasks[:8]:  # Max 8 úkolů v kontextu
-            emoji = type_emoji.get(t.get('task_type', 'reminder'), '📌')
+        lines = ["\n=== DNEŠNÍ ÚKOLY A PŘIPOMÍNKY ==="]
+        for t in tasks[:8]:
+            emoji = type_emoji.get(t.get('task_type', 'reminder'), '\U0001f4cc')
             time_str = ""
             if t.get('scheduled_time'):
                 time_val = t['scheduled_time']
@@ -501,12 +313,11 @@ def build_tasks_context(user_id):
                     time_str = f" v {time_val.strftime('%H:%M')}"
             lines.append(f"- {emoji} {t['title']}{time_str}")
 
-        lines.append(f"Celkem: {len(tasks)} úkol(ů) na dnes.")
-        lines.append("Pokud se uživatel zeptá na úkoly, zmíň je. Pokud se blíží čas, jemně připomeň.")
-        lines.append("═══════════════════════════════════")
+        lines.append(f"Celkem: {len(tasks)} ukol(u) na dnes.")
+        lines.append("Pokud se uzivatel zepta na ukoly, zmin je.")
+        lines.append("=================================")
 
         return "\n".join(lines)
-
     except Exception as e:
         logger.warning(f"build_tasks_context warning: {e}")
         return ""

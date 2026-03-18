@@ -46,7 +46,7 @@ def require_iot_auth(f):
 
 def _get_db():
     """Get database connection."""
-    from database import get_connection, is_postgres
+    from database import get_connection, is_postgres, db_context
     return get_connection(), is_postgres()
 
 
@@ -224,46 +224,29 @@ def _send_sms_alert(alert, room_id):
 
 def _get_room_caregivers(room_id):
     """Get active caregivers with SMS enabled for a room."""
-    db = None
     try:
-        db, is_pg = _get_db()
-        ph = _ph(is_pg)
-        rows = db.execute(f'''
-            SELECT name, phone FROM iot_caregivers
-            WHERE room_id = {ph} AND active = {ph} AND notify_sms = {ph}
-        ''', (room_id, True if is_pg else 1, True if is_pg else 1)).fetchall()
-        return [{'name': r['name'], 'phone': r['phone']} for r in rows]
+        active_val = True if is_postgres() else 1
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT name, phone FROM iot_caregivers WHERE room_id = ? AND active = ? AND notify_sms = ?",
+                (room_id, active_val, active_val)
+            ).fetchall()
+            return [{'name': r['name'], 'phone': r['phone']} for r in rows]
     except Exception as e:
         logger.warning(f"Caregiver lookup error: {e}")
         return []
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
 
 def _get_room_display_name(room_id):
     """Get user-friendly room name from device registry."""
-    db = None
     try:
-        db, is_pg = _get_db()
-        ph = _ph(is_pg)
-        row = db.execute(f'''
-            SELECT user_id FROM iot_devices WHERE room_id = {ph} LIMIT 1
-        ''', (room_id,)).fetchone()
-        if row and row['user_id']:
-            return f"{room_id} ({row['user_id']})"
-        return room_id
+        with db_context() as db:
+            row = db.execute("SELECT user_id FROM iot_devices WHERE room_id = ? LIMIT 1", (room_id,)).fetchone()
+            if row and row['user_id']:
+                return f"{room_id} ({row['user_id']})"
+            return room_id
     except Exception:
         return room_id
-    finally:
-        if db:
-            try:
-                db.close()
-            except Exception:
-                pass
 
 
 logger.info("✅ IoT Helpers loaded — auth, DB, alert engine, room helpers")
