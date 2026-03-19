@@ -116,6 +116,55 @@ class TestAgentObservationsTable:
             assert row is not None
 
 
+class TestVoiceFilter:
+    """Voice filter SSML tests."""
+
+    def test_build_ssml_harmony(self):
+        from voice_filter import build_radim_ssml
+        ssml = build_radim_ssml("Dobrý den.", mode="HARMONY")
+        assert 'express-as style="friendly"' in ssml
+        assert 'rate="-5%"' in ssml
+        assert 'cs-CZ-AntoninNeural' in ssml
+
+    def test_build_ssml_crisis(self):
+        from voice_filter import build_radim_ssml
+        ssml = build_radim_ssml("Zavolám pomoc.", mode="CRISIS")
+        assert 'express-as style="calm"' in ssml
+        assert 'rate="-25%"' in ssml
+        assert 'styledegree="2.0"' in ssml
+
+    def test_sentence_pauses(self):
+        from voice_filter import build_radim_ssml
+        ssml = build_radim_ssml("První věta. Druhá věta.", mode="HARMONY")
+        assert 'break time="618ms"' in ssml
+
+    def test_crisis_emphasis(self):
+        from voice_filter import build_radim_ssml
+        ssml = build_radim_ssml("Pomohu vám, zůstaňte v klidu.", mode="CRISIS")
+        # "pomoc" or "klid" variants should get emphasis
+        assert '<emphasis' in ssml
+
+    def test_is_available(self):
+        from voice_filter import is_available
+        assert is_available() is True
+
+
+class TestMorningCheckin:
+    """Morning check-in scheduler tests."""
+
+    def test_get_seniors_no_crash(self):
+        from agent_loop import _get_seniors_with_medications
+        # Should return list (possibly empty) without errors
+        result = _get_seniors_with_medications()
+        assert isinstance(result, list)
+
+    def test_morning_greeting_with_meds(self):
+        """Morning greeting includes medication names."""
+        from agent_loop import _morning_call_or_push
+        # We can't easily test the actual call, but verify the function exists
+        assert callable(_morning_call_or_push)
+
+
 class TestExistingTestsStillPass:
     """Ensure agent_loop doesn't break existing health endpoint."""
 

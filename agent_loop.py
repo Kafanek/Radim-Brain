@@ -459,4 +459,124 @@ def _call_senior(user_id, obs):
         logger.debug(f"call_senior error: {e}")
 
 
-logger.info("Agent Loop v1.1 loaded — proactive monitoring + phone calls")
+# ============================================================================
+# MORNING CHECK-IN (v390 — scheduled daily call)
+# ============================================================================
+
+def run_morning_checkin(app):
+    """Daily morning check-in: call seniors with medication reminders.
+
+    Called by APScheduler cron job at 8:00 AM.
+    For each senior with medications in profile:
+    1. Build personalized morning greeting with today's meds
+    2. Call them on phone (if phone number in profile)
+    3. Or push notification (if no phone)
+    """
+    if not _AVAILABLE:
+        return
+
+    with app.app_context():
+        try:
+            seniors = _get_seniors_with_medications()
+            if not seniors:
+                return
+            logger.info(f"☀️ Morning check-in: {len(seniors)} seniors with medications")
+
+            for user_id, meds_info in seniors:
+                try:
+                    _morning_call_or_push(user_id, meds_info, app)
+                except Exception as e:
+                    logger.debug(f"Morning check-in skip {user_id}: {e}")
+
+        except Exception as e:
+            logger.error(f"Morning check-in error: {e}")
+
+
+def _get_seniors_with_medications():
+    """Find seniors who have morning medications configured."""
+    results = []
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT user_id, data FROM memory_profiles WHERE data IS NOT NULL"
+            ).fetchall()
+
+            for row in rows:
+                user_id = row.get('user_id') or row[0]
+                data = row.get('data') or row[1]
+                if isinstance(data, str):
+                    import json
+                    try:
+                        data = json.loads(data)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+
+                if not isinstance(data, dict):
+                    continue
+
+                meds = data.get("medications_list", [])
+                med_times = data.get("medication_times", {})
+                morning_meds = med_times.get("rano") or med_times.get("morning") or []
+
+                if meds or morning_meds:
+                    results.append((user_id, {
+                        "meds": meds,
+                        "morning": morning_meds,
+                        "name": data.get("name", ""),
+                    }))
+    except Exception as e:
+        logger.debug(f"get_seniors_with_medications error: {e}")
+    return results
+
+
+def _morning_call_or_push(user_id, meds_info, app):
+    """Call senior with morning greeting + meds, or fallback to push."""
+    name = meds_info.get("name", "")
+    morning_meds = meds_info.get("morning", [])
+    all_meds = meds_info.get("meds", [])
+
+    # Build greeting
+    greeting_name = f", {name}" if name else ""
+    if morning_meds and isinstance(morning_meds, list):
+        meds_str = ", ".join(morning_meds[:3])
+        greeting = (
+            f"Dobré ráno{greeting_name}! Tady Radim. "
+            f"Nezapomeňte na ranní léky: {meds_str}. "
+            f"Jak se dnes cítíte?"
+        )
+    elif all_meds and isinstance(all_meds, list):
+        greeting = (
+            f"Dobré ráno{greeting_name}! Tady Radim. "
+            f"Připomínám ranní léky. Jak se dnes cítíte?"
+        )
+    else:
+        greeting = (
+            f"Dobré ráno{greeting_name}! Tady Radim. "
+            f"Jak se dnes cítíte?"
+        )
+
+    # Try phone call first
+    try:
+        from twilio_voice_helpers import initiate_proactive_call, get_senior_phone
+        phone = get_senior_phone(user_id)
+        if phone:
+            result = initiate_proactive_call(phone, greeting, user_id=user_id, reason="morning_checkin")
+            if result.get("success"):
+                logger.info(f"☀️ Morning call to {name or user_id}: {result['call_sid']}")
+                return
+    except ImportError:
+        pass
+
+    # Fallback: push notification
+    try:
+        send_push = app.config.get('SEND_PUSH_FN')
+        if send_push:
+            push_body = greeting.replace("Tady Radim. ", "")
+            send_push(user_id, "☀️ Dobré ráno od Radima", push_body,
+                      data={"type": "morning_checkin"})
+            logger.info(f"☀️ Morning push to {name or user_id}")
+    except Exception as e:
+        logger.debug(f"Morning push error: {e}")
+
+
+logger.info("Agent Loop v1.2 loaded — monitoring + proactive calls + morning check-in")

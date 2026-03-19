@@ -516,9 +516,18 @@ try:
 
     scheduler.add_job(_cleanup_old_data, 'cron', hour=3, minute=0, id='daily_cleanup')
 
+    # v390: Morning check-in — call seniors with medication reminders at 8:00 AM
+    try:
+        from agent_loop import run_morning_checkin
+        scheduler.add_job(lambda: run_morning_checkin(app), 'cron', hour=8, minute=0,
+                          id='morning_checkin', max_instances=1, misfire_grace_time=600)
+        logger.info("✅ Morning check-in registered (daily at 8:00)")
+    except ImportError:
+        logger.warning("⚠️ morning check-in not available")
+
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
-    logger.info("✅ APScheduler started: 4 jobs (reminders + telemed + agent_loop + cleanup)")
+    logger.info("✅ APScheduler started: 5 jobs (reminders + telemed + agent + cleanup + morning)")
 
 except ImportError:
     logger.warning("⚠️ APScheduler not installed — reminders will not auto-send")
