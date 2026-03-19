@@ -285,21 +285,21 @@ INTENTS = [
     {
         "name": "greeting",
         "patterns": [
-            r"^\s*(ahoj|\u010dau|nazdar|zdrav\u00edm|dobr\u00fd\s+den|dobr\u00e9\s+r\u00e1no|dobr\u00fd\s+ve\u010der|dobr\u00e9\s+odpoledne)\s*[!.?]*\s*$",
+            r"^\s*(ahoj|\u010dau|nazdar|zdrav\u00edm|dobr\u00fd\s+den|dobr\u00e9\s+r\u00e1no|dobr\u00fd\s+ve\u010der|dobr\u00e9\s+odpoledne)(\s+\w+)?\s*[!.?]*\s*$",
         ],
         "handler": "greeting",
     },
     {
         "name": "goodbye",
         "patterns": [
-            r"^\s*(nashledanou|na\s+shledanou|sbohem|\u010dau|papa|ahoj|dobrou\s+noc)\s*[!.?]*\s*$",
+            r"^\s*(nashledanou|na\s+shledanou|sbohem|\u010dau|papa|ahoj|dobrou\s+noc)(\s+\w+)?\s*[!.?]*\s*$",
         ],
         "handler": "goodbye",
     },
     {
         "name": "thanks",
         "patterns": [
-            r"^\s*(d\u011bkuji?|d\u00edky|d\u00edky\s+moc|dekuji|mockr\u00e1t\s+d\u011bkuji?)\s*[!.?]*\s*$",
+            r"^\s*(d\u011bkuji?|d\u00edky|d\u00edky\s+moc|dekuji|mockr\u00e1t\s+d\u011bkuji?)(\s+\w+)?\s*[!.?]*\s*$",
         ],
         "handler": "thanks",
     },

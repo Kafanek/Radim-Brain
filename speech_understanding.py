@@ -74,7 +74,8 @@ SAFETY_FUZZY = [
     ("boji", 1, "medium"),
     ("ztratil", 2, "high"),
     ("ztratila", 2, "high"),
-    ("nevim", 1, "medium"),
+    # NOTE: "nevim" removed — too common ("I don't know"), causes false positives
+    # Confused seniors say "nevim" constantly; it's stress, not safety emergency
     # Suicidal (must not miss)
     ("sebevrazda", 2, "critical"),
     ("nechci", 1, "high"),
@@ -335,7 +336,7 @@ _STT_CORRECTIONS = {
     "dekuji": "děkuji",
     "dobre": "dobře",
     "ano": "ano",
-    "ne": "ne",
+    # "ne": "ne",  # removed — no-op correction wastes correction budget
     # Senior speech patterns
     "co co": "co",           # repetition (dementia)
     "tak tak": "tak",         # filler
@@ -531,10 +532,13 @@ def classify_safety_priority(text, confidence=1.0):
         }
 
     if safety and safety["severity"] == "high":
+        # v406: High-severity (falls, pain) → CRITICAL even with moderate confidence
+        # "spadl jsem" at conf=0.4 is still an emergency
+        is_critical = conf >= 0.4
         return {
-            "priority": "CRITICAL" if conf > 0.5 else "MEDIUM",
-            "bypass_ai": conf > 0.5,
-            "escalate": conf > 0.5,
+            "priority": "CRITICAL" if is_critical else "MEDIUM",
+            "bypass_ai": is_critical,
+            "escalate": is_critical,
             "reason": f"High-severity word '{safety['word']}' (confidence={conf})",
         }
 

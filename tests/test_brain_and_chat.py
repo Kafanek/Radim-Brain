@@ -405,6 +405,59 @@ class TestSpeechUnderstanding:
         assert isinstance(msg, str)
         assert len(msg) > 10
 
+    # v406 bug fixes
+    def test_spadl_jsem_is_critical(self):
+        """Bug fix: 'spadl jsem' must be CRITICAL, not MEDIUM."""
+        from speech_understanding import classify_safety_priority
+        p = classify_safety_priority("spadl jsem nemohu vstát", confidence=0.5)
+        assert p["priority"] == "CRITICAL"
+        assert p["bypass_ai"] is True
+        assert p["escalate"] is True
+
+    def test_spadl_low_confidence_still_critical(self):
+        """Even at conf=0.4, 'spadl' should trigger CRITICAL."""
+        from speech_understanding import classify_safety_priority
+        p = classify_safety_priority("spadl jsem", confidence=0.4)
+        assert p["priority"] == "CRITICAL"
+
+    def test_nevim_not_safety(self):
+        """Bug fix: 'nevim' should NOT trigger safety detection."""
+        from speech_understanding import detect_safety_fuzzy
+        result = detect_safety_fuzzy("nevim co mam delat")
+        # Should be None — "nevim" removed from SAFETY_FUZZY
+        assert result is None
+
+    def test_nevim_no_false_alarm(self):
+        """'nevim kde jsou klice' should NOT be safety."""
+        from speech_understanding import classify_safety_priority
+        p = classify_safety_priority("nevim kde jsou klice")
+        assert p["priority"] == "LOW"
+
+    def test_dekuji_radime_matches_thanks(self):
+        """Bug fix: 'děkuji radime' should match thanks intent."""
+        from intent_resolver import resolve_intent
+        resp, intent, meta = resolve_intent("děkuji radime")
+        assert intent == "thanks"
+        assert resp is not None
+
+    def test_dekuji_plain_still_works(self):
+        """Plain 'děkuji' still matches thanks."""
+        from intent_resolver import resolve_intent
+        resp, intent, meta = resolve_intent("děkuji")
+        assert intent == "thanks"
+
+    def test_ahoj_radime_matches_greeting(self):
+        """'ahoj radime' should match greeting."""
+        from intent_resolver import resolve_intent
+        resp, intent, meta = resolve_intent("ahoj radime")
+        assert intent == "greeting"
+
+    def test_nashledanou_radime_matches_goodbye(self):
+        """'nashledanou radime' should match goodbye."""
+        from intent_resolver import resolve_intent
+        resp, intent, meta = resolve_intent("nashledanou radime")
+        assert intent == "goodbye"
+
 
 class TestAdaptiveLearning:
     """Adaptive learning per-user tests."""
