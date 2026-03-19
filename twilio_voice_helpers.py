@@ -110,17 +110,24 @@ except ImportError:
     _VOICE_MEMORY = False
 
 
-# Emotional keyword sets for C/α estimation from speech
-_CRISIS_WORDS = {'pomoc', 'help', 'bolest', 'pain', 'spadl', 'fell', 'sos',
-                 'nouzové', 'emergency', 'nemůžu', 'špatně', 'umírám', 'záchranku'}
-_STRESS_WORDS = {'strach', 'afraid', 'bojím', 'nervous', 'nemocný', 'sick',
-                 'unavený', 'tired', 'problém', 'bolí', 'nespím', 'samota', 'sám'}
-_CALM_WORDS = {'děkuji', 'díky', 'hezky', 'nice', 'dobře', 'good', 'krásně',
-               'fajn', 'prima', 'skvěle', 'výborně', 'pohoda'}
+# v408: Import word sets from single source of truth (was duplicated & incomplete)
+try:
+    from intent_data import CRISIS_WORDS as _CRISIS_WORDS_ALL, STRESS_WORDS as _STRESS_WORDS, CALM_WORDS as _CALM_WORDS
+    # Use full CRISIS_WORDS (46 words) instead of local subset (was 12 words!)
+    _CRISIS_WORDS = _CRISIS_WORDS_ALL
+except ImportError:
+    # Fallback if intent_data not available (shouldn't happen in production)
+    _CRISIS_WORDS = {'pomoc', 'help', 'bolest', 'spadl', 'sos', 'nemůžu', 'záchranku'}
+    _STRESS_WORDS = {'strach', 'bojím', 'nemocný', 'unavený', 'problém', 'bolí'}
+    _CALM_WORDS = {'děkuji', 'díky', 'dobře', 'fajn', 'skvěle', 'pohoda'}
 
 
 def estimate_call_C_alpha(call_sid, speech_result, confidence):
-    """Estimate C and α from phone call context (keywords, STT confidence, turn count)."""
+    """Estimate C and α from phone call context.
+
+    v408: Unified coefficients with intent_resolver.quick_estimate_from_text()
+    + fuzzy safety detection for speech-impaired seniors on calls.
+    """
     call_data = active_calls.get(call_sid, {})
     history = call_data.get("history", [])
     turn_count = len(history) // 2
@@ -142,18 +149,30 @@ def estimate_call_C_alpha(call_sid, speech_result, confidence):
     stress_hits = len(words & _STRESS_WORDS)
     calm_hits = len(words & _CALM_WORDS)
 
-    C += crisis_hits * 8
-    C += stress_hits * 3
-    C -= calm_hits * 2
-    C = max(0, min(C, 40))
+    # v408: Fuzzy safety check — catches "pomo", "pomc", "infrkt" etc.
+    # Critical for dysarthria/aphasia seniors on phone
+    try:
+        from speech_understanding import detect_safety_fuzzy
+        fuzzy = detect_safety_fuzzy(speech_result or "")
+        if fuzzy and fuzzy["severity"] == "critical":
+            crisis_hits = max(crisis_hits, 2)  # ensure strong C response
+        elif fuzzy and fuzzy["severity"] == "high":
+            crisis_hits = max(crisis_hits, 1)
+    except ImportError:
+        pass
 
+    # v408: Unified coefficients — same as intent_resolver.quick_estimate_from_text
+    C += crisis_hits * 12.0
+    C += stress_hits * 4.0
+    C -= calm_hits * 2.0
+    C = max(0, min(C, 50))
+
+    # v408: Incremental alpha (was binary jump — inconsistent with chat)
     alpha = 0.2
-    if crisis_hits > 0:
-        alpha = 0.8
-    elif stress_hits > 0:
-        alpha = 0.5
-    elif calm_hits > 0:
-        alpha = 0.1
+    alpha += crisis_hits * 0.3
+    alpha += stress_hits * 0.15
+    alpha -= calm_hits * 0.05
+    alpha = max(0.0, min(1.0, alpha))
 
     if call_sid in active_calls:
         prev_C = active_calls[call_sid].get("C", 5.0)
@@ -202,8 +221,12 @@ TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE_NUMBER = os.environ.get("TWILIO_PHONE_NUMBER")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
-AZURE_SPEECH_KEY = os.environ.get("AZURE_SPEECH_KEY")
-AZURE_SPEECH_REGION = os.environ.get("AZURE_SPEECH_REGION", "germanywestcentral")
+# v408: Import shared Azure config (single source of truth)
+try:
+    from speech_helpers import AZURE_SPEECH_KEY, AZURE_SPEECH_REGION
+except ImportError:
+    AZURE_SPEECH_KEY = os.environ.get("AZURE_SPEECH_KEY")
+    AZURE_SPEECH_REGION = os.environ.get("AZURE_SPEECH_REGION", "germanywestcentral")
 
 RADIM_VOICE_GOOGLE = "Google.cs-CZ-Standard-A"
 RADIM_VOICE_BASIC = "man"

@@ -573,6 +573,46 @@ class TestSpeechUnderstanding:
         import threading
         assert isinstance(_calls_lock, type(threading.Lock()))
 
+    # v408: Deduplication verification
+    def test_word_lists_unified(self):
+        """twilio_voice_helpers must use intent_data word sets (not local copies)."""
+        from twilio_voice_helpers import _CRISIS_WORDS as call_crisis
+        from intent_data import CRISIS_WORDS as data_crisis
+        # Call crisis words should be the SAME object or superset
+        assert len(call_crisis) >= 40, f"Call crisis words too small ({len(call_crisis)}), should import from intent_data"
+        # Verify key words are present
+        assert 'spadl' in call_crisis
+        assert 'infarkt' in call_crisis or 'pomoc' in call_crisis
+
+    def test_c_alpha_coefficients_match(self):
+        """C/α estimation on calls should use same coefficients as chat.
+        Note: quick_estimate uses substring matching, call uses word-set intersection,
+        so exact values differ. Both should detect crisis (C > 20).
+        """
+        from twilio_voice_helpers import estimate_call_C_alpha
+        from intent_resolver import quick_estimate_from_text
+        C_call, _ = estimate_call_C_alpha("test", "pomoc spadl", 0.8)
+        C_chat, _ = quick_estimate_from_text("pomoc spadl")
+        # Both must detect crisis state (C > 20)
+        assert C_call > 20, f"Call missed crisis: C={C_call}"
+        assert C_chat > 20, f"Chat missed crisis: C={C_chat}"
+        # Same coefficient base — difference only from matching method
+        assert abs(C_call - C_chat) < 15, f"C_call={C_call} vs C_chat={C_chat} differ too much"
+
+    def test_call_fuzzy_safety_integrated(self):
+        """Phone calls should use fuzzy safety detection (catches 'pomo', 'pomc')."""
+        from twilio_voice_helpers import estimate_call_C_alpha
+        # "pomo" is fuzzy match for "pomoc" (distance 1)
+        C_fuzzy, alpha_fuzzy = estimate_call_C_alpha("test", "pomo prosim", 0.5)
+        # Should detect crisis via fuzzy matching
+        assert C_fuzzy > 15, f"Fuzzy 'pomo' not detected on call: C={C_fuzzy}"
+
+    def test_azure_config_single_source(self):
+        """Azure config should come from speech_helpers (single source)."""
+        from twilio_voice_helpers import AZURE_SPEECH_REGION as call_region
+        from speech_helpers import AZURE_SPEECH_REGION as helpers_region
+        assert call_region == helpers_region, f"Region mismatch: {call_region} vs {helpers_region}"
+
 
 class TestAdaptiveLearning:
     """Adaptive learning per-user tests."""
