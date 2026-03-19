@@ -934,6 +934,79 @@ def admin_agent_run():
         logger.error(f"Agent run error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/admin/status')
+def admin_status():
+    """Comprehensive system status — all subsystems at a glance."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        status = {"timestamp": now_iso(), "version": "3.5.0"}
+
+        with db_context() as db:
+            # Active users (brain_states last 24h)
+            if is_postgres():
+                active = db.execute(
+                    "SELECT COUNT(DISTINCT user_id) as cnt FROM brain_states WHERE created_at > NOW() - INTERVAL '24 hours'"
+                ).fetchone()
+                obs = db.execute(
+                    "SELECT COUNT(*) as cnt FROM agent_observations WHERE created_at > NOW() - INTERVAL '24 hours'"
+                ).fetchone()
+                total_bs = db.execute("SELECT COUNT(*) as cnt FROM brain_states").fetchone()
+                total_profiles = db.execute("SELECT COUNT(*) as cnt FROM memory_profiles").fetchone()
+                total_iot = db.execute("SELECT COUNT(*) as cnt FROM iot_sensor_data").fetchone()
+                recent_obs = db.execute(
+                    "SELECT user_id, observation_type, severity, message, created_at "
+                    "FROM agent_observations ORDER BY created_at DESC LIMIT 5"
+                ).fetchall()
+            else:
+                active = db.execute(
+                    "SELECT COUNT(DISTINCT user_id) as cnt FROM brain_states WHERE created_at > datetime('now', '-24 hours')"
+                ).fetchone()
+                obs = db.execute(
+                    "SELECT COUNT(*) as cnt FROM agent_observations WHERE created_at > datetime('now', '-24 hours')"
+                ).fetchone()
+                total_bs = db.execute("SELECT COUNT(*) as cnt FROM brain_states").fetchone()
+                total_profiles = db.execute("SELECT COUNT(*) as cnt FROM memory_profiles").fetchone()
+                total_iot = db.execute("SELECT COUNT(*) as cnt FROM iot_sensor_data").fetchone()
+                recent_obs = db.execute(
+                    "SELECT user_id, observation_type, severity, message, created_at "
+                    "FROM agent_observations ORDER BY created_at DESC LIMIT 5"
+                ).fetchall()
+
+        status["users"] = {
+            "active_24h": (active['cnt'] or active[0]) if active else 0,
+            "total_profiles": (total_profiles['cnt'] or total_profiles[0]) if total_profiles else 0,
+        }
+        status["brain"] = {
+            "total_states": (total_bs['cnt'] or total_bs[0]) if total_bs else 0,
+        }
+        status["agent_loop"] = {
+            "observations_24h": (obs['cnt'] or obs[0]) if obs else 0,
+            "recent": [dict(r) for r in (recent_obs or [])],
+        }
+        status["iot"] = {
+            "total_readings": (total_iot['cnt'] or total_iot[0]) if total_iot else 0,
+        }
+        status["channels"] = {
+            "chat": True,
+            "twilio": bool(os.environ.get('TWILIO_ACCOUNT_SID')),
+            "whatsapp": bool(os.environ.get('TWILIO_PHONE_NUMBER')),
+            "push": bool(os.environ.get('VAPID_PUBLIC_KEY')),
+            "azure_tts": bool(os.environ.get('AZURE_SPEECH_KEY')),
+        }
+        status["scheduler"] = {
+            "agent_loop": "every 5 min",
+            "morning_checkin": "daily 8:00",
+            "daily_cleanup": "daily 3:00",
+            "reminders": "every 5 min",
+            "telemed": "every 5 min",
+        }
+
+        return jsonify(status), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # Auth routes — now in auth_routes.py blueprint
 
 @app.route('/api')

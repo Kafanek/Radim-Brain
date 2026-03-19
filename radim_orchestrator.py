@@ -390,14 +390,25 @@ def radim_chat_internal(message, user_id=None, mode="senior"):
         if not text_response:
             text_response = "Omlouvám se, zkuste to prosím později."
 
-        # Record to memory
+        # Record to memory + compute brain state
+        brain_mode = None
         if _ORCH_MEMORY_AVAILABLE:
             try:
                 _orch_record(user_id, message, text_response)
             except Exception:
                 pass
 
-        return {"success": True, "response": text_response, "intent": intent}
+        # v394: Brain Ψ(t) computation for WhatsApp/calls
+        try:
+            from brain_core import compute_psi_state
+            from intent_resolver import quick_estimate_from_text
+            C_est, alpha_est = quick_estimate_from_text(message)
+            psi = compute_psi_state(C_est, alpha_est, user_id=user_id)
+            brain_mode = psi.get("mode", "HARMONY")
+        except Exception:
+            pass
+
+        return {"success": True, "response": text_response, "intent": intent, "brain_mode": brain_mode}
 
     except Exception as e:
         logger.error(f"radim_chat_internal error: {e}")
