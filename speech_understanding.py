@@ -65,21 +65,32 @@ SAFETY_FUZZY = [
     ("bolit", 1, "high"),
     ("spadl", 1, "high"),
     ("spadla", 1, "high"),
+    ("padl", 1, "high"),        # v407: fell (alternative to spadl)
+    ("upadl", 1, "high"),       # v407: fell down
     ("nemohu", 1, "high"),
     ("nemuzu", 1, "high"),
     ("dychej", 2, "critical"),  # dýchej → dychej, dychet, dichet
     ("dusim", 1, "critical"),
+    # v407: Medical emergencies — must not miss
+    ("infarkt", 1, "critical"),
+    ("mrtvice", 1, "critical"),
+    ("krev", 1, "high"),        # bleeding
+    ("zlomenina", 2, "high"),   # fracture
+    ("omdlel", 1, "high"),      # fainted (male)
+    ("omdlela", 1, "high"),     # fainted (female)
+    ("bevedomi", 2, "critical"),  # unconscious (catches bezvedomi, bevedomi)
     # Distress
     ("strach", 1, "medium"),
     ("boji", 1, "medium"),
     ("ztratil", 2, "high"),
     ("ztratila", 2, "high"),
     # NOTE: "nevim" removed — too common ("I don't know"), causes false positives
-    # Confused seniors say "nevim" constantly; it's stress, not safety emergency
     # Suicidal (must not miss)
     ("sebevrazda", 2, "critical"),
     ("nechci", 1, "high"),
     ("zabij", 2, "critical"),
+    ("umrit", 1, "critical"),   # v407: want to die
+    ("zemrit", 1, "critical"),  # v407: want to die (variant)
 ]
 
 

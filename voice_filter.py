@@ -64,6 +64,8 @@ EMPHASIS_WORDS = {
 
 def _add_sentence_pauses(text, pause_ms):
     """Insert SSML breaks between sentences."""
+    if not text:
+        return ""
     # Split on sentence boundaries
     sentences = re.split(r'(?<=[.!?])\s+', text.strip())
     if len(sentences) <= 1:
@@ -95,13 +97,17 @@ MAX_TTS_CHARS = 200
 # v405: Fatigue hysteresis — prevent mode switching instability
 _FATIGUE_ACTIVATE = 0.65
 _FATIGUE_DEACTIVATE = 0.55
+_FATIGUE_MAX_ENTRIES = 500  # v407: prevent memory leak — evict oldest when full
 _fatigue_slow_active = {}  # user_id → bool
 
 
 def _truncate_for_tts(text, max_chars=MAX_TTS_CHARS):
     """Shorten text for TTS while preserving meaning.
     Cuts at sentence boundary, adds continuation hint.
+    Guarantees: len(result) <= max_chars + 1 (for trailing period).
     """
+    if not text:
+        return ""
     if len(text) <= max_chars:
         return text
     # Find last sentence boundary before limit
@@ -113,7 +119,8 @@ def _truncate_for_tts(text, max_chars=MAX_TTS_CHARS):
     last_space = truncated.rfind(' ')
     if last_space > 0:
         return truncated[:last_space] + "."
-    return truncated + "."
+    # v407: Guarantee max length even for single long word
+    return truncated[:max_chars - 1] + "."
 
 
 def _add_pause_variability(pause_ms):
@@ -134,6 +141,8 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
     - Pause variability (±50ms for natural rhythm)
     - Logging: mode, overrides applied, text length
     """
+    if mode not in VOICE_PROFILES:
+        logger.warning(f"Invalid voice mode '{mode}' — falling back to HARMONY")
     profile = dict(VOICE_PROFILES.get(mode, VOICE_PROFILES["HARMONY"]))
     overrides = []
 
@@ -159,6 +168,10 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
                 fatigue = state.get("fatigue_level", 0)
                 was_slow = _fatigue_slow_active.get(user_id, False)
                 if fatigue > _FATIGUE_ACTIVATE or (was_slow and fatigue > _FATIGUE_DEACTIVATE):
+                    # v407: Evict oldest entries to prevent memory leak
+                    if len(_fatigue_slow_active) > _FATIGUE_MAX_ENTRIES:
+                        oldest = next(iter(_fatigue_slow_active))
+                        del _fatigue_slow_active[oldest]
                     _fatigue_slow_active[user_id] = True
                     current_rate = int(profile["rate"].replace("%", "").replace("+", ""))
                     profile["rate"] = f"{min(current_rate, -15)}%"
@@ -169,12 +182,16 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
 
                 recovery = state.get("recovery", {})
                 if recovery.get("active") and recovery.get("level", 0) >= 2:
-                    profile["rate"] = "-20%"
+                    # v407: Don't speed up if already slower (e.g. CRISIS at -25%)
+                    current_rate = int(profile["rate"].replace("%", "").replace("+", ""))
+                    profile["rate"] = f"{min(current_rate, -20)}%"
                     profile["volume"] = "x-loud"
-                    profile["pause_ms"] = 1500
+                    profile["pause_ms"] = max(profile["pause_ms"], 1500)
                     overrides.append(f"recovery:L{recovery['level']}")
-        except (ImportError, Exception):
+        except ImportError:
             pass
+        except Exception as e:
+            logger.warning(f"Adaptive voice failed for {user_id}: {e}")
 
     # Add pauses between sentences (with variability)
     pause = _add_pause_variability(profile["pause_ms"])

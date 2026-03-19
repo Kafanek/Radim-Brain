@@ -289,8 +289,13 @@ def resolve_intent(message, user_id=None, mode="HARMONY"):
                 if handler:
                     try:
                         response = handler(user_id=user_id, mode=mode)
-                        logger.info(f"Intent '{name}' resolved locally for user={user_id}")
-                        return (response, name, {"source": "local"})
+                        if response is not None:
+                            logger.info(f"Intent '{name}' resolved locally for user={user_id}")
+                            return (response, name, {"source": "local"})
+                        else:
+                            # v407: Handler returned None → pass to AI (e.g. no profile data)
+                            logger.info(f"Intent '{name}' detected but handler returned None, passing to AI")
+                            return (None, name, None)
                     except Exception as e:
                         logger.warning(f"Intent handler '{name}' failed: {e}")
                         return (None, name, None)

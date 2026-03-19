@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 AZURE_SPEECH_KEY = os.environ.get('AZURE_SPEECH_KEY')
-AZURE_SPEECH_REGION = os.environ.get('AZURE_SPEECH_REGION', 'westeurope')
+AZURE_SPEECH_REGION = os.environ.get('AZURE_SPEECH_REGION', 'germanywestcentral')  # v407: consistent with twilio_voice_helpers
 
 # ============================================================================
 # VOICE CONFIGURATION

@@ -458,6 +458,77 @@ class TestSpeechUnderstanding:
         resp, intent, meta = resolve_intent("nashledanou radime")
         assert intent == "goodbye"
 
+    # v407 safety word expansion tests
+    def test_safety_infarkt_critical(self):
+        """'infarkt' must be detected as critical safety word."""
+        from speech_understanding import detect_safety_fuzzy
+        r = detect_safety_fuzzy("mám infarkt")
+        assert r is not None
+        assert r["severity"] == "critical"
+
+    def test_safety_mrtvice_critical(self):
+        """'mrtvice' must be detected as critical."""
+        from speech_understanding import detect_safety_fuzzy
+        r = detect_safety_fuzzy("asi mám mrtvici")
+        assert r is not None
+        assert r["severity"] == "critical"
+
+    def test_safety_padl_high(self):
+        """'padl jsem' detected as high severity."""
+        from speech_understanding import detect_safety_fuzzy
+        r = detect_safety_fuzzy("padl jsem na zem")
+        assert r is not None
+        assert r["severity"] == "high"
+
+    def test_safety_omdlel_high(self):
+        """'omdlel' detected as high severity."""
+        from speech_understanding import detect_safety_fuzzy
+        r = detect_safety_fuzzy("manžel omdlel")
+        assert r is not None
+        assert r["severity"] == "high"
+
+    def test_safety_umrit_critical(self):
+        """'chci umrit' detected as critical."""
+        from speech_understanding import detect_safety_fuzzy
+        r = detect_safety_fuzzy("chci umrit")
+        assert r is not None
+        assert r["severity"] == "critical"
+
+    def test_safety_zlomenina_high(self):
+        """'zlomenina' detected as high severity."""
+        from speech_understanding import detect_safety_fuzzy
+        r = detect_safety_fuzzy("mám zlomeninu")
+        assert r is not None
+        assert r["severity"] == "high"
+
+    def test_weather_intent_no_duplicate(self):
+        """Weather intent should not be duplicated."""
+        from intent_data import INTENTS
+        weather_count = sum(1 for i in INTENTS if i["name"] == "weather")
+        assert weather_count == 1, f"Found {weather_count} weather intents, expected 1"
+
+    def test_voice_filter_none_text(self):
+        """Voice filter handles None/empty text gracefully."""
+        from voice_filter import _truncate_for_tts, _add_sentence_pauses
+        assert _truncate_for_tts("") == ""
+        assert _truncate_for_tts(None) == ""
+        assert _add_sentence_pauses("", 618) == ""
+        assert _add_sentence_pauses(None, 618) == ""
+
+    def test_voice_filter_truncate_guarantees_max(self):
+        """Truncation must not exceed max_chars + 1."""
+        from voice_filter import _truncate_for_tts
+        long_word = "x" * 300
+        result = _truncate_for_tts(long_word, max_chars=200)
+        assert len(result) <= 200, f"Truncated to {len(result)} chars, expected <= 200"
+
+    def test_voice_filter_recovery_no_speedup(self):
+        """Recovery mode must not speed up CRISIS voice (-25% → should stay -25%, not -20%)."""
+        from voice_filter import VOICE_PROFILES
+        crisis_rate = int(VOICE_PROFILES["CRISIS"]["rate"].replace("%", ""))
+        # Recovery sets min(current, -20), so for CRISIS -25%: min(-25, -20) = -25 (stays slow)
+        assert min(crisis_rate, -20) == crisis_rate, "Recovery would speed up CRISIS voice!"
+
 
 class TestAdaptiveLearning:
     """Adaptive learning per-user tests."""

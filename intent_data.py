@@ -368,15 +368,20 @@ INTENTS = [
         ],
         "handler": "how_are_you",
     },
+    # v407: weather intent merged (was duplicated), diacritics-tolerant patterns
     {
         "name": "weather",
         "patterns": [
-            r"po\u010das\u00ed",
-            r"jak\u00e9\s+bude\s+po\u010das\u00ed",
-            r"bude\s+pr\u0161et",
-            r"bude\s+sn\u011b\u017eit",
-            r"jak\u00e1\s+je\s+teplota",
-            r"kolik\s+je\s+stup\u0148\u016f",
+            r"po[čc]as[ií]",
+            r"jak[ée]\s+bude\s+po[čc]as[ií]",
+            r"jak[ée]\s+je\s+po[čc]as[ií]",
+            r"bude\s+pr[šs]et",
+            r"bude\s+sn[eě][žz]it",
+            r"jak[aá]\s+je\s+teplota",
+            r"kolik\s+je\s+stup[nň][ůu]",
+            r"po[čc]as[ií]\s+na\s+z[ií]tra",
+            r"po[čc]as[ií]\s+dnes",
+            r"venku\s+je",
         ],
         "handler": None,
     },
@@ -405,21 +410,7 @@ INTENTS = [
         ],
         "handler": "who_am_i",
     },
-    {
-        "name": "weather",
-        "patterns": [
-            r"jak[ée]\s+je\s+po[čc]as[ií]",
-            r"jak[ée]\s+bude\s+po[čc]as[ií]",
-            r"bude\s+pr[šs]et",
-            r"bude\s+sn[eě][žz]it",
-            r"kolik\s+je\s+stup[nň][ůu]",
-            r"jak[aá]\s+je\s+teplota",
-            r"po[čc]as[ií]\s+na\s+z[ií]tra",
-            r"po[čc]as[ií]\s+dnes",
-            r"venku\s+je",
-        ],
-        "handler": None,  # pass to AI (Gemini can answer weather)
-    },
+    # weather intent merged above in v407 (removed duplicate)
     {
         "name": "safety",
         "patterns": [

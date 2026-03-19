@@ -134,7 +134,7 @@ def estimate_call_C_alpha(call_sid, speech_result, confidence):
     if conf_val < 0.5:
         C += (0.5 - conf_val) * 10
 
-    text_lower = speech_result.lower()
+    text_lower = (speech_result or "").lower()
     words = set(text_lower.split())
 
     crisis_hits = len(words & _CRISIS_WORDS)
