@@ -579,4 +579,48 @@ def _morning_call_or_push(user_id, meds_info, app):
         logger.debug(f"Morning push error: {e}")
 
 
-logger.info("Agent Loop v1.2 loaded — monitoring + proactive calls + morning check-in")
+# ============================================================================
+# DAILY CLEANUP (v392 — scheduled at 3:00 AM)
+# ============================================================================
+
+def run_daily_cleanup(app):
+    """Clean up old data: observations >30d, brain_states >90d.
+
+    Called by APScheduler cron job at 3:00 AM.
+    """
+    if not _AVAILABLE:
+        return
+
+    with app.app_context():
+        try:
+            with db_context(commit=True) as db:
+                if is_postgres():
+                    # Observations older than 30 days
+                    r1 = db.execute(
+                        "DELETE FROM agent_observations WHERE created_at < NOW() - INTERVAL '30 days'"
+                    )
+                    # Brain states older than 90 days
+                    r2 = db.execute(
+                        "DELETE FROM brain_states WHERE created_at < NOW() - INTERVAL '90 days'"
+                    )
+                else:
+                    r1 = db.execute(
+                        "DELETE FROM agent_observations WHERE created_at < datetime('now', '-30 days')"
+                    )
+                    r2 = db.execute(
+                        "DELETE FROM brain_states WHERE created_at < datetime('now', '-90 days')"
+                    )
+
+                obs_deleted = r1.rowcount if r1 else 0
+                brain_deleted = r2.rowcount if r2 else 0
+
+                if obs_deleted > 0 or brain_deleted > 0:
+                    logger.info(f"🧹 Daily cleanup: {obs_deleted} old observations, {brain_deleted} old brain_states deleted")
+                else:
+                    logger.debug("🧹 Daily cleanup: nothing to delete")
+
+        except Exception as e:
+            logger.error(f"Daily cleanup error: {e}")
+
+
+logger.info("Agent Loop v1.3 loaded — monitoring + calls + morning check-in + cleanup")

@@ -525,9 +525,18 @@ try:
     except ImportError:
         logger.warning("⚠️ morning check-in not available")
 
+    # Daily cleanup — old observations + brain_states
+    try:
+        from agent_loop import run_daily_cleanup
+        scheduler.add_job(lambda: run_daily_cleanup(app), 'cron', hour=3, minute=0,
+                          id='daily_cleanup', max_instances=1, misfire_grace_time=3600)
+        logger.info("✅ Daily cleanup registered (3:00 AM)")
+    except ImportError:
+        logger.warning("⚠️ daily cleanup not available")
+
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
-    logger.info("✅ APScheduler started: 5 jobs (reminders + telemed + agent + cleanup + morning)")
+    logger.info("✅ APScheduler started: 5 jobs (reminders + telemed + agent + morning + cleanup)")
 
 except ImportError:
     logger.warning("⚠️ APScheduler not installed — reminders will not auto-send")
