@@ -372,6 +372,84 @@ class TestSpeechUnderstanding:
         # "tak tak" → "tak" (phrase correction) + regex collapse
         assert result.count("tak") <= 2
 
+
+class TestAdaptiveLearning:
+    """Adaptive learning per-user tests."""
+
+    def test_feedback_success(self):
+        from adaptive_learning import detect_feedback
+        f = detect_feedback("Děkuji, super!")
+        assert f["signal"] == "success"
+        assert f["strength"] > 0
+
+    def test_feedback_failure(self):
+        from adaptive_learning import detect_feedback
+        f = detect_feedback("Nerozumím tomu")
+        assert f["signal"] == "failure"
+
+    def test_feedback_wants_shorter(self):
+        from adaptive_learning import detect_feedback
+        f = detect_feedback("To je moc dlouhé")
+        assert f["length_pref"] == "shorter"
+
+    def test_feedback_wants_repeat(self):
+        from adaptive_learning import detect_feedback
+        f = detect_feedback("Zopakuj to prosím")
+        assert f["wants_repeat"] is True
+
+    def test_rhythm_update(self):
+        from adaptive_learning import update_rhythm
+        a = {}
+        a = update_rhythm(a, "Ahoj", "Dobrý den!")
+        assert "time_buckets" in a
+        assert "avg_message_length" in a
+        assert "interaction_hours" in a
+        assert sum(a["time_buckets"].values()) == 1
+
+    def test_mood_transitions(self):
+        from adaptive_learning import update_mood_transitions
+        a = {}
+        a = update_mood_transitions(a, "happy")
+        a = update_mood_transitions(a, "sad")
+        a = update_mood_transitions(a, "sad")
+        a = update_mood_transitions(a, "sad")
+        assert len(a["mood_history"]) == 4
+        # 3 consecutive sad → mood concern
+        assert a.get("mood_concern") is True
+
+    def test_topic_freshness(self):
+        from adaptive_learning import update_topic_freshness
+        a = {}
+        a = update_topic_freshness(a, "zdravi")
+        a = update_topic_freshness(a, "zdravi")
+        a = update_topic_freshness(a, "rodina")
+        assert "zdravi" in a["fresh_interests"]
+        assert a["fresh_interests"]["zdravi"] == 2
+
+    def test_speech_patience_aphasia(self):
+        from adaptive_learning import compute_speech_patience
+        p = compute_speech_patience({}, "afazie")
+        assert p["speech_timeout_multiplier"] >= 2.0
+        assert p["response_pace"] == "very_slow"
+        assert p["preferred_confirmation"] == "yes_no"
+
+    def test_speech_patience_normal(self):
+        from adaptive_learning import compute_speech_patience
+        p = compute_speech_patience({}, "")
+        assert p["speech_timeout_multiplier"] == 1.0
+        assert p["response_pace"] == "normal"
+
+    def test_preferred_length_short(self):
+        from adaptive_learning import compute_preferred_length
+        a = {"avg_message_length": 10, "length_feedback": ["shorter", "shorter"]}
+        assert compute_preferred_length(a) == "short"
+
+    def test_get_adaptive_context_empty(self):
+        from adaptive_learning import get_adaptive_context
+        lines = get_adaptive_context("nonexistent_user")
+        assert isinstance(lines, list)
+        assert len(lines) == 0  # not enough data
+
     def test_stt_no_change_normal(self):
         """Normal text should not be changed."""
         from speech_understanding import correct_stt_output

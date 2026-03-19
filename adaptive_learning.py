@@ -1,0 +1,496 @@
+"""
+Adaptive Learning v1.0 — Per-user rhythm, pace, and feedback learning
+=====================================================================
+Learns from EVERY interaction:
+1. Interaction rhythm — when does this user talk? (time-of-day heatmap)
+2. Message pace — how long are their messages? How fast do they respond?
+3. Response length preference — do they prefer short or long answers?
+4. Feedback detection — "děkuji" = success, "nerozumím" = failure
+5. STT error tracking — what words does STT get wrong for THIS user?
+6. Emotional transitions — mood state machine per user
+7. Topic freshness — time-weighted topic interests
+
+All data stored in memory_learning JSONB under "adaptive" key.
+Updated on every interaction via update_adaptive_profile().
+"""
+
+import logging
+import re
+from datetime import datetime, timedelta
+from collections import Counter
+
+logger = logging.getLogger(__name__)
+
+# ============================================================================
+# FEEDBACK DETECTION — did user like the response?
+# ============================================================================
+
+_SUCCESS_SIGNALS = [
+    r'\b(d[ěe]kuj[iu]|d[ií]ky|dekuju|fajn|super|skv[ěe]l[ýeya]|v[ýy]born[ěeya]|dobre|spr[áa]vn[ěeya])\b',
+    r'\b(ano|jo|jasn[ěeya]|p[řr]esn[ěeya]|souhlas[ií]m|m[áa][šs]\s+pravdu)\b',
+    r'\b(pomohlo|pomoh|rozum[ií]m|ch[áa]pu|ok[ée]j?|ok)\b',
+]
+
+_FAILURE_SIGNALS = [
+    r'\b(nerozum[ií]m|nech[áa]pu|co\s+t[ií]m\s+mysl[ií][šs])\b',
+    r'\b(ne\s+ne|to\s+nen[ií]|[šs]patn[ěeya]|blb[ěeya]|h[ůu][řr])\b',
+    r'\b(opakuj|znovu|je[šs]t[ěe]\s+jednou|pomaleji|hlasit[ěe]ji)\b',
+    r'\b(moc\s+dlouh[ýeya]|kr[áa]t[čc]e|stru[čc]n[ěeya])\b',
+    r'\b(nev[ií]m|nevad[ií]|jedno)\b',
+]
+
+_COMPILED_SUCCESS = [re.compile(p, re.IGNORECASE) for p in _SUCCESS_SIGNALS]
+_COMPILED_FAILURE = [re.compile(p, re.IGNORECASE) for p in _FAILURE_SIGNALS]
+
+# Explicit length feedback
+_WANTS_SHORTER = re.compile(r'(kr[áa]t[čc]e|stru[čc]n|moc\s+dlouh|zkra[ťt])', re.IGNORECASE)
+_WANTS_LONGER = re.compile(r'(v[ií]c|podrobn|rozve[ďd]|vysv[ěe]tli)', re.IGNORECASE)
+
+
+def detect_feedback(message):
+    """Detect user feedback from their response.
+
+    Returns:
+        dict: {
+            "signal": "success" | "failure" | "neutral",
+            "strength": 0.0-1.0,
+            "length_pref": "shorter" | "longer" | None,
+            "wants_repeat": bool,
+        }
+    """
+    if not message:
+        return {"signal": "neutral", "strength": 0.0, "length_pref": None, "wants_repeat": False}
+
+    text = message.strip()
+    text_lower = text.lower()
+
+    success_hits = sum(1 for p in _COMPILED_SUCCESS if p.search(text_lower))
+    failure_hits = sum(1 for p in _COMPILED_FAILURE if p.search(text_lower))
+
+    # Determine signal
+    if success_hits > failure_hits:
+        signal = "success"
+        strength = min(1.0, success_hits * 0.4)
+    elif failure_hits > success_hits:
+        signal = "failure"
+        strength = min(1.0, failure_hits * 0.4)
+    else:
+        signal = "neutral"
+        strength = 0.0
+
+    # Length preference
+    length_pref = None
+    if _WANTS_SHORTER.search(text_lower):
+        length_pref = "shorter"
+    elif _WANTS_LONGER.search(text_lower):
+        length_pref = "longer"
+
+    # Repeat request
+    wants_repeat = bool(re.search(r'(opakuj|znovu|je[šs]t[ěe]\s+jednou|zopakuj)', text_lower, re.IGNORECASE))
+
+    return {
+        "signal": signal,
+        "strength": strength,
+        "length_pref": length_pref,
+        "wants_repeat": wants_repeat,
+    }
+
+
+# ============================================================================
+# RHYTHM TRACKING — when and how does this user interact?
+# ============================================================================
+
+def _hour_bucket(hour):
+    """Map hour to 4 time buckets."""
+    if 6 <= hour < 12:
+        return "morning"
+    elif 12 <= hour < 18:
+        return "afternoon"
+    elif 18 <= hour < 22:
+        return "evening"
+    return "night"
+
+
+def update_rhythm(adaptive, message, response):
+    """Update interaction rhythm data.
+
+    Tracks:
+    - time_buckets: {morning: count, afternoon: count, ...}
+    - avg_message_length: exponential moving average of user message length
+    - avg_response_time_sec: average time between interactions
+    - interaction_hours: list of recent interaction hours (last 50)
+    """
+    now = datetime.now()
+    bucket = _hour_bucket(now.hour)
+
+    # Time bucket counts
+    buckets = adaptive.get("time_buckets", {"morning": 0, "afternoon": 0, "evening": 0, "night": 0})
+    buckets[bucket] = buckets.get(bucket, 0) + 1
+    adaptive["time_buckets"] = buckets
+
+    # Message length — exponential moving average (α=0.2)
+    msg_len = len(message) if message else 0
+    prev_avg = adaptive.get("avg_message_length", msg_len)
+    adaptive["avg_message_length"] = round(0.8 * prev_avg + 0.2 * msg_len)
+
+    # Response length tracking
+    resp_len = len(response) if response else 0
+    prev_resp = adaptive.get("avg_response_length", resp_len)
+    adaptive["avg_response_length"] = round(0.8 * prev_resp + 0.2 * resp_len)
+
+    # Interaction hours (last 50 for pattern detection)
+    hours = adaptive.get("interaction_hours", [])
+    hours.append(now.hour)
+    adaptive["interaction_hours"] = hours[-50:]
+
+    # Peak interaction time
+    if len(hours) >= 5:
+        hour_counts = Counter(hours)
+        peak = hour_counts.most_common(1)[0][0]
+        adaptive["peak_hour"] = peak
+
+    # Time since last interaction
+    last = adaptive.get("last_interaction_ts")
+    if last:
+        try:
+            last_dt = datetime.fromisoformat(str(last).split('+')[0])
+            gap_sec = (now - last_dt).total_seconds()
+            prev_gap = adaptive.get("avg_gap_minutes", gap_sec / 60)
+            adaptive["avg_gap_minutes"] = round(0.8 * prev_gap + 0.2 * (gap_sec / 60), 1)
+        except (ValueError, TypeError):
+            pass
+    adaptive["last_interaction_ts"] = now.isoformat()
+
+    return adaptive
+
+
+# ============================================================================
+# RESPONSE LENGTH ADAPTATION
+# ============================================================================
+
+def compute_preferred_length(adaptive):
+    """Compute preferred response length from user behavior.
+
+    Logic:
+    - If user sends short messages (<30 chars avg), prefer short responses
+    - If user explicitly asked for shorter/longer, weight that heavily
+    - If user's success signals come after short responses, prefer short
+
+    Returns: "short" | "medium" | "long"
+    """
+    avg_msg = adaptive.get("avg_message_length", 50)
+    explicit_prefs = adaptive.get("length_feedback", [])  # list of "shorter"/"longer"
+
+    # Start with message-length heuristic
+    if avg_msg < 20:
+        score = -1  # prefers short
+    elif avg_msg > 80:
+        score = 1   # prefers long
+    else:
+        score = 0   # medium
+
+    # Explicit feedback weighs 3x
+    for pref in explicit_prefs[-5:]:  # last 5 feedbacks
+        if pref == "shorter":
+            score -= 3
+        elif pref == "longer":
+            score += 3
+
+    if score <= -2:
+        return "short"
+    elif score >= 2:
+        return "long"
+    return "medium"
+
+
+# ============================================================================
+# EMOTIONAL TRANSITIONS
+# ============================================================================
+
+def update_mood_transitions(adaptive, current_mood):
+    """Track mood transitions for pattern detection.
+
+    Stores last 20 mood values with timestamps for transition analysis.
+    """
+    mood_history = adaptive.get("mood_history", [])
+    mood_history.append({
+        "mood": current_mood,
+        "hour": datetime.now().hour,
+        "ts": datetime.now().isoformat()[:16],  # minute precision
+    })
+    adaptive["mood_history"] = mood_history[-20:]
+
+    # Detect concerning patterns
+    if len(mood_history) >= 3:
+        last_3 = [m["mood"] for m in mood_history[-3:]]
+        if all(m in ("sad", "anxious") for m in last_3):
+            adaptive["mood_concern"] = True
+            adaptive["mood_concern_since"] = mood_history[-3]["ts"]
+        else:
+            adaptive["mood_concern"] = False
+
+    return adaptive
+
+
+# ============================================================================
+# TOPIC FRESHNESS — time-weighted interests
+# ============================================================================
+
+def update_topic_freshness(adaptive, topic):
+    """Track topics with time decay — recent topics weigh more.
+
+    Instead of raw counts, store timestamps of last 5 mentions per topic.
+    """
+    if not topic or topic == "general":
+        return adaptive
+
+    topic_times = adaptive.get("topic_times", {})
+    times = topic_times.get(topic, [])
+    times.append(datetime.now().isoformat()[:16])
+    topic_times[topic] = times[-5:]  # keep last 5 per topic
+    adaptive["topic_times"] = topic_times
+
+    # Compute fresh interests (topics mentioned in last 7 days)
+    week_ago = (datetime.now() - timedelta(days=7)).isoformat()[:16]
+    fresh = {}
+    for t, ts_list in topic_times.items():
+        recent = sum(1 for ts in ts_list if ts > week_ago)
+        if recent > 0:
+            fresh[t] = recent
+    adaptive["fresh_interests"] = fresh
+
+    return adaptive
+
+
+# ============================================================================
+# STT ERROR TRACKING — what words does STT get wrong for THIS user?
+# ============================================================================
+
+def track_stt_corrections(adaptive, corrections):
+    """Track STT corrections per user to build personal vocabulary.
+
+    Args:
+        corrections: list of "word → correction" strings from correct_stt_output()
+    """
+    if not corrections:
+        return adaptive
+
+    stt_errors = adaptive.get("stt_error_counts", {})
+    for corr in corrections:
+        # Extract the wrong word
+        parts = corr.split(" → ")
+        if len(parts) == 2:
+            wrong = parts[0].strip("'")
+            stt_errors[wrong] = stt_errors.get(wrong, 0) + 1
+
+    # Keep top 20 most frequent errors
+    if len(stt_errors) > 20:
+        sorted_errors = sorted(stt_errors.items(), key=lambda x: -x[1])
+        stt_errors = dict(sorted_errors[:20])
+
+    adaptive["stt_error_counts"] = stt_errors
+    return adaptive
+
+
+# ============================================================================
+# DYSPHASIA / SPEECH DISORDER RHYTHM ADAPTATION
+# ============================================================================
+
+def compute_speech_patience(adaptive, communication_needs=""):
+    """Compute how patient Radim should be with this specific user.
+
+    Returns:
+        dict: {
+            "speech_timeout_multiplier": 1.0-3.0,
+            "response_pace": "normal" | "slow" | "very_slow",
+            "repeat_tolerance": 1-5 (how many repeats before escalating),
+            "preferred_confirmation": "verbal" | "yes_no" | "dtmf",
+        }
+    """
+    needs = (communication_needs or "").lower()
+    avg_msg = adaptive.get("avg_message_length", 50)
+    repeat_count = adaptive.get("repeat_requests", 0)
+    success_rate = adaptive.get("success_rate", 0.5)
+
+    # Base patience from communication needs
+    multiplier = 1.0
+    pace = "normal"
+    confirm = "verbal"
+
+    if any(n in needs for n in ["afazi", "dysartr", "dysf"]):
+        multiplier = 2.5
+        pace = "very_slow"
+        confirm = "yes_no"  # offer simple choices
+    elif any(n in needs for n in ["kokta", "parkinson", "als", "huntington"]):
+        multiplier = 2.0
+        pace = "slow"
+        confirm = "yes_no"
+    elif any(n in needs for n in ["demenc", "alzheim"]):
+        multiplier = 1.5
+        pace = "slow"
+        confirm = "yes_no"
+
+    # Adapt from actual behavior — if user often asks to repeat, increase patience
+    if repeat_count > 5:
+        multiplier = min(3.0, multiplier + 0.5)
+    if avg_msg < 15:  # very short messages = may struggle to express
+        multiplier = min(3.0, multiplier + 0.3)
+
+    # If success rate is low, slow down more
+    if success_rate < 0.3:
+        pace = "very_slow"
+        multiplier = min(3.0, multiplier + 0.5)
+
+    return {
+        "speech_timeout_multiplier": round(multiplier, 1),
+        "response_pace": pace,
+        "repeat_tolerance": 5 if "afazi" in needs else 3,
+        "preferred_confirmation": confirm,
+    }
+
+
+# ============================================================================
+# MASTER UPDATE — called after every interaction
+# ============================================================================
+
+def update_adaptive_profile(user_id, message, response, mood=None, topic=None,
+                            stt_corrections=None, communication_needs=""):
+    """Update all adaptive learning data for a user.
+
+    Called from record_interaction() in memory_logic.py.
+
+    Args:
+        user_id: user identifier
+        message: user's message text
+        response: Radim's response text
+        mood: detected mood (or None)
+        topic: detected topic (or None)
+        stt_corrections: list of STT corrections applied
+        communication_needs: user's communication_needs string
+    """
+    try:
+        from memory_helpers import db_load_learning, db_save_learning
+
+        learning = db_load_learning(user_id)
+        adaptive = learning.get("adaptive", {})
+
+        # 1. Rhythm
+        adaptive = update_rhythm(adaptive, message, response)
+
+        # 2. Feedback detection
+        feedback = detect_feedback(message)
+        if feedback["signal"] != "neutral":
+            # Update success rate (EMA α=0.15)
+            prev_rate = adaptive.get("success_rate", 0.5)
+            new_val = 1.0 if feedback["signal"] == "success" else 0.0
+            adaptive["success_rate"] = round(0.85 * prev_rate + 0.15 * new_val, 3)
+
+        if feedback["length_pref"]:
+            length_fb = adaptive.get("length_feedback", [])
+            length_fb.append(feedback["length_pref"])
+            adaptive["length_feedback"] = length_fb[-10:]
+
+        if feedback["wants_repeat"]:
+            adaptive["repeat_requests"] = adaptive.get("repeat_requests", 0) + 1
+
+        # 3. Preferred response length (empirical)
+        adaptive["computed_length"] = compute_preferred_length(adaptive)
+
+        # 4. Mood transitions
+        if mood:
+            adaptive = update_mood_transitions(adaptive, mood)
+
+        # 5. Topic freshness
+        if topic:
+            adaptive = update_topic_freshness(adaptive, topic)
+
+        # 6. STT error tracking
+        if stt_corrections:
+            adaptive = track_stt_corrections(adaptive, stt_corrections)
+
+        # 7. Speech patience (recompute periodically)
+        total = adaptive.get("time_buckets", {})
+        total_interactions = sum(total.values()) if total else 0
+        if total_interactions % 5 == 0:  # every 5 interactions
+            patience = compute_speech_patience(adaptive, communication_needs)
+            adaptive["speech_patience"] = patience
+
+        # 8. Interaction counter
+        adaptive["total_adaptive_interactions"] = adaptive.get("total_adaptive_interactions", 0) + 1
+
+        # Save
+        learning["adaptive"] = adaptive
+        db_save_learning(user_id, learning)
+
+        logger.debug(f"Adaptive update for {user_id}: rhythm={adaptive.get('peak_hour')}h, "
+                     f"success={adaptive.get('success_rate', '?')}, "
+                     f"length={adaptive.get('computed_length')}")
+
+    except Exception as e:
+        logger.debug(f"Adaptive learning error for {user_id}: {e}")
+
+
+# ============================================================================
+# QUERY — get adaptive data for prompt building
+# ============================================================================
+
+def get_adaptive_context(user_id):
+    """Get adaptive learning context for system prompt injection.
+
+    Returns human-readable lines to add to personalized prompt.
+    """
+    try:
+        from memory_helpers import db_load_learning
+        learning = db_load_learning(user_id)
+        adaptive = learning.get("adaptive", {})
+
+        if not adaptive or adaptive.get("total_adaptive_interactions", 0) < 3:
+            return []  # not enough data yet
+
+        lines = []
+
+        # Preferred length
+        length = adaptive.get("computed_length")
+        if length == "short":
+            lines.append("- Uživatel preferuje KRÁTKÉ odpovědi (2-3 věty max)")
+        elif length == "long":
+            lines.append("- Uživatel preferuje podrobné odpovědi")
+
+        # Peak time
+        peak = adaptive.get("peak_hour")
+        if peak is not None:
+            lines.append(f"- Nejčastěji komunikuje kolem {peak}:00")
+
+        # Mood concern
+        if adaptive.get("mood_concern"):
+            lines.append("- POZOR: Uživatel je opakovaně smutný/úzkostný — buď extra empatický")
+
+        # Fresh interests
+        fresh = adaptive.get("fresh_interests", {})
+        if fresh:
+            top = sorted(fresh.items(), key=lambda x: -x[1])[:3]
+            topics = ", ".join(t for t, _ in top)
+            lines.append(f"- Aktuální zájmy: {topics}")
+
+        # Speech patience
+        patience = adaptive.get("speech_patience", {})
+        if patience.get("response_pace") == "very_slow":
+            lines.append("- Mluv POMALU a trpělivě — uživatel potřebuje více času")
+        elif patience.get("response_pace") == "slow":
+            lines.append("- Mluv klidně a pomaleji")
+
+        if patience.get("preferred_confirmation") == "yes_no":
+            lines.append("- Nabízej jednoduché volby (ANO/NE) místo otevřených otázek")
+
+        # Success rate
+        rate = adaptive.get("success_rate")
+        if rate is not None and rate < 0.3:
+            lines.append("- Nízká úspěšnost komunikace — zjednodušuj, ověřuj porozumění")
+
+        return lines
+
+    except Exception:
+        return []
+
+
+logger.info("Adaptive Learning v1.0 loaded — rhythm, feedback, pace, mood, topics")

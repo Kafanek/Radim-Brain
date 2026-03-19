@@ -181,6 +181,16 @@ def build_personalized_prompt(user_id: str) -> str:
         parts.append("Zmin to na zacatku odpovedi, napriklad: 'Vsiml jsem si, ze...' nebo 'Chtel bych se zeptat...'")
         parts.append("")
 
+    # v399: Adaptive learning context — rhythm, pace, mood patterns
+    try:
+        from adaptive_learning import get_adaptive_context
+        adaptive_lines = get_adaptive_context(user_id)
+        if adaptive_lines:
+            parts.append("--- Adaptivni profil (nauceno z interakci) ---")
+            parts.extend(adaptive_lines)
+    except ImportError:
+        pass
+
     parts.append("===============================================================")
 
     return "\n".join(parts)
@@ -331,9 +341,24 @@ def record_interaction(user_id: str, user_message: str, assistant_response: str,
             if old_baseline is None or abs(float(old_baseline) - avg_C) > 1.0:
                 profile["baseline_C"] = avg_C
                 db_save_profile(user_id, profile)
-                logger.info(f"🧠 [v283] baseline_C updated for {user_id}: {old_baseline} → {avg_C}")
         except Exception as e:
             logger.debug(f"baseline_C auto-update non-fatal: {e}")
+
+    # v399: Adaptive learning — rhythm, feedback, pace, mood patterns
+    try:
+        from adaptive_learning import update_adaptive_profile
+        comm_needs = ""
+        try:
+            profile = db_load_profile(user_id)
+            comm_needs = profile.get("communication_needs", "")
+        except Exception:
+            pass
+        update_adaptive_profile(
+            user_id, user_message, assistant_response,
+            mood=mood, topic=topic, communication_needs=comm_needs
+        )
+    except ImportError:
+        pass
 
 
 logger.info("✅ Memory Logic loaded — personalization, recording, crisis escalation")
