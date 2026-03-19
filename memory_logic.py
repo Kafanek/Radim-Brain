@@ -293,11 +293,18 @@ def _update_learning_stats(user_id: str, user_message: str, brain_C: float = Non
 
 def record_interaction(user_id: str, user_message: str, assistant_response: str, brain_C: float = None, brain_mode: str = None):
     """Zaznamenat interakci (v283: + brain state tracking, v290: + GDPR consent check)"""
-    # GDPR enforcement
+    # GDPR enforcement — chat history requires consent, but learning/adaptive is aggregated (no PII)
     consent = get_gdpr_consent(user_id)
-    if not consent.get("chat_history", False):
-        logger.info(f"🔒 [GDPR] Skipping chat history save for user={user_id} (no chat_history consent)")
+    has_chat_consent = consent.get("chat_history", False)
+    if not has_chat_consent:
         _update_learning_stats(user_id, user_message, brain_C, brain_mode)
+        # v399: Adaptive learning runs even without chat_history consent (aggregated, no PII)
+        try:
+            from adaptive_learning import update_adaptive_profile
+            update_adaptive_profile(user_id, user_message, assistant_response,
+                                    mood=detect_mood(user_message), topic=detect_topic(user_message))
+        except (ImportError, Exception):
+            pass
         return
 
     db_add_history(user_id, "user", user_message)
