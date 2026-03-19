@@ -144,6 +144,83 @@ def _handle_how_are_you(**kwargs):
     return random.choice(_HOW_ARE_YOU_REPLIES)
 
 
+def _handle_my_medications(**kwargs):
+    """Return senior's medication list from profile."""
+    user_id = kwargs.get("user_id")
+    if not user_id:
+        return None  # pass to AI
+    try:
+        from memory_helpers import db_load_profile
+        profile = db_load_profile(user_id)
+        meds = profile.get("medications_list", [])
+        med_times = profile.get("medication_times", {})
+
+        if not meds and not med_times:
+            return "Nemám zatím uložené žádné léky. Řekněte mi, jaké léky berete, a zapamatuji si je."
+
+        parts = ["Vaše léky:"]
+        if med_times:
+            for period, period_meds in med_times.items():
+                period_cz = {"rano": "Ráno", "morning": "Ráno", "poledne": "Poledne",
+                             "noon": "Poledne", "vecer": "Večer", "evening": "Večer"}.get(period, period)
+                if period_meds and isinstance(period_meds, list):
+                    parts.append(f"  {period_cz}: {', '.join(period_meds)}")
+        elif meds and isinstance(meds, list):
+            parts.append(f"  {', '.join(meds)}")
+
+        return "\n".join(parts)
+    except Exception:
+        return None  # pass to AI
+
+
+def _handle_weather(**kwargs):
+    """Simple weather response — redirect to AI with context."""
+    # We can't fetch weather without API key, so we give a helpful response
+    # that acknowledges the question and suggests alternatives
+    now = datetime.now()
+    h = now.hour
+    if h < 10:
+        time_ctx = "Dobré ráno!"
+    elif h < 18:
+        time_ctx = ""
+    else:
+        time_ctx = "Dobrý večer!"
+
+    # Return None to pass to AI — Gemini can answer weather questions
+    return None
+
+
+def _handle_who_am_i(**kwargs):
+    """Return senior's profile info."""
+    user_id = kwargs.get("user_id")
+    if not user_id:
+        return None
+    try:
+        from memory_helpers import db_load_profile
+        profile = db_load_profile(user_id)
+        name = profile.get("name", "")
+        age = profile.get("age_group", "")
+
+        if not name:
+            return "Zatím mi neřekl vaše jméno. Jak se jmenujete?"
+
+        parts = [f"Jmenujete se {name}."]
+        if age:
+            parts.append(f"Věková skupina: {age}.")
+
+        ec = profile.get("emergency_contacts", [])
+        if ec and isinstance(ec, list):
+            for c in ec[:2]:
+                rel = c.get("relation", "kontakt")
+                cname = c.get("name", "")
+                if cname:
+                    parts.append(f"Nouzový kontakt: {cname} ({rel}).")
+
+        return " ".join(parts)
+    except Exception:
+        return None
+
+
 _HANDLERS = {
     "time": _handle_time,
     "date": _handle_date,
@@ -157,6 +234,9 @@ _HANDLERS = {
     "joke": _handle_joke,
     "compliment": _handle_compliment,
     "how_are_you": _handle_how_are_you,
+    "my_medications": _handle_my_medications,
+    "weather": _handle_weather,
+    "who_am_i": _handle_who_am_i,
 }
 
 

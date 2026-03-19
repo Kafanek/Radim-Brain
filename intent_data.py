@@ -383,14 +383,42 @@ INTENTS = [
     {
         "name": "medication",
         "patterns": [
-            r"l\u00e9ky",
-            r"pr\u00e1\u0161ky",
+            r"l[eé]ky",
+            r"pr[aá][šs]ky",
             r"tablety",
             r"vzal\s+jsem",
             r"bral\s+jsem",
             r"medikace",
         ],
-        "handler": None,
+        "handler": "my_medications",
+    },
+    # v390: New intents for seniors
+    {
+        "name": "who_am_i",
+        "patterns": [
+            r"kdo\s+jsem",
+            r"jak\s+se\s+jmenuj[iu]",
+            r"m[oů]j\s+profil",
+            r"co\s+o\s+mn[eě]\s+v[ií][šs]",
+            r"zn[aá][šs]\s+m[eě]",
+            r"pamatuje[šs]\s+si\s+m[eě]",
+        ],
+        "handler": "who_am_i",
+    },
+    {
+        "name": "weather",
+        "patterns": [
+            r"jak[ée]\s+je\s+po[čc]as[ií]",
+            r"jak[ée]\s+bude\s+po[čc]as[ií]",
+            r"bude\s+pr[šs]et",
+            r"bude\s+sn[eě][žz]it",
+            r"kolik\s+je\s+stup[nň][ůu]",
+            r"jak[aá]\s+je\s+teplota",
+            r"po[čc]as[ií]\s+na\s+z[ií]tra",
+            r"po[čc]as[ií]\s+dnes",
+            r"venku\s+je",
+        ],
+        "handler": None,  # pass to AI (Gemini can answer weather)
     },
     {
         "name": "safety",
