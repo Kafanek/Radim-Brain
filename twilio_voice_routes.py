@@ -159,8 +159,9 @@ def twilio_gather_webhook():
             from speech_understanding import get_gather_params, should_retry_stt, correct_stt_output
             gp = get_gather_params(_user_id)
             # v397: STT post-processing — fix common Czech recognition errors
+            # v401: Pass user_id for per-user learned corrections
             if speech_result:
-                speech_result, _corrections = correct_stt_output(speech_result)
+                speech_result, _corrections = correct_stt_output(speech_result, user_id=_user_id)
                 if _corrections:
                     logger.info(f"🔧 STT corrected: {_corrections}")
         except ImportError:

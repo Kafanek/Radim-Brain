@@ -234,6 +234,23 @@ def get_gather_params(user_id=None):
             # No timing change, but we could add TTS volume boost in future
             pass
 
+        # v401: Override from adaptive learning (learned from actual user behavior)
+        try:
+            from adaptive_learning import get_adaptive_state
+            state = get_adaptive_state(user_id)
+            if state:
+                multiplier = state.get("communication", {}).get("patience_multiplier", 1.0)
+                if multiplier > 1.0:
+                    # Adaptive engine learned this user needs more time
+                    adapted_st = max(defaults["speech_timeout"], round(3 * multiplier))
+                    adapted_to = max(defaults["timeout"], round(10 * multiplier))
+                    if adapted_st > defaults["speech_timeout"]:
+                        defaults["speech_timeout"] = min(adapted_st, 15)  # cap at 15s
+                        defaults["timeout"] = min(adapted_to, 30)         # cap at 30s
+                        logger.debug(f"Adaptive gather override for {user_id}: {defaults['speech_timeout']}s/{defaults['timeout']}s (×{multiplier})")
+        except (ImportError, Exception):
+            pass
+
     except Exception as e:
         logger.debug(f"get_gather_params error: {e}")
 
@@ -348,11 +365,15 @@ _WORD_CORRECTIONS = {
 }
 
 
-def correct_stt_output(text):
+def correct_stt_output(text, user_id=None):
     """Post-process STT output to fix common Czech recognition errors.
 
     Applied BEFORE intent resolution. Does not change meaning,
     only fixes known misrecognitions.
+
+    Args:
+        text: raw STT output
+        user_id: optional — if provided, loads per-user STT error patterns
 
     Returns:
         (corrected_text, corrections_applied)
@@ -388,6 +409,20 @@ def correct_stt_output(text):
 
     # Phase 3: Collapse repeated words (dementia pattern: "co co co" → "co")
     result = re.sub(r'\b(\w+)(\s+\1){2,}\b', r'\1', result)
+
+    # Phase 4: Per-user learned corrections (from adaptive_learning STT tracking)
+    if user_id:
+        try:
+            from memory_helpers import db_load_learning
+            learning = db_load_learning(user_id)
+            stt_errors = learning.get("adaptive", {}).get("stt_error_counts", {})
+            # If a word appears 3+ times in error log, it's a systematic STT issue
+            # We don't auto-correct (risky) but log for speech hints improvement
+            for wrong_word, count in stt_errors.items():
+                if count >= 3 and wrong_word in result:
+                    logger.debug(f"Known STT issue for {user_id}: '{wrong_word}' (seen {count}x)")
+        except (ImportError, Exception):
+            pass
 
     if corrections:
         logger.debug(f"STT correction: '{original}' → '{result}' [{', '.join(corrections)}]")
