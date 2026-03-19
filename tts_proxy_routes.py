@@ -128,8 +128,10 @@ def azure_tts_proxy():
         if not re.match(r'^[+-]?[0-9]+(%|Hz)$', pitch):
             pitch = '+0Hz'
 
-        # Build SSML
-        _style = brain_speech.get('style', 'friendly') if brain_speech else 'friendly'
+        # Build SSML — brain engine overrides frontend hint
+        # v410: Accept style hint from frontend, brain engine takes priority
+        _frontend_style = data.get('style', 'friendly')
+        _style = brain_speech.get('style', _frontend_style) if brain_speech else _frontend_style
         _styledegree = brain_speech.get('styledegree', '1.2') if brain_speech else '1.2'
         if _style not in _VALID_STYLES:
             _style = 'friendly'
