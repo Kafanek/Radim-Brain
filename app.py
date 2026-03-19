@@ -499,23 +499,6 @@ try:
     except ImportError:
         logger.warning("⚠️ agent_loop not available — proactive agent disabled")
 
-    # v384: Daily cleanup of old observations (keep last 30 days)
-    def _cleanup_old_data():
-        with app.app_context():
-            try:
-                with db_context(commit=True) as db:
-                    if is_postgres():
-                        db.execute("DELETE FROM agent_observations WHERE created_at < NOW() - INTERVAL '30 days'")
-                        db.execute("DELETE FROM brain_states WHERE created_at < NOW() - INTERVAL '90 days'")
-                    else:
-                        db.execute("DELETE FROM agent_observations WHERE created_at < datetime('now', '-30 days')")
-                        db.execute("DELETE FROM brain_states WHERE created_at < datetime('now', '-90 days')")
-                logger.info("Cleanup: old observations (30d) + brain_states (90d) purged")
-            except Exception as e:
-                logger.warning(f"Cleanup error (non-fatal): {e}")
-
-    scheduler.add_job(_cleanup_old_data, 'cron', hour=3, minute=0, id='daily_cleanup')
-
     # v390: Morning check-in — call seniors with medication reminders at 8:00 AM
     try:
         from agent_loop import run_morning_checkin
