@@ -529,6 +529,50 @@ class TestSpeechUnderstanding:
         # Recovery sets min(current, -20), so for CRISIS -25%: min(-25, -20) = -25 (stays slow)
         assert min(crisis_rate, -20) == crisis_rate, "Recovery would speed up CRISIS voice!"
 
+    # v407b: Thread safety, transfer intent, phone validation, silent emergency
+    def test_transfer_intent_casual(self):
+        """'chci mluvit s dcerou' should detect transfer intent."""
+        from twilio_voice_helpers import detect_transfer_intent
+        r = detect_transfer_intent("chci mluvit s dcerou")
+        assert r is not None
+        assert r["target"] == "dcera"
+
+    def test_transfer_intent_domu(self):
+        """'zavolej domů' should detect transfer to rodina."""
+        from twilio_voice_helpers import detect_transfer_intent
+        r = detect_transfer_intent("zavolej domů")
+        assert r is not None
+        assert r["target"] == "rodina"
+
+    def test_transfer_intent_none_on_empty(self):
+        """No crash on empty text."""
+        from twilio_voice_helpers import detect_transfer_intent
+        assert detect_transfer_intent("") is None
+        assert detect_transfer_intent(None) is None
+
+    def test_phone_validation_e164(self):
+        """initiate_proactive_call rejects invalid phone formats."""
+        from twilio_voice_helpers import initiate_proactive_call
+        r1 = initiate_proactive_call("+a", "Test")
+        assert r1["success"] is False
+        r2 = initiate_proactive_call("+42", "Test")  # too short
+        assert r2["success"] is False
+        r3 = initiate_proactive_call("420123456", "Test")  # missing +
+        assert r3["success"] is False
+
+    def test_estimate_c_alpha_none_speech(self):
+        """estimate_call_C_alpha handles None speech_result."""
+        from twilio_voice_helpers import estimate_call_C_alpha
+        C, alpha = estimate_call_C_alpha("test_sid", None, 0.5)
+        assert C >= 0
+        assert alpha >= 0
+
+    def test_calls_lock_exists(self):
+        """Thread lock for active_calls exists."""
+        from twilio_voice_helpers import _calls_lock
+        import threading
+        assert isinstance(_calls_lock, type(threading.Lock()))
+
 
 class TestAdaptiveLearning:
     """Adaptive learning per-user tests."""

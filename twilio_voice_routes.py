@@ -168,6 +168,30 @@ def twilio_gather_webhook():
             gp = {"speech_timeout": 3, "timeout": 10, "language": "cs-CZ", "hints": ""}
 
         if not speech_result.strip():
+            # v407: Track consecutive silence — after 2 silences, escalate
+            silence_count = call_data.get("silence_count", 0) + 1
+            if call_sid in active_calls:
+                active_calls[call_sid]["silence_count"] = silence_count
+
+            if silence_count >= 3:
+                # Senior unresponsive 3× — possible emergency (fall, stroke, unconscious)
+                logger.warning(f"🚨 SILENT EMERGENCY: {call_sid} — {silence_count}× no response, escalating")
+                say_help = twiml_say("Neslyším vás už delší dobu. Pro jistotu informuji vaši rodinu. Zůstaňte v klidu.")
+                try:
+                    from agent_loop import _alert_caregiver
+                    obs = {"type": "silent_emergency", "severity": "ALERT",
+                           "message": f"Senior neodpovídá na telefonu ({silence_count}× mlčení)",
+                           "details": {"call_sid": call_sid, "silence_count": silence_count}}
+                    _alert_caregiver(_user_id, obs, None)
+                except Exception:
+                    pass
+                return twiml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    {say_help}
+    <Pause length="3"/>
+    <Say language="cs-CZ" voice="Polly.Adela">Pokud potřebujete záchrannou službu, zavěste a zavolejte jedna pět pět.</Say>
+</Response>""")
+
             say_retry = twiml_say("Promiňte, neslyšel jsem vás. Můžete to zopakovat?")
             say_here = twiml_say("Jsem tu pro vás.")
             return twiml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -227,6 +251,10 @@ def twilio_gather_webhook():
 </Response>""")
         except ImportError:
             pass
+
+        # v407: Reset silence counter — senior is speaking normally
+        if call_sid in active_calls:
+            active_calls[call_sid]["silence_count"] = 0
 
         # Check transfer intent
         transfer = detect_transfer_intent(speech_result)

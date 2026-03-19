@@ -20,6 +20,7 @@ import os
 import re
 import time
 import logging
+import threading
 import requests as http_requests
 from xml.sax.saxutils import escape as xml_escape
 from functools import wraps
@@ -311,21 +312,23 @@ def twiml_say(text, speech_params=None):
 
 active_calls = {}
 _ACTIVE_CALLS_MAX = 100
+_calls_lock = threading.Lock()  # v407: thread safety for concurrent Twilio webhooks
 
 known_callers = {}
 _KNOWN_CALLERS_MAX = 500
 
 
 def _cleanup_active_calls():
-    """Remove calls older than 2h, enforce max size."""
-    cutoff = time.time() - 7200
-    expired = [sid for sid, d in active_calls.items() if d.get("started", 0) < cutoff]
-    for sid in expired:
-        del active_calls[sid]
-    if len(active_calls) > _ACTIVE_CALLS_MAX:
-        sorted_sids = sorted(active_calls.keys(), key=lambda s: active_calls[s].get("started", 0))
-        for sid in sorted_sids[:len(active_calls) - _ACTIVE_CALLS_MAX]:
+    """Remove calls older than 2h, enforce max size. Thread-safe."""
+    with _calls_lock:
+        cutoff = time.time() - 7200
+        expired = [sid for sid, d in active_calls.items() if d.get("started", 0) < cutoff]
+        for sid in expired:
             del active_calls[sid]
+        if len(active_calls) > _ACTIVE_CALLS_MAX:
+            sorted_sids = sorted(active_calls.keys(), key=lambda s: active_calls[s].get("started", 0))
+            for sid in sorted_sids[:len(active_calls) - _ACTIVE_CALLS_MAX]:
+                del active_calls[sid]
 
 
 def _cleanup_known_callers():
@@ -337,9 +340,11 @@ def _cleanup_known_callers():
         del known_callers[phone]
 
 
-# Intent patterns (Czech)
+# Intent patterns (Czech) — v407: expanded for casual senior speech
 TRANSFER_PATTERNS = re.compile(
-    r'(zavolej|přepoj|spojte|přepojte|zavolejte)\s*(na\s+)?(dce[rř]|syn|doktor|lékař|mari[ie]|pet[rř]|rodinu|vnuč)',
+    r'(zavolej|přepoj|spojte|přepojte|zavolejte|chci\s+mluvit\s+s|chci\s+volat|dej\s+mi|zavolej\s+domů)'
+    r'(\s+na\s+|\s+s\s+|\s+)?'
+    r'(dce[rř]|syn[aůuem]?|doktor[aůuem]?|lékař[aůuem]?|mari[ie]|pet[rř]|rodinu|vnuč|domů)?',
     re.IGNORECASE
 )
 
@@ -443,16 +448,20 @@ def get_ai_response_for_call(user_text, call_sid, user_id=None):
 
 
 def detect_transfer_intent(text):
-    """Detect if user wants to transfer call"""
+    """Detect if user wants to transfer call.
+    v407: expanded patterns — "chci mluvit s...", "zavolej domů" etc.
+    """
+    if not text:
+        return None
     if TRANSFER_PATTERNS.search(text):
         text_lower = text.lower()
         if any(w in text_lower for w in ['dcer', 'mari']):
             return {"target": "dcera", "name": "dcera"}
         elif any(w in text_lower for w in ['syn', 'petr']):
             return {"target": "syn", "name": "syn"}
-        elif any(w in text_lower for w in ['doktor', 'lékař']):
+        elif any(w in text_lower for w in ['doktor', 'lékař', 'lekar']):
             return {"target": "doktor", "name": "lékař"}
-        elif 'rodinu' in text_lower or 'vnuč' in text_lower:
+        elif any(w in text_lower for w in ['rodinu', 'vnuč', 'domů', 'domu']):
             return {"target": "rodina", "name": "rodina"}
         return {"target": "unknown", "name": "kontakt"}
     return None
@@ -491,8 +500,9 @@ def initiate_proactive_call(phone_number, greeting, user_id=None, reason="check_
         logger.warning("Proactive call skipped — Twilio not configured")
         return {"success": False, "error": "Twilio not configured"}
 
-    if not phone_number or not phone_number.startswith('+'):
-        return {"success": False, "error": f"Invalid phone: {phone_number}"}
+    # v407: E.164 validation (must be +countrycode + digits, 8-15 total)
+    if not phone_number or not re.match(r'^\+[1-9]\d{7,14}$', phone_number):
+        return {"success": False, "error": f"Invalid E.164 phone: {phone_number}"}
 
     try:
         from xml.sax.saxutils import escape as esc
