@@ -8,7 +8,7 @@ Recomputed every 24h (or on first agent_loop run).
 
 import math
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
