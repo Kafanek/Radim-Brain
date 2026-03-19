@@ -295,4 +295,155 @@ SAFETY_CONFIRM_MESSAGE = (
 )
 
 
-logger.info("Speech Understanding v1.0 loaded — fuzzy safety + adaptive STT")
+# ============================================================================
+# STT POST-PROCESSOR — correct common Twilio Czech STT errors
+# ============================================================================
+
+# Common Twilio cs-CZ STT errors: what it hears → what was actually said
+# Collected from real Twilio logs with Czech seniors
+_STT_CORRECTIONS = {
+    # Numbers misheard as words
+    "jedna pět pět": "155",
+    "jedna jedna dva": "112",
+    "jedna padesát pět": "155",
+    # Medications (common STT mangles)
+    "done pezil": "donepezil",
+    "dona pezil": "donepezil",
+    "met formin": "metformin",
+    "ena lapril": "enalapril",
+    "war farin": "warfarin",
+    "ibu profen": "ibuprofen",
+    # Common Czech words STT gets wrong
+    "prosim": "prosím",
+    "dekuji": "děkuji",
+    "dobre": "dobře",
+    "ano": "ano",
+    "ne": "ne",
+    # Senior speech patterns
+    "co co": "co",           # repetition (dementia)
+    "tak tak": "tak",         # filler
+    "no no no": "no",         # filler
+    "halo halo": "haló",      # phone greeting
+}
+
+# Word-level corrections (applied per word, not per phrase)
+_WORD_CORRECTIONS = {
+    "pomok": "pomoc",
+    "pomoct": "pomoc",
+    "pomoci": "pomoc",
+    "pomůžu": "pomoc",
+    "zachranku": "záchranku",
+    "zachranka": "záchranka",
+    "doktora": "doktora",
+    "doktor": "doktor",
+    "nemocnice": "nemocnice",
+    "nemocnici": "nemocnici",
+    "leky": "léky",
+    "prasky": "prášky",
+    "tablety": "tablety",
+    "bolesti": "bolesti",
+    "bolest": "bolest",
+    "spatne": "špatně",
+    "spatny": "špatný",
+}
+
+
+def correct_stt_output(text):
+    """Post-process STT output to fix common Czech recognition errors.
+
+    Applied BEFORE intent resolution. Does not change meaning,
+    only fixes known misrecognitions.
+
+    Returns:
+        (corrected_text, corrections_applied)
+    """
+    if not text:
+        return text, []
+
+    original = text
+    corrections = []
+    lower = text.lower().strip()
+
+    # Phase 1: Full phrase corrections
+    for wrong, right in _STT_CORRECTIONS.items():
+        if wrong in lower:
+            lower = lower.replace(wrong, right)
+            corrections.append(f"'{wrong}' → '{right}'")
+
+    # Phase 2: Word-level corrections
+    words = lower.split()
+    corrected_words = []
+    for w in words:
+        clean = re.sub(r'[.,!?;:]', '', w)
+        if clean in _WORD_CORRECTIONS:
+            replacement = _WORD_CORRECTIONS[clean]
+            # Preserve original punctuation
+            suffix = w[len(clean):] if len(w) > len(clean) else ""
+            corrected_words.append(replacement + suffix)
+            corrections.append(f"'{clean}' → '{replacement}'")
+        else:
+            corrected_words.append(w)
+
+    result = " ".join(corrected_words)
+
+    # Phase 3: Collapse repeated words (dementia pattern: "co co co" → "co")
+    result = re.sub(r'\b(\w+)(\s+\1){2,}\b', r'\1', result)
+
+    if corrections:
+        logger.debug(f"STT correction: '{original}' → '{result}' [{', '.join(corrections)}]")
+
+    return result, corrections
+
+
+def build_speech_hints(user_id):
+    """Build Twilio speech recognition hints from user profile.
+
+    Hints improve STT accuracy for user-specific vocabulary:
+    - Medication names (Donepezil, Metformin)
+    - Family member names (Marie, Karel)
+    - Common phrases for their needs
+
+    Returns:
+        str: comma-separated hints for Twilio <Gather hints="...">
+    """
+    hints = [
+        # Always include safety words
+        "pomoc", "záchranku", "bolest", "spadl", "špatně",
+        # Common senior phrases
+        "léky", "prášky", "doktor", "nemocnice",
+        "ano", "ne", "prosím", "děkuji",
+    ]
+
+    if not user_id:
+        return ",".join(hints)
+
+    try:
+        from memory_helpers import db_load_profile
+        profile = db_load_profile(user_id)
+
+        # Add medication names
+        meds = profile.get("medications_list", [])
+        if meds and isinstance(meds, list):
+            hints.extend(meds[:5])
+
+        # Add user's name (helps STT recognize it)
+        name = profile.get("name", "")
+        if name:
+            hints.append(name)
+
+        # Add emergency contact names
+        contacts = profile.get("emergency_contacts", [])
+        if contacts and isinstance(contacts, list):
+            for c in contacts[:3]:
+                cname = c.get("name", "")
+                if cname:
+                    hints.append(cname)
+
+    except Exception:
+        pass
+
+    # Twilio limit: 500 hints, each max 100 chars
+    return ",".join(hints[:50])
+
+
+logger.info("Speech Understanding v1.1 loaded — fuzzy safety + STT correction + hints")

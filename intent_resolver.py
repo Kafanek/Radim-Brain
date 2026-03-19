@@ -261,12 +261,14 @@ def resolve_intent(message, user_id=None, mode="HARMONY"):
     # v396: Fuzzy safety check FIRST — catches "pomo", "pomc", "zachrnku" etc.
     # Critical for speech-impaired seniors (dysarthria, aphasia, Parkinson's)
     try:
-        from speech_understanding import detect_safety_fuzzy
+        from speech_understanding import detect_safety_fuzzy, correct_stt_output, normalize_czech
         safety_match = detect_safety_fuzzy(text)
         if safety_match and safety_match["severity"] == "critical":
             logger.info(f"FUZZY SAFETY: '{safety_match['input']}' → '{safety_match['word']}' "
                         f"(dist={safety_match['distance']}) for user={user_id}")
             return (None, "safety", {"priority": "high", "fuzzy_match": safety_match})
+        # v397: Apply STT correction to text before regex matching
+        text, _ = correct_stt_output(text)
     except ImportError:
         pass
 

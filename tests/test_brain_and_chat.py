@@ -344,3 +344,43 @@ class TestSpeechUnderstanding:
         assert intent == "safety"
         assert meta is not None
         assert meta.get("fuzzy_match") is not None
+
+    # v397: STT correction tests
+    def test_stt_correction_155(self):
+        """STT hears 'jedna pět pět' → correct to '155'."""
+        from speech_understanding import correct_stt_output
+        result, corrections = correct_stt_output("jedna pět pět")
+        assert "155" in result
+        assert len(corrections) > 0
+
+    def test_stt_correction_medication(self):
+        """STT splits medication name → correct."""
+        from speech_understanding import correct_stt_output
+        result, corrections = correct_stt_output("done pezil ráno")
+        assert "donepezil" in result
+
+    def test_stt_correction_pomok(self):
+        """Word 'pomok' (common mispronunciation) → 'pomoc'."""
+        from speech_understanding import correct_stt_output
+        result, _ = correct_stt_output("pomok prosím")
+        assert "pomoc" in result
+
+    def test_stt_collapse_repetition(self):
+        """Dementia pattern: repeated words collapsed."""
+        from speech_understanding import correct_stt_output
+        result, _ = correct_stt_output("tak tak tak tak tak prosím")
+        # "tak tak" → "tak" (phrase correction) + regex collapse
+        assert result.count("tak") <= 2
+
+    def test_stt_no_change_normal(self):
+        """Normal text should not be changed."""
+        from speech_understanding import correct_stt_output
+        result, corrections = correct_stt_output("Dobrý den, jak se máte?")
+        assert len(corrections) == 0
+
+    def test_build_speech_hints(self):
+        """Speech hints include safety words."""
+        from speech_understanding import build_speech_hints
+        hints = build_speech_hints(None)
+        assert "pomoc" in hints
+        assert "léky" in hints

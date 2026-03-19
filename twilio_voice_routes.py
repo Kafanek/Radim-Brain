@@ -111,9 +111,12 @@ def twilio_voice_webhook():
         say_noheard = twiml_say("Neslyšel jsem vás. Pokud potřebujete pomoc, zavolejte znovu.")
 
         # v396: Adaptive gather params per user profile (aphasia, dysarthria → longer timeout)
+        # v397: Speech hints from profile (medications, names) improve STT accuracy
         try:
-            from speech_understanding import get_gather_params
-            gp = get_gather_params(caller_data.get("user_id"))
+            from speech_understanding import get_gather_params, build_speech_hints
+            _caller_uid = caller_data.get("user_id")
+            gp = get_gather_params(_caller_uid)
+            gp["hints"] = build_speech_hints(_caller_uid)
         except ImportError:
             gp = {"speech_timeout": 3, "timeout": 10, "language": "cs-CZ", "hints": ""}
         hints_attr = f' hints="{gp["hints"]}"' if gp.get("hints") else ""
@@ -153,8 +156,13 @@ def twilio_gather_webhook():
         call_data = active_calls.get(call_sid, {})
         _user_id = call_data.get("user_id")
         try:
-            from speech_understanding import get_gather_params, should_retry_stt
+            from speech_understanding import get_gather_params, should_retry_stt, correct_stt_output
             gp = get_gather_params(_user_id)
+            # v397: STT post-processing — fix common Czech recognition errors
+            if speech_result:
+                speech_result, _corrections = correct_stt_output(speech_result)
+                if _corrections:
+                    logger.info(f"🔧 STT corrected: {_corrections}")
         except ImportError:
             gp = {"speech_timeout": 3, "timeout": 10, "language": "cs-CZ", "hints": ""}
 
