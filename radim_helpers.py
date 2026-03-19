@@ -196,6 +196,15 @@ def detect_intent(message):
         if word in msg_lower:
             return 'safety'
 
+    # v398: Fuzzy safety for speech-impaired seniors ("pomo" → "pomoc")
+    try:
+        from speech_understanding import detect_safety_fuzzy
+        match = detect_safety_fuzzy(message)
+        if match and match["severity"] == "critical":
+            return 'safety'
+    except ImportError:
+        pass
+
     for word in MEDICATION_KEYWORDS:
         if word in msg_lower:
             return 'medication'
