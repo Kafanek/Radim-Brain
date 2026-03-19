@@ -1,6 +1,6 @@
 """
-Adaptive Learning v1.0 — Per-user rhythm, pace, and feedback learning
-=====================================================================
+Adaptive Learning v2.0 — Radim Adaptive Engine
+===============================================
 Learns from EVERY interaction:
 1. Interaction rhythm — when does this user talk? (time-of-day heatmap)
 2. Message pace — how long are their messages? How fast do they respond?
@@ -88,8 +88,27 @@ def detect_feedback(message):
     # Repeat request
     wants_repeat = bool(re.search(r'(opakuj|znovu|je[šs]t[ěe]\s+jednou|zopakuj)', text_lower, re.IGNORECASE))
 
+    # Implicit: very short response after long answer = possible confusion
+    if len(text) < 5 and text_lower not in ("ano", "jo", "ne", "ok", "díky"):
+        if signal == "neutral":
+            signal = "confusion"
+            strength = 0.2
+
+    # Compute normalized score: -1 (failure) to +1 (success)
+    if signal == "success":
+        score = min(1.0, strength)
+    elif signal in ("failure", "confusion"):
+        score = max(-1.0, -strength)
+    else:
+        score = 0.0
+
+    # Confidence: how sure are we about this signal?
+    confidence = min(1.0, abs(score) * 1.5) if signal != "neutral" else 0.1
+
     return {
         "signal": signal,
+        "score": round(score, 2),
+        "confidence": round(confidence, 2),
         "strength": strength,
         "length_pref": length_pref,
         "wants_repeat": wants_repeat,
@@ -350,6 +369,288 @@ def compute_speech_patience(adaptive, communication_needs=""):
 
 
 # ============================================================================
+# LANGUAGE COMPLEXITY — reduce if user struggles
+# ============================================================================
+
+def compute_language_complexity(adaptive):
+    """Compute appropriate language complexity level.
+
+    Reduces complexity when:
+    - Repeated confusion (repeat_requests > 3)
+    - Low success rate (< 0.4)
+    - Very short messages (user can't express complex thoughts)
+    - Communication needs include cognitive impairment
+
+    Returns: "simple" | "normal"
+    """
+    success_rate = adaptive.get("success_rate", 0.5)
+    repeats = adaptive.get("repeat_requests", 0)
+    avg_msg = adaptive.get("avg_message_length", 50)
+    confusion_count = adaptive.get("confusion_count", 0)
+
+    # Score: negative = simplify
+    score = 0
+    if success_rate < 0.3:
+        score -= 3
+    elif success_rate < 0.4:
+        score -= 1
+
+    if repeats > 5:
+        score -= 2
+    elif repeats > 3:
+        score -= 1
+
+    if avg_msg < 15:
+        score -= 1
+
+    if confusion_count > 3:
+        score -= 2
+
+    return "simple" if score <= -2 else "normal"
+
+
+# ============================================================================
+# ENERGY LEVEL — time-of-day + activity patterns
+# ============================================================================
+
+def compute_energy_level(adaptive):
+    """Estimate user's current energy level (0.0-1.0).
+
+    Based on:
+    - Time of day (seniors typically peak 9-11 AM)
+    - Current time vs user's peak_hour
+    - Recent mood patterns
+    - Activity frequency today vs baseline
+
+    Returns: float 0.0 (exhausted) to 1.0 (energetic)
+    """
+    now = datetime.now()
+    hour = now.hour
+
+    # Base energy curve for seniors (circadian rhythm)
+    # Peak at 10 AM, low at 2 PM (post-lunch dip), moderate evening
+    base_curve = {
+        6: 0.4, 7: 0.5, 8: 0.7, 9: 0.85, 10: 0.9, 11: 0.85,
+        12: 0.7, 13: 0.5, 14: 0.4, 15: 0.5, 16: 0.6, 17: 0.6,
+        18: 0.5, 19: 0.4, 20: 0.3, 21: 0.2, 22: 0.1,
+    }
+    base = base_curve.get(hour, 0.2)
+
+    # Adjust for personal peak hour
+    peak = adaptive.get("peak_hour")
+    if peak is not None:
+        distance = abs(hour - peak)
+        if distance <= 1:
+            base = min(1.0, base + 0.15)
+        elif distance >= 4:
+            base = max(0.1, base - 0.1)
+
+    # Mood adjustment
+    mood_history = adaptive.get("mood_history", [])
+    if mood_history:
+        recent_moods = [m["mood"] for m in mood_history[-3:]]
+        sad_count = sum(1 for m in recent_moods if m in ("sad", "anxious"))
+        if sad_count >= 2:
+            base = max(0.1, base - 0.2)
+        elif all(m == "happy" for m in recent_moods):
+            base = min(1.0, base + 0.1)
+
+    return round(base, 2)
+
+
+# ============================================================================
+# TRUST SCORE — how reliable is our adaptive model for this user?
+# ============================================================================
+
+def compute_trust_score(adaptive):
+    """Compute trust/confidence in our adaptive model (0.0-1.0).
+
+    Based on:
+    - Number of interactions (more data = more trust)
+    - Feedback consistency (stable signals = higher trust)
+    - Behavioral stability (predictable patterns = higher trust)
+
+    Returns: float 0.0 (unreliable) to 1.0 (highly confident)
+    """
+    total = adaptive.get("total_adaptive_interactions", 0)
+
+    # Data volume component (logarithmic — diminishing returns)
+    if total < 3:
+        return 0.1  # not enough data
+    import math
+    volume = min(0.4, math.log10(total) * 0.2)
+
+    # Feedback consistency: low variance in success_rate changes
+    success_rate = adaptive.get("success_rate", 0.5)
+    # Closer to extremes = more consistent signal
+    consistency = abs(success_rate - 0.5) * 0.6  # 0 to 0.3
+
+    # Behavioral stability: does user have a clear peak_hour?
+    hours = adaptive.get("interaction_hours", [])
+    stability = 0.0
+    if len(hours) >= 10:
+        hour_counts = Counter(hours)
+        top_count = hour_counts.most_common(1)[0][1]
+        stability = min(0.3, (top_count / len(hours)) * 0.5)
+
+    return round(min(1.0, volume + consistency + stability), 2)
+
+
+# ============================================================================
+# ERROR RECOVERY — simplify when communication fails
+# ============================================================================
+
+_FAILURE_THRESHOLD = 3  # consecutive failures before recovery mode
+
+def check_error_recovery(adaptive):
+    """Check if error recovery mode should activate.
+
+    Activates when:
+    - 3+ consecutive negative feedbacks
+    - success_rate drops below 0.2
+    - repeat_requests spike (>3 in current session)
+
+    Returns:
+        dict: {
+            "active": bool,
+            "actions": list of recovery actions,
+            "level": 0 (none) | 1 (mild) | 2 (moderate) | 3 (maximum)
+        }
+    """
+    success_rate = adaptive.get("success_rate", 0.5)
+    repeats = adaptive.get("repeat_requests", 0)
+    consecutive_failures = adaptive.get("consecutive_failures", 0)
+
+    level = 0
+    actions = []
+
+    if consecutive_failures >= 5 or success_rate < 0.15:
+        level = 3
+        actions = ["yes_no_mode", "ultra_short", "very_slow_speech", "emergency_check"]
+    elif consecutive_failures >= _FAILURE_THRESHOLD or success_rate < 0.25:
+        level = 2
+        actions = ["simple_language", "short_responses", "slow_speech", "confirm_understanding"]
+    elif success_rate < 0.35 or repeats > 5:
+        level = 1
+        actions = ["simplify_slightly", "add_confirmation"]
+
+    return {
+        "active": level > 0,
+        "level": level,
+        "actions": actions,
+    }
+
+
+# ============================================================================
+# STRUCTURED OUTPUT — for system prompt injection
+# ============================================================================
+
+def build_adaptive_state(adaptive, communication_needs=""):
+    """Build structured adaptive state for system prompt.
+
+    Returns a clean dict (not text lines) that can be:
+    1. Injected into system prompt as structured context
+    2. Used by TTS/voice filter for speech params
+    3. Logged for analytics
+
+    This is the canonical output of the adaptive engine.
+    """
+    patience = adaptive.get("speech_patience", {})
+    recovery = check_error_recovery(adaptive)
+    energy = compute_energy_level(adaptive)
+    trust = compute_trust_score(adaptive)
+    complexity = compute_language_complexity(adaptive)
+    length = adaptive.get("computed_length", "medium")
+
+    # Override from recovery mode
+    if recovery["active"]:
+        if recovery["level"] >= 2:
+            length = "short"
+            complexity = "simple"
+
+    # Build mood state
+    mood_history = adaptive.get("mood_history", [])
+    mood_state = "neutral"
+    mood_trend = "stable"
+    mood_risk = 0.0
+
+    if mood_history:
+        recent = [m["mood"] for m in mood_history[-3:]]
+        # Current state = most recent
+        mood_state = recent[-1] if recent else "neutral"
+        mood_map = {"happy": "positive", "neutral": "neutral", "sad": "negative", "anxious": "negative"}
+        mood_state = mood_map.get(mood_state, "neutral")
+
+        # Trend
+        if len(mood_history) >= 5:
+            older = [m["mood"] for m in mood_history[-5:-2]]
+            newer = recent
+            old_neg = sum(1 for m in older if m in ("sad", "anxious"))
+            new_neg = sum(1 for m in newer if m in ("sad", "anxious"))
+            if new_neg > old_neg:
+                mood_trend = "declining"
+            elif new_neg < old_neg:
+                mood_trend = "improving"
+
+        # Risk
+        if adaptive.get("mood_concern"):
+            mood_risk = 0.7
+        elif mood_state == "negative":
+            mood_risk = 0.4
+
+    # Build topics
+    fresh = adaptive.get("fresh_interests", {})
+    short_term = sorted(fresh.keys(), key=lambda k: -fresh[k])[:5] if fresh else []
+
+    topic_times = adaptive.get("topic_times", {})
+    long_term = sorted(topic_times.keys(), key=lambda k: -len(topic_times[k]))[:5] if topic_times else []
+
+    # Determine speech speed
+    pace = patience.get("response_pace", "normal")
+    if recovery["active"] and recovery["level"] >= 2:
+        pace = "very_slow"
+
+    speech_speed = "slow" if pace in ("slow", "very_slow") else "normal"
+
+    # Determine interaction mode
+    confirm_type = patience.get("preferred_confirmation", "verbal")
+    if recovery["active"]:
+        interaction_mode = "recovery"
+    elif confirm_type == "yes_no":
+        interaction_mode = "patient"
+    else:
+        interaction_mode = "normal"
+
+    return {
+        "feedback": {
+            "score": adaptive.get("success_rate", 0.5),
+            "confidence": trust,
+        },
+        "communication": {
+            "preferred_length": length,
+            "speech_speed": speech_speed,
+            "patience_multiplier": patience.get("speech_timeout_multiplier", 1.0),
+            "language_level": complexity,
+        },
+        "behavior": {
+            "peak_hour": adaptive.get("peak_hour"),
+            "energy_level": energy,
+        },
+        "mood": {
+            "state": mood_state,
+            "trend": mood_trend,
+            "risk_level": round(mood_risk, 2),
+        },
+        "topics": {
+            "short_term": short_term,
+            "long_term": long_term,
+        },
+        "trust_score": trust,
+        "recovery": recovery,
+    }
+
+
+# ============================================================================
 # MASTER UPDATE — called after every interaction
 # ============================================================================
 
@@ -377,13 +678,18 @@ def update_adaptive_profile(user_id, message, response, mood=None, topic=None,
         # 1. Rhythm
         adaptive = update_rhythm(adaptive, message, response)
 
-        # 2. Feedback detection
+        # 2. Feedback detection (explicit + implicit)
         feedback = detect_feedback(message)
-        if feedback["signal"] != "neutral":
-            # Update success rate (EMA α=0.15)
+        if feedback["signal"] == "success":
             prev_rate = adaptive.get("success_rate", 0.5)
-            new_val = 1.0 if feedback["signal"] == "success" else 0.0
-            adaptive["success_rate"] = round(0.85 * prev_rate + 0.15 * new_val, 3)
+            adaptive["success_rate"] = round(0.85 * prev_rate + 0.15 * 1.0, 3)
+            adaptive["consecutive_failures"] = 0  # reset on success
+        elif feedback["signal"] in ("failure", "confusion"):
+            prev_rate = adaptive.get("success_rate", 0.5)
+            adaptive["success_rate"] = round(0.85 * prev_rate + 0.15 * 0.0, 3)
+            adaptive["consecutive_failures"] = adaptive.get("consecutive_failures", 0) + 1
+            if feedback["signal"] == "confusion":
+                adaptive["confusion_count"] = adaptive.get("confusion_count", 0) + 1
 
         if feedback["length_pref"]:
             length_fb = adaptive.get("length_feedback", [])
@@ -396,26 +702,36 @@ def update_adaptive_profile(user_id, message, response, mood=None, topic=None,
         # 3. Preferred response length (empirical)
         adaptive["computed_length"] = compute_preferred_length(adaptive)
 
-        # 4. Mood transitions
+        # 4. Language complexity
+        adaptive["language_level"] = compute_language_complexity(adaptive)
+
+        # 5. Mood transitions
         if mood:
             adaptive = update_mood_transitions(adaptive, mood)
 
-        # 5. Topic freshness
+        # 6. Topic freshness
         if topic:
             adaptive = update_topic_freshness(adaptive, topic)
 
-        # 6. STT error tracking
+        # 7. STT error tracking
         if stt_corrections:
             adaptive = track_stt_corrections(adaptive, stt_corrections)
 
-        # 7. Speech patience (recompute periodically)
+        # 8. Speech patience (every 5 interactions)
         total = adaptive.get("time_buckets", {})
         total_interactions = sum(total.values()) if total else 0
-        if total_interactions % 5 == 0:  # every 5 interactions
+        if total_interactions % 5 == 0:
             patience = compute_speech_patience(adaptive, communication_needs)
             adaptive["speech_patience"] = patience
 
-        # 8. Interaction counter
+        # 9. Energy level + trust score (lightweight, every interaction)
+        adaptive["energy_level"] = compute_energy_level(adaptive)
+        adaptive["trust_score"] = compute_trust_score(adaptive)
+
+        # 10. Error recovery check
+        adaptive["recovery"] = check_error_recovery(adaptive)
+
+        # 11. Interaction counter
         adaptive["total_adaptive_interactions"] = adaptive.get("total_adaptive_interactions", 0) + 1
 
         # Save
@@ -438,6 +754,7 @@ def get_adaptive_context(user_id):
     """Get adaptive learning context for system prompt injection.
 
     Returns human-readable lines to add to personalized prompt.
+    Uses build_adaptive_state() for structured data, then converts to text.
     """
     try:
         from memory_helpers import db_load_learning
@@ -447,45 +764,57 @@ def get_adaptive_context(user_id):
         if not adaptive or adaptive.get("total_adaptive_interactions", 0) < 3:
             return []  # not enough data yet
 
+        state = build_adaptive_state(adaptive)
         lines = []
 
-        # Preferred length
-        length = adaptive.get("computed_length")
-        if length == "short":
+        # Communication style
+        comm = state["communication"]
+        if comm["preferred_length"] == "short":
             lines.append("- Uživatel preferuje KRÁTKÉ odpovědi (2-3 věty max)")
-        elif length == "long":
+        elif comm["preferred_length"] == "long":
             lines.append("- Uživatel preferuje podrobné odpovědi")
 
-        # Peak time
-        peak = adaptive.get("peak_hour")
+        if comm["language_level"] == "simple":
+            lines.append("- Používej JEDNODUCHÉ věty a slova — uživatel potřebuje srozumitelnost")
+
+        if comm["speech_speed"] == "slow":
+            lines.append("- Mluv POMALU a trpělivě — uživatel potřebuje více času")
+
+        if comm["patience_multiplier"] >= 2.0:
+            lines.append("- Nabízej jednoduché volby (ANO/NE) místo otevřených otázek")
+
+        # Behavior
+        peak = state["behavior"]["peak_hour"]
         if peak is not None:
             lines.append(f"- Nejčastěji komunikuje kolem {peak}:00")
 
-        # Mood concern
-        if adaptive.get("mood_concern"):
+        energy = state["behavior"]["energy_level"]
+        if energy < 0.3:
+            lines.append("- Uživatel má pravděpodobně nízkou energii — buď stručný a klidný")
+
+        # Mood
+        mood = state["mood"]
+        if mood["risk_level"] >= 0.5:
             lines.append("- POZOR: Uživatel je opakovaně smutný/úzkostný — buď extra empatický")
+        if mood["trend"] == "declining":
+            lines.append("- Nálada se zhoršuje — věnuj extra pozornost emočnímu stavu")
 
-        # Fresh interests
-        fresh = adaptive.get("fresh_interests", {})
-        if fresh:
-            top = sorted(fresh.items(), key=lambda x: -x[1])[:3]
-            topics = ", ".join(t for t, _ in top)
-            lines.append(f"- Aktuální zájmy: {topics}")
+        # Topics
+        short_term = state["topics"]["short_term"]
+        if short_term:
+            lines.append(f"- Aktuální zájmy: {', '.join(short_term[:3])}")
 
-        # Speech patience
-        patience = adaptive.get("speech_patience", {})
-        if patience.get("response_pace") == "very_slow":
-            lines.append("- Mluv POMALU a trpělivě — uživatel potřebuje více času")
-        elif patience.get("response_pace") == "slow":
-            lines.append("- Mluv klidně a pomaleji")
+        # Recovery mode
+        recovery = state["recovery"]
+        if recovery["active"]:
+            if recovery["level"] >= 2:
+                lines.append("- RECOVERY MODE: Zjednodušuj, zkracuj, ověřuj porozumění po každé větě")
+            else:
+                lines.append("- Mírné potíže s komunikací — přidej potvrzení porozumění")
 
-        if patience.get("preferred_confirmation") == "yes_no":
-            lines.append("- Nabízej jednoduché volby (ANO/NE) místo otevřených otázek")
-
-        # Success rate
-        rate = adaptive.get("success_rate")
-        if rate is not None and rate < 0.3:
-            lines.append("- Nízká úspěšnost komunikace — zjednodušuj, ověřuj porozumění")
+        # Trust
+        if state["trust_score"] < 0.2:
+            lines.append("- Adaptivní profil je zatím nejistý — buď obecnější")
 
         return lines
 
@@ -493,4 +822,20 @@ def get_adaptive_context(user_id):
         return []
 
 
-logger.info("Adaptive Learning v1.0 loaded — rhythm, feedback, pace, mood, topics")
+def get_adaptive_state(user_id):
+    """Get full structured adaptive state (for API/analytics).
+
+    Returns the structured dict from build_adaptive_state().
+    """
+    try:
+        from memory_helpers import db_load_learning
+        learning = db_load_learning(user_id)
+        adaptive = learning.get("adaptive", {})
+        if not adaptive:
+            return None
+        return build_adaptive_state(adaptive)
+    except Exception:
+        return None
+
+
+logger.info("Adaptive Learning v2.0 loaded — rhythm, feedback, energy, trust, recovery")

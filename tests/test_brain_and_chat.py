@@ -450,6 +450,99 @@ class TestAdaptiveLearning:
         assert isinstance(lines, list)
         assert len(lines) == 0  # not enough data
 
+    def test_feedback_score_positive(self):
+        from adaptive_learning import detect_feedback
+        f = detect_feedback("Děkuji!")
+        assert f["score"] > 0
+        assert f["confidence"] > 0
+
+    def test_feedback_score_negative(self):
+        from adaptive_learning import detect_feedback
+        f = detect_feedback("Nerozumím")
+        assert f["score"] < 0
+
+    def test_language_complexity_normal(self):
+        from adaptive_learning import compute_language_complexity
+        a = {"success_rate": 0.7, "repeat_requests": 0}
+        assert compute_language_complexity(a) == "normal"
+
+    def test_language_complexity_simple(self):
+        from adaptive_learning import compute_language_complexity
+        a = {"success_rate": 0.2, "repeat_requests": 6, "confusion_count": 5}
+        assert compute_language_complexity(a) == "simple"
+
+    def test_energy_level_range(self):
+        from adaptive_learning import compute_energy_level
+        energy = compute_energy_level({})
+        assert 0.0 <= energy <= 1.0
+
+    def test_energy_level_with_sad_mood(self):
+        from adaptive_learning import compute_energy_level
+        a = {"mood_history": [
+            {"mood": "sad", "hour": 10, "ts": "2026-03-19T10:00"},
+            {"mood": "sad", "hour": 10, "ts": "2026-03-19T10:05"},
+            {"mood": "anxious", "hour": 10, "ts": "2026-03-19T10:10"},
+        ]}
+        energy = compute_energy_level(a)
+        energy_normal = compute_energy_level({})
+        assert energy < energy_normal  # sad mood reduces energy
+
+    def test_trust_score_low_data(self):
+        from adaptive_learning import compute_trust_score
+        t = compute_trust_score({"total_adaptive_interactions": 1})
+        assert t == 0.1
+
+    def test_trust_score_grows(self):
+        from adaptive_learning import compute_trust_score
+        t_low = compute_trust_score({"total_adaptive_interactions": 3, "success_rate": 0.5})
+        t_high = compute_trust_score({
+            "total_adaptive_interactions": 50,
+            "success_rate": 0.8,
+            "interaction_hours": [10]*30 + [11]*20
+        })
+        assert t_high > t_low
+
+    def test_error_recovery_inactive(self):
+        from adaptive_learning import check_error_recovery
+        r = check_error_recovery({"success_rate": 0.7, "consecutive_failures": 0})
+        assert r["active"] is False
+        assert r["level"] == 0
+
+    def test_error_recovery_active_level2(self):
+        from adaptive_learning import check_error_recovery
+        r = check_error_recovery({"success_rate": 0.2, "consecutive_failures": 4})
+        assert r["active"] is True
+        assert r["level"] >= 2
+        assert "simple_language" in r["actions"]
+
+    def test_error_recovery_level3(self):
+        from adaptive_learning import check_error_recovery
+        r = check_error_recovery({"success_rate": 0.1, "consecutive_failures": 6})
+        assert r["active"] is True
+        assert r["level"] == 3
+        assert "yes_no_mode" in r["actions"]
+
+    def test_build_adaptive_state_structure(self):
+        from adaptive_learning import build_adaptive_state
+        state = build_adaptive_state({"total_adaptive_interactions": 10, "success_rate": 0.6})
+        assert "feedback" in state
+        assert "communication" in state
+        assert "behavior" in state
+        assert "mood" in state
+        assert "topics" in state
+        assert "trust_score" in state
+        assert "recovery" in state
+        assert state["communication"]["preferred_length"] in ("short", "medium", "long")
+        assert state["communication"]["language_level"] in ("simple", "normal")
+
+    def test_build_adaptive_state_recovery_overrides(self):
+        from adaptive_learning import build_adaptive_state
+        a = {"success_rate": 0.1, "consecutive_failures": 5, "computed_length": "long"}
+        state = build_adaptive_state(a)
+        # Recovery should override to short + simple
+        assert state["communication"]["preferred_length"] == "short"
+        assert state["communication"]["language_level"] == "simple"
+
     def test_stt_no_change_normal(self):
         """Normal text should not be changed."""
         from speech_understanding import correct_stt_output
