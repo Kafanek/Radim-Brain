@@ -164,10 +164,11 @@ def radim_speak(text, emotion='friendly', C=None, alpha=None, user_id=None):
                 style, degree = s, d
 
         # v389: Use rich SSML from voice_filter (emotion + pauses + emphasis)
+        # v403: Pass user_id for per-user adaptive voice (fatigue, recovery, pace)
         _mode = brain_speech.get("mode", "HARMONY") if brain_speech else "HARMONY"
         try:
             from voice_filter import build_radim_ssml
-            ssml = build_radim_ssml(text, mode=_mode)
+            ssml = build_radim_ssml(text, mode=_mode, user_id=user_id)
         except ImportError:
             safe_text = xml_escape(text)
             ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"

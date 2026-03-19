@@ -591,8 +591,10 @@ def twilio_tts():
 
     rate_pct = request.args.get('rate')
     pitch_hz = request.args.get('pitch')
+    mode = request.args.get('mode', 'HARMONY')
+    user_id = request.args.get('user_id')
 
-    audio = generate_azure_tts(text, rate_pct=rate_pct, pitch_hz=pitch_hz)
+    audio = generate_azure_tts(text, rate_pct=rate_pct, pitch_hz=pitch_hz, mode=mode, user_id=user_id)
     if audio:
         return Response(audio, content_type='audio/mpeg', headers={
             'Cache-Control': 'public, max-age=3600',

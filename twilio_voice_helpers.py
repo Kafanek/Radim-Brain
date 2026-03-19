@@ -233,8 +233,11 @@ def azure_tts_available():
 # TTS FUNCTIONS
 # ============================================================================
 
-def generate_azure_tts(text, rate_pct=None, pitch_hz=None):
-    """Generate audio bytes using Azure TTS (AntoninNeural)."""
+def generate_azure_tts(text, rate_pct=None, pitch_hz=None, mode="HARMONY", user_id=None):
+    """Generate audio bytes using Azure TTS (AntoninNeural).
+
+    v403: Accepts mode + user_id for adaptive voice styling.
+    """
     if not azure_tts_available():
         return None
 
@@ -247,9 +250,10 @@ def generate_azure_tts(text, rate_pct=None, pitch_hz=None):
         url = f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
 
         # v389: Use rich SSML from voice_filter (emotion + pauses + emphasis)
+        # v403: Pass user_id for per-user adaptive voice (fatigue, recovery, pace)
         try:
             from voice_filter import build_radim_ssml
-            ssml = build_radim_ssml(text, mode="HARMONY", voice=RADIM_AZURE_VOICE)
+            ssml = build_radim_ssml(text, mode=mode, voice=RADIM_AZURE_VOICE, user_id=user_id)
         except ImportError:
             safe_text = xml_escape(text)
             ssml = f"""<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='cs-CZ'>

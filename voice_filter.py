@@ -89,7 +89,7 @@ def _add_emphasis(text_with_breaks):
     return text_with_breaks
 
 
-def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural"):
+def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=None):
     """
     Build rich SSML for Radim's voice with mode-adaptive styling.
 
@@ -97,11 +97,38 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural"):
         text: Czech text to speak
         mode: "HARMONY", "ALERT", or "CRISIS"
         voice: Azure voice name
+        user_id: optional — loads adaptive state for per-user voice tuning
 
     Returns:
         str: Complete SSML string
     """
-    profile = VOICE_PROFILES.get(mode, VOICE_PROFILES["HARMONY"])
+    profile = dict(VOICE_PROFILES.get(mode, VOICE_PROFILES["HARMONY"]))  # copy
+
+    # v403: Per-user adaptive overrides from Radim Core Engine
+    if user_id:
+        try:
+            from adaptive_learning import get_adaptive_state
+            state = get_adaptive_state(user_id)
+            if state:
+                comm = state.get("communication", {})
+                # Slow down if adaptive says so
+                if comm.get("speech_speed") == "slow" and mode == "HARMONY":
+                    profile["rate"] = "-15%"
+                    profile["pause_ms"] = 1000
+                # Fatigue → even slower, longer pauses
+                fatigue = state.get("fatigue_level", 0)
+                if fatigue > 0.6:
+                    current_rate = int(profile["rate"].replace("%", "").replace("+", ""))
+                    profile["rate"] = f"{min(current_rate, -15)}%"
+                    profile["pause_ms"] = max(profile["pause_ms"], 1200)
+                # Recovery → maximum clarity
+                recovery = state.get("recovery", {})
+                if recovery.get("active") and recovery.get("level", 0) >= 2:
+                    profile["rate"] = "-20%"
+                    profile["volume"] = "x-loud"
+                    profile["pause_ms"] = 1500
+        except (ImportError, Exception):
+            pass
 
     # Add pauses between sentences
     styled_text = _add_sentence_pauses(text, profile["pause_ms"])
