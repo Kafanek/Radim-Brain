@@ -369,8 +369,41 @@ class TestSpeechUnderstanding:
         """Dementia pattern: repeated words collapsed."""
         from speech_understanding import correct_stt_output
         result, _ = correct_stt_output("tak tak tak tak tak prosím")
-        # "tak tak" → "tak" (phrase correction) + regex collapse
         assert result.count("tak") <= 2
+
+    def test_stt_correction_limit(self):
+        """Over-correction guard: stop after MAX_CORRECTION_STEPS."""
+        from speech_understanding import correct_stt_output, MAX_CORRECTION_STEPS
+        # 7 correctable words, should stop after 5
+        text = "pomok zachranku leky prasky spatne bolest spatny"
+        result, corrections = correct_stt_output(text)
+        assert len(corrections) == MAX_CORRECTION_STEPS
+        # Last two words should NOT be corrected
+        assert "spatny" in result  # not corrected to "špatný"
+
+    def test_safety_priority_critical(self):
+        from speech_understanding import classify_safety_priority
+        p = classify_safety_priority("pomoc prosim")
+        assert p["priority"] == "CRITICAL"
+        assert p["bypass_ai"] is True
+        assert p["escalate"] is True
+
+    def test_safety_priority_low(self):
+        from speech_understanding import classify_safety_priority
+        p = classify_safety_priority("dobrý den")
+        assert p["priority"] == "LOW"
+        assert p["bypass_ai"] is False
+
+    def test_safety_priority_repetition(self):
+        from speech_understanding import classify_safety_priority
+        p = classify_safety_priority("co co co co co")
+        assert p["priority"] == "MEDIUM"
+
+    def test_latency_fallback(self):
+        from speech_understanding import get_latency_fallback
+        msg = get_latency_fallback()
+        assert isinstance(msg, str)
+        assert len(msg) > 10
 
 
 class TestAdaptiveLearning:

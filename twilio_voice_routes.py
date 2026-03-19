@@ -178,6 +178,30 @@ def twilio_gather_webhook():
     </Gather>
 </Response>""")
 
+        # v402: CRITICAL PATH BYPASS — safety-first, skip AI delay
+        try:
+            from speech_understanding import classify_safety_priority
+            priority = classify_safety_priority(speech_result, confidence)
+            if priority["priority"] == "CRITICAL" and priority["bypass_ai"]:
+                logger.warning(f"🚨 CRITICAL SAFETY: '{speech_result}' → bypass AI [{priority['reason']}]")
+                say_help = twiml_say("Rozumím, potřebujete pomoc. Zůstaňte v klidu, volám pomoc a informuji rodinu.")
+                # Trigger escalation in background
+                try:
+                    from agent_loop import _alert_caregiver, _crisis_escalate
+                    obs = {"type": "voice_crisis", "severity": "CRISIS",
+                           "message": f"Hlasová krize: '{speech_result}'", "details": {"confidence": confidence}}
+                    _alert_caregiver(_user_id, obs, None)
+                except Exception:
+                    pass
+                return twiml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    {say_help}
+    <Pause length="2"/>
+    <Say language="cs-CZ" voice="Polly.Adela">Pokud potřebujete záchrannou službu, zavěste a zavolejte jedna pět pět.</Say>
+</Response>""")
+        except ImportError:
+            pass
+
         # v396: Low confidence → retry or safety escalation
         try:
             action, data = should_retry_stt(speech_result, confidence, _user_id)

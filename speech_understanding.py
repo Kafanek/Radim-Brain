@@ -365,15 +365,14 @@ _WORD_CORRECTIONS = {
 }
 
 
+MAX_CORRECTION_STEPS = 5  # safety: stop correcting after N changes to prevent over-correction
+
+
 def correct_stt_output(text, user_id=None):
     """Post-process STT output to fix common Czech recognition errors.
 
-    Applied BEFORE intent resolution. Does not change meaning,
-    only fixes known misrecognitions.
-
-    Args:
-        text: raw STT output
-        user_id: optional — if provided, loads per-user STT error patterns
+    Safety: stops after MAX_CORRECTION_STEPS to prevent over-correction.
+    If limit hit, logs warning and returns partially corrected text.
 
     Returns:
         (corrected_text, corrections_applied)
@@ -391,14 +390,16 @@ def correct_stt_output(text, user_id=None):
             lower = lower.replace(wrong, right)
             corrections.append(f"'{wrong}' → '{right}'")
 
-    # Phase 2: Word-level corrections
+    # Phase 2: Word-level corrections (with limit)
     words = lower.split()
     corrected_words = []
     for w in words:
+        if len(corrections) >= MAX_CORRECTION_STEPS:
+            corrected_words.append(w)  # stop correcting, pass through
+            continue
         clean = re.sub(r'[.,!?;:]', '', w)
         if clean in _WORD_CORRECTIONS:
             replacement = _WORD_CORRECTIONS[clean]
-            # Preserve original punctuation
             suffix = w[len(clean):] if len(w) > len(clean) else ""
             corrected_words.append(replacement + suffix)
             corrections.append(f"'{clean}' → '{replacement}'")
@@ -406,6 +407,9 @@ def correct_stt_output(text, user_id=None):
             corrected_words.append(w)
 
     result = " ".join(corrected_words)
+
+    if len(corrections) >= MAX_CORRECTION_STEPS:
+        logger.warning(f"STT correction limit hit ({MAX_CORRECTION_STEPS}): '{original}'")
 
     # Phase 3: Collapse repeated words (dementia pattern: "co co co" → "co")
     result = re.sub(r'\b(\w+)(\s+\1){2,}\b', r'\1', result)
@@ -474,6 +478,21 @@ def build_speech_hints(user_id):
                 if cname:
                     hints.append(cname)
 
+        # v402: Add user-learned error words as hints (prevents repeated STT errors)
+        try:
+            from memory_helpers import db_load_learning
+            learning = db_load_learning(user_id)
+            stt_errors = learning.get("adaptive", {}).get("stt_error_counts", {})
+            # Add frequently misheard words (3+ occurrences)
+            for word, count in sorted(stt_errors.items(), key=lambda x: -x[1])[:10]:
+                if count >= 3 and word not in hints:
+                    # Add the CORRECT version if we know it
+                    correct = _WORD_CORRECTIONS.get(word)
+                    if correct and correct not in hints:
+                        hints.append(correct)
+        except Exception:
+            pass
+
     except Exception:
         pass
 
@@ -481,4 +500,85 @@ def build_speech_hints(user_id):
     return ",".join(hints[:50])
 
 
-logger.info("Speech Understanding v1.1 loaded — fuzzy safety + STT correction + hints")
+# ============================================================================
+# SAFETY PRIORITY CLASSIFICATION
+# ============================================================================
+
+def classify_safety_priority(text, confidence=1.0):
+    """Classify message safety priority.
+
+    Returns:
+        dict: {
+            "priority": "CRITICAL" | "MEDIUM" | "LOW",
+            "bypass_ai": bool,     # skip AI for immediate response
+            "escalate": bool,      # trigger caregiver notification
+            "reason": str or None,
+        }
+    """
+    if not text:
+        return {"priority": "LOW", "bypass_ai": False, "escalate": False, "reason": None}
+
+    # Check fuzzy safety first
+    safety = detect_safety_fuzzy(text)
+    conf = float(confidence or 0)
+
+    if safety and safety["severity"] == "critical":
+        return {
+            "priority": "CRITICAL",
+            "bypass_ai": True,
+            "escalate": True,
+            "reason": f"Safety word '{safety['word']}' detected (distance={safety['distance']})",
+        }
+
+    if safety and safety["severity"] == "high":
+        return {
+            "priority": "CRITICAL" if conf > 0.5 else "MEDIUM",
+            "bypass_ai": conf > 0.5,
+            "escalate": conf > 0.5,
+            "reason": f"High-severity word '{safety['word']}' (confidence={conf})",
+        }
+
+    if safety and safety["severity"] == "medium":
+        return {
+            "priority": "MEDIUM",
+            "bypass_ai": False,
+            "escalate": False,
+            "reason": f"Medium-severity word '{safety['word']}'",
+        }
+
+    # Check for confusion patterns (repeated words, very short)
+    normalized = normalize_czech(text)
+    words = normalized.split()
+    if len(words) >= 3:
+        unique = set(words)
+        if len(unique) <= len(words) * 0.4:  # >60% repetition
+            return {
+                "priority": "MEDIUM",
+                "bypass_ai": False,
+                "escalate": False,
+                "reason": "Repeated words pattern (possible confusion)",
+            }
+
+    return {"priority": "LOW", "bypass_ai": False, "escalate": False, "reason": None}
+
+
+# ============================================================================
+# LATENCY GUARD — fallback if processing takes too long
+# ============================================================================
+
+LATENCY_LIMIT_MS = 2500  # target: respond within 2.5s (leaves 500ms for network)
+
+LATENCY_FALLBACK_RESPONSES = [
+    "Promiňte, chvilku mi to trvá. Můžete to zkusit ještě jednou?",
+    "Omlouvám se za zdržení. Jsem tu pro vás.",
+    "Moment prosím, zpracovávám vaši odpověď.",
+]
+
+
+def get_latency_fallback():
+    """Return a short fallback response when processing exceeds time limit."""
+    import random
+    return random.choice(LATENCY_FALLBACK_RESPONSES)
+
+
+logger.info("Speech Understanding v2.0 loaded — safety priority + correction limit + error learning")
