@@ -253,3 +253,94 @@ class TestProactiveCalls:
         result = initiate_proactive_call("+420123456789", "Test greeting")
         # Should return dict with error (Twilio not configured in test)
         assert isinstance(result, dict)
+
+
+class TestSpeechUnderstanding:
+    """Fuzzy matching + normalization for speech-impaired seniors."""
+
+    def test_strip_diacritics(self):
+        from speech_understanding import strip_diacritics
+        assert strip_diacritics("příliš žluťoučký") == "prilis zlutoucky"
+        assert strip_diacritics("pomoc") == "pomoc"
+        assert strip_diacritics("léky") == "leky"
+
+    def test_normalize_czech(self):
+        from speech_understanding import normalize_czech
+        assert normalize_czech("  POMOC!  ") == "pomoc"
+        assert normalize_czech("Léky Na Ráno") == "leky na rano"
+
+    def test_safety_exact_match(self):
+        from speech_understanding import detect_safety_fuzzy
+        m = detect_safety_fuzzy("Pomoc!")
+        assert m is not None
+        assert m["severity"] == "critical"
+        assert m["distance"] == 0
+
+    def test_safety_fuzzy_pomo(self):
+        """Senior with dysarthria says 'pomo' instead of 'pomoc'."""
+        from speech_understanding import detect_safety_fuzzy
+        m = detect_safety_fuzzy("pomo")
+        assert m is not None
+        assert m["word"] == "pomoc"
+        assert m["distance"] <= 2
+
+    def test_safety_fuzzy_pomc(self):
+        """Parkinson's tremor types 'pomc' instead of 'pomoc'."""
+        from speech_understanding import detect_safety_fuzzy
+        m = detect_safety_fuzzy("pomc")
+        assert m is not None
+        assert m["word"] == "pomoc"
+
+    def test_safety_fuzzy_zachrnku(self):
+        """STT misheard 'záchranku' as 'zachrnku'."""
+        from speech_understanding import detect_safety_fuzzy
+        m = detect_safety_fuzzy("zachrnku")
+        assert m is not None
+        assert m["severity"] == "critical"
+
+    def test_safety_no_false_positive(self):
+        """Normal words should NOT trigger safety."""
+        from speech_understanding import detect_safety_fuzzy
+        assert detect_safety_fuzzy("Dobrý den") is None
+        assert detect_safety_fuzzy("Jaké je počasí?") is None
+        assert detect_safety_fuzzy("Děkuji") is None
+
+    def test_safety_155_exact(self):
+        """Emergency number 155 must match exactly."""
+        from speech_understanding import detect_safety_fuzzy
+        m = detect_safety_fuzzy("zavolej 155")
+        assert m is not None
+        assert m["severity"] == "critical"
+
+    def test_should_retry_low_conf(self):
+        """Very low confidence + short text → retry."""
+        from speech_understanding import should_retry_stt
+        action, _ = should_retry_stt("bla", 0.2)
+        assert action == "retry"
+
+    def test_should_retry_safety_overrides(self):
+        """Safety word overrides low confidence → safety escalation."""
+        from speech_understanding import should_retry_stt
+        action, data = should_retry_stt("pomoc", 0.1)
+        assert action == "safety"
+        assert data["severity"] == "critical"
+
+    def test_should_proceed_good_conf(self):
+        """Good confidence → proceed normally."""
+        from speech_understanding import should_retry_stt
+        action, _ = should_retry_stt("Dobrý den, jak se máte?", 0.85)
+        assert action == "proceed"
+
+    def test_adaptive_gather_default(self):
+        from speech_understanding import get_gather_params
+        p = get_gather_params(None)
+        assert p["speech_timeout"] == 3
+        assert p["language"] == "cs-CZ"
+
+    def test_intent_resolver_fuzzy_safety(self):
+        """Fuzzy safety in intent resolver catches 'pomo'."""
+        from intent_resolver import resolve_intent
+        text, intent, meta = resolve_intent("pomo prosim")
+        assert intent == "safety"
+        assert meta is not None
+        assert meta.get("fuzzy_match") is not None

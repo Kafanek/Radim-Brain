@@ -258,6 +258,18 @@ def resolve_intent(message, user_id=None, mode="HARMONY"):
 
     text = message.strip()
 
+    # v396: Fuzzy safety check FIRST — catches "pomo", "pomc", "zachrnku" etc.
+    # Critical for speech-impaired seniors (dysarthria, aphasia, Parkinson's)
+    try:
+        from speech_understanding import detect_safety_fuzzy
+        safety_match = detect_safety_fuzzy(text)
+        if safety_match and safety_match["severity"] == "critical":
+            logger.info(f"FUZZY SAFETY: '{safety_match['input']}' → '{safety_match['word']}' "
+                        f"(dist={safety_match['distance']}) for user={user_id}")
+            return (None, "safety", {"priority": "high", "fuzzy_match": safety_match})
+    except ImportError:
+        pass
+
     for intent in _INTENTS:
         for pattern in intent["_compiled"]:
             if pattern.search(text):

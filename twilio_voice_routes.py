@@ -110,10 +110,18 @@ def twilio_voice_webhook():
         say_listen = twiml_say("Poslouchám vás.")
         say_noheard = twiml_say("Neslyšel jsem vás. Pokud potřebujete pomoc, zavolejte znovu.")
 
+        # v396: Adaptive gather params per user profile (aphasia, dysarthria → longer timeout)
+        try:
+            from speech_understanding import get_gather_params
+            gp = get_gather_params(caller_data.get("user_id"))
+        except ImportError:
+            gp = {"speech_timeout": 3, "timeout": 10, "language": "cs-CZ", "hints": ""}
+        hints_attr = f' hints="{gp["hints"]}"' if gp.get("hints") else ""
+
         twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     {say_greeting}
-    <Gather input="speech" language="cs-CZ" action="/api/twilio/gather" method="POST" speechTimeout="3" timeout="10">
+    <Gather input="speech" language="{gp['language']}" action="/api/twilio/gather" method="POST" speechTimeout="{gp['speech_timeout']}" timeout="{gp['timeout']}"{hints_attr}>
         {say_listen}
     </Gather>
     {say_noheard}
@@ -141,16 +149,51 @@ def twilio_gather_webhook():
 
         logger.info(f"🎤 Speech: '{speech_result}' (confidence: {confidence})")
 
+        # v396: Get adaptive params for this user
+        call_data = active_calls.get(call_sid, {})
+        _user_id = call_data.get("user_id")
+        try:
+            from speech_understanding import get_gather_params, should_retry_stt
+            gp = get_gather_params(_user_id)
+        except ImportError:
+            gp = {"speech_timeout": 3, "timeout": 10, "language": "cs-CZ", "hints": ""}
+
         if not speech_result.strip():
             say_retry = twiml_say("Promiňte, neslyšel jsem vás. Můžete to zopakovat?")
             say_here = twiml_say("Jsem tu pro vás.")
             return twiml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     {say_retry}
-    <Gather input="speech" language="cs-CZ" action="/api/twilio/gather" method="POST" speechTimeout="3" timeout="10">
+    <Gather input="speech" language="{gp['language']}" action="/api/twilio/gather" method="POST" speechTimeout="{gp['speech_timeout']}" timeout="{gp['timeout']}">
         {say_here}
     </Gather>
 </Response>""")
+
+        # v396: Low confidence → retry or safety escalation
+        try:
+            action, data = should_retry_stt(speech_result, confidence, _user_id)
+            if action == "retry":
+                logger.info(f"🔄 Low confidence ({confidence}), asking to repeat")
+                say_again = twiml_say("Promiňte, nerozuměl jsem dobře. Řekněte to prosím ještě jednou, pomaleji.")
+                say_here = twiml_say("Poslouchám.")
+                return twiml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    {say_again}
+    <Gather input="speech" language="{gp['language']}" action="/api/twilio/gather" method="POST" speechTimeout="{gp['speech_timeout']}" timeout="{gp['timeout']}">
+        {say_here}
+    </Gather>
+</Response>""")
+            elif action == "safety":
+                logger.warning(f"🚨 FUZZY SAFETY detected: '{data['input']}' → '{data['word']}' (conf={confidence})")
+                say_confirm = twiml_say("Slyšel jsem, že potřebujete pomoc. Je to tak? Řekněte ano, nebo stiskněte jedničku.")
+                return twiml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    {say_confirm}
+    <Gather input="speech dtmf" numDigits="1" language="{gp['language']}" action="/api/twilio/gather" method="POST" speechTimeout="5" timeout="10">
+    </Gather>
+</Response>""")
+        except ImportError:
+            pass
 
         # Check transfer intent
         transfer = detect_transfer_intent(speech_result)
