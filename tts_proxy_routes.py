@@ -16,8 +16,9 @@ logger = logging.getLogger(__name__)
 tts_proxy_bp = Blueprint('tts_proxy', __name__)
 
 # ── Config from environment ──────────────────────────────────────────
-AZURE_TTS_KEY = os.environ.get('AZURE_TTS_KEY')
-AZURE_TTS_REGION = os.environ.get('AZURE_TTS_REGION', 'eastus')
+# v409: Unified config — use same env vars as speech_helpers.py
+AZURE_TTS_KEY = os.environ.get('AZURE_TTS_KEY') or os.environ.get('AZURE_SPEECH_KEY')
+AZURE_TTS_REGION = os.environ.get('AZURE_TTS_REGION') or os.environ.get('AZURE_SPEECH_REGION', 'germanywestcentral')
 ELEVENLABS_API_KEY = os.environ.get('ELEVENLABS_API_KEY', '')
 
 # ── Anticipation + Brain engine refs (set by init_tts_proxy_routes) ──
