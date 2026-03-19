@@ -131,12 +131,22 @@ def radim_chat():
         if intent == 'safety':
             severity = 'critical' if any(w in message.lower() for w in ['155', '112', 'záchranka', 'sebevražd', 'sebevrazd', 'chci umřít', 'chci umrit']) else 'high'
 
-            _safety_notify_caregivers(user_id, message, severity)
-            _safety_log_crisis_event(user_id, message, severity)
+            # v398: RESPOND FIRST, notify ASYNC — senior must hear response within 500ms
+            import threading
+            threading.Thread(
+                target=_safety_notify_caregivers,
+                args=(user_id, message, severity),
+                daemon=True
+            ).start()
+            threading.Thread(
+                target=_safety_log_crisis_event,
+                args=(user_id, message, severity),
+                daemon=True
+            ).start()
 
             return jsonify({
                 'success': True,
-                'response': '🚨 Zůstaňte v klidu! Volám pomoc a informuji rodinu.',
+                'response': 'Zůstaňte v klidu! Volám pomoc a informuji rodinu.',
                 'radim_action': {
                     'type': 'safety_alert',
                     'payload': {'user_id': user_id, 'severity': severity, 'message': message},

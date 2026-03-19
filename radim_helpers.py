@@ -220,55 +220,40 @@ def detect_intent(message):
 # ============================================
 
 def _safety_notify_caregivers(user_id, message, severity):
-    """Send push notifications to caregivers and log to DB.
+    """Send push + SMS notifications to caregivers (runs async from v398).
     This is the CRITICAL C1 fix — previously the system said 'calling help'
     but never actually sent anything.
     """
     try:
-        from database import get_connection
-        conn = get_connection()
-        if not conn:
-            logger.error("🚨 SAFETY: Cannot get DB connection for caregiver notification!")
-            return
+        from database import db_context
 
-        # 1. Find caregivers for this user (from iot_caregivers table)
-        cur = conn.execute(
-            "SELECT name, phone, email, notify_push, notify_sms FROM iot_caregivers WHERE active = TRUE"
-        )
-        caregivers = cur.fetchall()
+        with db_context() as db:
+            # 1. Find caregivers
+            caregivers = db.execute(
+                "SELECT name, phone, email, notify_push, notify_sms FROM iot_caregivers WHERE active = ?",
+                (True,)
+            ).fetchall()
 
-        # 2. Send push notifications to all push subscribers
-        # Import app's send_push_notification
-        try:
-            from app import send_push_notification
-            # Notify all caregivers who have push subscriptions
-            for cg in caregivers:
-                cg_name = cg['name'] if hasattr(cg, '__getitem__') else cg[0]
-                # Send to user's contacts that have push subscriptions
-                logger.info(f"🚨 SAFETY: Notifying caregiver {cg_name} about crisis for user {user_id}")
-
-            # Also send push to all admins/caregivers in chat_users
-            admin_cur = conn.execute(
-                "SELECT id FROM chat_users WHERE role IN ('admin', 'caregiver', 'family') AND id != %s",
-                (user_id,)
-            ) if conn else None
-
-            if admin_cur:
-                admins = admin_cur.fetchall()
+            # 2. Push to admins/caregivers/family
+            try:
+                from app import send_push_notification
+                admins = db.execute(
+                    "SELECT id FROM chat_users WHERE role IN ('admin', 'caregiver', 'family') AND id != ?",
+                    (user_id,)
+                ).fetchall()
                 for admin in admins:
-                    admin_id = admin['id'] if hasattr(admin, '__getitem__') else admin[0]
+                    admin_id = admin.get('id') or admin[0]
                     send_push_notification(
                         admin_id,
-                        f"🚨 KRIZOVÁ SITUACE — {severity.upper()}",
-                        f"Uživatel {user_id} potřebuje pomoc: {message[:100]}",
+                        f"KRIZOVA SITUACE — {severity.upper()}",
+                        f"Uzivatel {user_id} potrebuje pomoc: {message[:100]}",
                         data={'type': 'safety_alert', 'severity': severity, 'user_id': user_id}
                     )
-                    logger.info(f"🚨 SAFETY: Push sent to {admin_id}")
+                    logger.info(f"SAFETY: Push sent to {admin_id}")
+            except ImportError:
+                logger.warning("SAFETY: Cannot import send_push_notification")
 
-        except ImportError:
-            logger.warning("🚨 SAFETY: Cannot import send_push_notification")
-
-        # 3. Send SMS via Twilio to caregivers with notify_sms=True
+        # 3. SMS (outside db_context — Twilio HTTP call can be slow)
         try:
             twilio_sid = os.environ.get('TWILIO_ACCOUNT_SID')
             twilio_token = os.environ.get('TWILIO_AUTH_TOKEN')
@@ -279,58 +264,47 @@ def _safety_notify_caregivers(user_id, message, severity):
                 twilio_client = TwilioClient(twilio_sid, twilio_token)
 
                 for cg in caregivers:
-                    cg_phone = cg['phone'] if hasattr(cg, '__getitem__') else cg[1]
-                    cg_sms = cg['notify_sms'] if hasattr(cg, '__getitem__') else cg[4]
+                    cg_phone = cg.get('phone') or cg[1]
+                    cg_sms = cg.get('notify_sms') or cg[4]
+                    cg_name = cg.get('name') or cg[0]
                     if cg_sms and cg_phone:
                         try:
                             twilio_client.messages.create(
-                                body=f"🚨 RADIM KRIZOVÝ ALERT [{severity.upper()}]: Uživatel {user_id} - {message[:120]}. Zkontrolujte prosím situaci.",
+                                body=f"RADIM KRIZOVY ALERT [{severity.upper()}]: Uzivatel {user_id} - {message[:120]}",
                                 from_=twilio_from,
                                 to=cg_phone
                             )
-                            cg_name = cg['name'] if hasattr(cg, '__getitem__') else cg[0]
-                            logger.info(f"🚨 SAFETY: SMS sent to {cg_name} at {cg_phone}")
+                            logger.info(f"SAFETY: SMS sent to {cg_name} at {cg_phone}")
                         except Exception as sms_err:
-                            logger.error(f"🚨 SAFETY: SMS failed to {cg_phone}: {sms_err}")
-            else:
-                logger.warning("🚨 SAFETY: Twilio not configured — SMS notifications disabled")
+                            logger.error(f"SAFETY: SMS failed to {cg_phone}: {sms_err}")
         except ImportError:
-            logger.warning("🚨 SAFETY: Twilio library not available for SMS")
+            logger.warning("SAFETY: Twilio library not available for SMS")
 
     except Exception as e:
-        # v327 C2 FIX: Error in safety must NOT default to silent — log loudly
-        logger.error(f"🚨🚨🚨 CRITICAL SAFETY NOTIFICATION FAILURE for user {user_id}: {e}")
+        logger.error(f"CRITICAL SAFETY NOTIFICATION FAILURE for user {user_id}: {e}")
 
 
 def _safety_log_crisis_event(user_id, message, severity):
-    """Log crisis event to audit trail (v327 H6 fix).
+    """Log crisis event to audit trail (runs async from v398).
     Records in both crisis_events and audit_log tables.
     """
     try:
-        from database import get_connection
-        conn = get_connection()
-        if not conn:
-            logger.error("🚨 SAFETY: Cannot log crisis event — no DB connection")
-            return
+        from database import db_context
 
-        # Insert into crisis_events table
-        conn.execute(
-            "INSERT INTO crisis_events (user_id, message_excerpt, brain_c) VALUES (%s, %s, %s)",
-            (user_id, message[:300], 30.0 if severity == 'critical' else 20.0)
-        )
-
-        # Insert into audit_log table
-        conn.execute(
-            "INSERT INTO audit_log (user_id, action, resource, detail) VALUES (%s, %s, %s, %s)",
-            (user_id, 'crisis_alert', 'safety',
-             json.dumps({'severity': severity, 'message': message[:200]}, ensure_ascii=False))
-        )
-
-        conn.commit()
-        logger.info(f"🚨 SAFETY: Crisis event logged for user {user_id}, severity={severity}")
+        with db_context(commit=True) as db:
+            db.execute(
+                "INSERT INTO crisis_events (user_id, message_excerpt, brain_c) VALUES (?, ?, ?)",
+                (user_id, message[:300], 30.0 if severity == 'critical' else 20.0)
+            )
+            db.execute(
+                "INSERT INTO audit_log (user_id, action, resource, detail) VALUES (?, ?, ?, ?)",
+                (user_id, 'crisis_alert', 'safety',
+                 json.dumps({'severity': severity, 'message': message[:200]}, ensure_ascii=False))
+            )
+        logger.info(f"SAFETY: Crisis event logged for user {user_id}, severity={severity}")
 
     except Exception as e:
-        logger.error(f"🚨 SAFETY: Failed to log crisis event: {e}")
+        logger.error(f"SAFETY: Failed to log crisis event: {e}")
 
 
 # ============================================
