@@ -23,6 +23,7 @@ Routes:
 import os
 import time
 import logging
+from xml.sax.saxutils import escape as xml_escape
 from flask import Blueprint, request, jsonify, Response
 from auth_middleware import require_auth, optional_auth
 from rate_limiter import rate_limit

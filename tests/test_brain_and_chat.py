@@ -177,3 +177,79 @@ class TestIoTAuth:
                                 "sensor_type": "motion", "value": 1.0})
         # Should return 503 (no IOT_GATEWAY_TOKEN configured)
         assert resp.status_code == 503
+
+
+class TestWhatsAppWebhook:
+    """WhatsApp message handling tests."""
+
+    def test_whatsapp_empty_body(self, client):
+        """Empty WhatsApp message returns empty TwiML."""
+        resp = client.post('/api/twilio/whatsapp', data={"Body": "", "From": "whatsapp:+420123"})
+        assert resp.status_code == 200
+        assert b'<Response>' in resp.data
+
+    def test_whatsapp_with_message(self, client):
+        """WhatsApp message triggers AI response."""
+        resp = client.post('/api/twilio/whatsapp',
+                          data={"Body": "Ahoj Radime", "From": "whatsapp:+420123456789"})
+        assert resp.status_code == 200
+        assert b'<Message>' in resp.data
+
+
+class TestIntentResolver:
+    """Intent resolver local intent tests."""
+
+    def test_time_intent(self):
+        from intent_resolver import resolve_intent
+        text, intent, _ = resolve_intent("Kolik je hodin?")
+        assert intent == "time"
+        assert text is not None
+        assert ":" in text
+
+    def test_medication_intent(self):
+        from intent_resolver import resolve_intent
+        text, intent, _ = resolve_intent("Jaké mám léky?", user_id="demo_senior_1")
+        assert intent == "medication"
+        # Returns text with user_id (from profile or fallback message)
+        assert text is not None
+
+    def test_who_am_i_intent(self):
+        from intent_resolver import resolve_intent
+        text, intent, _ = resolve_intent("Kdo jsem?")
+        assert intent == "who_am_i"
+
+    def test_safety_passes_to_ai(self):
+        from intent_resolver import resolve_intent
+        text, intent, meta = resolve_intent("Pomoc, spadl jsem!")
+        assert intent == "safety"
+        assert text is None  # passed to AI
+        assert meta is not None
+
+    def test_weather_passes_to_ai(self):
+        from intent_resolver import resolve_intent
+        text, intent, _ = resolve_intent("Jaké je počasí?")
+        assert intent == "weather"
+        assert text is None  # passed to AI
+
+    def test_greeting(self):
+        from intent_resolver import resolve_intent
+        text, intent, _ = resolve_intent("Ahoj!")
+        assert intent == "greeting"
+        assert text is not None
+
+
+class TestProactiveCalls:
+    """Proactive call infrastructure tests."""
+
+    def test_get_senior_phone(self):
+        from twilio_voice_helpers import get_senior_phone
+        # No profile → returns None
+        phone = get_senior_phone("nonexistent_user")
+        assert phone is None
+
+    def test_initiate_call_no_twilio(self):
+        """Without Twilio configured, call returns error gracefully."""
+        from twilio_voice_helpers import initiate_proactive_call
+        result = initiate_proactive_call("+420123456789", "Test greeting")
+        # Should return dict with error (Twilio not configured in test)
+        assert isinstance(result, dict)
