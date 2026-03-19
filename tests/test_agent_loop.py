@@ -136,7 +136,12 @@ class TestVoiceFilter:
     def test_sentence_pauses(self):
         from voice_filter import build_radim_ssml
         ssml = build_radim_ssml("První věta. Druhá věta.", mode="HARMONY")
-        assert 'break time="618ms"' in ssml
+        # v405: pause has ±50ms variability, check range instead of exact value
+        import re
+        pause_match = re.search(r'break time="(\d+)ms"', ssml)
+        assert pause_match is not None, "No break element found"
+        pause_ms = int(pause_match.group(1))
+        assert 550 <= pause_ms <= 700, f"Pause {pause_ms}ms outside HARMONY range (618±82)"
 
     def test_crisis_emphasis(self):
         from voice_filter import build_radim_ssml

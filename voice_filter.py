@@ -89,53 +89,103 @@ def _add_emphasis(text_with_breaks):
     return text_with_breaks
 
 
+# v405: Response length limit — prevent long TTS output (seniors lose focus)
+MAX_TTS_CHARS = 200
+
+# v405: Fatigue hysteresis — prevent mode switching instability
+_FATIGUE_ACTIVATE = 0.65
+_FATIGUE_DEACTIVATE = 0.55
+_fatigue_slow_active = {}  # user_id → bool
+
+
+def _truncate_for_tts(text, max_chars=MAX_TTS_CHARS):
+    """Shorten text for TTS while preserving meaning.
+    Cuts at sentence boundary, adds continuation hint.
+    """
+    if len(text) <= max_chars:
+        return text
+    # Find last sentence boundary before limit
+    truncated = text[:max_chars]
+    last_period = max(truncated.rfind('.'), truncated.rfind('!'), truncated.rfind('?'))
+    if last_period > max_chars * 0.4:  # at least 40% of text
+        return truncated[:last_period + 1]
+    # No good sentence boundary — cut at last space
+    last_space = truncated.rfind(' ')
+    if last_space > 0:
+        return truncated[:last_space] + "."
+    return truncated + "."
+
+
+def _add_pause_variability(pause_ms):
+    """Add slight random variability to pauses for natural speech.
+    ±50ms (small enough to not notice, big enough to sound human).
+    """
+    import random
+    variation = random.randint(-50, 50)
+    return max(200, pause_ms + variation)  # minimum 200ms
+
+
 def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=None):
+    """Build rich SSML for Radim's voice with mode-adaptive styling.
+
+    v405 hardening:
+    - MAX_TTS_CHARS truncation (seniors lose focus on long speech)
+    - Fatigue hysteresis (prevent mode switching instability)
+    - Pause variability (±50ms for natural rhythm)
+    - Logging: mode, overrides applied, text length
     """
-    Build rich SSML for Radim's voice with mode-adaptive styling.
+    profile = dict(VOICE_PROFILES.get(mode, VOICE_PROFILES["HARMONY"]))
+    overrides = []
 
-    Args:
-        text: Czech text to speak
-        mode: "HARMONY", "ALERT", or "CRISIS"
-        voice: Azure voice name
-        user_id: optional — loads adaptive state for per-user voice tuning
+    # v405: Truncate long text
+    original_len = len(text)
+    text = _truncate_for_tts(text)
+    if len(text) < original_len:
+        overrides.append(f"truncated:{original_len}→{len(text)}")
 
-    Returns:
-        str: Complete SSML string
-    """
-    profile = dict(VOICE_PROFILES.get(mode, VOICE_PROFILES["HARMONY"]))  # copy
-
-    # v403: Per-user adaptive overrides from Radim Core Engine
+    # v403: Per-user adaptive overrides
     if user_id:
         try:
             from adaptive_learning import get_adaptive_state
             state = get_adaptive_state(user_id)
             if state:
                 comm = state.get("communication", {})
-                # Slow down if adaptive says so
                 if comm.get("speech_speed") == "slow" and mode == "HARMONY":
                     profile["rate"] = "-15%"
                     profile["pause_ms"] = 1000
-                # Fatigue → even slower, longer pauses
+                    overrides.append("slow_speech")
+
+                # v405: Fatigue with hysteresis
                 fatigue = state.get("fatigue_level", 0)
-                if fatigue > 0.6:
+                was_slow = _fatigue_slow_active.get(user_id, False)
+                if fatigue > _FATIGUE_ACTIVATE or (was_slow and fatigue > _FATIGUE_DEACTIVATE):
+                    _fatigue_slow_active[user_id] = True
                     current_rate = int(profile["rate"].replace("%", "").replace("+", ""))
                     profile["rate"] = f"{min(current_rate, -15)}%"
                     profile["pause_ms"] = max(profile["pause_ms"], 1200)
-                # Recovery → maximum clarity
+                    overrides.append(f"fatigue:{fatigue}")
+                else:
+                    _fatigue_slow_active[user_id] = False
+
                 recovery = state.get("recovery", {})
                 if recovery.get("active") and recovery.get("level", 0) >= 2:
                     profile["rate"] = "-20%"
                     profile["volume"] = "x-loud"
                     profile["pause_ms"] = 1500
+                    overrides.append(f"recovery:L{recovery['level']}")
         except (ImportError, Exception):
             pass
 
-    # Add pauses between sentences
-    styled_text = _add_sentence_pauses(text, profile["pause_ms"])
+    # Add pauses between sentences (with variability)
+    pause = _add_pause_variability(profile["pause_ms"])
+    styled_text = _add_sentence_pauses(text, pause)
 
     # Add emphasis in ALERT/CRISIS
     if profile["emphasis"]:
         styled_text = _add_emphasis(styled_text)
+
+    if overrides:
+        logger.info(f"TTS [{mode}] {len(text)}ch overrides=[{','.join(overrides)}]")
 
     ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
            xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="cs-CZ">

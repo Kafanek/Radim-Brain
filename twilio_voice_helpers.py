@@ -262,6 +262,8 @@ def generate_azure_tts(text, rate_pct=None, pitch_hz=None, mode="HARMONY", user_
                 </voice>
             </speak>"""
 
+        import time as _time
+        _t0 = _time.time()
         resp = http_requests.post(
             url,
             headers={
@@ -272,10 +274,13 @@ def generate_azure_tts(text, rate_pct=None, pitch_hz=None, mode="HARMONY", user_
             data=ssml.encode('utf-8'),
             timeout=8
         )
+        _latency = round((_time.time() - _t0) * 1000)
         if resp.status_code == 200:
+            _size = len(resp.content)
+            logger.info(f"TTS OK: {_latency}ms {_size}bytes mode={mode} chars={len(text)}")
             return resp.content
         else:
-            logger.error(f"Azure TTS error: {resp.status_code} {resp.text[:200]}")
+            logger.error(f"Azure TTS error: {resp.status_code} {_latency}ms {resp.text[:100]}")
             return None
     except Exception as e:
         logger.error(f"Azure TTS exception: {e}")
