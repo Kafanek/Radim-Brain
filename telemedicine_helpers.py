@@ -194,9 +194,17 @@ def _is_participant(user_id, consultation):
 # ============================================
 
 MAX_TEXT = 10000
-PARTICIPANT_ROLES = ('organizer', 'specialist', 'observer', 'patient')
+PARTICIPANT_ROLES = ('organizer', 'specialist', 'observer', 'patient', 'caregiver_proxy')
 SPECIALTIES = ('speech_therapist', 'neurologist', 'social_worker', 'psychologist',
                'doctor', 'nurse', 'physiotherapist', 'occupational_therapist', 'other')
+
+# GDPR sensitivity levels (Point 1)
+SENSITIVITY_LEVELS = ('health_data', 'special_category', 'operational')
+LEGAL_BASES = ('consent_art9', 'vital_interest', 'public_health', 'healthcare_provision')
+RETENTION_CLASSES = ('clinical_5y', 'operational_1y', 'audit_10y')
+
+# Email summary modes (Point 6)
+EMAIL_MODES = ('brief_notification', 'full_summary')
 PARTICIPANT_STATUSES = ('invited', 'accepted', 'declined', 'joined', 'left')
 
 

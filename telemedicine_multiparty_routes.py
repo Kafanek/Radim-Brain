@@ -19,6 +19,7 @@ from telemedicine_helpers import (
     _validate_date, _validate_time, _verify_teacher_student_local,
     MAX_TEXT, SPECIALTIES
 )
+from telemedicine_audit import log_event, check_permission
 
 telemedicine_multiparty_bp = Blueprint('telemedicine_multiparty', __name__)
 
@@ -98,6 +99,10 @@ def telemed_create_multiparty():
         logger.error(f"telemed_create_multiparty DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    log_event(cid, 'consultation_confirmed', organizer_id,
+              new_status='confirmed', actor_consultation_role='organizer',
+              metadata={'multiparty': True, 'invited_count': invited_count, 'title': title})
+
     _notify_user(patient_id, 'telemedicine_confirmed', {
         'consultation_id': cid, 'teacher_id': organizer_id, 'title': title, 'multiparty': True
     })
@@ -169,6 +174,10 @@ def telemed_invite_participant(consultation_id):
             return jsonify({"success": False, "error": "Uzivatel je jiz pozvan"}), 409
         logger.error(f"telemed_invite_participant DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
+
+    log_event(consultation_id, 'participant_invited', organizer_id,
+              actor_consultation_role='organizer',
+              metadata={'invited_user': user_id, 'role': role, 'specialty': specialty})
 
     _notify_user(user_id, 'telemedicine_invited', {
         'consultation_id': consultation_id, 'organizer_id': organizer_id,
@@ -250,6 +259,10 @@ def telemed_respond_invitation(consultation_id):
         logger.error(f"telemed_respond_invitation DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    event_type = 'participant_accepted' if response == 'accepted' else 'participant_declined'
+    log_event(consultation_id, event_type, user_id,
+              metadata={'response': response})
+
     consultation = _get_consultation(consultation_id)
     if consultation:
         _notify_user(consultation.get('teacher_id'), 'telemedicine_invitation_response', {
@@ -299,6 +312,10 @@ def telemed_participant_notes(consultation_id):
         logger.error(f"telemed_participant_notes DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    log_event(consultation_id, 'notes_written', user_id,
+              actor_consultation_role='specialist',
+              metadata={'contribution_length': len(notes_contribution)})
+
     if user_id != consultation.get('teacher_id'):
         _notify_user(consultation.get('teacher_id'), 'telemedicine_notes_ready', {
             'consultation_id': consultation_id, 'from_user': user_id
@@ -319,11 +336,21 @@ def telemed_all_notes(consultation_id):
     if not _is_participant(user_id, consultation):
         return jsonify({"success": False, "error": "Nemate opravneni"}), 403
 
-    organizer_notes = {
-        "complaint": consultation.get('complaint', ''),
-        "findings": consultation.get('findings', ''),
-        "recommendations": consultation.get('recommendations', '')
-    }
+    # Policy-based notes visibility (Point 3)
+    allowed_clinical, role = check_permission(user_id, consultation_id, 'view_clinical')
+
+    if allowed_clinical:
+        # Full clinical notes for organizer/therapist/specialist
+        organizer_notes = {
+            "complaint": consultation.get('complaint', ''),
+            "findings": consultation.get('findings', ''),
+            "recommendations": consultation.get('recommendations', '')
+        }
+    else:
+        # Patient/observer sees only recommendations (patient-facing)
+        organizer_notes = {
+            "recommendations": consultation.get('recommendations', '')
+        }
 
     specialist_notes = []
     try:
@@ -333,14 +360,22 @@ def telemed_all_notes(consultation_id):
                 "WHERE consultation_id = ? AND notes_contribution IS NOT NULL AND notes_contribution != ''",
                 (consultation_id,)
             ).fetchall()
-            specialist_notes = [dict(r) for r in rows]
+            if allowed_clinical:
+                specialist_notes = [dict(r) for r in rows]
+            # Patient/observer: no specialist internal notes
     except Exception:
         pass
+
+    log_event(consultation_id, 'notes_viewed', user_id,
+              actor_consultation_role=role,
+              metadata={'clinical_access': allowed_clinical})
 
     return jsonify({
         "success": True, "consultation_id": consultation_id,
         "organizer_notes": organizer_notes, "specialist_notes": specialist_notes,
-        "total_contributions": len(specialist_notes), "timestamp": now_iso()
+        "total_contributions": len(specialist_notes),
+        "your_role": role, "clinical_access": allowed_clinical,
+        "timestamp": now_iso()
     })
 
 
@@ -373,6 +408,10 @@ def telemed_remove_participant(consultation_id, participant_user_id):
     except Exception as e:
         logger.error(f"telemed_remove_participant DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
+
+    log_event(consultation_id, 'participant_removed', organizer_id,
+              actor_consultation_role='organizer',
+              metadata={'removed_user': participant_user_id})
 
     _notify_user(participant_user_id, 'telemedicine_cancelled', {
         'consultation_id': consultation_id, 'cancelled_by': 'organizer', 'reason': 'Odebrán z konzultace'

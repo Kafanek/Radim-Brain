@@ -25,6 +25,10 @@ from telemedicine_helpers import (
     _verify_teacher_student_local,
     MAX_TEXT,
 )
+from telemedicine_audit import (
+    log_event, check_availability_conflict, compute_quality_kpis,
+    check_permission, get_audit_trail,
+)
 
 telemedicine_teacher_bp = Blueprint('telemedicine_teacher', __name__)
 
@@ -259,6 +263,10 @@ def telemed_confirm(consultation_id):
         logger.error(f"telemed_confirm DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    log_event(consultation_id, 'consultation_confirmed', teacher_id,
+              old_status='requested', new_status='confirmed',
+              actor_consultation_role='organizer')
+
     _notify_user(student_id, 'telemedicine_confirmed', {
         'consultation_id': consultation_id, 'teacher_id': teacher_id
     })
@@ -295,9 +303,14 @@ def telemed_teacher_cancel(consultation_id):
                 (reason, consultation_id)
             )
             student_id = row['student_id']
+            old_status = row['status']
     except Exception as e:
         logger.error(f"telemed_teacher_cancel DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
+
+    log_event(consultation_id, 'consultation_cancelled', teacher_id,
+              old_status=old_status, new_status='cancelled', reason=reason,
+              actor_consultation_role='organizer')
 
     _notify_user(student_id, 'telemedicine_cancelled', {
         'consultation_id': consultation_id, 'cancelled_by': 'teacher', 'reason': reason
@@ -340,6 +353,11 @@ def telemed_start(consultation_id):
     except Exception as e:
         logger.error(f"telemed_start DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
+
+    log_event(consultation_id, 'consultation_started', teacher_id,
+              old_status=row['status'], new_status='in_progress',
+              actor_consultation_role='organizer',
+              metadata={'room_code': room_code, 'is_multiparty': is_mp})
 
     frontend_url = os.environ.get('FRONTEND_URL', 'https://polite-bush-001303503.6.azurestaticapps.net')
     join_page = f"{frontend_url}/call.html?room={room_code}&from=Terapeut&type=video"
@@ -387,6 +405,10 @@ def telemed_complete(consultation_id):
         logger.error(f"telemed_complete DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    log_event(consultation_id, 'consultation_completed', teacher_id,
+              old_status='in_progress', new_status='completed',
+              actor_consultation_role='organizer')
+
     return jsonify({"success": True, "message": "Konzultace ukoncena", "consultation_id": consultation_id, "timestamp": now_iso()})
 
 
@@ -428,6 +450,10 @@ def telemed_notes(consultation_id):
     except Exception as e:
         logger.error(f"telemed_notes DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
+
+    log_event(consultation_id, 'notes_written', teacher_id,
+              actor_consultation_role='organizer',
+              metadata={'fields': [f for f in ('complaint', 'findings', 'recommendations') if data.get(f)]})
 
     _notify_user(student_id, 'telemedicine_notes_ready', {'consultation_id': consultation_id})
 
@@ -507,6 +533,10 @@ def telemed_send_summary(consultation_id):
     except Exception as e:
         return jsonify({"success": False, "error": f"Email error: {e}"}), 500
 
+    log_event(consultation_id, 'summary_emailed', teacher_id,
+              actor_consultation_role='organizer',
+              metadata={'to_email': to_email, 'mode': data.get('mode', 'full_summary')})
+
     _notify_user(consultation.get('student_id'), 'telemedicine_summary_sent', {
         'consultation_id': consultation_id, 'email': to_email
     })
@@ -544,3 +574,71 @@ def telemed_student_history(student_id):
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
     return jsonify({"success": True, "history": history, "total": len(history), "student_id": student_id, "timestamp": now_iso()})
+
+
+# ============================================
+# AUDIT TRAIL ENDPOINT (Point 2)
+# ============================================
+
+@telemedicine_teacher_bp.route('/api/telemedicine/consultation/<int:consultation_id>/audit', methods=['GET'])
+@require_auth
+@require_teacher
+def telemed_audit_trail(consultation_id):
+    """Full audit trail for a consultation (organizer only)"""
+    teacher_id = _get_teacher_id_local()
+
+    allowed, role = check_permission(teacher_id, consultation_id, 'view_audit_trail')
+    if not allowed:
+        return jsonify({"success": False, "error": "Nemate opravneni k auditu"}), 403
+
+    trail = get_audit_trail(consultation_id)
+    return jsonify({
+        "success": True, "consultation_id": consultation_id,
+        "audit_trail": trail, "total_events": len(trail),
+        "your_role": role, "timestamp": now_iso()
+    })
+
+
+# ============================================
+# AVAILABILITY CONFLICT CHECK (Point 5)
+# ============================================
+
+@telemedicine_teacher_bp.route('/api/telemedicine/availability/check-conflict', methods=['POST'])
+@require_auth
+@require_teacher
+def telemed_check_conflict():
+    """Check if proposed time conflicts with existing consultations"""
+    teacher_id = _get_teacher_id_local()
+    data = request.json or {}
+
+    scheduled_date = data.get('scheduled_date', '').strip()
+    scheduled_time = data.get('scheduled_time', '').strip()
+    duration = data.get('duration_minutes', 30)
+
+    if not scheduled_date or not scheduled_time:
+        return jsonify({"success": False, "error": "scheduled_date a scheduled_time jsou povinne"}), 400
+
+    has_conflict, conflicts = check_availability_conflict(
+        teacher_id, scheduled_date, scheduled_time, duration
+    )
+
+    return jsonify({
+        "success": True, "has_conflict": has_conflict,
+        "conflicts": conflicts, "timestamp": now_iso()
+    })
+
+
+# ============================================
+# QUALITY KPI ENDPOINT (Point 7)
+# ============================================
+
+@telemedicine_teacher_bp.route('/api/telemedicine/quality/kpis', methods=['GET'])
+@require_auth
+@require_teacher
+def telemed_quality_kpis():
+    """Telemedicine quality metrics (WHO-aligned)"""
+    days = request.args.get('days', 30, type=int)
+    days = min(max(days, 7), 365)
+
+    kpis = compute_quality_kpis(days)
+    return jsonify({"success": True, "kpis": kpis, "timestamp": now_iso()})

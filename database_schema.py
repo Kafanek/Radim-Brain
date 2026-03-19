@@ -309,6 +309,40 @@ PG_MAIN_SCHEMA = '''
     CREATE INDEX IF NOT EXISTS idx_telemed_part_user ON telemedicine_participants(user_id);
     CREATE INDEX IF NOT EXISTS idx_telemed_part_status ON telemedicine_participants(user_id, status);
 
+    -- Telemedicine audit events v4.1
+    CREATE TABLE IF NOT EXISTS telemedicine_events (
+        id SERIAL PRIMARY KEY,
+        consultation_id INTEGER NOT NULL REFERENCES telemedicine_consultations(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL,
+        old_status TEXT,
+        new_status TEXT,
+        actor_user_id TEXT NOT NULL,
+        actor_auth_role TEXT,
+        actor_consultation_role TEXT,
+        reason TEXT,
+        metadata JSONB DEFAULT '{}',
+        ip_address TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_telemed_events_consult ON telemedicine_events(consultation_id);
+    CREATE INDEX IF NOT EXISTS idx_telemed_events_actor ON telemedicine_events(actor_user_id);
+    CREATE INDEX IF NOT EXISTS idx_telemed_events_type ON telemedicine_events(event_type);
+    CREATE INDEX IF NOT EXISTS idx_telemed_events_created ON telemedicine_events(created_at);
+
+    -- Telemedicine quality metrics v4.1
+    CREATE TABLE IF NOT EXISTS telemedicine_quality_log (
+        id SERIAL PRIMARY KEY,
+        consultation_id INTEGER REFERENCES telemedicine_consultations(id) ON DELETE SET NULL,
+        metric_type TEXT NOT NULL,
+        metric_value NUMERIC,
+        details JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_telemed_quality_type ON telemedicine_quality_log(metric_type);
+    CREATE INDEX IF NOT EXISTS idx_telemed_quality_created ON telemedicine_quality_log(created_at);
+
     -- Rhythm Return Engine v3.9
     CREATE TABLE IF NOT EXISTS rhythm_sessions (
         id TEXT PRIMARY KEY,
@@ -530,6 +564,22 @@ PG_IOT_TABLES = [
 PG_MIGRATIONS = [
     "ALTER TABLE telemedicine_consultations ADD COLUMN IF NOT EXISTS title TEXT",
     "ALTER TABLE telemedicine_consultations ADD COLUMN IF NOT EXISTS is_multiparty INTEGER DEFAULT 0",
+    # v4.1 — GDPR health data classification + audit
+    "ALTER TABLE telemedicine_consultations ADD COLUMN IF NOT EXISTS sensitivity_level TEXT DEFAULT 'health_data'",
+    "ALTER TABLE telemedicine_consultations ADD COLUMN IF NOT EXISTS consent_version TEXT",
+    "ALTER TABLE telemedicine_consultations ADD COLUMN IF NOT EXISTS legal_basis TEXT DEFAULT 'consent_art9'",
+    "ALTER TABLE telemedicine_consultations ADD COLUMN IF NOT EXISTS retention_class TEXT DEFAULT 'clinical_5y'",
+    "ALTER TABLE telemedicine_consultations ADD COLUMN IF NOT EXISTS clinical_notes_locked INTEGER DEFAULT 0",
+    # v4.1 — Availability conflict prevention
+    "ALTER TABLE telemedicine_availability ADD COLUMN IF NOT EXISTS buffer_before_min INTEGER DEFAULT 5",
+    "ALTER TABLE telemedicine_availability ADD COLUMN IF NOT EXISTS buffer_after_min INTEGER DEFAULT 5",
+    "ALTER TABLE telemedicine_availability ADD COLUMN IF NOT EXISTS location_mode TEXT DEFAULT 'remote'",
+    "ALTER TABLE telemedicine_availability ADD COLUMN IF NOT EXISTS slot_status TEXT DEFAULT 'open'",
+    # v4.1 — Participant visibility control
+    "ALTER TABLE telemedicine_participants ADD COLUMN IF NOT EXISTS can_view_clinical INTEGER DEFAULT 0",
+    "ALTER TABLE telemedicine_participants ADD COLUMN IF NOT EXISTS can_edit_notes INTEGER DEFAULT 0",
+    "ALTER TABLE telemedicine_participants ADD COLUMN IF NOT EXISTS join_token TEXT",
+    "ALTER TABLE telemedicine_participants ADD COLUMN IF NOT EXISTS join_token_expires TIMESTAMP",
 ]
 
 # ============================================================================
@@ -828,6 +878,40 @@ SQLITE_SCHEMA = '''
     CREATE INDEX IF NOT EXISTS idx_telemed_part_user ON telemedicine_participants(user_id);
     CREATE INDEX IF NOT EXISTS idx_telemed_part_status ON telemedicine_participants(user_id, status);
 
+    -- Telemedicine audit events v4.1
+    CREATE TABLE IF NOT EXISTS telemedicine_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        consultation_id INTEGER NOT NULL REFERENCES telemedicine_consultations(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL,
+        old_status TEXT,
+        new_status TEXT,
+        actor_user_id TEXT NOT NULL,
+        actor_auth_role TEXT,
+        actor_consultation_role TEXT,
+        reason TEXT,
+        metadata TEXT DEFAULT '{}',
+        ip_address TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_telemed_events_consult ON telemedicine_events(consultation_id);
+    CREATE INDEX IF NOT EXISTS idx_telemed_events_actor ON telemedicine_events(actor_user_id);
+    CREATE INDEX IF NOT EXISTS idx_telemed_events_type ON telemedicine_events(event_type);
+    CREATE INDEX IF NOT EXISTS idx_telemed_events_created ON telemedicine_events(created_at);
+
+    -- Telemedicine quality metrics v4.1
+    CREATE TABLE IF NOT EXISTS telemedicine_quality_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        consultation_id INTEGER REFERENCES telemedicine_consultations(id) ON DELETE SET NULL,
+        metric_type TEXT NOT NULL,
+        metric_value REAL,
+        details TEXT DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_telemed_quality_type ON telemedicine_quality_log(metric_type);
+    CREATE INDEX IF NOT EXISTS idx_telemed_quality_created ON telemedicine_quality_log(created_at);
+
     -- Rhythm Return Engine v3.9
     CREATE TABLE IF NOT EXISTS rhythm_sessions (
         id TEXT PRIMARY KEY,
@@ -1008,6 +1092,22 @@ SQLITE_SCHEMA = '''
 SQLITE_MIGRATIONS = [
     "ALTER TABLE telemedicine_consultations ADD COLUMN title TEXT",
     "ALTER TABLE telemedicine_consultations ADD COLUMN is_multiparty INTEGER DEFAULT 0",
+    # v4.1 — GDPR health data classification + audit
+    "ALTER TABLE telemedicine_consultations ADD COLUMN sensitivity_level TEXT DEFAULT 'health_data'",
+    "ALTER TABLE telemedicine_consultations ADD COLUMN consent_version TEXT",
+    "ALTER TABLE telemedicine_consultations ADD COLUMN legal_basis TEXT DEFAULT 'consent_art9'",
+    "ALTER TABLE telemedicine_consultations ADD COLUMN retention_class TEXT DEFAULT 'clinical_5y'",
+    "ALTER TABLE telemedicine_consultations ADD COLUMN clinical_notes_locked INTEGER DEFAULT 0",
+    # v4.1 — Availability conflict prevention
+    "ALTER TABLE telemedicine_availability ADD COLUMN buffer_before_min INTEGER DEFAULT 5",
+    "ALTER TABLE telemedicine_availability ADD COLUMN buffer_after_min INTEGER DEFAULT 5",
+    "ALTER TABLE telemedicine_availability ADD COLUMN location_mode TEXT DEFAULT 'remote'",
+    "ALTER TABLE telemedicine_availability ADD COLUMN slot_status TEXT DEFAULT 'open'",
+    # v4.1 — Participant visibility control
+    "ALTER TABLE telemedicine_participants ADD COLUMN can_view_clinical INTEGER DEFAULT 0",
+    "ALTER TABLE telemedicine_participants ADD COLUMN can_edit_notes INTEGER DEFAULT 0",
+    "ALTER TABLE telemedicine_participants ADD COLUMN join_token TEXT",
+    "ALTER TABLE telemedicine_participants ADD COLUMN join_token_expires TIMESTAMP",
 ]
 
 

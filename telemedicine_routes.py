@@ -22,6 +22,9 @@ from telemedicine_helpers import (
     # Re-export for backward compatibility (app.py imports from here)
     get_upcoming_consultations_for_reminder,
 )
+from telemedicine_audit import (
+    log_event, check_join_eligibility, generate_join_token,
+)
 
 telemedicine_bp = Blueprint('telemedicine', __name__)
 
@@ -133,6 +136,10 @@ def telemed_my_request():
         logger.error(f"telemed_my_request DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
 
+    log_event(cid, 'consultation_requested', student_id,
+              new_status='requested', actor_consultation_role='patient',
+              metadata={'teacher_id': teacher_id, 'type': consultation_type})
+
     _notify_user(teacher_id, 'telemedicine_new_request', {
         'consultation_id': cid, 'student_id': student_id,
         'scheduled_date': preferred_date, 'scheduled_time': preferred_time
@@ -221,9 +228,14 @@ def telemed_my_cancel(consultation_id):
                 (reason, consultation_id)
             )
             teacher_id = row['teacher_id']
+            old_status = row['status']
     except Exception as e:
         logger.error(f"telemed_my_cancel DB error: {e}")
         return jsonify({"success": False, "error": f"DB error: {e}"}), 500
+
+    log_event(consultation_id, 'consultation_cancelled', student_id,
+              old_status=old_status, new_status='cancelled', reason=reason,
+              actor_consultation_role='patient')
 
     _notify_user(teacher_id, 'telemedicine_cancelled', {
         'consultation_id': consultation_id, 'cancelled_by': 'student', 'reason': reason
@@ -239,29 +251,40 @@ def telemed_my_cancel(consultation_id):
 @telemedicine_bp.route('/api/telemedicine/consultation/<int:consultation_id>/join', methods=['GET'])
 @require_auth
 def telemed_join(consultation_id):
-    """Get Jitsi join URL (teacher or student)"""
+    """Get Jitsi join URL with full eligibility check + short-lived token (v4.1 hardened)"""
     user_id = _get_user_id()
-    consultation = _get_consultation(consultation_id)
 
+    # Full eligibility check (Point 4): participant? status? time window? revoked?
+    eligible, reason = check_join_eligibility(consultation_id, user_id)
+    if not eligible:
+        log_event(consultation_id, 'join_url_accessed', user_id,
+                  metadata={'allowed': False, 'reason': reason})
+        return jsonify({"success": False, "error": reason}), 403
+
+    consultation = _get_consultation(consultation_id)
     if not consultation:
         return jsonify({"success": False, "error": "Konzultace nenalezena"}), 404
-    if not _is_participant(user_id, consultation):
-        return jsonify({"success": False, "error": "Nemate opravneni"}), 403
-    if consultation.get('status') != 'in_progress':
-        return jsonify({"success": False, "error": "Konzultace jeste nebyla zahajena"}), 400
 
     room_code = consultation.get('room_code')
-    jitsi_url = consultation.get('jitsi_url')
-
     if not room_code:
         return jsonify({"success": False, "error": "Jitsi room neni k dispozici"}), 404
 
+    # Generate short-lived join token instead of permanent URL
+    join_token = generate_join_token(consultation_id, user_id)
+
     frontend_url = os.environ.get('FRONTEND_URL', 'https://polite-bush-001303503.6.azurestaticapps.net')
     join_page = f"{frontend_url}/call.html?room={room_code}&type={consultation.get('consultation_type', 'video')}"
+    if join_token:
+        join_page += f"&token={join_token}"
+
+    log_event(consultation_id, 'join_url_accessed', user_id,
+              metadata={'allowed': True, 'has_token': bool(join_token)})
 
     return jsonify({
-        "success": True, "jitsi_url": jitsi_url, "room_code": room_code,
-        "join_page": join_page, "consultation_id": consultation_id, "timestamp": now_iso()
+        "success": True, "room_code": room_code,
+        "join_page": join_page, "join_token": join_token,
+        "token_ttl_minutes": 30,
+        "consultation_id": consultation_id, "timestamp": now_iso()
     })
 
 
