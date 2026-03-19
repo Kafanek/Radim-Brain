@@ -1,6 +1,6 @@
 """
-Adaptive Learning v2.0 — Radim Adaptive Engine
-===============================================
+Radim Core Engine v2.0
+======================
 Learns from EVERY interaction:
 1. Interaction rhythm — when does this user talk? (time-of-day heatmap)
 2. Message pace — how long are their messages? How fast do they respond?
@@ -542,31 +542,329 @@ def check_error_recovery(adaptive):
 
 
 # ============================================================================
+# CONFIDENCE GATING — how confident is Radim in THIS response context?
+# ============================================================================
+
+def compute_confidence_score(adaptive):
+    """Compute confidence in current interaction context (0.0-1.0).
+
+    Combines:
+    - Trust score (long-term model reliability)
+    - Recent feedback consistency (short-term signal quality)
+    - Data freshness (stale data = lower confidence)
+
+    If < 0.5: simplify, shorten, add confirmations.
+    """
+    trust = adaptive.get("trust_score", 0.1)
+    success_rate = adaptive.get("success_rate", 0.5)
+    total = adaptive.get("total_adaptive_interactions", 0)
+    consecutive_failures = adaptive.get("consecutive_failures", 0)
+
+    # Base from trust
+    base = trust * 0.5  # max 0.5 from trust alone
+
+    # Recent feedback signal (success_rate near extremes = clear signal)
+    if success_rate > 0.7:
+        base += 0.3
+    elif success_rate > 0.5:
+        base += 0.15
+    elif success_rate < 0.3:
+        base -= 0.1
+
+    # Penalize consecutive failures heavily
+    if consecutive_failures >= 3:
+        base -= 0.2
+    elif consecutive_failures >= 1:
+        base -= 0.05
+
+    # Data volume bonus
+    if total >= 20:
+        base += 0.1
+    elif total < 5:
+        base -= 0.15
+
+    return round(max(0.0, min(1.0, base)), 2)
+
+
+# ============================================================================
+# FATIGUE MODEL — detect when user is getting tired
+# ============================================================================
+
+def compute_fatigue_level(adaptive):
+    """Estimate user fatigue (0.0=fresh, 1.0=exhausted).
+
+    Based on:
+    - Session duration (interactions in last 30 min)
+    - Time of day (late = more fatigue)
+    - Message length trend (shorter over time = fatigue)
+    - Energy level (low energy = higher fatigue)
+
+    If > 0.6: suggest break, reduce complexity, go passive.
+    """
+    now = datetime.now()
+    hour = now.hour
+
+    # Time-of-day fatigue (seniors tire in afternoon/evening)
+    time_fatigue = 0.0
+    if hour >= 20:
+        time_fatigue = 0.4
+    elif hour >= 17:
+        time_fatigue = 0.2
+    elif 13 <= hour <= 15:  # post-lunch dip
+        time_fatigue = 0.15
+
+    # Session intensity: recent interactions
+    interaction_hours = adaptive.get("interaction_hours", [])
+    recent_count = sum(1 for h in interaction_hours[-10:] if abs(h - hour) <= 1)
+    session_fatigue = min(0.3, recent_count * 0.06)  # 5+ recent = 0.3
+
+    # Message length decline (getting shorter = tiring)
+    avg_msg = adaptive.get("avg_message_length", 50)
+    length_fatigue = 0.0
+    if avg_msg < 10:
+        length_fatigue = 0.15
+    elif avg_msg < 20:
+        length_fatigue = 0.05
+
+    # Energy inverse
+    energy = adaptive.get("energy_level", 0.5)
+    energy_fatigue = max(0.0, (1.0 - energy) * 0.2)
+
+    total_fatigue = time_fatigue + session_fatigue + length_fatigue + energy_fatigue
+    return round(min(1.0, total_fatigue), 2)
+
+
+# ============================================================================
+# RADIM SCORE — core composite metric
+# ============================================================================
+
+def compute_radim_score(adaptive):
+    """Compute Radim Score (0.0-1.0) — the single metric for senior wellbeing.
+
+    Weights:
+    - feedback_score:    0.25 (how well communication works)
+    - trust_score:       0.20 (model reliability)
+    - mood risk:         0.20 (inverse — low risk = good)
+    - energy_level:      0.15 (current energy)
+    - fatigue:           0.20 (inverse — low fatigue = good)
+
+    < 0.4 → alert caregiver
+    < 0.3 → high priority alert
+    """
+    feedback = adaptive.get("success_rate", 0.5)
+    trust = adaptive.get("trust_score", 0.3)
+    energy = adaptive.get("energy_level", 0.5)
+    fatigue = compute_fatigue_level(adaptive)
+
+    # Mood risk (from mood_concern flag + recent mood history)
+    mood_risk = 0.0
+    if adaptive.get("mood_concern"):
+        mood_risk = 0.7
+    else:
+        mood_history = adaptive.get("mood_history", [])
+        if mood_history:
+            recent = [m["mood"] for m in mood_history[-3:]]
+            neg_count = sum(1 for m in recent if m in ("sad", "anxious"))
+            mood_risk = neg_count * 0.25
+
+    score = (
+        feedback * 0.25 +
+        trust * 0.20 +
+        (1.0 - mood_risk) * 0.20 +
+        energy * 0.15 +
+        (1.0 - fatigue) * 0.20
+    )
+    return round(max(0.0, min(1.0, score)), 2)
+
+
+# ============================================================================
+# ALERT SYSTEM — graduated alerts based on radim_score + mood
+# ============================================================================
+
+def check_alerts(adaptive):
+    """Check if any alerts should fire.
+
+    Returns list of alert dicts, each with:
+    - type: "caregiver" | "high_priority" | "check_user" | "fatigue_break"
+    - reason: human-readable string
+    - priority: 1 (low) to 5 (critical)
+    """
+    alerts = []
+    radim_score = adaptive.get("radim_score", 0.5)
+    mood_risk = 0.0
+
+    if adaptive.get("mood_concern"):
+        mood_risk = 0.7
+    else:
+        mood_history = adaptive.get("mood_history", [])
+        if mood_history:
+            recent = [m["mood"] for m in mood_history[-3:]]
+            mood_risk = sum(1 for m in recent if m in ("sad", "anxious")) * 0.25
+
+    fatigue = adaptive.get("fatigue_level", 0.0)
+
+    # Critical: very low radim score
+    if radim_score < 0.3:
+        alerts.append({
+            "type": "high_priority",
+            "reason": f"Radim skóre kriticky nízké ({radim_score}). Kontaktujte pečovatele.",
+            "priority": 5,
+        })
+    elif radim_score < 0.4:
+        alerts.append({
+            "type": "caregiver",
+            "reason": f"Radim skóre nízké ({radim_score}). Doporučujeme kontrolu.",
+            "priority": 3,
+        })
+
+    # Mood risk
+    if mood_risk > 0.7:
+        alerts.append({
+            "type": "high_priority",
+            "reason": "Opakovaně negativní nálada. Zvažte osobní kontakt.",
+            "priority": 4,
+        })
+
+    # Fatigue
+    if fatigue > 0.7:
+        alerts.append({
+            "type": "fatigue_break",
+            "reason": "Uživatel je pravděpodobně unavený. Radim navrhne přestávku.",
+            "priority": 2,
+        })
+
+    return alerts
+
+
+# ============================================================================
+# IOT ACTIVITY SCORE — prepare for sensor integration
+# ============================================================================
+
+def compute_activity_score(sensor_data):
+    """Compute activity score from IoT sensor data (0.0-1.0).
+
+    Input:
+        sensor_data: {
+            "motion": bool,         # motion detected right now
+            "door": bool,           # door opened recently
+            "presence": bool,       # person in room
+            "last_activity_minutes": int  # minutes since last activity
+        }
+
+    Returns: float 0.0 (inactive) to 1.0 (active)
+    """
+    if not sensor_data or not isinstance(sensor_data, dict):
+        return None  # no IoT data available
+
+    score = 0.0
+
+    if sensor_data.get("motion"):
+        score += 0.4
+    if sensor_data.get("door"):
+        score += 0.2
+    if sensor_data.get("presence"):
+        score += 0.2
+
+    last_min = sensor_data.get("last_activity_minutes", 999)
+    if last_min < 5:
+        score += 0.2
+    elif last_min < 30:
+        score += 0.1
+    elif last_min > 120:
+        score -= 0.2  # prolonged inactivity is concerning
+
+    return round(max(0.0, min(1.0, score)), 2)
+
+
+# ============================================================================
+# SOFT ADAPTATION — gradual adjustment without hard recovery
+# ============================================================================
+
+def compute_soft_adaptation(adaptive):
+    """Compute soft adaptation parameters when feedback is mildly negative.
+
+    Differs from error recovery: soft adaptation is gradual, not a hard switch.
+    Applies when feedback_score 0.3-0.5 (below average but not critical).
+
+    Returns dict with adjustment factors.
+    """
+    feedback = adaptive.get("success_rate", 0.5)
+    confidence = adaptive.get("confidence_score", 0.5)
+
+    if feedback >= 0.5 and confidence >= 0.5:
+        return {"active": False}
+
+    # Soft adjustments
+    length_adjust = 0  # negative = shorten
+    speed_adjust = 0   # positive = slower
+    complexity_adjust = 0  # negative = simpler
+
+    if feedback < 0.5:
+        length_adjust -= 1
+        speed_adjust += 1
+    if feedback < 0.4:
+        length_adjust -= 1
+        complexity_adjust -= 1
+    if confidence < 0.5:
+        complexity_adjust -= 1
+        speed_adjust += 1
+
+    return {
+        "active": True,
+        "length_adjust": length_adjust,     # -2 to 0
+        "speed_adjust": speed_adjust,       # 0 to +2
+        "complexity_adjust": complexity_adjust,  # -2 to 0
+        "add_confirmation": confidence < 0.5 or feedback < 0.4,
+    }
+
+
+# ============================================================================
 # STRUCTURED OUTPUT — for system prompt injection
 # ============================================================================
 
 def build_adaptive_state(adaptive, communication_needs=""):
-    """Build structured adaptive state for system prompt.
+    """Build structured adaptive state — canonical output of Radim Core Engine.
 
-    Returns a clean dict (not text lines) that can be:
-    1. Injected into system prompt as structured context
-    2. Used by TTS/voice filter for speech params
-    3. Logged for analytics
-
-    This is the canonical output of the adaptive engine.
+    Used for:
+    1. System prompt injection (natural language)
+    2. TTS/voice filter params
+    3. API response / analytics
+    4. Agent loop alert decisions
     """
     patience = adaptive.get("speech_patience", {})
     recovery = check_error_recovery(adaptive)
     energy = compute_energy_level(adaptive)
     trust = compute_trust_score(adaptive)
+    confidence = compute_confidence_score(adaptive)
+    fatigue = compute_fatigue_level(adaptive)
     complexity = compute_language_complexity(adaptive)
     length = adaptive.get("computed_length", "medium")
+    soft = compute_soft_adaptation(adaptive)
 
-    # Override from recovery mode
+    # Layer 1: Soft adaptation (gradual)
+    if soft["active"] and not recovery["active"]:
+        if soft["length_adjust"] <= -2:
+            length = "short"
+        if soft["complexity_adjust"] <= -1:
+            complexity = "simple"
+
+    # Layer 2: Hard recovery (overrides everything)
     if recovery["active"]:
         if recovery["level"] >= 2:
             length = "short"
             complexity = "simple"
+
+    # Layer 3: Confidence gating
+    if confidence < 0.5:
+        if length == "long":
+            length = "medium"
+        if complexity != "simple" and confidence < 0.3:
+            complexity = "simple"
+
+    # Layer 4: Fatigue override
+    if fatigue > 0.6:
+        if length != "short":
+            length = "short"
 
     # Build mood state
     mood_history = adaptive.get("mood_history", [])
@@ -576,12 +874,10 @@ def build_adaptive_state(adaptive, communication_needs=""):
 
     if mood_history:
         recent = [m["mood"] for m in mood_history[-3:]]
-        # Current state = most recent
         mood_state = recent[-1] if recent else "neutral"
         mood_map = {"happy": "positive", "neutral": "neutral", "sad": "negative", "anxious": "negative"}
         mood_state = mood_map.get(mood_state, "neutral")
 
-        # Trend
         if len(mood_history) >= 5:
             older = [m["mood"] for m in mood_history[-5:-2]]
             newer = recent
@@ -592,7 +888,6 @@ def build_adaptive_state(adaptive, communication_needs=""):
             elif new_neg < old_neg:
                 mood_trend = "improving"
 
-        # Risk
         if adaptive.get("mood_concern"):
             mood_risk = 0.7
         elif mood_state == "negative":
@@ -601,40 +896,63 @@ def build_adaptive_state(adaptive, communication_needs=""):
     # Build topics
     fresh = adaptive.get("fresh_interests", {})
     short_term = sorted(fresh.keys(), key=lambda k: -fresh[k])[:5] if fresh else []
-
     topic_times = adaptive.get("topic_times", {})
     long_term = sorted(topic_times.keys(), key=lambda k: -len(topic_times[k]))[:5] if topic_times else []
 
-    # Determine speech speed
+    # Determine speech speed (layered)
     pace = patience.get("response_pace", "normal")
     if recovery["active"] and recovery["level"] >= 2:
         pace = "very_slow"
-
+    elif soft["active"] and soft.get("speed_adjust", 0) >= 2:
+        pace = "slow"
+    elif fatigue > 0.6:
+        pace = "slow"
     speech_speed = "slow" if pace in ("slow", "very_slow") else "normal"
 
-    # Determine interaction mode
-    confirm_type = patience.get("preferred_confirmation", "verbal")
+    # Confirmation level
+    confirm_level = "normal"
+    if recovery["active"] or confidence < 0.4:
+        confirm_level = "high"
+    elif soft.get("add_confirmation") or trust < 0.4:
+        confirm_level = "high"
+
+    # Energy mode
+    energy_mode = "active"
+    if fatigue > 0.6 or energy < 0.3:
+        energy_mode = "passive"
+
+    # Interaction mode
     if recovery["active"]:
         interaction_mode = "recovery"
-    elif confirm_type == "yes_no":
+    elif fatigue > 0.7:
+        interaction_mode = "passive"
+    elif patience.get("preferred_confirmation") == "yes_no":
         interaction_mode = "patient"
     else:
         interaction_mode = "normal"
 
+    # Radim score
+    radim_score = adaptive.get("radim_score", compute_radim_score(adaptive))
+
+    # Alerts
+    alerts = check_alerts(adaptive)
+
     return {
         "feedback": {
             "score": adaptive.get("success_rate", 0.5),
-            "confidence": trust,
+            "confidence": confidence,
         },
         "communication": {
             "preferred_length": length,
             "speech_speed": speech_speed,
             "patience_multiplier": patience.get("speech_timeout_multiplier", 1.0),
             "language_level": complexity,
+            "confirmation_level": confirm_level,
         },
         "behavior": {
             "peak_hour": adaptive.get("peak_hour"),
             "energy_level": energy,
+            "energy_mode": energy_mode,
         },
         "mood": {
             "state": mood_state,
@@ -646,7 +964,13 @@ def build_adaptive_state(adaptive, communication_needs=""):
             "long_term": long_term,
         },
         "trust_score": trust,
+        "confidence_score": confidence,
+        "fatigue_level": fatigue,
+        "radim_score": radim_score,
         "recovery": recovery,
+        "soft_adaptation": soft,
+        "interaction_mode": interaction_mode,
+        "alerts": alerts,
     }
 
 
@@ -724,11 +1048,14 @@ def update_adaptive_profile(user_id, message, response, mood=None, topic=None,
             patience = compute_speech_patience(adaptive, communication_needs)
             adaptive["speech_patience"] = patience
 
-        # 9. Energy level + trust score (lightweight, every interaction)
+        # 9. Core metrics (every interaction)
         adaptive["energy_level"] = compute_energy_level(adaptive)
         adaptive["trust_score"] = compute_trust_score(adaptive)
+        adaptive["confidence_score"] = compute_confidence_score(adaptive)
+        adaptive["fatigue_level"] = compute_fatigue_level(adaptive)
+        adaptive["radim_score"] = compute_radim_score(adaptive)
 
-        # 10. Error recovery check
+        # 10. Error recovery + soft adaptation
         adaptive["recovery"] = check_error_recovery(adaptive)
 
         # 11. Interaction counter
@@ -804,6 +1131,21 @@ def get_adaptive_context(user_id):
         if short_term:
             lines.append(f"- Aktuální zájmy: {', '.join(short_term[:3])}")
 
+        # Confirmation level
+        if state["communication"].get("confirmation_level") == "high":
+            lines.append("- Ověřuj porozumění: 'Rozumíte mi?' nebo 'Je to jasné?'")
+
+        # Fatigue
+        fatigue = state.get("fatigue_level", 0)
+        if fatigue > 0.7:
+            lines.append("- Uživatel je UNAVENÝ — navrhni přestávku, buď maximálně stručný")
+        elif fatigue > 0.5:
+            lines.append("- Uživatel začíná být unavený — zkrať odpovědi")
+
+        # Energy mode
+        if state["behavior"].get("energy_mode") == "passive":
+            lines.append("- PASIVNÍ REŽIM: Uživatel má nízkou energii — nepokládej otázky, jen odpovídej")
+
         # Recovery mode
         recovery = state["recovery"]
         if recovery["active"]:
@@ -811,6 +1153,13 @@ def get_adaptive_context(user_id):
                 lines.append("- RECOVERY MODE: Zjednodušuj, zkracuj, ověřuj porozumění po každé větě")
             else:
                 lines.append("- Mírné potíže s komunikací — přidej potvrzení porozumění")
+
+        # Radim score warning
+        radim = state.get("radim_score", 0.5)
+        if radim < 0.3:
+            lines.append("- ⚠ KRITICKÝ STAV: Radim skóre velmi nízké — maximální opatrnost a empatie")
+        elif radim < 0.4:
+            lines.append("- Nízké Radim skóre — buď extra pozorný a klidný")
 
         # Trust
         if state["trust_score"] < 0.2:
@@ -838,4 +1187,4 @@ def get_adaptive_state(user_id):
         return None
 
 
-logger.info("Adaptive Learning v2.0 loaded — rhythm, feedback, energy, trust, recovery")
+logger.info("Radim Core Engine v2.0 loaded — confidence, fatigue, radim_score, alerts, IoT")

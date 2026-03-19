@@ -539,9 +539,69 @@ class TestAdaptiveLearning:
         from adaptive_learning import build_adaptive_state
         a = {"success_rate": 0.1, "consecutive_failures": 5, "computed_length": "long"}
         state = build_adaptive_state(a)
-        # Recovery should override to short + simple
         assert state["communication"]["preferred_length"] == "short"
         assert state["communication"]["language_level"] == "simple"
+
+    # === Radim Core Engine v2 tests ===
+
+    def test_confidence_score_range(self):
+        from adaptive_learning import compute_confidence_score
+        c = compute_confidence_score({"success_rate": 0.7, "trust_score": 0.5, "total_adaptive_interactions": 20})
+        assert 0.0 <= c <= 1.0
+
+    def test_confidence_low_on_failures(self):
+        from adaptive_learning import compute_confidence_score
+        c = compute_confidence_score({"success_rate": 0.2, "trust_score": 0.1, "consecutive_failures": 4, "total_adaptive_interactions": 5})
+        assert c < 0.3
+
+    def test_fatigue_range(self):
+        from adaptive_learning import compute_fatigue_level
+        f = compute_fatigue_level({})
+        assert 0.0 <= f <= 1.0
+
+    def test_radim_score_range(self):
+        from adaptive_learning import compute_radim_score
+        r = compute_radim_score({"success_rate": 0.6, "trust_score": 0.5, "energy_level": 0.7})
+        assert 0.0 <= r <= 1.0
+
+    def test_radim_score_low_on_crisis(self):
+        from adaptive_learning import compute_radim_score
+        r = compute_radim_score({"success_rate": 0.1, "trust_score": 0.1, "energy_level": 0.2, "mood_concern": True})
+        assert r < 0.4
+
+    def test_alerts_empty_normal(self):
+        from adaptive_learning import check_alerts
+        assert len(check_alerts({"radim_score": 0.7})) == 0
+
+    def test_alerts_caregiver_low_score(self):
+        from adaptive_learning import check_alerts
+        assert any(a["type"] == "caregiver" for a in check_alerts({"radim_score": 0.35}))
+
+    def test_alerts_fatigue_break(self):
+        from adaptive_learning import check_alerts
+        assert any(a["type"] == "fatigue_break" for a in check_alerts({"radim_score": 0.5, "fatigue_level": 0.8}))
+
+    def test_iot_activity_score(self):
+        from adaptive_learning import compute_activity_score
+        assert compute_activity_score({"motion": True, "door": True, "presence": True, "last_activity_minutes": 2}) >= 0.8
+        assert compute_activity_score(None) is None
+
+    def test_soft_adaptation_inactive(self):
+        from adaptive_learning import compute_soft_adaptation
+        assert compute_soft_adaptation({"success_rate": 0.7, "confidence_score": 0.6})["active"] is False
+
+    def test_soft_adaptation_active(self):
+        from adaptive_learning import compute_soft_adaptation
+        s = compute_soft_adaptation({"success_rate": 0.35, "confidence_score": 0.4})
+        assert s["active"] is True
+
+    def test_state_has_v2_fields(self):
+        from adaptive_learning import build_adaptive_state
+        state = build_adaptive_state({"total_adaptive_interactions": 10, "success_rate": 0.6})
+        for key in ("confidence_score", "fatigue_level", "radim_score", "soft_adaptation", "interaction_mode", "alerts"):
+            assert key in state, f"Missing: {key}"
+        assert "confirmation_level" in state["communication"]
+        assert "energy_mode" in state["behavior"]
 
     def test_stt_no_change_normal(self):
         """Normal text should not be changed."""
