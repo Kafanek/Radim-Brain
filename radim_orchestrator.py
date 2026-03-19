@@ -103,7 +103,7 @@ def radim_chat():
         return '', 204
 
     try:
-        data = request.json
+        data = request.get_json(force=True, silent=True) or {}
         message = data.get('message', '')
         user_id = _extract_user_id(getattr(g, 'auth_user', None), data.get('user_id'))
         mode = data.get('mode', 'senior')
