@@ -210,6 +210,8 @@ DEV_ORIGINS = [
     "http://127.0.0.1:8080",
     "http://127.0.0.1:8081",
     "http://localhost:5173",
+    "http://localhost:8765",
+    "http://127.0.0.1:8765",
 ]
 
 IS_PRODUCTION = os.environ.get('DYNO') is not None  # Heroku sets DYNO
