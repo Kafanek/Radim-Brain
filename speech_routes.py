@@ -21,7 +21,7 @@ import time
 import requests
 from xml.sax.saxutils import escape as xml_escape
 from flask import Blueprint, request, jsonify, Response, g
-from auth_middleware import require_auth
+from auth_middleware import require_auth, optional_auth
 from rate_limiter import rate_limit
 import logging
 
@@ -423,9 +423,10 @@ def speech_health():
 # ============================================================================
 
 @speech_bp.route('/azure-token', methods=['GET'])
-@require_auth
+@optional_auth
 def get_azure_token():
-    """Vrati kratkodoby Azure Speech token pro frontend SDK (STT/TTS)"""
+    """Vrati kratkodoby Azure Speech token pro frontend SDK (STT/TTS).
+    Uses optional_auth — token proxy is rate-limited, no API key exposed."""
     if not AZURE_SPEECH_KEY:
         return jsonify({'success': False, 'error': 'Azure not configured'}), 500
 

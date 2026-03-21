@@ -493,20 +493,20 @@ CZ_JOKES = [
 ]
 
 COMPLIMENT_REPLIES = [
-    "Dekuji! To me tesi.",
-    "Vy jste ale mili! Dekuji.",
-    "To je od vas hezke! Snazim se.",
-    "Diky moc! Jsem rad, ze vam mohu pomahat.",
+    "Děkuji! To mě těší.",
+    "Vy jste ale milí! Děkuji.",
+    "To je od vás hezké! Snažím se.",
+    "Díky moc! Jsem rád, že vám mohu pomáhat.",
 ]
 
 HOW_ARE_YOU_REPLIES = [
-    "Mam se skvele, dekuji za optani! A vy?",
-    "Vyborne! Jsem pripraveny vam pomahat. Jak se mate vy?",
-    "Dobre, dekuji! Co pro vas mohu udelat?",
-    "Fajn! Jsem tu pro vas. Jak se dari vam?",
+    "Mám se skvěle, děkuji za optání! A vy?",
+    "Výborně! Jsem připravený vám pomáhat. Jak se máte vy?",
+    "Dobře, děkuji! Co pro vás mohu udělat?",
+    "Fajn! Jsem tu pro vás. Jak se daří vám?",
 ]
 
-IDENTITY_REPLY = "Jsem Radim, vas digitalni asistent od MyKolibri. Pomaham s kazdodennimi cinnostmi, zdravim a jsem tu pro vas kdykoli."
+IDENTITY_REPLY = "Jsem Radim, váš digitální asistent od MyKolibri. Pomáhám s každodenními činnostmi, zdravím a jsem tu pro vás kdykoli."
 
 
 logger.info("Intent Data loaded — word sets, namedays, patterns, templates")
