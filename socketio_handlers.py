@@ -209,4 +209,25 @@ def register_socketio_handlers(socketio, users_online, cleanup_fn):
         if user_id:
             leave_room(f'user_{user_id}')
 
-    logger.info("✅ SocketIO handlers registered (13 events)")
+    # ═══════════════════════════════════════════════════════════
+    # AGENT ACTION — backend pushes UI actions to frontend
+    # ═══════════════════════════════════════════════════════════
+
+    @socketio.on('agent_action')
+    def handle_agent_action(data):
+        """Forward agent action to specific user's room.
+        Used by agent_loop.py to control frontend UI.
+
+        data: {
+            'user_id': 'target_user_id',
+            'action': 'showModule',  # or 'speak', 'notify'
+            'module': 'quiz',
+            'speak': 'Optional text to speak'
+        }
+        """
+        user_id = data.get('user_id')
+        if user_id:
+            emit('agent_action', data, room=f'user_{user_id}')
+            logger.info(f"🤖 Agent action → user {user_id}: {data.get('action')} {data.get('module', '')}")
+
+    logger.info("✅ SocketIO handlers registered (14 events)")

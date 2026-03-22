@@ -623,4 +623,45 @@ def run_daily_cleanup(app):
             logger.error(f"Daily cleanup error: {e}")
 
 
-logger.info("Agent Loop v1.3 loaded — monitoring + calls + morning check-in + cleanup")
+
+# ============================================================================
+# ACTIVITY SUGGESTION — push UI actions to inactive seniors (v431)
+# ============================================================================
+
+_activity_cooldown = {}  # user_id → last suggestion timestamp
+
+def suggest_activity(user_id, app):
+    """Suggest an activity to a senior via SocketIO agent_action.
+    Respects 2-hour cooldown per user. Called from run_agent_cycle()
+    when interaction_silence detected at INFO level."""
+    import time, random
+    now = time.time()
+
+    # Cooldown: max 1 suggestion per 2 hours
+    if now - _activity_cooldown.get(user_id, 0) < 7200:
+        return
+
+    activities = [
+        {'module': 'quiz', 'speak': 'Co takhle malý kvíz na trénink paměti?'},
+        {'module': 'exercises', 'speak': 'Pojďme si trochu zacvičit, co říkáte?'},
+        {'module': 'stories', 'speak': 'Mám pro vás hezký příběh. Chcete si poslechnout?'},
+        {'module': 'news', 'speak': 'Podívejme se, co je nového ve zprávách.'},
+    ]
+    activity = random.choice(activities)
+
+    try:
+        with app.app_context():
+            from app import socketio
+            socketio.emit('agent_action', {
+                'user_id': user_id,
+                'action': 'showModule',
+                'module': activity['module'],
+                'speak': activity['speak']
+            }, room=f'user_{user_id}')
+            _activity_cooldown[user_id] = now
+            logger.info(f"🎯 Activity suggested to {user_id}: {activity['module']}")
+    except Exception as e:
+        logger.debug(f"Activity suggestion error: {e}")
+
+
+logger.info("Agent Loop v1.4 loaded — monitoring + calls + morning + cleanup + activity suggestions")
