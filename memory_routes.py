@@ -83,7 +83,7 @@ def get_profile(user_id):
         "timestamp": datetime.utcnow().isoformat()
     })
 
-@memory_bp.route('/profile/<user_id>', methods=['POST'])
+@memory_bp.route('/profile/<user_id>', methods=['POST', 'PUT'])
 @require_auth
 def save_profile(user_id):
     """Uložit/aktualizovat profil uživatele"""
@@ -95,8 +95,9 @@ def save_profile(user_id):
     allowed_fields = ["name", "age_group", "hearing", "vision", "memory_support",
                       "communication_style", "preferred_length", "character", "tone",
                       "communication_needs", "mobility",
-                      "medications_list", "medication_times",
-                      "emergency_contacts", "daily_routine_notes", "baseline_C"]
+                      "medications", "medications_list", "medication_times",
+                      "emergency_contacts", "daily_routine_notes", "baseline_C",
+                      "onboarding_completed", "phone"]
 
     profile = db_load_profile(user_id)
 
