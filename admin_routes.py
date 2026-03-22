@@ -322,6 +322,177 @@ def api_get_client(client_id):
     }), 200
 
 
+# ============================================
+# ADMIN PANEL API — user management + system overview (v429)
+# ============================================
+
+def _require_admin(f):
+    """Decorator: require administrator role via JWT."""
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        from flask import g
+        if not hasattr(g, 'auth_user') or not g.auth_user:
+            return jsonify({'success': False, 'error': 'Přihlášení vyžadováno'}), 401
+        if g.auth_user.get('role') not in ('administrator', 'admin'):
+            return jsonify({'success': False, 'error': 'Nedostatečná oprávnění'}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
+@admin_bp.route('/api/admin/users-full', methods=['GET'])
+@require_auth
+@_require_admin
+def admin_users_full():
+    """Full user listing: auth_users + memory + brain states."""
+    from database import db_context, is_postgres
+    try:
+        with db_context() as db:
+            # Get all registered users
+            users = db.execute("""
+                SELECT id, email, name, role, created_at
+                FROM auth_users ORDER BY created_at DESC
+            """).fetchall()
+
+            result = []
+            for u in users:
+                uid = str(u[0])
+                user_data = {
+                    'id': uid, 'email': u[1], 'name': u[2] or '',
+                    'role': u[3] or 'subscriber', 'created_at': str(u[4] or '')
+                }
+
+                # Memory profile
+                try:
+                    prof = db.execute("SELECT data FROM memory_profiles WHERE user_id = ?", (uid,)).fetchone()
+                    if prof:
+                        import json as _json
+                        pd = _json.loads(prof[0]) if isinstance(prof[0], str) else prof[0]
+                        user_data['profile'] = {
+                            'name': pd.get('name', ''),
+                            'traits': pd.get('traits', []),
+                        }
+                except Exception:
+                    pass
+
+                # Latest brain state
+                try:
+                    bs = db.execute(
+                        "SELECT c_value, mode, created_at FROM brain_states WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+                        (uid,)
+                    ).fetchone()
+                    if bs:
+                        user_data['brain'] = {'C': bs[0], 'mode': bs[1], 'last_active': str(bs[2])}
+                except Exception:
+                    pass
+
+                # Message count
+                try:
+                    mc = db.execute(
+                        "SELECT COUNT(*) FROM memory_history WHERE user_id = ?", (uid,)
+                    ).fetchone()
+                    user_data['message_count'] = mc[0] if mc else 0
+                except Exception:
+                    user_data['message_count'] = 0
+
+                result.append(user_data)
+
+        return jsonify({'success': True, 'users': result, 'count': len(result)})
+    except Exception as e:
+        logger.error(f"Admin users-full error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/users/<user_id>/role', methods=['PUT', 'OPTIONS'])
+@require_auth
+@_require_admin
+def admin_change_role(user_id):
+    """Change user role."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    from database import db_context
+    data = request.get_json() or {}
+    new_role = data.get('role', '')
+    valid_roles = ('subscriber', 'premium', 'teacher', 'administrator')
+    if new_role not in valid_roles:
+        return jsonify({'success': False, 'error': f'Neplatná role. Povolené: {valid_roles}'}), 400
+
+    try:
+        with db_context(commit=True) as db:
+            db.execute("UPDATE auth_users SET role = ? WHERE id = ?", (new_role, int(user_id)))
+        return jsonify({'success': True, 'user_id': user_id, 'role': new_role})
+    except Exception as e:
+        logger.error(f"Admin change role error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/users/<user_id>', methods=['DELETE', 'OPTIONS'])
+@require_auth
+@_require_admin
+def admin_delete_user(user_id):
+    """Delete user and all their data. Irreversible."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    from database import db_context
+    try:
+        with db_context(commit=True) as db:
+            uid = str(user_id)
+            tables = [
+                ("auth_users", "id", int(user_id)),
+                ("memory_profiles", "user_id", uid),
+                ("memory_history", "user_id", uid),
+                ("memory_learning", "user_id", uid),
+                ("brain_states", "user_id", uid),
+                ("agent_observations", "user_id", uid),
+                ("chat_contacts", "user_id", uid),
+            ]
+            deleted = {}
+            for table, col, val in tables:
+                try:
+                    r = db.execute(f"DELETE FROM {table} WHERE {col} = ?", (val,))
+                    deleted[table] = r.rowcount if r else 0
+                except Exception:
+                    deleted[table] = 'skip'
+
+        logger.info(f"Admin deleted user {user_id}: {deleted}")
+        return jsonify({'success': True, 'deleted': deleted})
+    except Exception as e:
+        logger.error(f"Admin delete user error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/system', methods=['GET'])
+@require_auth
+@_require_admin
+def admin_system():
+    """System overview — counts, agent status, online users."""
+    from database import db_context
+    try:
+        with db_context() as db:
+            counts = {}
+            for table in ['auth_users', 'brain_states', 'agent_observations', 'memory_profiles', 'memory_history']:
+                try:
+                    r = db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+                    counts[table] = r[0] if r else 0
+                except Exception:
+                    counts[table] = 0
+
+        try:
+            users_online, _, _, _ = _get_app_helpers()
+            online = len(users_online) if users_online else 0
+        except Exception:
+            online = 0
+
+        return jsonify({
+            'success': True,
+            'counts': counts,
+            'online_users': online,
+            'timestamp': now_iso()
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @admin_bp.route('/api/emergency', methods=['POST', 'OPTIONS'])
 def api_emergency():
     if request.method == 'OPTIONS':
