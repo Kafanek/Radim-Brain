@@ -152,7 +152,7 @@ def azure_tts_proxy():
         headers = {
             'Ocp-Apim-Subscription-Key': AZURE_TTS_KEY,
             'Content-Type': 'application/ssml+xml',
-            'X-Microsoft-OutputFormat': 'audio-16khz-128kbitrate-mono-mp3'
+            'X-Microsoft-OutputFormat': 'audio-24khz-160kbitrate-mono-mp3'
         }
 
         try:
