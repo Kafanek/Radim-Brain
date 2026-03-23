@@ -403,6 +403,10 @@ def _alert_caregiver(user_id, obs, app):
 
 def _crisis_escalate(user_id, obs, app):
     """SMS to caregiver + crisis_event record."""
+    # v460: Skip SMS for demo/seeded users (prevent Twilio daily limit exhaustion)
+    if str(user_id).startswith('senior-') or str(user_id).startswith('test-'):
+        logger.debug(f"Skipping crisis SMS for demo user {user_id}")
+        return
     try:
         # Save crisis event (reuse existing table)
         profile = db_load_profile(user_id)
@@ -432,6 +436,9 @@ def _crisis_escalate(user_id, obs, app):
 
 def _call_senior(user_id, obs):
     """Proactive phone call to senior (v387)."""
+    # v460: Skip calls to demo/seeded users
+    if str(user_id).startswith('senior-') or str(user_id).startswith('test-'):
+        return
     try:
         from twilio_voice_helpers import initiate_proactive_call, get_senior_phone
         phone = get_senior_phone(user_id)
