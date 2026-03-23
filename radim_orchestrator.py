@@ -378,64 +378,78 @@ def radim_chat():
             if _emotional_state.get('stressed'):
                 personalized += "Uživatel je ve stresu. Začni uklidněním. Žádné otázky, jen podpora.\n"
 
+        # ═══ v456: HYBRID LLM ROUTER ═══
+        # Claude = primary (empatie, zdraví, vztahy, kognitivní pipeline)
+        # Gemini = fallback (rychlý, levný, spolehlivý)
+        # Static = last resort (circuit breakers open)
         if text_response is None:
-            # v448: Self-healing LLM call with circuit breaker
-            try:
-                from self_healing import get_breaker, safe_response, log_healing_event
-                breaker = get_breaker('gemini')
-                if breaker.can_proceed():
-                    try:
-                        text_response, action_json = call_gemini_whatsapp(
-                            message, context, mode, personalized, history,
-                            anticipation_prompt, gen_config
-                        )
-                        if text_response:
-                            breaker.record_success()
-                        else:
-                            breaker.record_failure()
-                            log_healing_event('empty_response', 'gemini', {'message': message[:50]})
-                    except Exception as e:
-                        breaker.record_failure()
-                        log_healing_event('exception', 'gemini', {'error': str(e)[:100]})
-                        logger.error(f"LLM error: {e}")
-                else:
-                    log_healing_event('circuit_open', 'gemini')
-            except ImportError:
-                # Fallback without self-healing
-                text_response, action_json = call_gemini_whatsapp(
-                    message, context, mode, personalized, history,
-                    anticipation_prompt, gen_config
-                )
-
-        # v449: FALLBACK CHAIN — Gemini failed → try Claude → then static
-        if not text_response:
+            _ai_provider = None
             try:
                 from self_healing import get_breaker, log_healing_event
-                from claude_helpers import get_claude_client, extract_text_from_response
+                from claude_helpers import get_claude_client, extract_text_from_response, CLAUDE_MODEL
+
+                # ── PRIMARY: Claude (empatie, 7-step pipeline) ──
                 claude_breaker = get_breaker('claude')
                 if claude_breaker.can_proceed():
                     try:
                         client = get_claude_client()
                         if client:
-                            system_prompt = personalized or "Jsi Radim, český AI asistent. Odpovídej česky, stručně, s diakritikou."
+                            _sys = personalized or "Jsi Radim, český AI asistent péče. Odpovídej česky, stručně, s diakritikou."
+                            # Build messages with history
+                            _msgs = []
+                            if history:
+                                for h in history[-10:]:
+                                    _msgs.append({"role": h.get("role", "user"), "content": h.get("content", "")})
+                            _msgs.append({"role": "user", "content": message})
+
                             claude_resp = client.messages.create(
-                                model="claude-sonnet-4-20250514",
-                                max_tokens=300,
-                                system=system_prompt,
-                                messages=[{"role": "user", "content": message}]
+                                model=CLAUDE_MODEL,
+                                max_tokens=400,
+                                system=_sys,
+                                messages=_msgs
                             )
                             text_response = extract_text_from_response(claude_resp)
                             if text_response:
                                 claude_breaker.record_success()
-                                log_healing_event('claude_fallback_success', 'claude', {'message': message[:50]})
-                                logger.info(f"🔄 Claude fallback used for {user_id}")
+                                _ai_provider = 'claude'
+                                logger.info(f"🧠 Claude primary for {user_id}")
                             else:
                                 claude_breaker.record_failure()
+                                log_healing_event('empty_response', 'claude', {'message': message[:50]})
                     except Exception as e:
                         claude_breaker.record_failure()
-                        log_healing_event('claude_fallback_failed', 'claude', {'error': str(e)[:100]})
+                        log_healing_event('exception', 'claude', {'error': str(e)[:100]})
+                        logger.warning(f"Claude error: {e}")
+                else:
+                    log_healing_event('circuit_open', 'claude')
+
+                # ── FALLBACK: Gemini (if Claude failed) ──
+                if not text_response:
+                    gemini_breaker = get_breaker('gemini')
+                    if gemini_breaker.can_proceed():
+                        try:
+                            text_response, action_json = call_gemini_whatsapp(
+                                message, context, mode, personalized, history,
+                                anticipation_prompt, gen_config
+                            )
+                            if text_response:
+                                gemini_breaker.record_success()
+                                _ai_provider = 'gemini'
+                                logger.info(f"🔄 Gemini fallback for {user_id}")
+                            else:
+                                gemini_breaker.record_failure()
+                        except Exception as e:
+                            gemini_breaker.record_failure()
+                            log_healing_event('exception', 'gemini', {'error': str(e)[:100]})
+                    else:
+                        log_healing_event('circuit_open', 'gemini')
+
             except ImportError:
-                pass
+                # No self-healing — try Gemini directly
+                text_response, action_json = call_gemini_whatsapp(
+                    message, context, mode, personalized, history,
+                    anticipation_prompt, gen_config
+                )
 
         if not text_response:
             try:
