@@ -433,3 +433,128 @@ def auth_delete_account():
                 conn.close()
             except Exception:
                 pass
+
+
+# ============================================
+# FORGOT PASSWORD — v442
+# ============================================
+
+import secrets
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart as EmailMIME
+
+_reset_tokens = {}
+_RESET_TOKEN_TTL = 3600
+
+
+def _send_reset_email(to_email, reset_token):
+    """Send password reset email via SMTP."""
+    host = os.environ.get('SMTP_HOST', '')
+    port = int(os.environ.get('SMTP_PORT', '465'))
+    user = os.environ.get('SMTP_USER', '')
+    password = os.environ.get('SMTP_PASS', '')
+    from_addr = os.environ.get('SMTP_FROM', user)
+    if not host or not user or not password:
+        logger.error("SMTP not configured for password reset")
+        return False
+
+    frontend_url = os.environ.get('FRONTEND_URL', 'https://app.radimcare.cz')
+    reset_link = f"{frontend_url}/?reset={reset_token}"
+
+    msg = EmailMIME('alternative')
+    msg['From'] = f"Radim Care <{from_addr}>"
+    msg['To'] = to_email
+    msg['Subject'] = 'Obnovení hesla — Radim Care'
+
+    body_html = f"""<div style="font-family:system-ui,sans-serif;max-width:500px;margin:0 auto;padding:20px;">
+    <div style="text-align:center;margin-bottom:24px;">
+        <img src="{frontend_url}/assets/logo-radim.png" alt="Radim" style="height:60px;">
+    </div>
+    <h2 style="color:#2d3748;">Obnovení hesla</h2>
+    <p>Obdrželi jsme žádost o obnovení vašeho hesla.</p>
+    <div style="text-align:center;margin:32px 0;">
+        <a href="{reset_link}" style="background:#5BA8A0;color:white;padding:14px 32px;
+           border-radius:8px;text-decoration:none;font-weight:600;font-size:16px;">
+            Nastavit nové heslo
+        </a>
+    </div>
+    <p style="color:#718096;font-size:14px;">Odkaz je platný 1 hodinu.</p>
+    <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">
+    <p style="color:#a0aec0;font-size:12px;">Radim Care — Váš AI asistent péče</p>
+</div>"""
+
+    body_text = f"Obnovení hesla: {reset_link}\nPlatný 1 hodinu."
+
+    msg.attach(MIMEText(body_text, 'plain', 'utf-8'))
+    msg.attach(MIMEText(body_html, 'html', 'utf-8'))
+
+    try:
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, timeout=10) as server:
+                server.login(user, password)
+                server.sendmail(from_addr, to_email, msg.as_string())
+        else:
+            with smtplib.SMTP(host, port, timeout=10) as server:
+                server.starttls()
+                server.login(user, password)
+                server.sendmail(from_addr, to_email, msg.as_string())
+        logger.info(f"Password reset email sent to {to_email}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send reset email: {e}")
+        return False
+
+
+@auth_bp.route('/api/auth/forgot-password', methods=['POST', 'OPTIONS'])
+def auth_forgot_password():
+    """Request password reset — sends email with reset link."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    data = request.get_json(silent=True) or {}
+    email = data.get('email', '').strip().lower()
+    if not email:
+        return jsonify({"success": False, "error": "Email je povinný"}), 400
+    try:
+        with db_context() as db:
+            row = db.execute("SELECT id FROM auth_users WHERE email = ?", (email,)).fetchone()
+            if row:
+                token = secrets.token_urlsafe(32)
+                _reset_tokens[token] = {'email': email, 'expires': int(time.time()) + _RESET_TOKEN_TTL}
+                now_ts = int(time.time())
+                for k in [k for k, v in _reset_tokens.items() if v['expires'] < now_ts]:
+                    del _reset_tokens[k]
+                _send_reset_email(email, token)
+    except Exception as e:
+        logger.error(f"Forgot password error: {e}")
+    return jsonify({"success": True, "message": "Pokud existuje účet s tímto emailem, odeslali jsme odkaz pro obnovení hesla."})
+
+
+@auth_bp.route('/api/auth/reset-password', methods=['POST', 'OPTIONS'])
+def auth_reset_password():
+    """Reset password using token from email."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    data = request.get_json(silent=True) or {}
+    token = data.get('token', '').strip()
+    new_password = data.get('password', '')
+    if not token or not new_password:
+        return jsonify({"success": False, "error": "Token a nové heslo jsou povinné"}), 400
+    if len(new_password) < 6:
+        return jsonify({"success": False, "error": "Heslo musí mít alespoň 6 znaků"}), 400
+    token_data = _reset_tokens.get(token)
+    if not token_data or token_data['expires'] < int(time.time()):
+        if token in _reset_tokens:
+            del _reset_tokens[token]
+        return jsonify({"success": False, "error": "Neplatný nebo expirovaný odkaz."}), 400
+    email = token_data['email']
+    try:
+        pw_hash = _hash_password(new_password)
+        with db_context(commit=True) as db:
+            db.execute("UPDATE auth_users SET password_hash = ? WHERE email = ?", (pw_hash, email))
+        del _reset_tokens[token]
+        logger.info(f"Password reset for {email}")
+        return jsonify({"success": True, "message": "Heslo bylo změněno. Nyní se můžete přihlásit."})
+    except Exception as e:
+        logger.error(f"Reset password error: {e}")
+        return jsonify({"success": False, "error": "Chyba při změně hesla"}), 500
