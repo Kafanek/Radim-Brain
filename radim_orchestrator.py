@@ -129,9 +129,12 @@ def radim_chat():
             context['extracted_date'] = extract_date(message)
 
         if intent == 'safety':
-            severity = 'critical' if any(w in message.lower() for w in ['155', '112', 'záchranka', 'sebevražd', 'sebevrazd', 'chci umřít', 'chci umrit']) else 'high'
+            msg_lower = message.lower()
+            is_critical = any(w in msg_lower for w in ['155', '112', 'záchranka', 'záchranku', 'sebevražd', 'sebevrazd', 'chci umřít', 'chci umrit', 'zabij', 'nechci žít'])
+            severity = 'critical' if is_critical else 'high'
 
-            # v398: RESPOND FIRST, notify ASYNC — senior must hear response within 500ms
+            # v432: CRITICAL (explicit 155/suicide) → hardcoded fast response + notify
+            # HIGH (pain, fall, breathing) → let AI respond with empathy, notify async
             import threading
             threading.Thread(
                 target=_safety_notify_caregivers,
@@ -144,17 +147,23 @@ def radim_chat():
                 daemon=True
             ).start()
 
-            return jsonify({
-                'success': True,
-                'response': 'Zůstaňte v klidu! Volám pomoc a informuji rodinu.',
-                'radim_action': {
-                    'type': 'safety_alert',
-                    'payload': {'user_id': user_id, 'severity': severity, 'message': message},
-                    'ui': {'suggested_buttons': ['Zavolat 155', 'Kontaktovat rodinu', 'Jsem v pořádku']}
-                },
+            if is_critical:
+                # Explicit emergency call → fast hardcoded response
+                return jsonify({
+                    'success': True,
+                    'response': 'Jsem tady s vámi. Dýchejte pomalu. Volám záchranku a informuji vaši rodinu. Zůstaňte v klidu, pomoc je na cestě.',
+                    'radim_action': {
+                        'type': 'safety_alert',
+                        'payload': {'user_id': user_id, 'severity': severity, 'message': message},
+                        'ui': {'suggested_buttons': ['Zavolat 155', 'Kontaktovat rodinu', 'Jsem v pořádku']}
+                    },
                 'intent': 'safety',
                 'mode': mode
             })
+            # else: HIGH severity (pain, fall, breathing) → fall through to AI
+            # AI will respond with empathy + doptávání per cognitive pipeline KROK 6
+            # Caregivers already notified async above
+            mode = 'CRISIS'  # Force crisis mode for AI response
 
         # Load personalization and history from memory
         personalized = ''
