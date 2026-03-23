@@ -382,8 +382,8 @@ def radim_chat():
         # Claude = primary (empatie, zdraví, vztahy, kognitivní pipeline)
         # Gemini = fallback (rychlý, levný, spolehlivý)
         # Static = last resort (circuit breakers open)
+        _ai_provider = None
         if text_response is None:
-            _ai_provider = None
             try:
                 from self_healing import get_breaker, log_healing_event
                 from claude_helpers import get_claude_client, extract_text_from_response, CLAUDE_MODEL
