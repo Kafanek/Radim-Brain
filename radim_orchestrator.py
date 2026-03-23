@@ -419,7 +419,7 @@ def radim_chat():
                     except Exception as e:
                         claude_breaker.record_failure()
                         log_healing_event('exception', 'claude', {'error': str(e)[:100]})
-                        logger.warning(f"Claude error: {e}")
+                        print(f"❌ Claude FAILED: {type(e).__name__}: {e}")
                 else:
                     log_healing_event('circuit_open', 'claude')
 
