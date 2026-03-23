@@ -412,7 +412,7 @@ def radim_chat():
                             if text_response:
                                 claude_breaker.record_success()
                                 _ai_provider = 'claude'
-                                logger.info(f"🧠 Claude primary for {user_id}")
+                                print(f"🧠 Claude primary for {user_id}")
                             else:
                                 claude_breaker.record_failure()
                                 log_healing_event('empty_response', 'claude', {'message': message[:50]})
@@ -435,7 +435,7 @@ def radim_chat():
                             if text_response:
                                 gemini_breaker.record_success()
                                 _ai_provider = 'gemini'
-                                logger.info(f"🔄 Gemini fallback for {user_id}")
+                                print(f"🔄 Gemini fallback for {user_id}")
                             else:
                                 gemini_breaker.record_failure()
                         except Exception as e:
@@ -546,6 +546,7 @@ def radim_chat():
             'radim_action': action_json,
             'intent': _resolved_intent if _INTENT_RESOLVER else intent,
             'mode': mode,
+            'ai_provider': _ai_provider or 'local',
             'timestamp': datetime.utcnow().isoformat() + 'Z'
         }
         if anticipation_meta:
@@ -683,7 +684,7 @@ def radim_health():
             'anticipation_engine': _ORCH_TEXT_RHYTHM,
             'brain_engine': _ORCH_BRAIN_AVAILABLE,
             'memory': _ORCH_MEMORY_AVAILABLE,
-            'ai_provider': 'gemini' if GEMINI_API_KEY else 'none'
+            'ai_provider': 'claude+gemini (hybrid)'
         },
         'timestamp': datetime.utcnow().isoformat() + 'Z'
     })
