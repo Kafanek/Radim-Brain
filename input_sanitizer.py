@@ -45,6 +45,7 @@ _INJECTION_PATTERNS = [
     r'print\s+your\s+(system|initial)\s+(prompt|instructions)',
     r'repeat\s+(everything|all)\s+(above|before)',
     r'output\s+(your\s+)?(system|initial)\s+(prompt|instructions)',
+    r'system\s+prompt\s+(reveal|show|display|print|dump)',
 
     # Czech injection attempts
     r'ignoruj\s+(všechny\s+)?předchozí\s+instrukce',
