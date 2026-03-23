@@ -310,14 +310,63 @@ def radim_chat():
                 personalized += f"[Ψ-rytmus: {rmode}, koherence: {nrhythm.get('coherence', 0.8):.1f}] "
             personalized += "Přizpůsob odpověď — buď extra trpělivý, klidný a empatický."
 
+        # v448: Emotional self-healing — detect confusion/stress
+        _emotional_state = {}
+        try:
+            from self_healing import detect_emotional_state, apply_emotional_healing, safe_response, get_breaker, log_healing_event
+            _emotional_state = detect_emotional_state(message)
+            if _emotional_state.get('needs_simplification'):
+                personalized += "\n═══ UŽIVATEL POTŘEBUJE JEDNODUŠŠÍ KOMUNIKACI ═══\n"
+                if _emotional_state.get('confused'):
+                    personalized += "Uživatel nerozumí. Mluv POMALEJI, KRATŠÍ věty, OPAKUJ klíčové info.\n"
+                if _emotional_state.get('stressed'):
+                    personalized += "Uživatel je ve stresu. Začni uklidněním. Žádné otázky, jen podpora.\n"
+        except ImportError:
+            pass
+
         if text_response is None:
-            text_response, action_json = call_gemini_whatsapp(
-                message, context, mode, personalized, history,
-                anticipation_prompt, gen_config
-            )
+            # v448: Self-healing LLM call with circuit breaker
+            try:
+                from self_healing import get_breaker, safe_response, log_healing_event
+                breaker = get_breaker('gemini')
+                if breaker.can_proceed():
+                    try:
+                        text_response, action_json = call_gemini_whatsapp(
+                            message, context, mode, personalized, history,
+                            anticipation_prompt, gen_config
+                        )
+                        if text_response:
+                            breaker.record_success()
+                        else:
+                            breaker.record_failure()
+                            log_healing_event('empty_response', 'gemini', {'message': message[:50]})
+                    except Exception as e:
+                        breaker.record_failure()
+                        log_healing_event('exception', 'gemini', {'error': str(e)[:100]})
+                        logger.error(f"LLM error: {e}")
+                else:
+                    log_healing_event('circuit_open', 'gemini')
+            except ImportError:
+                # Fallback without self-healing
+                text_response, action_json = call_gemini_whatsapp(
+                    message, context, mode, personalized, history,
+                    anticipation_prompt, gen_config
+                )
 
         if not text_response:
-            text_response = "Promiňte, zkuste to za chvíli. 🙏"
+            try:
+                from self_healing import safe_response
+                text_response = safe_response(intent=intent, user_message=message, is_crisis=(intent == 'safety'))
+            except ImportError:
+                text_response = "Promiňte, zkuste to za chvíli. 🙏"
+
+        # v448: Apply emotional healing to response
+        if _emotional_state.get('needs_simplification') and text_response:
+            try:
+                from self_healing import apply_emotional_healing
+                text_response, _ = apply_emotional_healing(text_response, _emotional_state)
+            except ImportError:
+                pass
 
         # v439: SAFETY GATE — hardcoded 155 injection for crisis keywords
         # Gemini sometimes ignores prompt rules, so we enforce programmatically
