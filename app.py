@@ -528,9 +528,18 @@ try:
     except ImportError:
         logger.warning("⚠️ daily engagement not available")
 
+    # v446: Daily summary email to caregivers (20:00)
+    try:
+        from agent_loop import run_daily_summary
+        scheduler.add_job(lambda: run_daily_summary(app), 'cron', hour=20, minute=0,
+                          id='daily_summary', max_instances=1, misfire_grace_time=1800)
+        logger.info("✅ Daily summary registered (20:00)")
+    except ImportError:
+        logger.warning("⚠️ daily summary not available")
+
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
-    logger.info("✅ APScheduler started: 6 jobs (reminders + telemed + agent + morning + cleanup + engagement)")
+    logger.info("✅ APScheduler started: 7 jobs")
 
 except ImportError:
     logger.warning("⚠️ APScheduler not installed — reminders will not auto-send")

@@ -755,4 +755,159 @@ def run_daily_engagement(app):
             logger.error(f"Daily engagement error: {e}")
 
 
-logger.info("Agent Loop v1.5 loaded — monitoring + calls + morning + cleanup + activity + engagement")
+# ============================================================================
+# DAILY SUMMARY EMAIL for caregivers (v446 — 20:00)
+# ============================================================================
+
+def run_daily_summary(app):
+    """Send daily summary email to caregivers about their seniors.
+
+    Called by APScheduler at 20:00.
+    Aggregates: messages, brain states, observations, last activity.
+    """
+    if not _AVAILABLE:
+        return
+
+    import json
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    import os
+
+    with app.app_context():
+        try:
+            # Find caregivers with email
+            caregivers = []
+            with db_context() as db:
+                rows = db.execute(
+                    "SELECT id, email, name FROM auth_users WHERE role IN ('caregiver', 'teacher', 'administrator')"
+                ).fetchall()
+                caregivers = [dict(r) for r in rows]
+
+            if not caregivers:
+                return
+
+            # Aggregate today's data
+            with db_context() as db:
+                # Messages today
+                msg_counts = {}
+                rows = db.execute(
+                    "SELECT user_id, COUNT(*) as cnt FROM memory_history WHERE created_at > CURRENT_DATE GROUP BY user_id"
+                ).fetchall()
+                for r in rows:
+                    msg_counts[r[0] if isinstance(r, (list, tuple)) else r['user_id']] = r[1] if isinstance(r, (list, tuple)) else r['cnt']
+
+                # Brain states today
+                brain_avg = {}
+                rows = db.execute(
+                    "SELECT user_id, AVG(c) as avg_c, MAX(mode) as last_mode FROM brain_states WHERE created_at > CURRENT_DATE GROUP BY user_id"
+                ).fetchall()
+                for r in rows:
+                    uid = r[0] if isinstance(r, (list, tuple)) else r['user_id']
+                    brain_avg[uid] = {
+                        'avg_c': round(float(r[1] if isinstance(r, (list, tuple)) else r['avg_c']), 1),
+                        'mode': r[2] if isinstance(r, (list, tuple)) else r['last_mode']
+                    }
+
+                # Observations today
+                obs_today = []
+                rows = db.execute(
+                    "SELECT user_id, severity, message FROM agent_observations WHERE created_at > CURRENT_DATE ORDER BY created_at DESC"
+                ).fetchall()
+                for r in rows:
+                    obs_today.append({
+                        'user_id': r[0] if isinstance(r, (list, tuple)) else r['user_id'],
+                        'severity': r[1] if isinstance(r, (list, tuple)) else r['severity'],
+                        'message': r[2] if isinstance(r, (list, tuple)) else r['message']
+                    })
+
+                # Seniors list
+                seniors = []
+                rows = db.execute("SELECT id, data FROM memory_profiles").fetchall()
+                for r in rows:
+                    uid = r[0] if isinstance(r, (list, tuple)) else r['user_id']
+                    data = r[1] if isinstance(r, (list, tuple)) else r['data']
+                    if isinstance(data, str):
+                        data = json.loads(data)
+                    name = data.get('name', uid[:12])
+                    seniors.append({'id': uid, 'name': name})
+
+            # Build email
+            from datetime import datetime
+            today = datetime.now().strftime('%d.%m.%Y')
+
+            warnings = [o for o in obs_today if o['severity'] in ('WARNING', 'ALERT', 'CRISIS')]
+            total_msgs = sum(msg_counts.values())
+
+            body_lines = [
+                f"<h2>📊 Denní přehled — {today}</h2>",
+                f"<p><strong>{len(seniors)} seniorů</strong> · <strong>{total_msgs} zpráv</strong> · <strong>{len(warnings)} upozornění</strong></p>",
+            ]
+
+            if warnings:
+                body_lines.append("<h3>⚠️ Upozornění</h3><ul>")
+                for w in warnings[:10]:
+                    name = next((s['name'] for s in seniors if s['id'] == w['user_id']), w['user_id'][:12])
+                    body_lines.append(f"<li><strong>{name}</strong> ({w['severity']}): {w['message']}</li>")
+                body_lines.append("</ul>")
+
+            body_lines.append("<h3>👥 Senioři</h3><table style='width:100%;border-collapse:collapse;'>")
+            body_lines.append("<tr style='background:#f7fafc;'><th style='padding:8px;text-align:left;'>Jméno</th><th>Zprávy</th><th>Brain C</th><th>Mode</th></tr>")
+            for s in seniors[:20]:
+                msgs = msg_counts.get(s['id'], 0)
+                brain = brain_avg.get(s['id'], {})
+                avg_c = brain.get('avg_c', '—')
+                mode = brain.get('mode', '—')
+                body_lines.append(
+                    f"<tr><td style='padding:6px;'>{s['name']}</td>"
+                    f"<td style='text-align:center;'>{msgs}</td>"
+                    f"<td style='text-align:center;'>{avg_c}</td>"
+                    f"<td style='text-align:center;'>{mode}</td></tr>"
+                )
+            body_lines.append("</table>")
+            body_lines.append("<hr><p style='color:#a0aec0;font-size:12px;'>Radim Care — denní automatický přehled</p>")
+
+            html = f"""<div style="font-family:system-ui,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+                {''.join(body_lines)}
+            </div>"""
+
+            # Send to each caregiver
+            smtp_host = os.environ.get('SMTP_HOST', '')
+            smtp_port = int(os.environ.get('SMTP_PORT', '465'))
+            smtp_user = os.environ.get('SMTP_USER', '')
+            smtp_pass = os.environ.get('SMTP_PASS', '')
+            smtp_from = os.environ.get('SMTP_FROM', smtp_user)
+
+            if not smtp_host or not smtp_user or not smtp_pass:
+                logger.warning("SMTP not configured for daily summary")
+                return
+
+            for cg in caregivers:
+                if not cg.get('email'):
+                    continue
+                try:
+                    msg = MIMEMultipart('alternative')
+                    msg['From'] = f"Radim Care <{smtp_from}>"
+                    msg['To'] = cg['email']
+                    msg['Subject'] = f"📊 Denní přehled seniorů — {today}"
+                    msg.attach(MIMEText(html, 'html', 'utf-8'))
+
+                    if smtp_port == 465:
+                        with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10) as server:
+                            server.login(smtp_user, smtp_pass)
+                            server.sendmail(smtp_from, cg['email'], msg.as_string())
+                    else:
+                        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+                            server.starttls()
+                            server.login(smtp_user, smtp_pass)
+                            server.sendmail(smtp_from, cg['email'], msg.as_string())
+
+                    logger.info(f"📧 Daily summary sent to {cg['email']}")
+                except Exception as e:
+                    logger.warning(f"Daily summary email error for {cg['email']}: {e}")
+
+        except Exception as e:
+            logger.error(f"Daily summary error: {e}")
+
+
+logger.info("Agent Loop v1.6 loaded — monitoring + calls + morning + cleanup + activity + engagement + summary")

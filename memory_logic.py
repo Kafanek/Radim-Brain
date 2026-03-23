@@ -191,6 +191,24 @@ def build_personalized_prompt(user_id: str) -> str:
     except ImportError:
         pass
 
+    # v446: Health topic tracking — persistent health awareness
+    health_topics = ctx.get('health_topics', {})
+    if health_topics:
+        active = [(name, info) for name, info in health_topics.items()
+                  if info.get('count', 0) >= 2 or info.get('last') == datetime.utcnow().strftime('%Y-%m-%d')]
+        if active:
+            parts.append("--- Zdravotní témata (sledovaná v čase) ---")
+            for name, info in sorted(active, key=lambda x: x[1].get('count', 0), reverse=True)[:5]:
+                days = 0
+                try:
+                    first = datetime.strptime(info['first'], '%Y-%m-%d')
+                    days = (datetime.utcnow() - first).days
+                except Exception:
+                    pass
+                duration = f"od {info['first']}" if days > 0 else "dnes poprvé"
+                parts.append(f"  - {name}: zmíněno {info['count']}×, {duration}")
+            parts.append("  (Radim může jemně navázat: 'Jak je na tom vaše...')")
+
     # v437: Relationship Engine — vztahový kontext
     try:
         from relationship_engine import identify_relationship, build_relationship_prompt, save_relationship
@@ -270,6 +288,76 @@ def _crisis_escalate(user_id: str, brain_C: float = None, message: str = ""):
 
 
 # ============================================================================
+# HEALTH TOPIC TRACKING (v446)
+# ============================================================================
+
+import re as _re
+
+_HEALTH_KEYWORDS = {
+    'hlava': 'bolest hlavy',
+    'záda': 'bolest zad',
+    'koleno': 'bolest kolene',
+    'kloub': 'bolest kloubů',
+    'břicho': 'bolest břicha',
+    'hrudník': 'bolest hrudníku',
+    'noha': 'bolest nohy',
+    'ruka': 'bolest ruky',
+    'srdce': 'srdeční potíže',
+    'dýchání': 'dýchací potíže',
+    'spánek': 'problémy se spánkem',
+    'nespím': 'problémy se spánkem',
+    'závrat': 'závratě',
+    'nevolnost': 'nevolnost',
+    'teplota': 'zvýšená teplota',
+    'horečka': 'horečka',
+    'kašel': 'kašel',
+    'únava': 'únava',
+    'smutek': 'smutek',
+    'úzkost': 'úzkost',
+    'strach': 'strach',
+    'samota': 'pocit samoty',
+    'léky': 'léky',
+    'lék': 'léky',
+}
+
+
+def _track_health_topics(learning, message):
+    """Track health-related mentions over time.
+
+    Stores in learning['health_topics']:
+    {
+        'bolest hlavy': {'count': 3, 'first': '2026-03-20', 'last': '2026-03-23'},
+        'problémy se spánkem': {'count': 1, 'first': '2026-03-23', 'last': '2026-03-23'}
+    }
+
+    This enables: "Radim ví, že koleno bolí od pondělí"
+    """
+    if not message:
+        return
+
+    msg_lower = message.lower()
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+
+    health_topics = learning.get('health_topics', {})
+    found = False
+
+    for keyword, topic_name in _HEALTH_KEYWORDS.items():
+        if keyword in msg_lower:
+            if topic_name not in health_topics:
+                health_topics[topic_name] = {
+                    'count': 0,
+                    'first': today,
+                    'last': today
+                }
+            health_topics[topic_name]['count'] += 1
+            health_topics[topic_name]['last'] = today
+            found = True
+
+    if found:
+        learning['health_topics'] = health_topics
+
+
+# ============================================================================
 # RECORD INTERACTION
 # ============================================================================
 
@@ -335,7 +423,13 @@ def record_interaction(user_id: str, user_message: str, assistant_response: str,
     learning["topics"] = topics
     learning["last_mood"] = mood
     learning["interaction_count"] = learning.get("interaction_count", 0) + 1
+    learning["successful_interactions"] = learning.get("successful_interactions", 0) + (1 if assistant_response else 0)
     learning["last_interaction"] = datetime.utcnow().isoformat()
+    if not learning.get("first_interaction"):
+        learning["first_interaction"] = learning["last_interaction"]
+
+    # v446: Health topic tracking — "koleno bolí od pondělí"
+    _track_health_topics(learning, user_message)
 
     # v283: Brain state learning
     if brain_C is not None:
