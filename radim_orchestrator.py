@@ -353,6 +353,36 @@ def radim_chat():
                     anticipation_prompt, gen_config
                 )
 
+        # v449: FALLBACK CHAIN — Gemini failed → try Claude → then static
+        if not text_response:
+            try:
+                from self_healing import get_breaker, log_healing_event
+                from claude_helpers import get_claude_client, extract_text_from_response
+                claude_breaker = get_breaker('claude')
+                if claude_breaker.can_proceed():
+                    try:
+                        client = get_claude_client()
+                        if client:
+                            system_prompt = personalized or "Jsi Radim, český AI asistent. Odpovídej česky, stručně, s diakritikou."
+                            claude_resp = client.messages.create(
+                                model="claude-sonnet-4-20250514",
+                                max_tokens=300,
+                                system=system_prompt,
+                                messages=[{"role": "user", "content": message}]
+                            )
+                            text_response = extract_text_from_response(claude_resp)
+                            if text_response:
+                                claude_breaker.record_success()
+                                log_healing_event('claude_fallback_success', 'claude', {'message': message[:50]})
+                                logger.info(f"🔄 Claude fallback used for {user_id}")
+                            else:
+                                claude_breaker.record_failure()
+                    except Exception as e:
+                        claude_breaker.record_failure()
+                        log_healing_event('claude_fallback_failed', 'claude', {'error': str(e)[:100]})
+            except ImportError:
+                pass
+
         if not text_response:
             try:
                 from self_healing import safe_response

@@ -871,8 +871,22 @@ def health():
             'twilio_voice': {'configured': bool(os.environ.get('TWILIO_ACCOUNT_SID')), 'phone': os.environ.get('TWILIO_PHONE_NUMBER')},
             'agent_loop': True
         },
-        'online_users': len(users_online)
+        'online_users': len(users_online),
+        'self_healing': _get_healing_status()
     }), status_code
+
+
+def _get_healing_status():
+    """Get self-healing circuit breaker status for /health endpoint."""
+    try:
+        from self_healing import get_system_health
+        h = get_system_health()
+        return {
+            'overall': h.get('overall', 'unknown'),
+            'circuits': {name: info['state'] for name, info in h.get('circuits', {}).items()},
+        }
+    except ImportError:
+        return {'overall': 'unavailable'}
 
 # v384: Admin auth guard
 ADMIN_SECRET = os.environ.get('ADMIN_SECRET', '')

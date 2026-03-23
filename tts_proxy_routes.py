@@ -155,13 +155,41 @@ def azure_tts_proxy():
             'X-Microsoft-OutputFormat': 'audio-24khz-160kbitrate-mono-mp3'
         }
 
+        # v449: TTS with circuit breaker + retry
         try:
-            response = http_requests.post(url, headers=headers, data=ssml.encode('utf-8'), timeout=60)
-        except http_requests.exceptions.Timeout:
-            return jsonify({'error': 'Azure TTS API timeout - try again'}), 504
-        except http_requests.exceptions.RequestException as e:
-            logger.error(f"TTS proxy error: {e}")
-            return jsonify({'error': 'Interni chyba serveru'}), 503
+            from self_healing import get_breaker, log_healing_event
+            tts_breaker = get_breaker('azure_tts')
+            if not tts_breaker.can_proceed():
+                log_healing_event('circuit_open', 'azure_tts')
+                return jsonify({'error': 'TTS service temporarily unavailable', 'fallback': 'browser'}), 503
+        except ImportError:
+            tts_breaker = None
+
+        response = None
+        for _attempt in range(2):  # max 1 retry
+            try:
+                response = http_requests.post(url, headers=headers, data=ssml.encode('utf-8'), timeout=15)
+                if response.status_code == 200:
+                    if tts_breaker: tts_breaker.record_success()
+                    break
+                else:
+                    if tts_breaker: tts_breaker.record_failure()
+            except http_requests.exceptions.Timeout:
+                if tts_breaker: tts_breaker.record_failure()
+                if _attempt == 0:
+                    continue  # retry once
+                try: log_healing_event('timeout', 'azure_tts')
+                except: pass
+                return jsonify({'error': 'Azure TTS timeout', 'fallback': 'browser'}), 504
+            except http_requests.exceptions.RequestException as e:
+                if tts_breaker: tts_breaker.record_failure()
+                logger.error(f"TTS proxy error: {e}")
+                try: log_healing_event('exception', 'azure_tts', {'error': str(e)[:80]})
+                except: pass
+                return jsonify({'error': 'TTS error', 'fallback': 'browser'}), 503
+
+        if response is None or response.status_code != 200:
+            return jsonify({'error': f'Azure TTS error: {response.status_code if response else "no response"}', 'fallback': 'browser'}), 503
 
         if response.status_code == 200:
             resp_headers = {

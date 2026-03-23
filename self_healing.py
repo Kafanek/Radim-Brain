@@ -56,8 +56,15 @@ class CircuitBreaker:
         self.state = 'closed'  # closed=OK, open=failing, half-open=testing
 
     def record_success(self):
+        was_open = self.state in ('open', 'half-open')
         self.failures = 0
         self.state = 'closed'
+        if was_open:
+            logger.info(f"🟢 Circuit RECOVERED: {self.name}")
+            try:
+                log_healing_event('circuit_recovered', self.name)
+            except Exception:
+                pass
 
     def record_failure(self):
         self.failures += 1
