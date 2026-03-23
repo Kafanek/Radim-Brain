@@ -88,13 +88,7 @@ def azure_tts_proxy():
         uid = data.get('user_id', '')
         ant_state = None
 
-        # ═══ SINGLE SOURCE OF TRUTH: voice_profile_engine ═══
-        # Combines: user profile + coherence φ–ρ–δ + brain Ψ(t) + time-of-day
-        # No duplicate calculations. One call. Final params.
-        rate = '0.9'
-        pitch = '+0%'
-
-        # 1. Get brain speech (raw Ψ data)
+        # 1. Get brain mode for voice adaptation
         brain_speech = None
         if uid and _brain_available:
             try:
@@ -104,30 +98,6 @@ def azure_tts_proxy():
             except Exception:
                 pass
 
-        # 2. Voice Profile Engine — FINAL params (all layers merged)
-        if uid:
-            try:
-                from voice_profile_engine import get_adapted_voice_params
-                from context_builder import classify_coherence
-                _phi = brain_speech.get('coherence', 0.5) if brain_speech else 0.5
-                _rho = brain_speech.get('rho_stability', 0.5) if brain_speech else 0.5
-                _coh_state = classify_coherence(_phi, _rho)
-                _hour = __import__('datetime').datetime.now().hour
-                _time_ctx = 'morning' if _hour < 12 else 'afternoon' if _hour < 18 else 'evening' if _hour < 22 else 'night'
-                adapted = get_adapted_voice_params(uid, coherence_state=_coh_state,
-                                                    brain_speech=brain_speech, time_context=_time_ctx)
-                rate = str(adapted['rate'])
-                pitch = f"{adapted['pitch_pct']:+d}%"
-                _style = adapted.get('style', _style)
-                _styledegree = adapted.get('styledegree', _styledegree)
-            except (ImportError, Exception):
-                # Fallback: brain_speech direct, or defaults
-                if brain_speech:
-                    rate = str(brain_speech.get('rate', '0.9'))
-                    pitch = f"{brain_speech.get('pitch_pct', 0):+d}%"
-                    _style = brain_speech.get('style', _style)
-                    _styledegree = brain_speech.get('styledegree', _styledegree)
-
         if not text:
             return jsonify({'error': 'Text is required'}), 400
 
@@ -135,9 +105,14 @@ def azure_tts_proxy():
         if not re.match(r'^[a-zA-Z]{2}-[A-Z]{2}-[a-zA-Z]+$', voice):
             voice = 'cs-CZ-AntoninNeural'
 
-        # ═══ SINGLE SOURCE: voice_filter.build_radim_ssml() ═══
-        # Includes: φ-pauzy, emphasis, truncation, fatigue, per-user adaptation
-        # No duplicate SSML building — everything goes through voice_filter
+        # ═══ SINGLE SOURCE OF TRUTH: voice_filter.build_radim_ssml() ═══
+        # ONE function does everything:
+        #   • VOICE_PROFILES (HARMONY/ALERT/CRISIS → rate, pitch, style)
+        #   • Per-user adaptation (adaptive_learning → slow_speech, fatigue)
+        #   • φ-pauzy between sentences (±50ms variability)
+        #   • Emphasis on key words (ALERT/CRISIS)
+        #   • Truncation to 200 chars (senior focus)
+        # NO other voice param calculation anywhere.
         _mode = ant_state or (brain_speech.get('mode') if brain_speech else None) or 'HARMONY'
         try:
             from voice_filter import build_radim_ssml
