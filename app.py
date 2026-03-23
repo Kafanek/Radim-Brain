@@ -519,9 +519,18 @@ try:
     except ImportError:
         logger.warning("⚠️ daily cleanup not available")
 
+    # v445: Daily engagement (positive proactive interaction, 14:00)
+    try:
+        from agent_loop import run_daily_engagement
+        scheduler.add_job(lambda: run_daily_engagement(app), 'cron', hour=14, minute=0,
+                          id='daily_engagement', max_instances=1, misfire_grace_time=1800)
+        logger.info("✅ Daily engagement registered (14:00)")
+    except ImportError:
+        logger.warning("⚠️ daily engagement not available")
+
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
-    logger.info("✅ APScheduler started: 5 jobs (reminders + telemed + agent + morning + cleanup)")
+    logger.info("✅ APScheduler started: 6 jobs (reminders + telemed + agent + morning + cleanup + engagement)")
 
 except ImportError:
     logger.warning("⚠️ APScheduler not installed — reminders will not auto-send")

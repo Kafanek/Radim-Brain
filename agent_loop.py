@@ -664,4 +664,95 @@ def suggest_activity(user_id, app):
         logger.debug(f"Activity suggestion error: {e}")
 
 
-logger.info("Agent Loop v1.4 loaded — monitoring + calls + morning + cleanup + activity suggestions")
+# ============================================================================
+# DAILY ENGAGEMENT (v445 — positive proactive interaction)
+# ============================================================================
+
+def run_daily_engagement(app):
+    """Afternoon engagement: positive suggestions based on weather, interests, nameday.
+
+    Called by APScheduler at 14:00.
+    Sends push notification with encouraging activity suggestion.
+    """
+    if not _AVAILABLE:
+        return
+
+    import random
+    from datetime import datetime
+
+    with app.app_context():
+        try:
+            with db_context() as db:
+                rows = db.execute(
+                    "SELECT DISTINCT user_id FROM memory_profiles"
+                ).fetchall()
+
+            if not rows:
+                return
+
+            # Get weather for context
+            weather_text = ""
+            try:
+                import urllib.request, json
+                w = json.loads(urllib.request.urlopen("https://wttr.in/Prague?format=j1", timeout=5).read())
+                temp = w['current_condition'][0]['temp_C']
+                desc = w['current_condition'][0].get('lang_cs', [{}])
+                desc_text = desc[0].get('value', '') if desc else ''
+                weather_text = f"{temp}°C, {desc_text}"
+            except Exception:
+                weather_text = "příjemný den"
+
+            # Engagement templates
+            templates = [
+                f"☀️ Venku je {weather_text}. Co takhle krátká procházka?",
+                "🧠 Máme připravený nový kvíz! Chcete si zatrénovat paměť?",
+                "📖 Mám pro vás nový příběh. Chcete si poslechnout?",
+                f"🌤️ Dnes je {weather_text}. Zkuste si udělat chvilku jen pro sebe.",
+                "🎵 Co takhle pustit si něco příjemného a relaxovat?",
+                "💪 Připravil jsem pro vás krátké cvičení. Zacvičíme si?",
+                "📰 Mám čerstvé zprávy. Chcete vědět co je nového?",
+            ]
+
+            for row in rows:
+                user_id = row[0] if isinstance(row, (list, tuple)) else row['user_id']
+                try:
+                    # Check if user had recent interaction (< 4h) → skip
+                    with db_context() as db:
+                        recent = db.execute(
+                            "SELECT COUNT(*) FROM memory_history WHERE user_id = ? AND created_at > NOW() - INTERVAL '4 hours'",
+                            (user_id,)
+                        ).fetchone()
+                        if recent and recent[0] > 0:
+                            continue  # User is active, don't bother
+
+                    message = random.choice(templates)
+
+                    # Try push notification
+                    try:
+                        from push_helpers import send_push
+                        send_push(user_id, "Radim 💬", message)
+                    except Exception:
+                        pass
+
+                    # SocketIO
+                    try:
+                        from flask_socketio import emit
+                        emit('engagement', {
+                            'message': message,
+                            'type': 'positive'
+                        }, room=f'user_{user_id}', namespace='/')
+                    except Exception:
+                        pass
+
+                    logger.debug(f"🌟 Engagement sent to {user_id}: {message[:50]}")
+
+                except Exception as e:
+                    logger.debug(f"Engagement skip {user_id}: {e}")
+
+            logger.info(f"🌟 Daily engagement: {len(rows)} users processed")
+
+        except Exception as e:
+            logger.error(f"Daily engagement error: {e}")
+
+
+logger.info("Agent Loop v1.5 loaded — monitoring + calls + morning + cleanup + activity + engagement")
