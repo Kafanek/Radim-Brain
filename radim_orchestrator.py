@@ -310,19 +310,73 @@ def radim_chat():
                 personalized += f"[Ψ-rytmus: {rmode}, koherence: {nrhythm.get('coherence', 0.8):.1f}] "
             personalized += "Přizpůsob odpověď — buď extra trpělivý, klidný a empatický."
 
-        # v448: Emotional self-healing — detect confusion/stress
+        # v451: Unified Context Builder — replaces scattered emotional/relationship/coherence logic
         _emotional_state = {}
+        _radim_context = None
         try:
-            from self_healing import detect_emotional_state, apply_emotional_healing, safe_response, get_breaker, log_healing_event
+            from self_healing import detect_emotional_state
+            from context_builder import build_radim_context, context_to_prompt_section, meta_observe, compress_memory
             _emotional_state = detect_emotional_state(message)
-            if _emotional_state.get('needs_simplification'):
-                personalized += "\n═══ UŽIVATEL POTŘEBUJE JEDNODUŠŠÍ KOMUNIKACI ═══\n"
-                if _emotional_state.get('confused'):
-                    personalized += "Uživatel nerozumí. Mluv POMALEJI, KRATŠÍ věty, OPAKUJ klíčové info.\n"
-                if _emotional_state.get('stressed'):
-                    personalized += "Uživatel je ve stresu. Začni uklidněním. Žádné otázky, jen podpora.\n"
+
+            # Build unified context
+            _brain_for_ctx = None
+            if _ORCH_BRAIN_AVAILABLE:
+                try:
+                    _brain_for_ctx = {'phi_index': anticipation_meta.get('phi_index', 0.5) if anticipation_meta else 0.5,
+                                      'rho_stability': anticipation_meta.get('rho_stability', 0.5) if anticipation_meta else 0.5,
+                                      'mode': _brain_mode_val or 'HARMONY'}
+                except Exception:
+                    pass
+
+            _rel_data = None
+            try:
+                from relationship_engine import identify_relationship
+                _rel_data = identify_relationship(user_id)
+            except Exception:
+                pass
+
+            _learn_data = None
+            try:
+                from memory_helpers import db_load_learning
+                _learn_data = db_load_learning(user_id)
+            except Exception:
+                pass
+
+            _radim_context = build_radim_context(
+                user_id, message,
+                brain_state=_brain_for_ctx,
+                relationship=_rel_data,
+                emotional_state=_emotional_state,
+                learning_data=_learn_data
+            )
+
+            # Inject context into prompt
+            ctx_prompt = context_to_prompt_section(_radim_context)
+            personalized += "\n" + ctx_prompt
+
+            # Compress memory periodically
+            if _learn_data and _learn_data.get('interaction_count', 0) % 50 == 0:
+                try:
+                    compressed = compress_memory(_learn_data)
+                    from memory_helpers import db_save_learning
+                    db_save_learning(user_id, compressed)
+                except Exception:
+                    pass
+
         except ImportError:
-            pass
+            # Fallback to old emotional detection
+            try:
+                from self_healing import detect_emotional_state
+                _emotional_state = detect_emotional_state(message)
+            except ImportError:
+                pass
+
+        if _emotional_state.get('needs_simplification'):
+            personalized += "\n═══ UŽIVATEL POTŘEBUJE JEDNODUŠŠÍ KOMUNIKACI ═══\n"
+            if _emotional_state.get('confused'):
+                personalized += "Uživatel nerozumí. Mluv POMALEJI, KRATŠÍ věty, OPAKUJ klíčové info.\n"
+            if _emotional_state.get('stressed'):
+                personalized += "Uživatel je ve stresu. Začni uklidněním. Žádné otázky, jen podpora.\n"
 
         if text_response is None:
             # v448: Self-healing LLM call with circuit breaker
