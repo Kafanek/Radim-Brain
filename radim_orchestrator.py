@@ -165,13 +165,13 @@ def radim_chat():
                 # AI in CRISIS mode gives too-short answers, so we build it here
                 msg_lower = message.lower()
                 if any(w in msg_lower for w in ['dýchat', 'dech', 'dušnost', 'hrud']):
-                    crisis_resp = 'Jsem tady s vámi, nikam neodcházím. Zkuste se posadit a dýchat pomalu — nádech nosem, výdech ústy. Bolí to stále stejně, nebo se to mění? Chcete, abych zavolal lékaře?'
+                    crisis_resp = 'Jsem tady s vámi, nikam neodcházím. Zkuste se posadit a dýchat pomalu — nádech nosem, výdech ústy. Bolí to stále stejně, nebo se to mění? Doporučuji zavolat záchrannou službu na 155. Chcete, abych zavolal?'
                 elif any(w in msg_lower for w in ['spadl', 'upadl', 'nemůžu vstát', 'nemuzu vstat', 'zlomen']):
-                    crisis_resp = 'Ach ne, to mě mrzí. Hlavně se nehýbejte a zůstaňte na místě. Bolí vás i hlava, nebo jen to místo kde jste spadl? Chcete, abych zavolal pomoc nebo rodinu?'
+                    crisis_resp = 'Hlavně se nehýbejte a zůstaňte na místě. Bolí vás i hlava, nebo jen to místo kde jste spadl? Pro jistotu doporučuji zavolat na 155. Chcete, abych zavolal záchranku nebo rodinu?'
                 elif any(w in msg_lower for w in ['krev', 'rána', 'řízl', 'pořezal']):
-                    crisis_resp = 'Zůstaňte v klidu. Přitiskněte na ránu čistý hadřík a držte tlak. Je to velká rána? Chcete, abych zavolal záchranku?'
+                    crisis_resp = 'Zůstaňte v klidu. Přitiskněte na ránu čistý hadřík a držte tlak. Je to velká rána? Doporučuji zavolat záchranku na 155.'
                 else:
-                    crisis_resp = 'Slyším, že vám není dobře, a jsem tady s vámi. Posaďte se nebo si lehněte, ať se vám trochu ulevilo. Můžete mi říct víc o tom, co cítíte? Chcete, abych zavolal lékaře nebo rodinu?'
+                    crisis_resp = 'Slyším, že vám není dobře, a jsem tady s vámi. Posaďte se nebo si lehněte. Můžete mi říct víc o tom, co cítíte? Pokud je to vážné, doporučuji zavolat na 155. Chcete, abych zavolal lékaře nebo rodinu?'
 
                 return jsonify({
                     'success': True,
