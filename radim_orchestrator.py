@@ -305,6 +305,16 @@ def radim_chat():
         if not text_response:
             text_response = "Promiňte, zkuste to za chvíli. 🙏"
 
+        # v439: SAFETY GATE — hardcoded 155 injection for crisis keywords
+        # Gemini sometimes ignores prompt rules, so we enforce programmatically
+        _crisis_kw = ['bolí mě na hrudi', 'nemůžu dýchat', 'dušnost', 'spadl jsem', 'nemůžu vstát',
+                       'bolest na hrudi', 'hrudník', 'nemohu dýchat', 'ztrácím vědomí', 'mdloba']
+        _msg_lower = message.lower()
+        if any(kw in _msg_lower for kw in _crisis_kw):
+            if '155' not in text_response and '112' not in text_response:
+                text_response += ' Doporučuji zavolat záchrannou službu na číslo 155.'
+                logger.info(f"🚨 Safety gate: injected 155 into response for user {user_id}")
+
         # Crisis enforcement: hard limit na počet vět (ALERT/CRISIS)
         if _ORCH_TEXT_RHYTHM and anticipation_meta and text_response != "Promiňte, zkuste to za chvíli. 🙏":
             try:
