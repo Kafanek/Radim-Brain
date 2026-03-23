@@ -113,6 +113,20 @@ def radim_chat():
         if not message:
             return jsonify({'success': False, 'error': 'Zpráva je povinná'}), 400
 
+        # v442: Input sanitizer — prompt injection defense
+        try:
+            from input_sanitizer import sanitize_input
+            message, threat_level, threat_details = sanitize_input(message, user_id=user_id)
+            if threat_level == 'blocked':
+                return jsonify({
+                    'success': True,
+                    'response': message,  # safe replacement text
+                    'intent': 'blocked',
+                    'mode': mode
+                })
+        except ImportError:
+            pass
+
         # Add emotional context from frontend (RadimEmpathyBridge)
         if emotional_context:
             context['emotional_state'] = emotional_context
