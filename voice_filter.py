@@ -28,38 +28,50 @@ VOICE_PROFILES = {
     "HARMONY": {
         "style": "friendly",
         "styledegree": "1.3",
-        "rate": "-5%",
-        "pitch": "-2%",
+        "rate": "-10%",          # v455: pomalejší = jasnější pro seniory
+        "pitch": "+2%",          # v455: mírně vyšší = jasnější artikulace
         "volume": "loud",
-        "pause_ms": 618,        # φ × 382 — golden ratio pause
-        "emphasis": False,      # natural, no emphasis
+        "pause_ms": 618,         # φ × 382 — golden ratio pause
+        "emphasis": False,       # natural, no emphasis
     },
     "ALERT": {
         "style": "empathetic",
         "styledegree": "1.5",
-        "rate": "-15%",         # noticeably slower
-        "pitch": "-5%",         # lower = calmer
+        "rate": "-18%",          # v455: pomalejší pro jasnost
+        "pitch": "+0%",          # neutrální
         "volume": "loud",
-        "pause_ms": 1000,       # longer pauses for processing
-        "emphasis": True,       # gentle emphasis on key words
+        "pause_ms": 1000,        # longer pauses for processing
+        "emphasis": True,        # gentle emphasis on key words
     },
     "CRISIS": {
         "style": "calm",
-        "styledegree": "2.0",   # maximum emotional expression
-        "rate": "-25%",         # very slow, deliberate
-        "pitch": "-8%",         # deep, reassuring
-        "volume": "x-loud",    # louder for clarity
-        "pause_ms": 1618,       # φ × 1000 — maximum pause
+        "styledegree": "2.0",    # maximum emotional expression
+        "rate": "-25%",          # very slow, deliberate
+        "pitch": "-3%",          # v455: méně hluboký = srozumitelnější
+        "volume": "x-loud",     # louder for clarity
+        "pause_ms": 1618,        # φ × 1000 — maximum pause
         "emphasis": True,
     },
 }
 
 # Words that should get gentle emphasis in ALERT/CRISIS
 EMPHASIS_WORDS = {
+    # Uklidnění
     "klid", "klidně", "pomoc", "pomohu", "dýchejte", "nadechněte",
     "vydechněte", "zavolám", "jste", "bezpečí", "poradím", "společně",
-    "rodina", "doktor", "lékař", "záchranku",
+    # Zdraví
+    "rodina", "doktor", "lékař", "záchranku", "nemocnice",
+    # Čísla — tísňová volání
+    "155", "158", "112",
+    # Léky
+    "léky", "lék", "tabletu", "prášek",
 }
+
+# Numbers and medicine names get emphasis automatically
+EMPHASIS_PATTERNS = [
+    r'\b\d{3}\b',             # 3-digit numbers (155, 112)
+    r'\b\d{1,2}:\d{2}\b',    # times (8:30, 14:00)
+]
 
 
 def _add_sentence_pauses(text, pause_ms):
@@ -80,11 +92,18 @@ def _add_sentence_pauses(text, pause_ms):
 
 
 def _add_emphasis(text_with_breaks):
-    """Add gentle emphasis to key words (for ALERT/CRISIS)."""
+    """Add gentle emphasis to key words, numbers, medicine names."""
+    # Word emphasis
     for word in EMPHASIS_WORDS:
-        # Case-insensitive replace, preserve original case
         pattern = re.compile(rf'\b({re.escape(word)})\b', re.IGNORECASE)
         text_with_breaks = pattern.sub(
+            r'<emphasis level="moderate">\1</emphasis>',
+            text_with_breaks
+        )
+    # Pattern emphasis (numbers, times)
+    for pat in EMPHASIS_PATTERNS:
+        text_with_breaks = re.sub(
+            rf'({pat})',
             r'<emphasis level="moderate">\1</emphasis>',
             text_with_breaks
         )

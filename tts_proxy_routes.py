@@ -131,34 +131,29 @@ def azure_tts_proxy():
         if not text:
             return jsonify({'error': 'Text is required'}), 400
 
-        # Sanitize inputs to prevent SSML injection
-        safe_text = xml_escape(text)
+        # Sanitize voice name
         if not re.match(r'^[a-zA-Z]{2}-[A-Z]{2}-[a-zA-Z]+$', voice):
             voice = 'cs-CZ-AntoninNeural'
-        if not re.match(r'^[0-9.]+$', str(rate).replace('%', '')):
-            rate = '0.85'
-        if not re.match(r'^[+-]?[0-9]+(%|Hz)$', pitch):
-            pitch = '+0Hz'
 
-        # Build SSML — brain engine overrides frontend hint
-        # v410: Accept style hint from frontend, brain engine takes priority
-        _frontend_style = data.get('style', 'friendly')
-        _style = brain_speech.get('style', _frontend_style) if brain_speech else _frontend_style
-        _styledegree = brain_speech.get('styledegree', '1.2') if brain_speech else '1.2'
-        if _style not in _VALID_STYLES:
-            _style = 'friendly'
-        if not re.match(r'^[0-9.]+$', str(_styledegree)):
-            _styledegree = '1.2'
-
-        ssml = f"""<speak version='1.0' xmlns:mstts='https://www.w3.org/2001/mstts' xml:lang='cs-CZ'>
-            <voice name='{voice}'>
-                <mstts:express-as style='{_style}' styledegree='{_styledegree}'>
-                    <prosody rate='{rate}' pitch='{pitch}'>
-                        {safe_text}
-                    </prosody>
-                </mstts:express-as>
-            </voice>
-        </speak>"""
+        # ═══ SINGLE SOURCE: voice_filter.build_radim_ssml() ═══
+        # Includes: φ-pauzy, emphasis, truncation, fatigue, per-user adaptation
+        # No duplicate SSML building — everything goes through voice_filter
+        _mode = ant_state or (brain_speech.get('mode') if brain_speech else None) or 'HARMONY'
+        try:
+            from voice_filter import build_radim_ssml
+            ssml = build_radim_ssml(text, mode=_mode, voice=voice, user_id=uid or None)
+        except Exception as e:
+            logger.warning(f"voice_filter failed, using simple SSML: {e}")
+            safe_text = xml_escape(text)
+            ssml = f"""<speak version='1.0' xmlns:mstts='https://www.w3.org/2001/mstts' xml:lang='cs-CZ'>
+                <voice name='{voice}'>
+                    <mstts:express-as style='friendly' styledegree='1.2'>
+                        <prosody rate='-5%' pitch='-2%'>
+                            {safe_text}
+                        </prosody>
+                    </mstts:express-as>
+                </voice>
+            </speak>"""
 
         url = f"https://{AZURE_TTS_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
         headers = {
