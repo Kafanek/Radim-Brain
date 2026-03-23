@@ -35,7 +35,7 @@ def _get_claude_helpers():
 # ============================================================================
 
 @claude_content_bp.route('/news', methods=['POST'])
-@require_auth
+@optional_auth
 def get_news():
     """📰 Získat aktuální české zprávy"""
     get_claude_client, extract_text_from_response, get_today_info, is_credit_error, call_gemini_fallback, CLAUDE_MODEL = _get_claude_helpers()
