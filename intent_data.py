@@ -458,38 +458,38 @@ CZ_MONTHS = [
 ]
 
 GREETINGS = [
-    "Ahoj! Jak se mate?",
-    "Dobry den! Co pro vas mohu udelat?",
-    "Zdravim vas! Jsem tu pro vas.",
-    "Ahoj! Rad vas slysim.",
-    "Dobry den! Jak vam mohu pomoci?",
+    "Ahoj! Jak se máte?",
+    "Dobrý den! Co pro vás mohu udělat?",
+    "Zdravím vás! Jsem tu pro vás.",
+    "Ahoj! Rád vás slyším.",
+    "Dobrý den! Jak vám mohu pomoci?",
 ]
 
 GOODBYES = [
-    "Nashledanou! Mejte se krasne.",
-    "Sbohem! Preji vam hezky den.",
-    "Na shledanou! Jsem tu, kdykoli budete potrebovat.",
-    "Cau! Opatrujte se.",
-    "Dobre, nashledanou! Budte zdravi.",
+    "Nashledanou! Mějte se krásně.",
+    "Sbohem! Přeji vám hezký den.",
+    "Na shledanou! Jsem tu, kdykoli budete potřebovat.",
+    "Čau! Opatrujte se.",
+    "Dobře, nashledanou! Buďte zdraví.",
 ]
 
 THANKS_REPLIES = [
-    "Neni zac! Rad pomaham.",
-    "Rado se stalo! Jsem tu pro vas.",
-    "To je v poradku! Kdykoli se ptejte.",
+    "Není zač! Rád pomáhám.",
+    "Rádo se stalo! Jsem tu pro vás.",
+    "To je v pořádku! Kdykoli se ptejte.",
 ]
 
 CZ_JOKES = [
-    "Co rekne nula osmicce? Hezky pasek!",
-    "Proc nemuze bicykl stat sam? Protoze je dvou-koly!",
-    "Co je to zaba na suchu? Priskoc!",
-    "Jaky je rozdil mezi skolou a blazincem? Telefonni cislo!",
-    "Co dela kocka na pocitaci? Chyta mys!",
-    "Proc se houby nezvou na party? Protoze zabiraji moc mista!",
-    "Co rekne jeden strom druhemu? Listuj!",
-    "Jaky je nejlepsi den na vareni? Patek — pa-tek!",
-    "Proc nosi klauni velke boty? Protoze maji velke nohy!",
-    "Co rika ryba, kdyz narazi do zdi? Plac!",
+    "Co řekne nula osmičce? Hezký pásek!",
+    "Proč nemůže bicykl stát sám? Protože je dvou-kolý!",
+    "Co je to žába na suchu? Přískoč!",
+    "Jaký je rozdíl mezi školou a blázincem? Telefonní číslo!",
+    "Co dělá kočka na počítači? Chytá myš!",
+    "Proč se houby nezvou na párty? Protože zabírají moc místa!",
+    "Co řekne jeden strom druhému? Listuj!",
+    "Jaký je nejlepší den na vaření? Pátek — pá-tek!",
+    "Proč nosí klauni velké boty? Protože mají velké nohy!",
+    "Co říká ryba, když narazí do zdi? Pláč!",
 ]
 
 COMPLIMENT_REPLIES = [
