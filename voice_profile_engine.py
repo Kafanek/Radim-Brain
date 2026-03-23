@@ -136,9 +136,7 @@ def get_adapted_voice_params(user_id, coherence_state='rho', brain_speech=None, 
     style = profile.get('preferred_style', 'friendly')
     styledegree = '1.2'
 
-    # Layer 2: Coherence state
-    from context_builder import coherence_to_voice
-    coh_voice = coherence_to_voice(coherence_state)
+    # Layer 2: Coherence state (φ–ρ–δ)
     if coherence_state == 'delta':
         rate = min(rate, 0.8)
         pause_ms = max(pause_ms, 1000)

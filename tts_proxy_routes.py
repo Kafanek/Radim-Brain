@@ -85,55 +85,48 @@ def azure_tts_proxy():
             return jsonify({'error': 'Chybi telo pozadavku (JSON)'}), 400
         text = data.get('text', '')
         voice = data.get('voice', 'cs-CZ-AntoninNeural')
-        rate = data.get('rate', '0.85')
-        pitch = data.get('pitch', '+0Hz')
-
-        # Optional: Use Anticipation Engine if C/alpha provided
-        C_val = data.get('C')
-        alpha_val = data.get('alpha')
-        ant_state = None
-        if C_val is not None and alpha_val is not None and _ant_available:
-            try:
-                C_pred = _ant_predict_C(float(C_val), 0, float(alpha_val))
-                emo = _ant_emotions(C_pred, float(alpha_val))
-                params = _ant_speech(C_pred, float(alpha_val), emo)
-                ant_state = _ant_classify(C_pred)
-                rate = str(round(params['rate'] * 100)) + '%'
-                pitch = f"{int(params['pitch'])}Hz" if params['pitch'] <= 0 else f"+{int(params['pitch'])}Hz"
-            except Exception:
-                pass  # Fall through to default rate/pitch
-
-        # Brain Engine: override with per-user Psi(t) speech adaptation
-        brain_speech = None
         uid = data.get('user_id', '')
+        ant_state = None
+
+        # ═══ SINGLE SOURCE OF TRUTH: voice_profile_engine ═══
+        # Combines: user profile + coherence φ–ρ–δ + brain Ψ(t) + time-of-day
+        # No duplicate calculations. One call. Final params.
+        rate = '0.9'
+        pitch = '+0%'
+
+        # 1. Get brain speech (raw Ψ data)
+        brain_speech = None
         if uid and _brain_available:
             try:
                 brain_speech = _brain_speech_fn(str(uid))
                 if brain_speech:
-                    ant_state = brain_speech.get('mode', ant_state)
+                    ant_state = brain_speech.get('mode')
             except Exception:
                 pass
 
-        # v452: Voice Profile Engine — per-user adaptive voice
+        # 2. Voice Profile Engine — FINAL params (all layers merged)
         if uid:
             try:
                 from voice_profile_engine import get_adapted_voice_params
                 from context_builder import classify_coherence
                 _phi = brain_speech.get('coherence', 0.5) if brain_speech else 0.5
-                _rho = 0.5
+                _rho = brain_speech.get('rho_stability', 0.5) if brain_speech else 0.5
                 _coh_state = classify_coherence(_phi, _rho)
                 _hour = __import__('datetime').datetime.now().hour
                 _time_ctx = 'morning' if _hour < 12 else 'afternoon' if _hour < 18 else 'evening' if _hour < 22 else 'night'
-                adapted = get_adapted_voice_params(uid, coherence_state=_coh_state, brain_speech=brain_speech, time_context=_time_ctx)
+                adapted = get_adapted_voice_params(uid, coherence_state=_coh_state,
+                                                    brain_speech=brain_speech, time_context=_time_ctx)
                 rate = str(adapted['rate'])
                 pitch = f"{adapted['pitch_pct']:+d}%"
                 _style = adapted.get('style', _style)
                 _styledegree = adapted.get('styledegree', _styledegree)
-            except (ImportError, Exception) as e:
-                # Fallback to brain_speech or defaults
+            except (ImportError, Exception):
+                # Fallback: brain_speech direct, or defaults
                 if brain_speech:
-                    rate = str(brain_speech.get('rate', rate))
+                    rate = str(brain_speech.get('rate', '0.9'))
                     pitch = f"{brain_speech.get('pitch_pct', 0):+d}%"
+                    _style = brain_speech.get('style', _style)
+                    _styledegree = brain_speech.get('styledegree', _styledegree)
 
         if not text:
             return jsonify({'error': 'Text is required'}), 400
