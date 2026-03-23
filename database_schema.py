@@ -50,6 +50,7 @@ PG_MAIN_SCHEMA = '''
         user_id TEXT NOT NULL,
         contact_id TEXT NOT NULL,
         name TEXT NOT NULL,
+        phone TEXT DEFAULT '',
         role TEXT DEFAULT 'Rodina',
         avatar TEXT,
         pinned INTEGER DEFAULT 0,
@@ -580,6 +581,8 @@ PG_MIGRATIONS = [
     "ALTER TABLE telemedicine_participants ADD COLUMN IF NOT EXISTS can_edit_notes INTEGER DEFAULT 0",
     "ALTER TABLE telemedicine_participants ADD COLUMN IF NOT EXISTS join_token TEXT",
     "ALTER TABLE telemedicine_participants ADD COLUMN IF NOT EXISTS join_token_expires TIMESTAMP",
+    # v444 — Phone number for contacts (voice calling)
+    "ALTER TABLE chat_contacts ADD COLUMN IF NOT EXISTS phone TEXT DEFAULT ''",
 ]
 
 # ============================================================================
@@ -619,6 +622,7 @@ SQLITE_SCHEMA = '''
         user_id TEXT NOT NULL,
         contact_id TEXT NOT NULL,
         name TEXT NOT NULL,
+        phone TEXT DEFAULT '',
         role TEXT DEFAULT 'Rodina',
         avatar TEXT,
         pinned INTEGER DEFAULT 0,

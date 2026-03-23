@@ -442,6 +442,7 @@ def add_contact():
             'user_id': data['userId'],
             'contact_id': data['contactId'],
             'name': data['name'],
+            'phone': data.get('phone', ''),
             'role': data.get('role', 'Rodina'),
             'avatar': data.get('avatar'),
             'pinned': 1 if data.get('pinned') else 0,
@@ -451,10 +452,10 @@ def add_contact():
 
         db = get_db()
         db.execute('''
-            INSERT INTO chat_contacts (id, user_id, contact_id, name, role, avatar, pinned, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO chat_contacts (id, user_id, contact_id, name, phone, role, avatar, pinned, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (contact['id'], contact['user_id'], contact['contact_id'], contact['name'],
-              contact['role'], contact['avatar'], contact['pinned'], contact['created_at']))
+              contact['phone'], contact['role'], contact['avatar'], contact['pinned'], contact['created_at']))
         db.commit()
 
         return jsonify({'success': True, 'contact': contact}), 201
