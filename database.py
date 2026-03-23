@@ -355,6 +355,12 @@ class db_context:
 
     def __enter__(self):
         self._db = get_connection()
+        # v450: Signal DB circuit breaker success
+        try:
+            from self_healing import get_breaker
+            get_breaker('database').record_success()
+        except Exception:
+            pass
         return self._db
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -364,6 +370,12 @@ class db_context:
             if exc_type is not None:
                 try:
                     self._db.rollback()
+                except Exception:
+                    pass
+                # v450: Signal DB circuit breaker failure
+                try:
+                    from self_healing import get_breaker
+                    get_breaker('database').record_failure()
                 except Exception:
                     pass
             elif self._commit:

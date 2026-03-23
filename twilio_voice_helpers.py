@@ -527,6 +527,16 @@ def initiate_proactive_call(phone_number, greeting, user_id=None, reason="check_
     if not phone_number or not re.match(r'^\+[1-9]\d{7,14}$', phone_number):
         return {"success": False, "error": f"Invalid E.164 phone: {phone_number}"}
 
+    # v450: Circuit breaker for Twilio
+    try:
+        from self_healing import get_breaker, log_healing_event
+        twilio_breaker = get_breaker('twilio')
+        if not twilio_breaker.can_proceed():
+            log_healing_event('circuit_open', 'twilio', {'phone': phone_number[-4:]})
+            return {"success": False, "error": "Twilio circuit open — too many failures"}
+    except ImportError:
+        twilio_breaker = None
+
     try:
         from xml.sax.saxutils import escape as esc
         safe_greeting = esc(greeting)
@@ -565,10 +575,14 @@ def initiate_proactive_call(phone_number, greeting, user_id=None, reason="check_
         }
 
         logger.info(f"📞 Proactive call initiated: {call.sid} → {phone_number} (reason={reason})")
+        if twilio_breaker: twilio_breaker.record_success()
         return {"success": True, "call_sid": call.sid}
 
     except Exception as e:
         logger.error(f"Proactive call error: {e}")
+        if twilio_breaker: twilio_breaker.record_failure()
+        try: log_healing_event('call_failed', 'twilio', {'error': str(e)[:80], 'phone': phone_number[-4:]})
+        except: pass
         return {"success": False, "error": str(e)}
 
 

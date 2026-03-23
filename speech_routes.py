@@ -442,6 +442,15 @@ def get_azure_token():
             'expiresIn': int(_token_cache['expires'] - now)
         })
 
+    # v450: Circuit breaker for Azure STT
+    try:
+        from self_healing import get_breaker
+        stt_breaker = get_breaker('azure_stt')
+        if not stt_breaker.can_proceed():
+            return jsonify({'success': False, 'error': 'Azure STT temporarily unavailable', 'fallback': 'browser'}), 503
+    except ImportError:
+        stt_breaker = None
+
     # Fetch new token from Azure (valid for 10 minutes)
     try:
         token_url = f"https://{AZURE_SPEECH_REGION}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
@@ -455,6 +464,7 @@ def get_azure_token():
             token = response.text
             _token_cache['token'] = token
             _token_cache['expires'] = now + 600  # 10 minutes
+            if stt_breaker: stt_breaker.record_success()
 
             return jsonify({
                 'success': True,
@@ -463,13 +473,16 @@ def get_azure_token():
                 'expiresIn': 600
             })
         else:
+            if stt_breaker: stt_breaker.record_failure()
             return jsonify({
                 'success': False,
-                'error': f'Azure token error: {response.status_code}'
+                'error': f'Azure token error: {response.status_code}',
+                'fallback': 'browser'
             }), 500
 
     except Exception as e:
         logger.error(f"azure_token error: {e}")
+        if stt_breaker: stt_breaker.record_failure()
         return jsonify({
             'success': False,
             'error': 'Nepodarilo se ziskat Azure token'
