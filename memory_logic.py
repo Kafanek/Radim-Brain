@@ -191,6 +191,21 @@ def build_personalized_prompt(user_id: str) -> str:
     except ImportError:
         pass
 
+    # v437: Relationship Engine — vztahový kontext
+    try:
+        from relationship_engine import identify_relationship, build_relationship_prompt, save_relationship
+        auth_role = ctx.get('role', 'subscriber')
+        rel = identify_relationship(user_id, auth_role=auth_role, learning_data=ctx, profile_data=profile)
+        rel_prompt = build_relationship_prompt(rel)
+        if rel_prompt:
+            parts.append(rel_prompt)
+        # Persist relationship state
+        save_relationship(user_id, rel)
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.debug(f"Relationship engine: {e}")
+
     parts.append("===============================================================")
 
     return "\n".join(parts)
