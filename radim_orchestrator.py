@@ -160,10 +160,30 @@ def radim_chat():
                 'intent': 'safety',
                 'mode': mode
             })
-            # else: HIGH severity (pain, fall, breathing) → fall through to AI
-            # AI will respond with empathy + doptávání per cognitive pipeline KROK 6
-            # Caregivers already notified async above
-            mode = 'CRISIS'  # Force crisis mode for AI response
+            else:
+                # HIGH severity (pain, fall, breathing) → empathetic structured response
+                # AI in CRISIS mode gives too-short answers, so we build it here
+                msg_lower = message.lower()
+                if any(w in msg_lower for w in ['dýchat', 'dech', 'dušnost', 'hrud']):
+                    crisis_resp = 'Jsem tady s vámi, nikam neodcházím. Zkuste se posadit a dýchat pomalu — nádech nosem, výdech ústy. Bolí to stále stejně, nebo se to mění? Chcete, abych zavolal lékaře?'
+                elif any(w in msg_lower for w in ['spadl', 'upadl', 'nemůžu vstát', 'nemuzu vstat', 'zlomen']):
+                    crisis_resp = 'Ach ne, to mě mrzí. Hlavně se nehýbejte a zůstaňte na místě. Bolí vás i hlava, nebo jen to místo kde jste spadl? Chcete, abych zavolal pomoc nebo rodinu?'
+                elif any(w in msg_lower for w in ['krev', 'rána', 'řízl', 'pořezal']):
+                    crisis_resp = 'Zůstaňte v klidu. Přitiskněte na ránu čistý hadřík a držte tlak. Je to velká rána? Chcete, abych zavolal záchranku?'
+                else:
+                    crisis_resp = 'Slyším, že vám není dobře, a jsem tady s vámi. Posaďte se nebo si lehněte, ať se vám trochu ulevilo. Můžete mi říct víc o tom, co cítíte? Chcete, abych zavolal lékaře nebo rodinu?'
+
+                return jsonify({
+                    'success': True,
+                    'response': crisis_resp,
+                    'radim_action': {
+                        'type': 'safety_alert',
+                        'payload': {'user_id': user_id, 'severity': 'high', 'message': message},
+                        'ui': {'suggested_buttons': ['Zavolat lékaře', 'Zavolat rodinu', 'Jsem v pořádku']}
+                    },
+                    'intent': 'safety',
+                    'mode': 'CRISIS'
+                })
 
         # Load personalization and history from memory
         personalized = ''
