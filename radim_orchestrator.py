@@ -511,6 +511,13 @@ def radim_chat():
             except Exception as rec_err:
                 logger.warning(f"Memory record warning: {rec_err}")
 
+        # v452: Voice profile learning — detect "pomaleji", "hlasitěji"
+        try:
+            from voice_profile_engine import learn_from_message
+            learn_from_message(user_id, message)
+        except (ImportError, Exception):
+            pass
+
         # Brain reinforcement: adapt per-user after response
         if _ORCH_BRAIN_AVAILABLE and text_response != "Promiňte, zkuste to za chvíli. 🙏":
             try:

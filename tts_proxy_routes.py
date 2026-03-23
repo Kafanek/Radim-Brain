@@ -110,11 +110,30 @@ def azure_tts_proxy():
             try:
                 brain_speech = _brain_speech_fn(str(uid))
                 if brain_speech:
-                    rate = str(brain_speech['rate'])
-                    pitch = f"{brain_speech['pitch_pct']:+d}%"
-                    ant_state = brain_speech['mode']
+                    ant_state = brain_speech.get('mode', ant_state)
             except Exception:
                 pass
+
+        # v452: Voice Profile Engine — per-user adaptive voice
+        if uid:
+            try:
+                from voice_profile_engine import get_adapted_voice_params
+                from context_builder import classify_coherence
+                _phi = brain_speech.get('coherence', 0.5) if brain_speech else 0.5
+                _rho = 0.5
+                _coh_state = classify_coherence(_phi, _rho)
+                _hour = __import__('datetime').datetime.now().hour
+                _time_ctx = 'morning' if _hour < 12 else 'afternoon' if _hour < 18 else 'evening' if _hour < 22 else 'night'
+                adapted = get_adapted_voice_params(uid, coherence_state=_coh_state, brain_speech=brain_speech, time_context=_time_ctx)
+                rate = str(adapted['rate'])
+                pitch = f"{adapted['pitch_pct']:+d}%"
+                _style = adapted.get('style', _style)
+                _styledegree = adapted.get('styledegree', _styledegree)
+            except (ImportError, Exception) as e:
+                # Fallback to brain_speech or defaults
+                if brain_speech:
+                    rate = str(brain_speech.get('rate', rate))
+                    pitch = f"{brain_speech.get('pitch_pct', 0):+d}%"
 
         if not text:
             return jsonify({'error': 'Text is required'}), 400
