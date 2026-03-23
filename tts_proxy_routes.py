@@ -176,7 +176,7 @@ def azure_tts_proxy():
         if response.status_code == 200:
             resp_headers = {
                 'X-Voice-Name': voice,
-                'X-Voice-Rate': str(rate),
+                'X-Voice-Mode': _mode,
                 'Cache-Control': 'no-cache'
             }
             if ant_state:
