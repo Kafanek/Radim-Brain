@@ -100,16 +100,16 @@ _TEXT_PARAMS = {
         "max_tokens": 250,
     },
     "CRISIS": {
-        "max_sentences": 1,
-        "sentence_structure": "single",       # 1
+        "max_sentences": 4,             # v434: was 1 — too short, senior needs to hear voice
+        "sentence_structure": "simple",
         "complexity": "minimal",
         "empathy_level": "maximum",
         "word_choice": "basic",
         "tone": "hluboce klidný, bezpečný, ochranný, jasný",
         "golden_ratio_split": 1.0,
-        "max_words_per_sentence": 8,
+        "max_words_per_sentence": 15,   # v434: was 8 — too restrictive
         "temperature_hint": 0.3,
-        "max_tokens": 80,
+        "max_tokens": 200,              # v434: was 80 — need room for empathy + question
     }
 }
 
