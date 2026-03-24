@@ -292,7 +292,7 @@ def resolve_intent(message, user_id=None, mode="HARMONY"):
                 handler = _HANDLERS.get(handler_key)
                 if handler:
                     try:
-                        response = handler(user_id=user_id, mode=mode)
+                        response = handler(user_id=user_id, mode=mode, message=message)
                         if response is not None:
                             logger.info(f"Intent '{name}' resolved locally for user={user_id}")
                             return (response, name, {"source": "local"})
