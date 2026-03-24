@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # HIGH: Direct prompt manipulation
 _INJECTION_PATTERNS = [
     # English injection attempts
-    r'ignore\s+(all\s+)?previous\s+instructions',
+    r'ignore\s+(all\s+)?(previous\s+)?instructions',
     r'ignore\s+(all\s+)?above',
     r'disregard\s+(all\s+)?previous',
     r'forget\s+(all\s+)?(your\s+)?instructions',
