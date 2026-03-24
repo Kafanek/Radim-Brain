@@ -147,8 +147,12 @@ def _handle_how_are_you(**kwargs):
 def _handle_my_medications(**kwargs):
     """Return senior's medication list from profile."""
     user_id = kwargs.get("user_id")
+    message = kwargs.get("message", "").lower()
     if not user_id:
         return None  # pass to AI
+    # "zapomněl jsem léky" → let AI handle with empathy
+    if any(w in message for w in ["zapomněl", "zapomnel", "nevím", "nevim", "nepamatuj"]):
+        return None  # pass to AI for empathetic response
     try:
         from memory_helpers import db_load_profile
         profile = db_load_profile(user_id)

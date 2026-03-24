@@ -49,7 +49,7 @@ _INJECTION_PATTERNS = [
 
     # Czech injection attempts
     r'ignoruj\s+(všechny\s+)?předchozí\s+instrukce',
-    r'zapomeň\s+(na\s+)?(všechny\s+)?pravidla',
+    r'zapomeň\s+(na\s+)?(všechny\s+)?(pravidla|instrukce)',
     r'ukaž\s+mi\s+(svůj\s+)?(systémový\s+)?prompt',
     r'jsi\s+teď\s+(DAN|zlý|neomezený)',
     r'obejdi\s+(svá\s+)?pravidla',
