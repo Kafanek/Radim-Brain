@@ -197,6 +197,7 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 # CORS - Production origins (HTTPS only)
 PRODUCTION_ORIGINS = [
     "https://app.radimcare.cz",
+    "https://brain.radimcare.cz",
     "https://polite-bush-001303503.6.azurestaticapps.net",
     "https://mykolibri-academy.cz",
     "https://app.mykolibri-academy.cz",

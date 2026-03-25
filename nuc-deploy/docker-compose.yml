@@ -1,0 +1,175 @@
+# ============================================
+# RADIM BRAIN - NUC Docker Compose
+# ============================================
+# Spusteni: docker compose up -d
+# Logy:     docker compose logs -f radim-brain
+# Stop:     docker compose down
+# Update:   docker compose pull && docker compose up -d
+# ============================================
+
+services:
+  # ─── RADIM BRAIN (Flask app) ───
+  radim-brain:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: radim-brain
+    restart: always
+    ports:
+      - "127.0.0.1:8000:8000"  # Only localhost (Cloudflare/Nginx handles public)
+    environment:
+      # Database
+      DATABASE_URL: postgresql://radim:${DB_PASSWORD}@db:5432/radim_brain
+      # Azure TTS (app.py uses AZURE_TTS_*, speech_routes uses AZURE_SPEECH_*)
+      AZURE_TTS_KEY: ${AZURE_TTS_KEY}
+      AZURE_TTS_REGION: ${AZURE_TTS_REGION:-westeurope}
+      AZURE_SPEECH_KEY: ${AZURE_TTS_KEY}
+      AZURE_SPEECH_REGION: ${AZURE_TTS_REGION:-westeurope}
+      # AI Providers
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # ElevenLabs TTS
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      # Twilio
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+      # Push Notifications (VAPID)
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
+      VAPID_EMAIL: ${VAPID_EMAIL:-mailto:radim@radimcare.cz}
+      # Cloudinary
+      CLOUDINARY_URL: ${CLOUDINARY_URL:-}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+      # WordPress
+      WP_URL: ${WP_URL:-}
+      WP_USER: ${WP_USER:-}
+      WP_APP_PASSWORD: ${WP_APP_PASSWORD:-}
+      # Auth
+      JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY: ${JWT_SECRET}
+      WP_JWT_SECRET: ${WP_JWT_SECRET}
+      # SMTP (email)
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      # App config
+      FLASK_ENV: production
+      PORT: 8000
+      # NUC-specific: public URL for callbacks (Twilio, webhooks)
+      PUBLIC_URL: ${PUBLIC_URL:-https://brain.radimcare.cz}
+    volumes:
+      - radim-logs:/app/logs
+      - radim-data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - radim-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ─── PostgreSQL 16 (Debian, not Alpine — needs cs_CZ locale) ───
+  db:
+    image: postgres:16
+    container_name: radim-db
+    restart: always
+    environment:
+      POSTGRES_DB: radim_brain
+      POSTGRES_USER: radim
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=cs_CZ.UTF-8"
+    # POZOR: shared_buffers=4GB vyzaduje min 16 GB RAM na NUC
+    # Pro 8 GB RAM zmenit na: shared_buffers=1GB, effective_cache_size=4GB
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=4GB"
+      - "-c"
+      - "effective_cache_size=12GB"
+      - "-c"
+      - "work_mem=64MB"
+      - "-c"
+      - "maintenance_work_mem=512MB"
+      - "-c"
+      - "wal_buffers=64MB"
+      - "-c"
+      - "max_wal_size=2GB"
+      - "-c"
+      - "max_connections=50"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "log_min_duration_statement=500"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
+    ports:
+      - "127.0.0.1:5432:5432"  # Only localhost access
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U radim -d radim_brain"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - radim-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # ─── Nginx (reverse proxy + SSL) ───
+  # POZNAMKA: Pokud pouzivas Cloudflare Tunnel, nginx NEPOTREBUJES.
+  # V tom pripade zakomentuj celou sekci nginx a certbot.
+  nginx:
+    image: nginx:alpine
+    container_name: radim-nginx
+    restart: always
+    profiles: ["nginx"]  # Only starts with: docker compose --profile nginx up -d
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/letsencrypt:ro
+      - ./certbot-webroot:/var/www/certbot:ro
+    depends_on:
+      - radim-brain
+    networks:
+      - radim-net
+
+  # ─── Certbot (SSL certificate renewal) ───
+  certbot:
+    image: certbot/certbot
+    container_name: radim-certbot
+    profiles: ["nginx"]  # Only with nginx profile
+    volumes:
+      - ./certs:/etc/letsencrypt
+      - ./certbot-webroot:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done'"
+    networks:
+      - radim-net
+
+volumes:
+  pgdata:
+    driver: local
+  radim-logs:
+    driver: local
+  radim-data:
+    driver: local
+
+networks:
+  radim-net:
+    driver: bridge

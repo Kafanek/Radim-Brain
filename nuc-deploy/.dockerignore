@@ -1,0 +1,36 @@
+# NUC Deploy — Docker ignore
+# Build context is /opt/radim/ (where docker-compose.yml lives)
+# App code is in /opt/radim/app/
+
+# Exclude deploy infrastructure (not needed in container)
+docker-compose.yml
+Dockerfile
+nginx.conf
+init-db.sql
+pg-tuning.conf
+*.sh
+.env
+.env.example
+certs/
+certbot-webroot/
+backups/
+logs/
+
+# Exclude Python artifacts inside app/
+app/.git
+app/__pycache__
+app/*.pyc
+app/*.pyo
+app/*.log
+app/*.bak
+app/*.md
+app/_CLEANUP_*
+app/node_modules/
+app/mykolibri-academy-project/
+app/nuc-deploy/
+app/vscode-mykolibri-orchestration/
+app/radim-backend/
+app/radim-backend-mcp/
+app/kal-system/
+app/kal-system-deploy/
+app/.claude/
