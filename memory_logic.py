@@ -44,6 +44,9 @@ def get_user_context(user_id: str) -> dict:
     topics = learning.get("topics", {})
     top_topics = sorted(topics.items(), key=lambda x: x[1], reverse=True)[:3]
 
+    # v465: Extended personal profile — interests, music, routine, family
+    personal = profile.get("personal", {})
+
     context = {
         "has_profile": bool(profile),
         "name": profile.get("name", ""),
@@ -59,7 +62,16 @@ def get_user_context(user_id: str) -> dict:
         "interaction_count": learning.get("interaction_count", 0),
         "last_mood": learning.get("last_mood", "neutral"),
         "recent_history": history,
-        "_raw_profile": profile  # v230: plný profil pro léky, kontakty, rutinu
+        "_raw_profile": profile,
+        # v465: Personal life
+        "favorite_music": personal.get("favorite_music", []),      # ["Karel Gott", "dechovka", "klasika"]
+        "favorite_radio": personal.get("favorite_radio", ""),       # "Radiožurnál"
+        "hobbies": personal.get("hobbies", []),                     # ["zahrada", "vaření", "šachy"]
+        "daily_routine": personal.get("daily_routine", {}),         # {"8:00": "snídaně", "14:00": "procházka"}
+        "family_members": personal.get("family_members", []),       # [{name, relation, birthday, phone}]
+        "life_story": personal.get("life_story", ""),               # "Vyrůstal v Brně, pracoval jako učitel"
+        "favorite_stories": personal.get("favorite_stories", []),   # ["pohádky", "detektivky"]
+        "relaxation": personal.get("relaxation", []),               # ["příroda", "meditace", "tichá hudba"]
     }
 
     return context
@@ -119,6 +131,24 @@ def build_personalized_prompt(user_id: str) -> str:
     if ctx["top_interests"]:
         interests_str = ", ".join(ctx["top_interests"])
         parts.append(f"- Oblíbená témata: {interests_str} → Můžeš na ně navázat")
+
+    # v465: Osobní život — hudba, koníčky, rodina, rutina
+    if ctx.get("favorite_music"):
+        parts.append(f"- Oblíbená hudba: {', '.join(ctx['favorite_music'])} → Můžeš nabídnout pustit")
+    if ctx.get("favorite_radio"):
+        parts.append(f"- Oblíbené rádio: {ctx['favorite_radio']}")
+    if ctx.get("hobbies"):
+        parts.append(f"- Koníčky: {', '.join(ctx['hobbies'])} → Zeptej se jak jim jde")
+    if ctx.get("family_members"):
+        fam = [f"{m.get('name','')} ({m.get('relation','')})" for m in ctx["family_members"][:5]]
+        parts.append(f"- Rodina: {', '.join(fam)}")
+    if ctx.get("daily_routine"):
+        routine_str = ", ".join(f"{k}: {v}" for k, v in list(ctx["daily_routine"].items())[:5])
+        parts.append(f"- Denní rutina: {routine_str}")
+    if ctx.get("life_story"):
+        parts.append(f"- Životní příběh: {ctx['life_story'][:150]}")
+    if ctx.get("relaxation"):
+        parts.append(f"- Relaxace: {', '.join(ctx['relaxation'])}")
 
     # Nálada
     mood_map = {
@@ -431,6 +461,10 @@ def record_interaction(user_id: str, user_message: str, assistant_response: str,
     # v446: Health topic tracking — "koleno bolí od pondělí"
     _track_health_topics(learning, user_message)
 
+    # v465: Interest + family tracking — "mám ráda zahradu", "dcera mi volala"
+    _track_interests(learning, user_message)
+    _track_family_mentions(learning, user_message)
+
     # v283: Brain state learning
     if brain_C is not None:
         c_history = learning.get("C_history", [])
@@ -477,4 +511,52 @@ def record_interaction(user_id: str, user_message: str, assistant_response: str,
         pass
 
 
-logger.info("✅ Memory Logic loaded — personalization, recording, crisis escalation")
+# ============================================================================
+# INTEREST TRACKING (v465) — learn hobbies, music, family from conversation
+# ============================================================================
+
+_INTEREST_PATTERNS = {
+    'music': ['hudba', 'písnička', 'zpívat', 'poslouchat', 'koncert', 'opera', 'gott', 'dechovka', 'klasika', 'jazz', 'country', 'rádio', 'radiožurnál'],
+    'garden': ['zahrada', 'zahrádka', 'květiny', 'sázet', 'pěstovat', 'rajčata', 'růže', 'kompost'],
+    'cooking': ['vařit', 'vaření', 'recept', 'koláč', 'buchta', 'polévka', 'pečení', 'jídlo'],
+    'crafts': ['háčkovat', 'plést', 'šít', 'vyšívat', 'ruční práce', 'malovat'],
+    'reading': ['kniha', 'číst', 'čtení', 'román', 'detektivka', 'povídka'],
+    'nature': ['procházka', 'příroda', 'les', 'park', 'ptáci', 'houby'],
+    'games': ['šachy', 'karty', 'křížovka', 'sudoku', 'puzzle', 'mariáš', 'hra'],
+    'family': ['vnouče', 'vnučka', 'vnuk', 'dcera', 'syn', 'pravnouče', 'manžel', 'manželka'],
+    'pets': ['kočka', 'pes', 'pejsek', 'kočička', 'zvíře', 'mazlíček'],
+    'tv': ['televize', 'seriál', 'film', 'zprávy', 'pořad'],
+}
+
+def _track_interests(learning, message):
+    """Auto-detect interests from conversation and save to learning."""
+    if not message or len(message) < 5:
+        return
+    lower = message.lower()
+    detected = learning.get('detected_interests', {})
+    for category, keywords in _INTEREST_PATTERNS.items():
+        for kw in keywords:
+            if kw in lower:
+                detected[category] = detected.get(category, 0) + 1
+                break
+    if detected:
+        learning['detected_interests'] = detected
+
+
+def _track_family_mentions(learning, message):
+    """Track when family members are mentioned."""
+    if not message or len(message) < 5:
+        return
+    lower = message.lower()
+    family_words = {'dcera': 'dcera', 'syn': 'syn', 'vnučka': 'vnučka', 'vnuk': 'vnuk',
+                    'manželka': 'manželka', 'manžel': 'manžel', 'bratr': 'bratr',
+                    'sestra': 'sestra', 'maminka': 'matka', 'tatínek': 'otec'}
+    mentions = learning.get('family_mentions', {})
+    for word, relation in family_words.items():
+        if word in lower:
+            mentions[relation] = mentions.get(relation, 0) + 1
+    if mentions:
+        learning['family_mentions'] = mentions
+
+
+logger.info("✅ Memory Logic v465 loaded — personalization, interests, health tracking")
