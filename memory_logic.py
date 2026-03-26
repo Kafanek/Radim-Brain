@@ -515,17 +515,19 @@ def record_interaction(user_id: str, user_message: str, assistant_response: str,
 # INTEREST TRACKING (v465) — learn hobbies, music, family from conversation
 # ============================================================================
 
+# Czech stemming: use word ROOTS to match all declensions
+# "zahrad" matches zahrada/zahradu/zahradě/zahrady/zahradou
 _INTEREST_PATTERNS = {
-    'music': ['hudba', 'písnička', 'zpívat', 'poslouchat', 'koncert', 'opera', 'gott', 'dechovka', 'klasika', 'jazz', 'country', 'rádio', 'radiožurnál'],
-    'garden': ['zahrada', 'zahrádka', 'květiny', 'sázet', 'pěstovat', 'rajčata', 'růže', 'kompost'],
-    'cooking': ['vařit', 'vaření', 'recept', 'koláč', 'buchta', 'polévka', 'pečení', 'jídlo'],
-    'crafts': ['háčkovat', 'plést', 'šít', 'vyšívat', 'ruční práce', 'malovat'],
-    'reading': ['kniha', 'číst', 'čtení', 'román', 'detektivka', 'povídka'],
-    'nature': ['procházka', 'příroda', 'les', 'park', 'ptáci', 'houby'],
-    'games': ['šachy', 'karty', 'křížovka', 'sudoku', 'puzzle', 'mariáš', 'hra'],
-    'family': ['vnouče', 'vnučka', 'vnuk', 'dcera', 'syn', 'pravnouče', 'manžel', 'manželka'],
-    'pets': ['kočka', 'pes', 'pejsek', 'kočička', 'zvíře', 'mazlíček'],
-    'tv': ['televize', 'seriál', 'film', 'zprávy', 'pořad'],
+    'music': ['hudb', 'písni', 'zpív', 'poslouch', 'koncert', 'oper', 'gott', 'dechov', 'klasik', 'jazz', 'country', 'rádi', 'radiožurn', 'melodi'],
+    'garden': ['zahrad', 'květin', 'sáze', 'pěstov', 'rajčat', 'růž', 'kompost', 'záhon', 'tráv'],
+    'cooking': ['vař', 'vaření', 'recept', 'koláč', 'bucht', 'polévk', 'peč', 'jídl', 'kuch'],
+    'crafts': ['háčk', 'plet', 'šij', 'vyšív', 'ruční prác', 'malov', 'kresli'],
+    'reading': ['knih', 'čís', 'čten', 'román', 'detektiv', 'povídk', 'pohád', 'časopis'],
+    'nature': ['procház', 'přírod', 'les', 'park', 'ptá', 'houb', 'zvířat'],
+    'games': ['šach', 'kart', 'křížov', 'sudok', 'puzzl', 'mariáš', 'hraj'],
+    'family': ['vnouč', 'vnučk', 'vnuk', 'dcer', 'syn', 'pravnouč', 'manžel', 'rodina', 'rodič'],
+    'pets': ['kočk', 'pes', 'pejsk', 'kočičk', 'zvíře', 'mazlíč', 'psík'],
+    'tv': ['televiz', 'seriál', 'film', 'zpráv', 'pořad'],
 }
 
 def _track_interests(learning, message):
