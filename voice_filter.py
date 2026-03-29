@@ -92,18 +92,20 @@ def _add_sentence_pauses(text, pause_ms):
 
 
 def _add_emphasis(text_with_breaks):
-    """Add gentle emphasis to key words, numbers, medicine names."""
+    """Add gentle emphasis to key words, numbers, medicine names.
+    v473: Prevents double-nesting (<emphasis><emphasis>).
+    """
     # Word emphasis
     for word in EMPHASIS_WORDS:
-        pattern = re.compile(rf'\b({re.escape(word)})\b', re.IGNORECASE)
+        pattern = re.compile(rf'(?<!<emphasis level="moderate">)\b({re.escape(word)})\b', re.IGNORECASE)
         text_with_breaks = pattern.sub(
             r'<emphasis level="moderate">\1</emphasis>',
             text_with_breaks
         )
-    # Pattern emphasis (numbers, times)
+    # Pattern emphasis (numbers, times) — skip if already wrapped
     for pat in EMPHASIS_PATTERNS:
         text_with_breaks = re.sub(
-            rf'({pat})',
+            rf'(?<!<emphasis level="moderate">)({pat})(?!</emphasis>)',
             r'<emphasis level="moderate">\1</emphasis>',
             text_with_breaks
         )
