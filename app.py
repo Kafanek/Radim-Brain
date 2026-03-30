@@ -429,6 +429,14 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Audit routes: {e}")
 
+# Care Plan Routes (Plán péče)
+try:
+    from care_plan import care_plan_bp
+    app.register_blueprint(care_plan_bp)
+    logger.info("✅ Care Plan routes registered: /api/care-plan/*")
+except Exception as e:
+    logger.warning(f"⚠️ Care Plan routes: {e}")
+
 # Auth Routes (Registration, Login, JWT, GDPR)
 from auth_routes import auth_bp
 app.register_blueprint(auth_bp)

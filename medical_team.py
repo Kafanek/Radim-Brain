@@ -514,6 +514,138 @@ def list_roles():
 # CONSENT FLOW (GDPR)
 # ============================================================================
 
+CONSENT_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS granular_consent (
+        id SERIAL PRIMARY KEY,
+        senior_id TEXT NOT NULL,
+        member_id INTEGER,
+        user_id TEXT,
+        role TEXT,
+        data_type TEXT NOT NULL,
+        granted BOOLEAN DEFAULT false,
+        expires_at TIMESTAMP,
+        granted_at TIMESTAMP,
+        revoked_at TIMESTAMP,
+        change_reason TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_gconsent_senior ON granular_consent(senior_id);
+"""
+
+CONSENT_DATA_TYPES = ['vitals', 'activity', 'mood', 'medications', 'photos', 'brain', 'chat', 'reports']
+
+def _init_consent_schema():
+    try:
+        with db_context(commit=True) as db:
+            for s in CONSENT_SCHEMA.strip().split(';'):
+                s = s.strip()
+                if s: db.execute(s)
+    except Exception:
+        pass
+
+
+@medical_bp.route('/api/medical/consent/<senior_id>/granular', methods=['GET', 'POST'])
+@optional_auth
+def granular_consent(senior_id):
+    """Granular GDPR consent — per role, per data type, with expiry."""
+    _init_consent_schema()
+
+    if request.method == 'GET':
+        try:
+            with db_context() as db:
+                rows = db.execute(
+                    "SELECT gc.id, gc.user_id, gc.role, gc.data_type, gc.granted, gc.expires_at, gc.granted_at, "
+                    "mt.name FROM granular_consent gc "
+                    "LEFT JOIN medical_team mt ON gc.user_id = mt.user_id AND gc.senior_id = mt.senior_id "
+                    "WHERE gc.senior_id = ? ORDER BY gc.role, gc.data_type",
+                    (senior_id,)
+                ).fetchall()
+
+            consents = [{
+                'id': r[0], 'user_id': r[1], 'role': r[2], 'data_type': r[3],
+                'granted': r[4], 'expires_at': str(r[5]) if r[5] else None,
+                'granted_at': str(r[6]) if r[6] else None, 'name': r[7] or '',
+            } for r in rows]
+
+            return jsonify({
+                'success': True, 'consents': consents,
+                'data_types': CONSENT_DATA_TYPES,
+                'count': len(consents),
+            })
+        except Exception:
+            return jsonify({'success': True, 'consents': [], 'data_types': CONSENT_DATA_TYPES, 'count': 0})
+
+    elif request.method == 'POST':
+        data = request.json or {}
+        user_id = data.get('user_id', '')
+        role = data.get('role', '')
+        data_type = data.get('data_type', '')
+        action = data.get('action', 'grant')  # grant / revoke
+        expires_days = data.get('expires_days')  # optional: auto-expire after N days
+        reason = data.get('reason', '')
+
+        if data_type not in CONSENT_DATA_TYPES:
+            return jsonify({'success': False, 'error': f'Neznámý typ dat. Povolené: {CONSENT_DATA_TYPES}'}), 400
+
+        try:
+            expires_at = None
+            if expires_days:
+                from datetime import timedelta
+                expires_at = (datetime.utcnow() + timedelta(days=int(expires_days))).isoformat()
+
+            with db_context(commit=True) as db:
+                if action == 'grant':
+                    db.execute(
+                        "INSERT INTO granular_consent (senior_id, user_id, role, data_type, granted, "
+                        "expires_at, granted_at, change_reason) VALUES (?, ?, ?, ?, true, ?, NOW(), ?) "
+                        "ON CONFLICT DO NOTHING",
+                        (senior_id, user_id, role, data_type, expires_at, reason)
+                    )
+                elif action == 'revoke':
+                    db.execute(
+                        "UPDATE granular_consent SET granted = false, revoked_at = NOW(), change_reason = ? "
+                        "WHERE senior_id = ? AND user_id = ? AND data_type = ?",
+                        (reason, senior_id, user_id, data_type)
+                    )
+
+            try:
+                from audit_log import log_audit, CONSENT
+                log_audit(CONSENT, 'granular_consent', None, senior_id,
+                          {'user_id': user_id, 'data_type': data_type, 'action': action, 'expires_days': expires_days})
+            except Exception:
+                pass
+
+            msg = f'✅ Souhlas {"udělen" if action == "grant" else "odebrán"} pro {data_type}'
+            return jsonify({'success': True, 'message': msg})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@medical_bp.route('/api/medical/consent/<senior_id>/history', methods=['GET'])
+@optional_auth
+def consent_history(senior_id):
+    """Consent change history — GDPR audit."""
+    _init_consent_schema()
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT role, data_type, granted, granted_at, revoked_at, change_reason "
+                "FROM granular_consent WHERE senior_id = ? ORDER BY created_at DESC LIMIT 50",
+                (senior_id,)
+            ).fetchall()
+
+        history = [{
+            'role': r[0], 'data_type': r[1], 'granted': r[2],
+            'granted_at': str(r[3]) if r[3] else None,
+            'revoked_at': str(r[4]) if r[4] else None,
+            'reason': r[5],
+        } for r in rows]
+
+        return jsonify({'success': True, 'history': history, 'count': len(history)})
+    except Exception:
+        return jsonify({'success': True, 'history': [], 'count': 0})
+
+
 @medical_bp.route('/api/medical/consent/<senior_id>', methods=['GET', 'POST'])
 @optional_auth
 def consent(senior_id):
