@@ -374,6 +374,41 @@ def _execute_action(user_id, obs, app):
     if severity == CRISIS:
         _crisis_escalate(user_id, obs, app)
 
+    # v485: Route to medical team — filtered by observation type
+    _route_to_medical_team(user_id, obs)
+
+
+def _route_to_medical_team(user_id, obs):
+    """Save alert to medical_alerts and route to relevant doctors."""
+    try:
+        from database import db_context
+        obs_type = obs.get('type', '')
+        severity = obs.get('severity', 'info')
+
+        # Map observation type → relevant medical roles
+        ALERT_ROLE_MAP = {
+            'c_trend_rising': ['coordinator', 'caregiver'],
+            'activity_drop': ['coordinator', 'caregiver', 'vascular'],
+            'vital_anomaly': ['coordinator', 'cardiologist'],
+            'no_interaction': ['coordinator', 'caregiver', 'family'],
+            'heart_rate': ['cardiologist'],
+            'blood_pressure': ['cardiologist'],
+            'skin_change': ['dermatologist'],
+            'fall_detected': ['coordinator', 'caregiver', 'family'],
+        }
+        routed = ALERT_ROLE_MAP.get(obs_type, ['coordinator'])
+
+        with db_context(commit=True) as db:
+            db.execute(
+                "INSERT INTO medical_alerts (senior_id, alert_type, severity, message, data, routed_to) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (user_id, obs_type, severity, obs.get('message', ''),
+                 __import__('json').dumps(obs.get('details', {})),
+                 __import__('json').dumps(routed))
+            )
+    except Exception as e:
+        logger.debug(f"Medical alert routing: {e}")
+
 
 def _push_to_senior(user_id, obs, app):
     """Push notification to senior."""
