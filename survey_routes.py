@@ -208,6 +208,14 @@ def submit_response():
     points = survey['reward_points'] if survey else 10
 
     try:
+        # Ensure tables exist (auto-create on first use)
+        try:
+            from database_schema import init_survey_schema
+            with db_context(commit=True) as db:
+                init_survey_schema(db)
+        except Exception:
+            pass
+
         with db_context(commit=True) as db:
             # Save response
             db_insert(db, 'survey_responses',
