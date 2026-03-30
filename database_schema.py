@@ -1170,4 +1170,62 @@ def init_sqlite_schema(db):
     ''', ('radim', 'Radim Asistent', 'ai_assistant', 1, '{"ai_enabled": true, "voice": "radim"}'))
 
 
-logger.info("Database Schema v4.0 loaded — PG + SQLite schemas")
+# ============================================
+# SURVEY / DOTAZNÍKY SCHEMA (v479)
+# ============================================
+
+SURVEY_SCHEMA_PG = """
+    CREATE TABLE IF NOT EXISTS surveys (
+        id SERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        survey_type TEXT DEFAULT 'daily',
+        questions JSONB NOT NULL DEFAULT '[]',
+        reward_points INTEGER DEFAULT 10,
+        active BOOLEAN DEFAULT true,
+        target_audience TEXT DEFAULT 'senior',
+        frequency TEXT DEFAULT 'daily',
+        created_by TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS survey_responses (
+        id SERIAL PRIMARY KEY,
+        survey_id INTEGER REFERENCES surveys(id),
+        user_id TEXT NOT NULL,
+        answers JSONB NOT NULL DEFAULT '[]',
+        points_earned INTEGER DEFAULT 0,
+        source TEXT DEFAULT 'ui',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_survey_resp_user ON survey_responses(user_id);
+    CREATE INDEX IF NOT EXISTS idx_survey_resp_survey ON survey_responses(survey_id);
+
+    CREATE TABLE IF NOT EXISTS survey_rewards (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL UNIQUE,
+        total_points INTEGER DEFAULT 0,
+        level TEXT DEFAULT 'starter',
+        badges JSONB DEFAULT '[]',
+        streak_days INTEGER DEFAULT 0,
+        last_survey_at TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_survey_rewards_user ON survey_rewards(user_id);
+"""
+
+def init_survey_schema(db):
+    """Create survey tables (call from init_db or migration)."""
+    try:
+        for stmt in SURVEY_SCHEMA_PG.strip().split(';'):
+            stmt = stmt.strip()
+            if stmt:
+                db.execute(stmt)
+        logger.info("✅ Survey schema created")
+    except Exception as e:
+        logger.debug(f"Survey schema: {e}")
+
+
+logger.info("Database Schema v4.1 loaded — PG + SQLite + Surveys")

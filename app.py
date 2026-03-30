@@ -399,6 +399,20 @@ from chat_routes import chat_bp
 app.register_blueprint(chat_bp)
 logger.info("✅ Chat routes registered: /api/chat/*")
 
+# Survey Routes (Dotazníky za odměnu)
+try:
+    from survey_routes import survey_bp
+    app.register_blueprint(survey_bp)
+    logger.info("✅ Survey routes registered: /api/surveys/*")
+    # Init survey DB tables
+    with app.app_context():
+        from database import db_context
+        from database_schema import init_survey_schema
+        with db_context(commit=True) as db:
+            init_survey_schema(db)
+except Exception as e:
+    logger.warning(f"⚠️ Survey routes: {e}")
+
 # Auth Routes (Registration, Login, JWT, GDPR)
 from auth_routes import auth_bp
 app.register_blueprint(auth_bp)
