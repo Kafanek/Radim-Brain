@@ -84,8 +84,10 @@ class TestMemorySystem:
         # Set up user with agent observation
         learning = db_load_learning("test_obs_user")
         learning["interaction_count"] = 5
+        from datetime import datetime
         learning["agent_observations"] = [
-            {"type": "test", "severity": "WARNING", "message": "Test observation message"}
+            {"type": "test", "severity": "WARNING", "message": "Test observation message",
+             "at": datetime.utcnow().isoformat() + "Z"}
         ]
         db_save_learning("test_obs_user", learning)
         # Build prompt
