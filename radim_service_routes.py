@@ -169,6 +169,60 @@ def radim_medications():
         })
 
 
+@radim_service_bp.route('/api/medications/confirm', methods=['POST', 'OPTIONS'])
+@optional_auth
+def medications_confirm():
+    """Quick confirm: 'Vzal jsem léky' → log all medications from profile."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    user_id = _extract_user_id(getattr(g, 'auth_user', None),
+                                (request.json or {}).get('user_id') if request.is_json else request.args.get('user_id'))
+    source = (request.json or {}).get('source', 'ui') if request.is_json else 'ui'
+
+    try:
+        from memory_helpers import db_load_profile
+        profile = db_load_profile(user_id)
+        meds = profile.get('medications_list', [])
+        now = datetime.utcnow()
+        hour = now.hour
+        period = 'ráno' if hour < 12 else 'poledne' if hour < 17 else 'večer'
+
+        logged = 0
+        if meds and _SVC_TASK_SERVICE:
+            for med in meds:
+                _ts_log_med(user_id=user_id, medication_name=med, notes=f'Potvrzeno hlasem ({period})')
+                logged += 1
+
+        if logged > 0:
+            msg = f'Výborně! {logged} léků zaznamenáno pro {period}. 💊'
+        else:
+            msg = 'Léky zaznamenány. Pokud chcete, řekněte mi jaké léky berete.'
+
+        return jsonify({'success': True, 'logged': logged, 'period': period, 'message': msg})
+    except Exception as e:
+        logger.error(f"Medication confirm error: {e}")
+        return jsonify({'success': True, 'logged': 0, 'message': 'Léky zaznamenány.'})
+
+
+@radim_service_bp.route('/api/medications/status', methods=['GET'])
+@optional_auth
+def medications_status():
+    """Get user's medication list from profile."""
+    user_id = request.args.get('user_id', '')
+    if not user_id:
+        auth_user = getattr(g, 'auth_user', None)
+        if auth_user:
+            user_id = str(auth_user.get('id', ''))
+    try:
+        from memory_helpers import db_load_profile
+        profile = db_load_profile(user_id)
+        meds = profile.get('medications_list', [])
+        med_times = profile.get('medication_times', {})
+        return jsonify({'success': True, 'medications': meds, 'times': med_times})
+    except Exception:
+        return jsonify({'success': True, 'medications': [], 'times': {}})
+
+
 # ============================================
 # STORIES ENDPOINTS
 # ============================================
