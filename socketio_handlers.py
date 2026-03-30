@@ -230,4 +230,45 @@ def register_socketio_handlers(socketio, users_online, cleanup_fn):
             emit('agent_action', data, room=f'user_{user_id}')
             logger.info(f"🤖 Agent action → user {user_id}: {data.get('action')} {data.get('module', '')}")
 
-    logger.info("✅ SocketIO handlers registered (14 events)")
+    # ═══════════════════════════════════════════════════════════
+    # MEDICAL TEAM — real-time chat (v488)
+    # ═══════════════════════════════════════════════════════════
+
+    @socketio.on('join_medical')
+    def handle_join_medical(data):
+        senior_id = data.get('senior_id')
+        if senior_id:
+            join_room(f'medical_{senior_id}')
+
+    @socketio.on('leave_medical')
+    def handle_leave_medical(data):
+        senior_id = data.get('senior_id')
+        if senior_id:
+            leave_room(f'medical_{senior_id}')
+
+    @socketio.on('medical_message')
+    def handle_medical_message(data):
+        senior_id = data.get('senior_id')
+        if senior_id:
+            try:
+                from database import db_context
+                with db_context(commit=True) as db:
+                    db.execute(
+                        "INSERT INTO medical_messages (senior_id, author_id, author_role, author_name, message) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (senior_id, data.get('author_id', ''), data.get('role', ''),
+                         data.get('name', ''), data.get('message', ''))
+                    )
+            except Exception:
+                pass
+            emit('medical_message', {
+                'senior_id': senior_id,
+                'author_id': data.get('author_id'),
+                'author_role': data.get('role'),
+                'author_icon': data.get('icon', '💬'),
+                'author_name': data.get('name'),
+                'message': data.get('message'),
+                'date': __import__('datetime').datetime.utcnow().isoformat() + 'Z',
+            }, room=f'medical_{senior_id}', include_self=True)
+
+    logger.info("✅ SocketIO handlers registered (17 events — incl medical)")

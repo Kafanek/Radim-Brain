@@ -667,4 +667,113 @@ def export_report(senior_id):
         return jsonify({'success': False, 'error': 'Chyba při generování reportu'}), 500
 
 
-logger.info("🏥 Medical Team v2.0 loaded — consent, photos, reports, smart routing")
+@medical_bp.route('/api/medical/report/<senior_id>/print', methods=['GET'])
+def print_report(senior_id):
+    """HTML report ready to print (Ctrl+P → PDF)."""
+    from flask import Response
+    days = request.args.get('days', 30, type=int)
+
+    try:
+        from memory_helpers import db_load_profile, db_load_learning
+        profile = db_load_profile(senior_id)
+        learning = db_load_learning(senior_id)
+        name = profile.get('name', 'Senior')
+        meds = profile.get('medications_list', [])
+
+        # Brain trend
+        brain_rows = []
+        try:
+            with db_context() as db:
+                brain_rows = db.execute(
+                    "SELECT created_at::date as day, ROUND(AVG(c)::numeric,1) as avg_c, "
+                    "ROUND(AVG(s)::numeric,2) as avg_s, COUNT(*) as msgs, "
+                    "MODE() WITHIN GROUP (ORDER BY mode) as mode "
+                    f"FROM brain_states WHERE user_id = ? AND created_at > NOW() - INTERVAL '{days} days' "
+                    "GROUP BY created_at::date ORDER BY day",
+                    (senior_id,)
+                ).fetchall()
+        except Exception:
+            pass
+
+        # Team
+        team = []
+        try:
+            with db_context() as db:
+                team = db.execute(
+                    "SELECT name, role FROM medical_team WHERE senior_id = ? AND active = true",
+                    (senior_id,)
+                ).fetchall()
+        except Exception:
+            pass
+
+        # Build HTML
+        now = datetime.utcnow().strftime('%d.%m.%Y %H:%M')
+        html = f"""<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>RadimCare — Report {name}</title>
+<style>
+    body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; color: #2d3748; }}
+    h1 {{ color: #5BA8A0; border-bottom: 3px solid #5BA8A0; padding-bottom: 8px; }}
+    h2 {{ color: #4A9690; margin-top: 24px; }}
+    table {{ width: 100%; border-collapse: collapse; margin: 12px 0; }}
+    th, td {{ border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }}
+    th {{ background: #f7fafc; font-weight: 600; }}
+    .green {{ color: #38a169; }} .orange {{ color: #dd6b20; }} .red {{ color: #e53e3e; }}
+    .footer {{ margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 10px; color: #a0aec0; font-size: 0.8rem; }}
+    @media print {{ body {{ padding: 0; }} }}
+</style>
+</head>
+<body>
+<h1>🏥 RadimCare — Zdravotní report</h1>
+<p><strong>Senior:</strong> {name} | <strong>Období:</strong> {days} dní | <strong>Vygenerováno:</strong> {now}</p>
+"""
+
+        # Medications
+        if meds:
+            html += '<h2>💊 Léky</h2><p>' + ', '.join(meds) + '</p>'
+
+        # Team
+        if team:
+            html += '<h2>👥 Zdravotní tým</h2><table><tr><th>Jméno</th><th>Role</th></tr>'
+            for t in team:
+                role_name = MEDICAL_ROLES.get(t[1], {}).get('name', t[1])
+                html += f'<tr><td>{t[0]}</td><td>{role_name}</td></tr>'
+            html += '</table>'
+
+        # Brain trend
+        if brain_rows:
+            avg_c = sum(float(r[1]) for r in brain_rows if r[1]) / len(brain_rows)
+            total_msgs = sum(int(r[3]) for r in brain_rows)
+            status_class = 'green' if avg_c < 12 else 'orange' if avg_c < 27 else 'red'
+            status_text = 'stabilní' if avg_c < 12 else 'vyžaduje pozornost' if avg_c < 27 else 'kritické'
+
+            html += f'<h2>🧠 Kognitivní trend</h2>'
+            html += f'<p>Průměrné C: <strong class="{status_class}">{avg_c:.1f}</strong> — '
+            html += f'<span class="{status_class}">{status_text}</span> | '
+            html += f'Celkem zpráv: {total_msgs} | Dní s daty: {len(brain_rows)}</p>'
+
+            html += '<table><tr><th>Datum</th><th>Avg C</th><th>Stress</th><th>Zpráv</th><th>Mode</th></tr>'
+            for r in brain_rows:
+                c_val = float(r[1]) if r[1] else 0
+                c_class = 'green' if c_val < 12 else 'orange' if c_val < 27 else 'red'
+                html += f'<tr><td>{r[0]}</td><td class="{c_class}">{r[1]}</td><td>{r[2]}</td><td>{r[3]}</td><td>{r[4]}</td></tr>'
+            html += '</table>'
+        else:
+            html += '<h2>🧠 Kognitivní trend</h2><p>Zatím nemáme dostatek dat.</p>'
+
+        html += f"""
+<div class="footer">
+    <p>RadimCare — Chytrá péče o seniory | www.radimcare.cz | {now}</p>
+    <p>Tento report byl vygenerován automaticky systémem RadimCare.</p>
+</div>
+</body></html>"""
+
+        return Response(html, mimetype='text/html')
+
+    except Exception as e:
+        return Response(f'<h1>Chyba</h1><p>{e}</p>', mimetype='text/html'), 500
+
+
+logger.info("🏥 Medical Team v3.0 loaded — consent, photos, reports, real-time, print")
