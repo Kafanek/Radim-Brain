@@ -421,6 +421,14 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Medical Team routes: {e}")
 
+# Audit Log Routes
+try:
+    from audit_log import audit_bp
+    app.register_blueprint(audit_bp)
+    logger.info("✅ Audit Log routes registered: /api/audit/*")
+except Exception as e:
+    logger.warning(f"⚠️ Audit routes: {e}")
+
 # Auth Routes (Registration, Login, JWT, GDPR)
 from auth_routes import auth_bp
 app.register_blueprint(auth_bp)

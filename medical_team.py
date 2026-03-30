@@ -308,6 +308,64 @@ def medical_messages(senior_id):
             return jsonify({'success': False, 'error': 'Chyba'}), 500
 
 
+# Alert lifecycle states
+ALERT_STATES = ['new', 'acknowledged', 'in_progress', 'resolved', 'escalated']
+
+@medical_bp.route('/api/medical/alerts/<senior_id>/update', methods=['POST'])
+@require_auth
+def update_alert(senior_id):
+    """Update alert state — acknowledge, resolve, escalate."""
+    data = request.json or {}
+    alert_id = data.get('alert_id')
+    new_state = data.get('state')
+    note = data.get('note', '')
+
+    if not alert_id or new_state not in ALERT_STATES:
+        return jsonify({'success': False, 'error': f'alert_id + state ({",".join(ALERT_STATES)}) required'}), 400
+
+    auth = getattr(g, 'auth_user', {}) or {}
+    user_name = auth.get('name', '')
+
+    try:
+        _init_medical_schema()
+        with db_context(commit=True) as db:
+            if new_state == 'acknowledged':
+                db.execute(
+                    "UPDATE medical_alerts SET acknowledged_by = ?, acknowledged_at = NOW(), "
+                    "data = data || ?::jsonb WHERE id = ? AND senior_id = ?",
+                    (str(auth.get('id', '')),
+                     json.dumps({'state': new_state, 'note': note, 'by': user_name}),
+                     alert_id, senior_id)
+                )
+            elif new_state == 'escalated':
+                # Create escalation alert
+                db.execute(
+                    "INSERT INTO medical_alerts (senior_id, alert_type, severity, message, data, routed_to) "
+                    "VALUES (?, 'escalation', 'alert', ?, ?, ?)",
+                    (senior_id, f'Eskalováno: {note or "Bez reakce"}',
+                     json.dumps({'original_alert': alert_id, 'escalated_by': user_name}),
+                     json.dumps(['coordinator']))
+                )
+            else:
+                db.execute(
+                    "UPDATE medical_alerts SET data = data || ?::jsonb WHERE id = ? AND senior_id = ?",
+                    (json.dumps({'state': new_state, 'note': note, 'by': user_name, 'at': datetime.utcnow().isoformat()}),
+                     alert_id, senior_id)
+                )
+
+        # Audit
+        try:
+            from audit_log import log_audit, ALERT
+            log_audit(ALERT, 'medical_alert', alert_id, senior_id,
+                      {'new_state': new_state, 'note': note})
+        except Exception:
+            pass
+
+        return jsonify({'success': True, 'message': f'Alert → {new_state}', 'state': new_state})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @medical_bp.route('/api/medical/alerts/<senior_id>', methods=['GET'])
 @optional_auth
 def get_alerts(senior_id):
@@ -776,4 +834,206 @@ def print_report(senior_id):
         return Response(f'<h1>Chyba</h1><p>{e}</p>', mimetype='text/html'), 500
 
 
-logger.info("🏥 Medical Team v3.0 loaded — consent, photos, reports, real-time, print")
+# ============================================================================
+# CLINICAL NOTES — structured medical records
+# ============================================================================
+
+CLINICAL_NOTES_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS clinical_notes (
+        id SERIAL PRIMARY KEY,
+        senior_id TEXT NOT NULL,
+        author_id TEXT NOT NULL,
+        author_role TEXT,
+        author_name TEXT,
+        note_type TEXT DEFAULT 'observation',
+        content TEXT NOT NULL,
+        decision TEXT,
+        next_step TEXT,
+        responsible TEXT,
+        review_date DATE,
+        attachments JSONB DEFAULT '[]',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_clinotes_senior ON clinical_notes(senior_id);
+"""
+
+def _init_clinical_schema():
+    try:
+        with db_context(commit=True) as db:
+            for s in CLINICAL_NOTES_SCHEMA.strip().split(';'):
+                s = s.strip()
+                if s: db.execute(s)
+    except Exception:
+        pass
+
+
+@medical_bp.route('/api/medical/notes/<senior_id>', methods=['GET', 'POST'])
+@optional_auth
+def clinical_notes(senior_id):
+    """Clinical notes — structured medical observations + decisions."""
+    _init_clinical_schema()
+
+    if request.method == 'GET':
+        try:
+            with db_context() as db:
+                rows = db.execute(
+                    "SELECT id, author_name, author_role, note_type, content, decision, "
+                    "next_step, responsible, review_date, created_at "
+                    "FROM clinical_notes WHERE senior_id = ? ORDER BY created_at DESC LIMIT 50",
+                    (senior_id,)
+                ).fetchall()
+
+            notes = [{
+                'id': r[0], 'author': r[1], 'role': r[2], 'type': r[3],
+                'content': r[4], 'decision': r[5], 'next_step': r[6],
+                'responsible': r[7], 'review_date': str(r[8]) if r[8] else None,
+                'date': str(r[9]),
+            } for r in rows]
+
+            return jsonify({'success': True, 'notes': notes, 'count': len(notes)})
+        except Exception:
+            return jsonify({'success': True, 'notes': [], 'count': 0})
+
+    elif request.method == 'POST':
+        data = request.json or {}
+        auth = getattr(g, 'auth_user', {}) or {}
+
+        content = data.get('content', '').strip()
+        if not content:
+            return jsonify({'success': False, 'error': 'Obsah poznámky je povinný'}), 400
+
+        try:
+            with db_context(commit=True) as db:
+                db.execute(
+                    "INSERT INTO clinical_notes (senior_id, author_id, author_role, author_name, "
+                    "note_type, content, decision, next_step, responsible, review_date) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (senior_id, str(auth.get('id', '')), data.get('role', auth.get('role', '')),
+                     data.get('name', auth.get('name', '')),
+                     data.get('type', 'observation'), content,
+                     data.get('decision'), data.get('next_step'),
+                     data.get('responsible'), data.get('review_date'))
+                )
+
+            try:
+                from audit_log import log_audit, CREATE
+                log_audit(CREATE, 'clinical_note', None, senior_id,
+                          {'type': data.get('type'), 'has_decision': bool(data.get('decision'))})
+            except Exception:
+                pass
+
+            return jsonify({'success': True, 'message': '📝 Klinická poznámka uložena'})
+        except Exception as e:
+            return jsonify({'success': False, 'error': 'Chyba'}), 500
+
+
+# ============================================================================
+# CARE PLAN — structured plan per senior
+# ============================================================================
+
+CARE_PLAN_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS care_plans (
+        id SERIAL PRIMARY KEY,
+        senior_id TEXT NOT NULL UNIQUE,
+        goals JSONB DEFAULT '[]',
+        daily_routine JSONB DEFAULT '{}',
+        medications JSONB DEFAULT '[]',
+        monitored_metrics JSONB DEFAULT '[]',
+        risks JSONB DEFAULT '[]',
+        responsibilities JSONB DEFAULT '[]',
+        notes TEXT,
+        updated_by TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+"""
+
+def _init_care_plan_schema():
+    try:
+        with db_context(commit=True) as db:
+            for s in CARE_PLAN_SCHEMA.strip().split(';'):
+                s = s.strip()
+                if s: db.execute(s)
+    except Exception:
+        pass
+
+
+@medical_bp.route('/api/medical/care-plan/<senior_id>', methods=['GET', 'PUT'])
+@optional_auth
+def care_plan(senior_id):
+    """Care plan — goals, routine, metrics, risks, responsibilities."""
+    _init_care_plan_schema()
+
+    if request.method == 'GET':
+        try:
+            with db_context() as db:
+                row = db.execute(
+                    "SELECT goals, daily_routine, medications, monitored_metrics, risks, "
+                    "responsibilities, notes, updated_by, updated_at FROM care_plans WHERE senior_id = ?",
+                    (senior_id,)
+                ).fetchone()
+
+            if row:
+                return jsonify({
+                    'success': True,
+                    'plan': {
+                        'goals': json.loads(row[0] or '[]'),
+                        'daily_routine': json.loads(row[1] or '{}'),
+                        'medications': json.loads(row[2] or '[]'),
+                        'monitored_metrics': json.loads(row[3] or '[]'),
+                        'risks': json.loads(row[4] or '[]'),
+                        'responsibilities': json.loads(row[5] or '[]'),
+                        'notes': row[6],
+                        'updated_by': row[7],
+                        'updated_at': str(row[8]),
+                    }
+                })
+            else:
+                return jsonify({
+                    'success': True,
+                    'plan': {
+                        'goals': [], 'daily_routine': {}, 'medications': [],
+                        'monitored_metrics': [], 'risks': [], 'responsibilities': [], 'notes': '',
+                    }
+                })
+        except Exception:
+            return jsonify({'success': True, 'plan': {}})
+
+    elif request.method == 'PUT':
+        data = request.json or {}
+        auth = getattr(g, 'auth_user', {}) or {}
+
+        try:
+            with db_context(commit=True) as db:
+                db.execute(
+                    "INSERT INTO care_plans (senior_id, goals, daily_routine, medications, "
+                    "monitored_metrics, risks, responsibilities, notes, updated_by) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT (senior_id) DO UPDATE SET "
+                    "goals = EXCLUDED.goals, daily_routine = EXCLUDED.daily_routine, "
+                    "medications = EXCLUDED.medications, monitored_metrics = EXCLUDED.monitored_metrics, "
+                    "risks = EXCLUDED.risks, responsibilities = EXCLUDED.responsibilities, "
+                    "notes = EXCLUDED.notes, updated_by = EXCLUDED.updated_by, updated_at = NOW()",
+                    (senior_id,
+                     json.dumps(data.get('goals', [])),
+                     json.dumps(data.get('daily_routine', {})),
+                     json.dumps(data.get('medications', [])),
+                     json.dumps(data.get('monitored_metrics', [])),
+                     json.dumps(data.get('risks', [])),
+                     json.dumps(data.get('responsibilities', [])),
+                     data.get('notes', ''),
+                     auth.get('name', str(auth.get('id', ''))))
+                )
+
+            try:
+                from audit_log import log_audit, UPDATE
+                log_audit(UPDATE, 'care_plan', senior_id, senior_id)
+            except Exception:
+                pass
+
+            return jsonify({'success': True, 'message': '📋 Plán péče aktualizován'})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+
+logger.info("🏥 Medical Team v4.0 loaded — audit, alerts lifecycle, clinical notes, care plan")
