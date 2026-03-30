@@ -201,15 +201,28 @@ def build_personalized_prompt(user_id: str) -> str:
     if crisis_count >= 3:
         parts.append(f"- Historicky {crisis_count}x krizovy stav — zvysena opatrnost")
 
-    # v381: Agent observations — Radim MUST mention these proactively
+    # v381+v475: Agent observations — mention ONLY if relevant and not stale
     agent_obs = learning_raw.get("agent_observations", [])
     if agent_obs:
-        parts.append("")
-        parts.append("DULEZITE — Radim si vsiml nasledujiciho a MUSI to zminit v odpovedi (prirozene, s empatii):")
+        # v475: Filter — only show observations from last 2 hours
+        from datetime import datetime, timedelta
+        recent_obs = []
+        now = datetime.utcnow()
         for obs in agent_obs[-3:]:
-            parts.append(f"  >>> {obs.get('message', '')}")
-        parts.append("Zmin to na zacatku odpovedi, napriklad: 'Vsiml jsem si, ze...' nebo 'Chtel bych se zeptat...'")
-        parts.append("")
+            try:
+                obs_time = datetime.fromisoformat(obs.get('at', '').replace('Z', '+00:00').replace('+00:00', ''))
+                if (now - obs_time).total_seconds() < 7200:  # 2 hours
+                    recent_obs.append(obs)
+            except Exception:
+                pass  # Skip malformed timestamps
+
+        if recent_obs:
+            parts.append("")
+            parts.append("Poznamka (zmín JEN pokud to dává smysl v kontextu konverzace, NEZAČÍNEJ tím):")
+            for obs in recent_obs:
+                parts.append(f"  - {obs.get('message', '')}")
+            parts.append("Neptej se na to přímo. Pokud uživatel právě komunikuje, observations ignoruj.")
+            parts.append("")
 
     # v399: Adaptive learning context — rhythm, pace, mood patterns
     try:
