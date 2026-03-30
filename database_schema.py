@@ -1191,7 +1191,7 @@ SURVEY_SCHEMA_PG = """
 
     CREATE TABLE IF NOT EXISTS survey_responses (
         id SERIAL PRIMARY KEY,
-        survey_id INTEGER REFERENCES surveys(id),
+        survey_id INTEGER DEFAULT 0,
         user_id TEXT NOT NULL,
         answers JSONB NOT NULL DEFAULT '[]',
         points_earned INTEGER DEFAULT 0,

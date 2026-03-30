@@ -218,9 +218,10 @@ def submit_response():
 
         with db_context(commit=True) as db:
             # Save response
-            db_insert(db, 'survey_responses',
-                ['survey_id', 'user_id', 'answers', 'points_earned', 'source'],
-                (0, user_id, json.dumps({'survey_id': survey_id, 'answers': answers}), points, source)
+            db.execute(
+                "INSERT INTO survey_responses (user_id, answers, points_earned, source) "
+                "VALUES (?, ?, ?, ?)",
+                (user_id, json.dumps({'survey_id': survey_id, 'answers': answers}), points, source)
             )
 
             # Update rewards
