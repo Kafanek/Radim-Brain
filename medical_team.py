@@ -394,12 +394,32 @@ def medical_dashboard(senior_id):
                 'note': 'Vitální data z IoT senzorů — připojit na NUC'
             }
 
-        # Brain state (coordinator, caregiver)
+        # Brain state (coordinator, caregiver) — with DB fallback
         if 'brain' in data_access:
             c_history = learning.get('C_history', [])
+            avg_c = learning.get('avg_C')
+            last_mode = learning.get('last_brain_mode')
+
+            # Fallback: query brain_states directly if learning is empty
+            if not c_history:
+                try:
+                    with db_context() as db:
+                        rows = db.execute(
+                            "SELECT c, mode FROM brain_states WHERE user_id = ? "
+                            "ORDER BY created_at DESC LIMIT 10",
+                            (senior_id,)
+                        ).fetchall()
+                    if rows:
+                        c_history = [float(r[0]) for r in rows if r[0] is not None]
+                        c_history.reverse()
+                        last_mode = rows[0][1] if rows[0][1] else 'HARMONY'
+                        avg_c = round(sum(c_history) / len(c_history), 1) if c_history else 0
+                except Exception:
+                    pass
+
             dashboard['view']['brain'] = {
-                'avg_c': learning.get('avg_C', 0),
-                'last_mode': learning.get('last_brain_mode', 'HARMONY'),
+                'avg_c': avg_c or 0,
+                'last_mode': last_mode or 'HARMONY',
                 'recent_c': c_history[-5:] if c_history else [],
             }
 
