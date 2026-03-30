@@ -504,3 +504,92 @@ logger.info(f"""
   Memory: {'✅' if MEMORY_AVAILABLE else '❌'}
   Soul: {'✅' if SOUL_AVAILABLE else '❌'}
 """)
+
+
+# ============================================================================
+# TREND API (v476) — brain_states aggregated by day
+# ============================================================================
+
+@radim_brain_bp.route('/trend/<user_id>', methods=['GET'])
+@optional_auth
+def brain_trend(user_id):
+    """
+    GET /api/brain/trend/<user_id>?days=30
+
+    Returns daily aggregated brain states for trend visualization.
+    Each day: avg C, E, R, S, dominant mode, message count.
+    Color coding: green (C<12), orange (12-27), red (C>27).
+    """
+    days = request.args.get('days', 30, type=int)
+    days = min(days, 90)  # Max 90 days
+
+    try:
+        from database import db_context
+        with db_context() as db:
+            rows = db.execute("""
+                SELECT
+                    created_at::date as day,
+                    ROUND(AVG(c)::numeric, 1) as avg_c,
+                    ROUND(AVG(e)::numeric, 2) as avg_e,
+                    ROUND(AVG(r)::numeric, 2) as avg_r,
+                    ROUND(AVG(s)::numeric, 2) as avg_s,
+                    ROUND(AVG(coherence)::numeric, 2) as avg_coherence,
+                    MODE() WITHIN GROUP (ORDER BY mode) as dominant_mode,
+                    COUNT(*) as interactions
+                FROM brain_states
+                WHERE user_id = ?
+                  AND created_at > NOW() - INTERVAL '? days'
+                GROUP BY created_at::date
+                ORDER BY day ASC
+            """.replace('? days', f'{days} days'), (str(user_id),)).fetchall()
+
+            trend = []
+            for row in rows:
+                avg_c = float(row[1]) if row[1] else 0
+                color = 'green' if avg_c < 12 else 'orange' if avg_c < 27 else 'red'
+                trend.append({
+                    'date': str(row[0]),
+                    'avg_c': avg_c,
+                    'avg_e': float(row[2]) if row[2] else 0,
+                    'avg_r': float(row[3]) if row[3] else 0,
+                    'avg_s': float(row[4]) if row[4] else 0,
+                    'coherence': float(row[5]) if row[5] else 0,
+                    'mode': row[6] or 'HARMONY',
+                    'interactions': int(row[7]),
+                    'color': color,
+                })
+
+            # Compute overall trend direction
+            if len(trend) >= 3:
+                recent_c = sum(d['avg_c'] for d in trend[-3:]) / 3
+                older_c = sum(d['avg_c'] for d in trend[:3]) / 3
+                if recent_c > older_c + 2:
+                    direction = 'rising'
+                    warning = 'Stres se zvyšuje'
+                elif recent_c < older_c - 2:
+                    direction = 'falling'
+                    warning = 'Stav se zlepšuje'
+                else:
+                    direction = 'stable'
+                    warning = None
+            else:
+                direction = 'insufficient_data'
+                warning = None
+
+            return jsonify({
+                'success': True,
+                'user_id': user_id,
+                'days': days,
+                'trend': trend,
+                'summary': {
+                    'direction': direction,
+                    'warning': warning,
+                    'total_interactions': sum(d['interactions'] for d in trend),
+                    'avg_c_overall': round(sum(d['avg_c'] for d in trend) / max(1, len(trend)), 1),
+                    'days_with_data': len(trend),
+                }
+            })
+
+    except Exception as e:
+        logger.error(f"Brain trend error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
