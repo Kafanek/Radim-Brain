@@ -413,6 +413,14 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Survey routes: {e}")
 
+# Medical Team Routes (Shared care coordination)
+try:
+    from medical_team import medical_bp
+    app.register_blueprint(medical_bp)
+    logger.info("✅ Medical Team routes registered: /api/medical/*")
+except Exception as e:
+    logger.warning(f"⚠️ Medical Team routes: {e}")
+
 # Auth Routes (Registration, Login, JWT, GDPR)
 from auth_routes import auth_bp
 app.register_blueprint(auth_bp)
