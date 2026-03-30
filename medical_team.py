@@ -432,4 +432,219 @@ def list_roles():
     return jsonify({'success': True, 'roles': roles})
 
 
-logger.info("🏥 Medical Team v1.0 loaded — shared care coordination")
+# ============================================================================
+# CONSENT FLOW (GDPR)
+# ============================================================================
+
+@medical_bp.route('/api/medical/consent/<senior_id>', methods=['GET', 'POST'])
+@optional_auth
+def consent(senior_id):
+    """GDPR consent — senior approves/revokes doctor access."""
+    _init_medical_schema()
+
+    if request.method == 'GET':
+        # List pending and approved consents
+        try:
+            with db_context() as db:
+                rows = db.execute(
+                    "SELECT id, user_id, role, name, consent_given, consent_at "
+                    "FROM medical_team WHERE senior_id = ? AND active = true",
+                    (senior_id,)
+                ).fetchall()
+
+            members = []
+            for r in rows:
+                role_info = MEDICAL_ROLES.get(r[2] if isinstance(r, (list, tuple)) else r.get('role', ''), {})
+                members.append({
+                    'id': r[0] if isinstance(r, (list, tuple)) else r.get('id'),
+                    'user_id': r[1] if isinstance(r, (list, tuple)) else r.get('user_id'),
+                    'role': r[2] if isinstance(r, (list, tuple)) else r.get('role'),
+                    'role_name': role_info.get('name', ''),
+                    'icon': role_info.get('icon', '👤'),
+                    'name': r[3] if isinstance(r, (list, tuple)) else r.get('name'),
+                    'consent_given': r[4] if isinstance(r, (list, tuple)) else r.get('consent_given', False),
+                    'consent_at': str(r[5]) if r[5] else None,
+                })
+
+            pending = [m for m in members if not m['consent_given']]
+            approved = [m for m in members if m['consent_given']]
+
+            return jsonify({
+                'success': True,
+                'pending': pending,
+                'approved': approved,
+                'total': len(members),
+            })
+        except Exception as e:
+            return jsonify({'success': True, 'pending': [], 'approved': [], 'total': 0})
+
+    elif request.method == 'POST':
+        data = request.json or {}
+        member_id = data.get('member_id')
+        action = data.get('action', 'approve')  # approve / revoke
+
+        if not member_id:
+            return jsonify({'success': False, 'error': 'member_id je povinný'}), 400
+
+        try:
+            with db_context(commit=True) as db:
+                if action == 'approve':
+                    db.execute(
+                        "UPDATE medical_team SET consent_given = true, consent_at = NOW() WHERE id = ? AND senior_id = ?",
+                        (member_id, senior_id)
+                    )
+                    return jsonify({'success': True, 'message': '✅ Souhlas udělen'})
+                elif action == 'revoke':
+                    db.execute(
+                        "UPDATE medical_team SET consent_given = false, active = false WHERE id = ? AND senior_id = ?",
+                        (member_id, senior_id)
+                    )
+                    return jsonify({'success': True, 'message': '🔒 Přístup odebrán'})
+                else:
+                    return jsonify({'success': False, 'error': 'Neznámá akce'}), 400
+        except Exception as e:
+            return jsonify({'success': False, 'error': 'Chyba'}), 500
+
+
+# ============================================================================
+# PHOTO DOCUMENTATION
+# ============================================================================
+
+@medical_bp.route('/api/medical/photos/<senior_id>', methods=['GET', 'POST'])
+@optional_auth
+def medical_photos(senior_id):
+    """Photo documentation — upload + timeline."""
+    if request.method == 'GET':
+        # Return photo history (stored as medical messages with type='photo')
+        try:
+            with db_context() as db:
+                rows = db.execute(
+                    "SELECT id, author_name, author_role, message, attachments, created_at "
+                    "FROM medical_messages WHERE senior_id = ? AND message_type = 'photo' "
+                    "ORDER BY created_at DESC LIMIT 50",
+                    (senior_id,)
+                ).fetchall()
+
+            photos = []
+            for r in rows:
+                photos.append({
+                    'id': r[0] if isinstance(r, (list, tuple)) else r.get('id'),
+                    'author': r[1] if isinstance(r, (list, tuple)) else r.get('author_name'),
+                    'role': r[2] if isinstance(r, (list, tuple)) else r.get('author_role'),
+                    'description': r[3] if isinstance(r, (list, tuple)) else r.get('message'),
+                    'date': str(r[5] if isinstance(r, (list, tuple)) else r.get('created_at', '')),
+                })
+
+            return jsonify({'success': True, 'photos': photos, 'count': len(photos)})
+        except Exception:
+            return jsonify({'success': True, 'photos': [], 'count': 0})
+
+    elif request.method == 'POST':
+        data = request.json or {}
+        description = data.get('description', '')
+        photo_url = data.get('photo_url', '')  # Base64 or URL
+        auth = getattr(g, 'auth_user', {}) or {}
+
+        try:
+            with db_context(commit=True) as db:
+                db.execute(
+                    "INSERT INTO medical_messages (senior_id, author_id, author_role, author_name, "
+                    "message, message_type, attachments) VALUES (?, ?, ?, ?, ?, 'photo', ?)",
+                    (senior_id, str(auth.get('id', '')), data.get('role', 'caregiver'),
+                     data.get('name', auth.get('name', '')), description,
+                     json.dumps([{'url': photo_url, 'type': 'photo'}]) if photo_url else '[]')
+                )
+            return jsonify({'success': True, 'message': '📸 Fotodokumentace uložena'})
+        except Exception as e:
+            return jsonify({'success': False, 'error': 'Chyba'}), 500
+
+
+# ============================================================================
+# PDF REPORT EXPORT
+# ============================================================================
+
+@medical_bp.route('/api/medical/report/<senior_id>', methods=['GET'])
+@optional_auth
+def export_report(senior_id):
+    """Generate text report for a senior (last 30 days)."""
+    days = request.args.get('days', 30, type=int)
+
+    try:
+        from memory_helpers import db_load_profile, db_load_learning
+        profile = db_load_profile(senior_id)
+        learning = db_load_learning(senior_id)
+
+        report = {
+            'success': True,
+            'senior': {
+                'name': profile.get('name', 'Senior'),
+                'age_group': profile.get('age_group', ''),
+                'medications': profile.get('medications_list', []),
+            },
+            'period': f'Posledních {days} dní',
+            'generated_at': datetime.utcnow().isoformat() + 'Z',
+        }
+
+        # Brain trend
+        try:
+            with db_context() as db:
+                rows = db.execute(
+                    "SELECT created_at::date as day, ROUND(AVG(c)::numeric,1) as avg_c, "
+                    "ROUND(AVG(s)::numeric,2) as avg_s, COUNT(*) as msgs "
+                    f"FROM brain_states WHERE user_id = ? AND created_at > NOW() - INTERVAL '{days} days' "
+                    "GROUP BY created_at::date ORDER BY day",
+                    (senior_id,)
+                ).fetchall()
+
+            report['brain_trend'] = [{
+                'date': str(r[0]),
+                'avg_c': float(r[1]) if r[1] else 0,
+                'avg_s': float(r[2]) if r[2] else 0,
+                'messages': int(r[3]),
+            } for r in rows]
+
+            if report['brain_trend']:
+                avg_c = sum(d['avg_c'] for d in report['brain_trend']) / len(report['brain_trend'])
+                report['summary'] = {
+                    'avg_c': round(avg_c, 1),
+                    'total_days': len(report['brain_trend']),
+                    'total_messages': sum(d['messages'] for d in report['brain_trend']),
+                    'status': 'stabilní' if avg_c < 12 else 'vyžaduje pozornost' if avg_c < 27 else 'kritické',
+                }
+        except Exception:
+            report['brain_trend'] = []
+
+        # Medical alerts
+        try:
+            with db_context() as db:
+                alerts = db.execute(
+                    f"SELECT alert_type, severity, message, created_at FROM medical_alerts "
+                    f"WHERE senior_id = ? AND created_at > NOW() - INTERVAL '{days} days' "
+                    "ORDER BY created_at DESC LIMIT 20",
+                    (senior_id,)
+                ).fetchall()
+            report['alerts'] = [{
+                'type': r[0], 'severity': r[1], 'message': r[2], 'date': str(r[3])
+            } for r in alerts]
+        except Exception:
+            report['alerts'] = []
+
+        # Team
+        try:
+            with db_context() as db:
+                team = db.execute(
+                    "SELECT name, role FROM medical_team WHERE senior_id = ? AND active = true",
+                    (senior_id,)
+                ).fetchall()
+            report['team'] = [{'name': r[0], 'role': r[1]} for r in team]
+        except Exception:
+            report['team'] = []
+
+        return jsonify(report)
+
+    except Exception as e:
+        logger.error(f"Report error: {e}")
+        return jsonify({'success': False, 'error': 'Chyba při generování reportu'}), 500
+
+
+logger.info("🏥 Medical Team v2.0 loaded — consent, photos, reports, smart routing")
