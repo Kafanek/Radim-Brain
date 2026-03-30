@@ -648,12 +648,47 @@ def suggest_activity(user_id, app):
     if now - _activity_cooldown.get(user_id, 0) < 7200:
         return
 
+    # v477: Personalized suggestions based on interests, time, weather
     activities = [
         {'module': 'quiz', 'speak': 'Co takhle malý kvíz na trénink paměti?'},
         {'module': 'exercises', 'speak': 'Pojďme si trochu zacvičit, co říkáte?'},
         {'module': 'stories', 'speak': 'Mám pro vás hezký příběh. Chcete si poslechnout?'},
         {'module': 'news', 'speak': 'Podívejme se, co je nového ve zprávách.'},
+        {'module': 'music', 'speak': 'Co takhle pustit si příjemnou hudbu?'},
     ]
+
+    # Personalize based on interests
+    try:
+        profile = db_load_profile(user_id)
+        learning = db_load_learning(user_id)
+        interests = learning.get('detected_interests', {})
+        personal = profile.get('personal', {})
+        hour = __import__('datetime').datetime.now().hour
+
+        # Morning → news, exercises
+        if hour < 11:
+            activities.append({'module': 'news', 'speak': 'Dobré ráno! Podíváme se na ranní zprávy?'})
+            activities.append({'module': 'exercises', 'speak': 'Dobré ráno! Co takhle ranní rozcvička?'})
+        # Afternoon → walks, music
+        elif hour < 17:
+            activities.append({'module': 'music', 'speak': 'Krásné odpoledne. Pustit si rádio?'})
+        # Evening → stories, relax
+        else:
+            activities.append({'module': 'stories', 'speak': 'Hezký večer. Co takhle příběh na dobrou noc?'})
+            activities.append({'module': 'music', 'speak': 'Večerní klid. Pustit relaxační hudbu?'})
+
+        # Interest-based
+        if interests.get('garden', 0) > 2:
+            activities.append({'module': 'chat', 'speak': 'Jak vám roste zahrádka? Potřebujete poradit?'})
+        if interests.get('music', 0) > 2 and personal.get('favorite_music'):
+            fav = personal['favorite_music'][0] if personal['favorite_music'] else 'hudbu'
+            activities.append({'module': 'music', 'speak': f'Pustit vám {fav}?'})
+        if interests.get('family', 0) > 2:
+            activities.append({'module': 'calls', 'speak': 'Nechcete zavolat rodině?'})
+
+    except Exception:
+        pass
+
     activity = random.choice(activities)
 
     try:
