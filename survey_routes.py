@@ -143,7 +143,10 @@ def _extract_user_id():
     auth_user = getattr(g, 'auth_user', None)
     if auth_user and auth_user.get('id'):
         return str(auth_user['id'])
-    return request.args.get('user_id', request.json.get('user_id', '') if request.json else '')
+    uid = request.args.get('user_id', '')
+    if not uid and request.is_json:
+        uid = request.json.get('user_id', '')
+    return uid
 
 
 # ============================================================================
