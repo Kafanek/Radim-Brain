@@ -153,6 +153,9 @@ def _handle_my_medications(**kwargs):
     # "zapomněl jsem léky" → let AI handle with empathy
     if any(w in message for w in ["zapomněl", "zapomnel", "nevím", "nevim", "nepamatuj"]):
         return None  # pass to AI for empathetic response
+    # v483: "vzal jsem léky" → confirmation, not query — pass to AI for praise
+    if any(w in message for w in ["vzal", "vzala", "bral", "brala", "splnil", "splnila"]):
+        return None  # pass to AI — it will praise the user
     try:
         from memory_helpers import db_load_profile
         profile = db_load_profile(user_id)
