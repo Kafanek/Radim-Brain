@@ -344,15 +344,26 @@ def _inject_into_memory(user_id, obs):
 # ============================================================================
 
 def _execute_action(user_id, obs, app):
-    """Graduated action based on severity."""
+    """Graduated action based on severity + user's chosen Radim mode."""
     severity = obs["severity"]
 
     # Always inject into memory (so Radim mentions it in next chat)
     _inject_into_memory(user_id, obs)
 
+    # v478: Respect user's chosen mode (observer/guide/guardian)
+    profile = db_load_profile(user_id)
+    radim_mode = profile.get('radim_mode', 'guide')
+
+    # OBSERVER mode: only act on CRISIS, skip everything else
+    if radim_mode == 'observer' and severity != CRISIS:
+        logger.debug(f"Observer mode: skipping {severity} for {user_id}")
+        return
+
     if severity == INFO:
         return  # logged only
 
+    # GUIDE mode: push + memory, no calls unless CRISIS
+    # GUARDIAN mode: full escalation
     if severity in (WARNING, ALERT, CRISIS):
         _push_to_senior(user_id, obs, app)
 
@@ -646,6 +657,12 @@ def suggest_activity(user_id, app):
 
     # Cooldown: max 1 suggestion per 2 hours
     if now - _activity_cooldown.get(user_id, 0) < 7200:
+        return
+
+    # v478: Respect Radim mode — observer gets no suggestions
+    profile = db_load_profile(user_id)
+    radim_mode = profile.get('radim_mode', 'guide')
+    if radim_mode == 'observer':
         return
 
     # v477: Personalized suggestions based on interests, time, weather
