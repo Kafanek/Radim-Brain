@@ -437,6 +437,30 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Care Plan routes: {e}")
 
+# FHIR Adapter (HL7 FHIR R4 export)
+try:
+    from fhir_adapter import fhir_bp
+    app.register_blueprint(fhir_bp)
+    logger.info("✅ FHIR routes registered: /api/fhir/*")
+except Exception as e:
+    logger.warning(f"⚠️ FHIR routes: {e}")
+
+# Ops Quality (monitoring, error tracking, retention)
+try:
+    from ops_quality import ops_bp
+    app.register_blueprint(ops_bp)
+    logger.info("✅ Ops Quality routes registered: /api/ops/*")
+except Exception as e:
+    logger.warning(f"⚠️ Ops routes: {e}")
+
+# Pilot Mode (templates, invite, export)
+try:
+    from pilot_mode import pilot_bp
+    app.register_blueprint(pilot_bp)
+    logger.info("✅ Pilot Mode routes registered: /api/pilot/*")
+except Exception as e:
+    logger.warning(f"⚠️ Pilot routes: {e}")
+
 # Auth Routes (Registration, Login, JWT, GDPR)
 from auth_routes import auth_bp
 app.register_blueprint(auth_bp)
