@@ -32,6 +32,111 @@ logger = logging.getLogger(__name__)
 medical_bp = Blueprint('medical', __name__)
 
 
+def _send_team_email(to_email, member_name, role_info, senior_id):
+    """v4.2: Send email notification to new team member."""
+    try:
+        import os, smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+
+        smtp_host = os.environ.get('SMTP_HOST')
+        smtp_port = int(os.environ.get('SMTP_PORT', '465'))
+        smtp_user = os.environ.get('SMTP_USER')
+        smtp_pass = os.environ.get('SMTP_PASS')
+        smtp_from = os.environ.get('SMTP_FROM', smtp_user)
+        if not all([smtp_host, smtp_user, smtp_pass]):
+            logger.debug("SMTP not configured, skipping email")
+            return
+
+        subject = f"{role_info['icon']} Přidáni do zdravotního týmu — Radim"
+        body = f"""
+        <div style="font-family:sans-serif;max-width:500px;margin:0 auto;">
+            <h2 style="color:#5BA8A0;">{role_info['icon']} Zdravotní tým</h2>
+            <p>Dobrý den, <strong>{member_name or 'člene'}</strong>,</p>
+            <p>byli jste přidáni do zdravotního týmu jako <strong>{role_info['name']}</strong>.</p>
+            <p>Přihlaste se do aplikace pro zobrazení sdíleného profilu seniora, chatu a alertů:</p>
+            <a href="https://app.radimcare.cz" style="display:inline-block;padding:12px 24px;background:#5BA8A0;
+               color:white;text-decoration:none;border-radius:10px;font-weight:600;">
+               Otevřít Radim</a>
+            <p style="color:#a0aec0;font-size:0.85rem;margin-top:20px;">
+                S pozdravem,<br>Radim — AI asistent pro seniory</p>
+        </div>"""
+
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = smtp_from
+        msg['To'] = to_email
+        msg.attach(MIMEText(body, 'html'))
+
+        if smtp_port == 465:
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10) as s:
+                s.login(smtp_user, smtp_pass)
+                s.sendmail(smtp_from, to_email, msg.as_string())
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as s:
+                s.starttls()
+                s.login(smtp_user, smtp_pass)
+                s.sendmail(smtp_from, to_email, msg.as_string())
+
+        logger.info(f"Welcome email sent to {to_email}")
+    except Exception as e:
+        logger.debug(f"Email send error: {e}")
+
+
+def _send_escalation_email(coordinator_emails, alert_data, senior_id):
+    """v4.2: Send escalation email to coordinators."""
+    try:
+        import os, smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+
+        smtp_host = os.environ.get('SMTP_HOST')
+        smtp_port = int(os.environ.get('SMTP_PORT', '465'))
+        smtp_user = os.environ.get('SMTP_USER')
+        smtp_pass = os.environ.get('SMTP_PASS')
+        smtp_from = os.environ.get('SMTP_FROM', smtp_user)
+        if not all([smtp_host, smtp_user, smtp_pass]):
+            return
+
+        subject = f"🚨 ESKALACE — Radim Medical Alert"
+        body = f"""
+        <div style="font-family:sans-serif;max-width:500px;margin:0 auto;">
+            <h2 style="color:#e53e3e;">🚨 Alert eskalován</h2>
+            <p><strong>Senior:</strong> {senior_id}</p>
+            <p><strong>Alert:</strong> {alert_data.get('message', '—')}</p>
+            <p><strong>Závažnost:</strong> {alert_data.get('severity', '—')}</p>
+            <p>Přihlaste se pro detaily a reakci:</p>
+            <a href="https://app.radimcare.cz" style="display:inline-block;padding:12px 24px;background:#e53e3e;
+               color:white;text-decoration:none;border-radius:10px;font-weight:600;">
+               Otevřít Radim</a>
+        </div>"""
+
+        for email in (coordinator_emails or []):
+            if not email:
+                continue
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = subject
+            msg['From'] = smtp_from
+            msg['To'] = email
+            msg.attach(MIMEText(body, 'html'))
+
+            try:
+                if smtp_port == 465:
+                    with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10) as s:
+                        s.login(smtp_user, smtp_pass)
+                        s.sendmail(smtp_from, email, msg.as_string())
+                else:
+                    with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as s:
+                        s.starttls()
+                        s.login(smtp_user, smtp_pass)
+                        s.sendmail(smtp_from, email, msg.as_string())
+                logger.info(f"Escalation email sent to {email}")
+            except Exception:
+                pass
+    except Exception as e:
+        logger.debug(f"Escalation email error: {e}")
+
+
 # ============================================================================
 # MEDICAL ROLES + PERMISSIONS
 # ============================================================================
@@ -230,6 +335,11 @@ def add_team_member(senior_id):
             )
 
         role_info = MEDICAL_ROLES[role]
+
+        # v4.2: Send welcome email to new team member
+        if email:
+            _send_team_email(email, name, role_info, senior_id)
+
         return jsonify({
             'success': True,
             'message': f'{role_info["icon"]} {name or role_info["name"]} přidán do týmu',
@@ -346,6 +456,17 @@ def update_alert(senior_id):
                      json.dumps({'original_alert': alert_id, 'escalated_by': user_name}),
                      json.dumps(['coordinator']))
                 )
+                # v4.2: Email coordinators on escalation
+                try:
+                    coordinator_rows = db.execute(
+                        "SELECT email FROM medical_team WHERE senior_id = ? AND role = 'coordinator' AND active = 1 AND email IS NOT NULL",
+                        (senior_id,)
+                    ).fetchall()
+                    emails = [r[0] for r in (coordinator_rows or []) if r[0]]
+                    if emails:
+                        _send_escalation_email(emails, {'message': note or 'Bez reakce', 'severity': 'alert'}, senior_id)
+                except Exception as esc_e:
+                    logger.debug(f"Escalation email lookup: {esc_e}")
             else:
                 db.execute(
                     "UPDATE medical_alerts SET data = data || ?::jsonb WHERE id = ? AND senior_id = ?",

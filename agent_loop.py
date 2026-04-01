@@ -375,12 +375,14 @@ def _execute_action(user_id, obs, app):
         _crisis_escalate(user_id, obs, app)
 
     # v485: Route to medical team — filtered by observation type
-    _route_to_medical_team(user_id, obs)
+    # v4.1: Now also sends push notifications to team members
+    _route_to_medical_team(user_id, obs, app)
 
 
-def _route_to_medical_team(user_id, obs):
-    """Save alert to medical_alerts and route to relevant doctors."""
+def _route_to_medical_team(user_id, obs, app=None):
+    """Save alert to medical_alerts, route to relevant doctors, and push notify them."""
     try:
+        import json as _json
         from database import db_context
         obs_type = obs.get('type', '')
         severity = obs.get('severity', 'info')
@@ -403,11 +405,58 @@ def _route_to_medical_team(user_id, obs):
                 "INSERT INTO medical_alerts (senior_id, alert_type, severity, message, data, routed_to) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (user_id, obs_type, severity, obs.get('message', ''),
-                 __import__('json').dumps(obs.get('details', {})),
-                 __import__('json').dumps(routed))
+                 _json.dumps(obs.get('details', {})),
+                 _json.dumps(routed))
             )
+
+        # v4.1: Push notify all team members with matching roles
+        if app and severity in ('warning', 'alert', 'crisis'):
+            _push_to_medical_team(user_id, obs, routed, app)
+
     except Exception as e:
         logger.debug(f"Medical alert routing: {e}")
+
+
+def _push_to_medical_team(user_id, obs, routed_roles, app):
+    """Push notification to all medical team members with matching roles."""
+    try:
+        import json as _json
+        from database import db_context
+        send_push = app.config.get('SEND_PUSH_FN')
+        if not send_push:
+            return
+
+        severity = obs.get('severity', 'info')
+        sev_icons = {'warning': '⚠️', 'alert': '🔴', 'crisis': '🚨'}
+        icon = sev_icons.get(severity, '🔔')
+        title = f"{icon} Radim Medical — {severity.upper()}"
+        body = obs.get('message', 'Nový alert')
+
+        # Find team members with matching roles
+        with db_context(commit=False) as db:
+            placeholders = ','.join(['?' for _ in routed_roles])
+            db.execute(
+                f"SELECT DISTINCT user_id FROM medical_team "
+                f"WHERE senior_id = ? AND role IN ({placeholders}) AND active = 1 AND user_id IS NOT NULL",
+                [user_id] + routed_roles
+            )
+            members = db.fetchall()
+
+        for row in (members or []):
+            member_id = row[0]
+            if member_id:
+                try:
+                    send_push(member_id, title, body, data={
+                        "type": "medical_alert",
+                        "senior_id": user_id,
+                        "severity": severity,
+                        "alert_type": obs.get('type', '')
+                    })
+                    logger.debug(f"Push sent to team member {member_id} for {severity}")
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.debug(f"Push to medical team: {e}")
 
 
 def _push_to_senior(user_id, obs, app):
