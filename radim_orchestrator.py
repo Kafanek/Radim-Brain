@@ -383,6 +383,8 @@ def radim_chat():
         # Gemini = fallback (rychlý, levný, spolehlivý)
         # Static = last resort (circuit breakers open)
         _ai_provider = None
+        _brain_C_val = None
+        _brain_mode_val = None
         if text_response is None:
             try:
                 from self_healing import get_breaker, log_healing_event
@@ -547,6 +549,8 @@ def radim_chat():
             'intent': _resolved_intent if _INTENT_RESOLVER else intent,
             'mode': mode,
             'ai_provider': _ai_provider or 'local',
+            'brain_C': _brain_C_val,
+            'brain_mode': _brain_mode_val,
             'timestamp': datetime.utcnow().isoformat() + 'Z'
         }
         if anticipation_meta:
