@@ -106,14 +106,14 @@ def azure_tts_proxy():
             voice = 'cs-CZ-AntoninNeural'
 
         # ═══ SINGLE SOURCE OF TRUTH: voice_filter.build_radim_ssml() ═══
-        # ONE function does everything:
-        #   • VOICE_PROFILES (HARMONY/ALERT/CRISIS → rate, pitch, style)
-        #   • Per-user adaptation (adaptive_learning → slow_speech, fatigue)
-        #   • φ-pauzy between sentences (±50ms variability)
-        #   • Emphasis on key words (ALERT/CRISIS)
-        #   • Truncation to 200 chars (senior focus)
-        # NO other voice param calculation anywhere.
-        _mode = ant_state or (brain_speech.get('mode') if brain_speech else None) or 'HARMONY'
+        # Mode priority: frontend hint → brain state → default HARMONY
+        # Frontend sends style='calm'/'empathetic' for crisis/alert responses
+        _frontend_style = data.get('style', '')
+        _style_to_mode = {
+            'calm': 'CRISIS', 'empathetic': 'ALERT', 'cheerful': 'HARMONY', 'friendly': 'HARMONY'
+        }
+        _frontend_mode = _style_to_mode.get(_frontend_style)
+        _mode = _frontend_mode or ant_state or (brain_speech.get('mode') if brain_speech else None) or 'HARMONY'
         try:
             from voice_filter import build_radim_ssml
             ssml = build_radim_ssml(text, mode=_mode, voice=voice, user_id=uid or None)
