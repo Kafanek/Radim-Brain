@@ -325,20 +325,25 @@ def add_team_member(senior_id):
         return jsonify({'success': False, 'error': f'Neznámá role: {role}. Povolené: {list(MEDICAL_ROLES.keys())}'}), 400
 
     try:
+        auth = getattr(g, 'auth_user', None) or {}
+        invited_by = str(auth.get('id', ''))
+
         with db_context(commit=True) as db:
             db.execute(
                 "INSERT INTO medical_team (senior_id, user_id, role, name, email, phone, invited_by) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (senior_id, user_id) DO UPDATE SET "
                 "role = EXCLUDED.role, name = EXCLUDED.name, active = true",
-                (senior_id, user_id, role, name, email, phone,
-                 str(getattr(g, 'auth_user', {}).get('id', '')))
+                (senior_id, user_id, role, name, email, phone, invited_by)
             )
 
         role_info = MEDICAL_ROLES[role]
 
-        # v4.2: Send welcome email to new team member
+        # v4.2: Send welcome email to new team member (fire-and-forget)
         if email:
-            _send_team_email(email, name, role_info, senior_id)
+            try:
+                _send_team_email(email, name, role_info, senior_id)
+            except Exception as email_err:
+                logger.debug(f"Welcome email failed (non-blocking): {email_err}")
 
         return jsonify({
             'success': True,
@@ -348,7 +353,7 @@ def add_team_member(senior_id):
         })
     except Exception as e:
         logger.error(f"Add member error: {e}")
-        return jsonify({'success': False, 'error': 'Chyba při přidávání'}), 500
+        return jsonify({'success': False, 'error': f'Chyba při přidávání: {str(e)[:100]}'}), 500
 
 
 @medical_bp.route('/api/medical/messages/<senior_id>', methods=['GET', 'POST'])
