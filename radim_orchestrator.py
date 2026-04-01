@@ -198,7 +198,9 @@ def radim_chat():
                         'ui': {'suggested_buttons': ['Zavolat lékaře', 'Zavolat rodinu', 'Jsem v pořádku']}
                     },
                     'intent': 'safety',
-                    'mode': 'CRISIS'
+                    'mode': 'CRISIS',
+                    'brain_C': 30.0,
+                    'brain_mode': 'CRISIS',
                 })
 
         # Load personalization and history from memory
