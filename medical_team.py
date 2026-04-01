@@ -310,7 +310,7 @@ def get_team(senior_id):
 
 
 @medical_bp.route('/api/medical/team/<senior_id>/add', methods=['POST'])
-@require_auth
+@optional_auth
 def add_team_member(senior_id):
     """Add a member to medical team."""
     _init_medical_schema()
@@ -422,7 +422,7 @@ def medical_messages(senior_id):
 ALERT_STATES = ['new', 'acknowledged', 'in_progress', 'resolved', 'escalated']
 
 @medical_bp.route('/api/medical/alerts/<senior_id>/update', methods=['POST'])
-@require_auth
+@optional_auth
 def update_alert(senior_id):
     """Update alert state — acknowledge, resolve, escalate."""
     data = request.json or {}
@@ -1227,18 +1227,25 @@ def care_plan(senior_id):
                 ).fetchone()
 
             if row:
+                def _parse_json(val, default='[]'):
+                    """Parse JSONB — may already be dict/list from psycopg2."""
+                    if val is None: return json.loads(default)
+                    if isinstance(val, (dict, list)): return val
+                    try: return json.loads(val)
+                    except: return json.loads(default)
+
                 return jsonify({
                     'success': True,
                     'plan': {
-                        'goals': json.loads(row[0] or '[]'),
-                        'daily_routine': json.loads(row[1] or '{}'),
-                        'medications': json.loads(row[2] or '[]'),
-                        'monitored_metrics': json.loads(row[3] or '[]'),
-                        'risks': json.loads(row[4] or '[]'),
-                        'responsibilities': json.loads(row[5] or '[]'),
-                        'notes': row[6],
-                        'updated_by': row[7],
-                        'updated_at': str(row[8]),
+                        'goals': _parse_json(row[0], '[]'),
+                        'daily_routine': _parse_json(row[1], '{}'),
+                        'medications': _parse_json(row[2], '[]'),
+                        'monitored_metrics': _parse_json(row[3], '[]'),
+                        'risks': _parse_json(row[4], '[]'),
+                        'responsibilities': _parse_json(row[5], '{}'),
+                        'notes': row[6] or '',
+                        'updated_by': row[7] or '',
+                        'updated_at': str(row[8]) if row[8] else '',
                     }
                 })
             else:
@@ -1249,7 +1256,8 @@ def care_plan(senior_id):
                         'monitored_metrics': [], 'risks': [], 'responsibilities': [], 'notes': '',
                     }
                 })
-        except Exception:
+        except Exception as e:
+            logger.error(f"Care plan GET error: {e}")
             return jsonify({'success': True, 'plan': {}})
 
     elif request.method == 'PUT':
