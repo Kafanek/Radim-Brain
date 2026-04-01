@@ -172,6 +172,8 @@ def radim_chat():
                         'ui': {'suggested_buttons': ['Zavolat 155', 'Kontaktovat rodinu', 'Jsem v pořádku']}
                     },
                 'intent': 'safety',
+                'brain_C': 35.0,
+                'brain_mode': 'CRISIS',
                 'mode': mode
             })
             else:
@@ -557,6 +559,17 @@ def radim_chat():
             result['anticipation'] = anticipation_meta
         if brain_meta:
             result['brain'] = brain_meta
+        # v522: Relationship trust
+        try:
+            from relationship_engine import identify_relationship
+            rel = identify_relationship(user_id)
+            result['relationship'] = {
+                'type': rel.get('type'),
+                'trust': rel.get('trust'),
+                'permission': rel.get('permission_level'),
+            }
+        except Exception:
+            pass
         return jsonify(result)
 
     except Exception as e:
