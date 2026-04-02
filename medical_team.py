@@ -310,7 +310,7 @@ def get_team(senior_id):
 
 
 @medical_bp.route('/api/medical/team/<senior_id>/add', methods=['POST'])
-@optional_auth
+@require_auth
 def add_team_member(senior_id):
     """Add a member to medical team."""
     _init_medical_schema()
@@ -427,7 +427,7 @@ def medical_messages(senior_id):
 ALERT_STATES = ['new', 'acknowledged', 'in_progress', 'resolved', 'escalated']
 
 @medical_bp.route('/api/medical/alerts/<senior_id>/update', methods=['POST'])
-@optional_auth
+@require_auth
 def update_alert(senior_id):
     """Update alert state — acknowledge, resolve, escalate."""
     data = request.json or {}
