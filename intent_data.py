@@ -410,6 +410,100 @@ INTENTS = [
         ],
         "handler": "who_am_i",
     },
+    # ═══════════════════════════════════════════════════════════════
+    # 🏠 HOME ASSISTANT INTENTS
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "name": "ha_light_on",
+        "patterns": [
+            r"zapni\s+sv[eě]tl",
+            r"rozsvi[tť]",
+            r"rozsvit",
+            r"zapnout\s+sv[eě]tl",
+            r"dej\s+sv[eě]tl",
+            r"zapni\s+lampu",
+            r"rozsvi[tť]\s+lampu",
+        ],
+        "handler": "ha_light_on",
+    },
+    {
+        "name": "ha_light_off",
+        "patterns": [
+            r"vypni\s+sv[eě]tl",
+            r"zhasni",
+            r"zhasn[iu]",
+            r"vypnout\s+sv[eě]tl",
+            r"zhas\s+sv[eě]tl",
+            r"vypni\s+lampu",
+        ],
+        "handler": "ha_light_off",
+    },
+    {
+        "name": "ha_temperature",
+        "patterns": [
+            r"jak[áa]\s+je\s+teplot",
+            r"kolik\s+je\s+stup[nň]",
+            r"kolik\s+je\s+teplot",
+            r"jak\s+je\s+teplo",
+            r"je\s+(?:tu|tam|tady)\s+(?:teplo|zima|horko|chladno)",
+            r"teplot[ua]\s+(?:v|doma|uvnit[řr])",
+        ],
+        "handler": "ha_temperature",
+    },
+    {
+        "name": "ha_home_status",
+        "patterns": [
+            r"stav\s+dom[ua]",
+            r"jak\s+je\s+doma",
+            r"co\s+se\s+d[eě]je\s+doma",
+            r"stav\s+dom[aá]cnosti",
+            r"p[řr]ehled\s+dom[ua]",
+            r"je\s+doma\s+v[šs]e\s+v\s+po[řr][aá]dku",
+            r"smart\s*home",
+            r"chytr[aá]\s+dom[aá]cnost",
+        ],
+        "handler": "ha_home_status",
+    },
+    {
+        "name": "ha_lock",
+        "patterns": [
+            r"zamkni",
+            r"zamknout",
+            r"odemkni",
+            r"odemknout",
+            r"zamk(n[iu]|nout)\s+dve[řr]",
+            r"odemk(n[iu]|nout)\s+dve[řr]",
+            r"je\s+zamčen",
+            r"je\s+zamknut",
+        ],
+        "handler": "ha_lock",
+    },
+    {
+        "name": "ha_climate",
+        "patterns": [
+            r"nastav\s+teplot",
+            r"nastav\s+topen[ií]",
+            r"zvyš\s+teplot",
+            r"sni[žz]\s+teplot",
+            r"p[řr]itop",
+            r"zat[oO]p",
+            r"je\s+mi\s+zima",
+            r"je\s+mi\s+teplo",
+            r"moc\s+(?:topí|top[ií]|hřeje|hreje)",
+            r"nastav.*\d+\s*(?:°|stupn)",
+        ],
+        "handler": "ha_climate",
+    },
+    {
+        "name": "ha_cover",
+        "patterns": [
+            r"(?:otev[řr]i|zavři|zav[řr]i)\s+rolet",
+            r"(?:vytáhni|stáhni|stas|vitas)\s+rolet",
+            r"(?:otev[řr]i|zavři|zav[řr]i)\s+žaluzi",
+            r"rolet[uy]\s+(?:nahoru|dol[uů])",
+        ],
+        "handler": "ha_cover",
+    },
     # weather intent merged above in v407 (removed duplicate)
     {
         "name": "safety",

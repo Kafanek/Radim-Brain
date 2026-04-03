@@ -1,0 +1,765 @@
+"""
+🏠 HOME ASSISTANT INTEGRATION v1.0
+====================================
+Radim ↔ Home Assistant hybrid integration.
+HA runs on NUC (hardware layer), Radim is the AI brain.
+
+Features:
+    - REST API client for HA states/services
+    - WebSocket for real-time events
+    - Device discovery & caching
+    - Room-based grouping for seniors
+    - Agent-compatible actions (lights, climate, sensors, locks, media)
+    - Fallback to simulated devices when HA unavailable
+
+Config (env vars):
+    HA_URL          — Home Assistant URL (e.g., http://192.168.1.100:8123)
+    HA_TOKEN        — Long-lived access token
+    HA_WEBHOOK_SECRET — For HA → Radim webhooks
+"""
+
+import os
+import json
+import time
+import logging
+import threading
+from datetime import datetime, timedelta
+from flask import Blueprint, request, jsonify
+
+logger = logging.getLogger(__name__)
+
+# ═══════════════════════════════════════════════════════════════════
+# CONFIG
+# ═══════════════════════════════════════════════════════════════════
+
+HA_URL = os.environ.get('HA_URL', '')
+HA_TOKEN = os.environ.get('HA_TOKEN', '')
+HA_WEBHOOK_SECRET = os.environ.get('HA_WEBHOOK_SECRET', '')
+
+# Device type mappings
+DEVICE_TYPES = {
+    'light': {'icon': '💡', 'name': 'Světlo', 'domain': 'light'},
+    'switch': {'icon': '🔌', 'name': 'Zásuvka', 'domain': 'switch'},
+    'climate': {'icon': '🌡️', 'name': 'Topení/Klima', 'domain': 'climate'},
+    'sensor': {'icon': '📊', 'name': 'Senzor', 'domain': 'sensor'},
+    'binary_sensor': {'icon': '🚪', 'name': 'Senzor', 'domain': 'binary_sensor'},
+    'lock': {'icon': '🔒', 'name': 'Zámek', 'domain': 'lock'},
+    'cover': {'icon': '🪟', 'name': 'Roleta', 'domain': 'cover'},
+    'media_player': {'icon': '📺', 'name': 'Média', 'domain': 'media_player'},
+    'camera': {'icon': '📷', 'name': 'Kamera', 'domain': 'camera'},
+    'fan': {'icon': '🌀', 'name': 'Ventilátor', 'domain': 'fan'},
+    'vacuum': {'icon': '🤖', 'name': 'Vysavač', 'domain': 'vacuum'},
+    'alarm_control_panel': {'icon': '🚨', 'name': 'Alarm', 'domain': 'alarm_control_panel'},
+}
+
+# Room mappings for Czech seniors
+ROOM_NAMES = {
+    'living_room': '🛋️ Obývák',
+    'bedroom': '🛏️ Ložnice',
+    'kitchen': '🍳 Kuchyně',
+    'bathroom': '🚿 Koupelna',
+    'hallway': '🚪 Chodba',
+    'balcony': '🌿 Balkon',
+    'garage': '🚗 Garáž',
+    'garden': '🌳 Zahrada',
+    'office': '💼 Pracovna',
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# HA API CLIENT
+# ═══════════════════════════════════════════════════════════════════
+
+class HomeAssistantClient:
+    """REST + WebSocket client for Home Assistant."""
+
+    def __init__(self, url=None, token=None):
+        self.url = (url or HA_URL).rstrip('/')
+        self.token = token or HA_TOKEN
+        self.connected = False
+        self._cache = {}  # entity_id → state
+        self._cache_time = 0
+        self._cache_ttl = 30  # seconds
+        self._rooms = {}  # room → [entity_ids]
+        self._ws = None
+        self._ws_thread = None
+        self._event_handlers = []
+
+    @property
+    def available(self):
+        return bool(self.url and self.token)
+
+    def _headers(self):
+        return {
+            'Authorization': f'Bearer {self.token}',
+            'Content-Type': 'application/json'
+        }
+
+    # ─── REST API ───
+
+    def _request(self, method, path, data=None, timeout=10):
+        """Make HTTP request to HA API."""
+        import requests
+        try:
+            url = f'{self.url}/api/{path}'
+            resp = requests.request(
+                method, url,
+                headers=self._headers(),
+                json=data,
+                timeout=timeout
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            elif resp.status_code == 201:
+                return resp.json() if resp.text else {'success': True}
+            else:
+                logger.warning(f'HA API {method} {path}: {resp.status_code} {resp.text[:200]}')
+                return None
+        except Exception as e:
+            logger.warning(f'HA API error: {e}')
+            return None
+
+    def check_connection(self):
+        """Test HA connection."""
+        if not self.available:
+            return {'connected': False, 'reason': 'HA_URL or HA_TOKEN not configured'}
+        result = self._request('GET', '')
+        if result and 'message' in result:
+            self.connected = True
+            return {'connected': True, 'message': result['message'], 'url': self.url}
+        self.connected = False
+        return {'connected': False, 'reason': 'Cannot reach HA'}
+
+    def get_config(self):
+        """Get HA configuration."""
+        return self._request('GET', 'config')
+
+    # ─── STATES ───
+
+    def get_all_states(self, use_cache=True):
+        """Get all entity states."""
+        now = time.time()
+        if use_cache and self._cache and (now - self._cache_time) < self._cache_ttl:
+            return list(self._cache.values())
+
+        states = self._request('GET', 'states')
+        if states:
+            self._cache = {s['entity_id']: s for s in states}
+            self._cache_time = now
+            self._build_rooms()
+            return states
+        return list(self._cache.values()) if self._cache else []
+
+    def get_state(self, entity_id):
+        """Get single entity state."""
+        # Try cache first
+        if entity_id in self._cache:
+            return self._cache[entity_id]
+        state = self._request('GET', f'states/{entity_id}')
+        if state:
+            self._cache[entity_id] = state
+        return state
+
+    def _build_rooms(self):
+        """Build room→entities mapping from entity attributes."""
+        self._rooms = {}
+        for entity_id, state in self._cache.items():
+            area = state.get('attributes', {}).get('area_id', '')
+            friendly = state.get('attributes', {}).get('friendly_name', '')
+            # Try to guess room from entity_id or friendly_name
+            room = area or self._guess_room(entity_id, friendly)
+            if room:
+                self._rooms.setdefault(room, []).append(entity_id)
+
+    def _guess_room(self, entity_id, friendly_name):
+        """Guess room from entity naming patterns."""
+        text = f'{entity_id} {friendly_name}'.lower()
+        for key in ROOM_NAMES:
+            if key.replace('_', '') in text.replace('_', '').replace(' ', ''):
+                return key
+        return ''
+
+    # ─── SERVICES (ACTIONS) ───
+
+    def call_service(self, domain, service, entity_id=None, data=None):
+        """Call HA service (turn on/off, set temperature, etc.)."""
+        payload = data or {}
+        if entity_id:
+            payload['entity_id'] = entity_id
+        return self._request('POST', f'services/{domain}/{service}', payload)
+
+    # ─── CONVENIENCE METHODS ───
+
+    def light_on(self, entity_id, brightness=None, color_temp=None):
+        """Turn on a light."""
+        data = {}
+        if brightness is not None:
+            data['brightness_pct'] = max(1, min(100, brightness))
+        if color_temp is not None:
+            data['color_temp_kelvin'] = color_temp
+        return self.call_service('light', 'turn_on', entity_id, data)
+
+    def light_off(self, entity_id):
+        return self.call_service('light', 'turn_off', entity_id)
+
+    def set_temperature(self, entity_id, temperature):
+        """Set climate target temperature."""
+        return self.call_service('climate', 'set_temperature', entity_id, {
+            'temperature': temperature
+        })
+
+    def lock(self, entity_id):
+        return self.call_service('lock', 'lock', entity_id)
+
+    def unlock(self, entity_id):
+        return self.call_service('lock', 'unlock', entity_id)
+
+    def cover_open(self, entity_id):
+        return self.call_service('cover', 'open_cover', entity_id)
+
+    def cover_close(self, entity_id):
+        return self.call_service('cover', 'close_cover', entity_id)
+
+    def switch_on(self, entity_id):
+        return self.call_service('switch', 'turn_on', entity_id)
+
+    def switch_off(self, entity_id):
+        return self.call_service('switch', 'turn_off', entity_id)
+
+    def media_play(self, entity_id):
+        return self.call_service('media_player', 'media_play', entity_id)
+
+    def media_pause(self, entity_id):
+        return self.call_service('media_player', 'media_pause', entity_id)
+
+    def media_volume(self, entity_id, volume):
+        """Set volume 0-100."""
+        return self.call_service('media_player', 'volume_set', entity_id, {
+            'volume_level': volume / 100.0
+        })
+
+    def alarm_arm(self, entity_id, code=None):
+        data = {'code': code} if code else {}
+        return self.call_service('alarm_control_panel', 'alarm_arm_away', entity_id, data)
+
+    def alarm_disarm(self, entity_id, code=None):
+        data = {'code': code} if code else {}
+        return self.call_service('alarm_control_panel', 'alarm_disarm', entity_id, data)
+
+    # ─── DEVICE DISCOVERY ───
+
+    def get_devices_by_type(self, device_type=None):
+        """Get devices grouped by type."""
+        states = self.get_all_states()
+        devices = {}
+        for s in states:
+            eid = s['entity_id']
+            domain = eid.split('.')[0]
+            if device_type and domain != device_type:
+                continue
+            if domain not in DEVICE_TYPES:
+                continue
+            dtype = DEVICE_TYPES[domain]
+            devices.setdefault(domain, []).append({
+                'entity_id': eid,
+                'name': s.get('attributes', {}).get('friendly_name', eid),
+                'state': s.get('state', 'unknown'),
+                'icon': dtype['icon'],
+                'type_name': dtype['name'],
+                'attributes': s.get('attributes', {}),
+                'last_changed': s.get('last_changed', ''),
+            })
+        return devices
+
+    def get_devices_by_room(self):
+        """Get devices grouped by room."""
+        self.get_all_states()
+        rooms = {}
+        for room, entities in self._rooms.items():
+            room_name = ROOM_NAMES.get(room, f'📍 {room}')
+            room_devices = []
+            for eid in entities:
+                state = self._cache.get(eid, {})
+                domain = eid.split('.')[0]
+                if domain not in DEVICE_TYPES:
+                    continue
+                dtype = DEVICE_TYPES[domain]
+                room_devices.append({
+                    'entity_id': eid,
+                    'name': state.get('attributes', {}).get('friendly_name', eid),
+                    'state': state.get('state', 'unknown'),
+                    'icon': dtype['icon'],
+                    'domain': domain,
+                })
+            if room_devices:
+                rooms[room] = {'name': room_name, 'devices': room_devices}
+        return rooms
+
+    def get_sensors_summary(self):
+        """Get sensor readings summary for agent loop."""
+        states = self.get_all_states()
+        sensors = {
+            'temperature': [],
+            'humidity': [],
+            'motion': [],
+            'door': [],
+            'light_level': [],
+            'air_quality': [],
+            'battery': [],
+        }
+        for s in states:
+            eid = s['entity_id']
+            state = s.get('state', '')
+            attrs = s.get('attributes', {})
+            device_class = attrs.get('device_class', '')
+            unit = attrs.get('unit_of_measurement', '')
+            name = attrs.get('friendly_name', eid)
+
+            try:
+                val = float(state) if state not in ('unknown', 'unavailable', '') else None
+            except (ValueError, TypeError):
+                val = None
+
+            if device_class == 'temperature' or '°C' in unit:
+                if val is not None:
+                    sensors['temperature'].append({'name': name, 'value': val, 'unit': '°C', 'entity_id': eid})
+            elif device_class == 'humidity':
+                if val is not None:
+                    sensors['humidity'].append({'name': name, 'value': val, 'unit': '%', 'entity_id': eid})
+            elif device_class == 'motion' or 'motion' in eid:
+                sensors['motion'].append({'name': name, 'state': state, 'entity_id': eid})
+            elif device_class == 'door' or device_class == 'opening':
+                sensors['door'].append({'name': name, 'state': state, 'entity_id': eid})
+            elif device_class == 'illuminance':
+                if val is not None:
+                    sensors['light_level'].append({'name': name, 'value': val, 'unit': 'lx', 'entity_id': eid})
+            elif device_class == 'battery':
+                if val is not None:
+                    sensors['battery'].append({'name': name, 'value': val, 'unit': '%', 'entity_id': eid})
+            elif device_class in ('pm25', 'pm10', 'co2', 'aqi'):
+                if val is not None:
+                    sensors['air_quality'].append({'name': name, 'value': val, 'device_class': device_class, 'entity_id': eid})
+
+        return sensors
+
+    # ─── WEBSOCKET (Real-time events) ───
+
+    def start_websocket(self):
+        """Start WebSocket connection for real-time events."""
+        if not self.available:
+            return
+        self._ws_thread = threading.Thread(target=self._ws_loop, daemon=True)
+        self._ws_thread.start()
+
+    def _ws_loop(self):
+        """WebSocket event loop."""
+        import websocket
+        ws_url = self.url.replace('http://', 'ws://').replace('https://', 'wss://')
+        ws_url = f'{ws_url}/api/websocket'
+
+        while True:
+            try:
+                ws = websocket.WebSocketApp(
+                    ws_url,
+                    on_message=self._on_ws_message,
+                    on_error=self._on_ws_error,
+                    on_close=self._on_ws_close,
+                    on_open=self._on_ws_open,
+                )
+                ws.run_forever(ping_interval=30, ping_timeout=10)
+            except Exception as e:
+                logger.warning(f'HA WebSocket error: {e}')
+            time.sleep(30)  # Reconnect after 30s
+
+    def _on_ws_open(self, ws):
+        logger.info('HA WebSocket connected')
+
+    def _on_ws_message(self, ws, message):
+        try:
+            data = json.loads(message)
+            msg_type = data.get('type', '')
+
+            if msg_type == 'auth_required':
+                ws.send(json.dumps({'type': 'auth', 'access_token': self.token}))
+            elif msg_type == 'auth_ok':
+                self.connected = True
+                logger.info('HA WebSocket authenticated')
+                # Subscribe to state changes
+                ws.send(json.dumps({
+                    'id': 1,
+                    'type': 'subscribe_events',
+                    'event_type': 'state_changed'
+                }))
+            elif msg_type == 'event':
+                event_data = data.get('event', {}).get('data', {})
+                entity_id = event_data.get('entity_id', '')
+                new_state = event_data.get('new_state', {})
+                if entity_id and new_state:
+                    self._cache[entity_id] = new_state
+                    for handler in self._event_handlers:
+                        try:
+                            handler(entity_id, new_state)
+                        except Exception as e:
+                            logger.warning(f'Event handler error: {e}')
+        except Exception as e:
+            logger.warning(f'WS message parse error: {e}')
+
+    def _on_ws_error(self, ws, error):
+        logger.warning(f'HA WebSocket error: {error}')
+
+    def _on_ws_close(self, ws, code, msg):
+        self.connected = False
+        logger.info(f'HA WebSocket closed: {code} {msg}')
+
+    def on_state_change(self, handler):
+        """Register event handler: handler(entity_id, new_state)."""
+        self._event_handlers.append(handler)
+
+    # ─── AGENT ACTIONS ───
+
+    def execute_agent_action(self, action, params=None):
+        """Execute action from agent loop or voice command.
+
+        Actions:
+            light_on, light_off, light_brightness
+            climate_set, climate_off
+            lock, unlock
+            cover_open, cover_close
+            switch_on, switch_off
+            alarm_arm, alarm_disarm
+            get_temperature, get_humidity, get_status
+        """
+        params = params or {}
+        entity_id = params.get('entity_id', '')
+
+        # Find entity by room + type if no entity_id
+        if not entity_id and 'room' in params and 'device_type' in params:
+            entity_id = self._find_entity(params['room'], params['device_type'])
+            if not entity_id:
+                return {'success': False, 'message': f'Zařízení nenalezeno v {params["room"]}'}
+
+        try:
+            if action == 'light_on':
+                result = self.light_on(entity_id, params.get('brightness'))
+                return {'success': True, 'message': '💡 Světlo zapnuto', 'entity_id': entity_id}
+            elif action == 'light_off':
+                result = self.light_off(entity_id)
+                return {'success': True, 'message': '💡 Světlo vypnuto', 'entity_id': entity_id}
+            elif action == 'light_brightness':
+                result = self.light_on(entity_id, brightness=params.get('brightness', 50))
+                return {'success': True, 'message': f'💡 Jas nastaven na {params.get("brightness", 50)}%'}
+            elif action == 'climate_set':
+                temp = params.get('temperature', 22)
+                result = self.set_temperature(entity_id, temp)
+                return {'success': True, 'message': f'🌡️ Teplota nastavena na {temp}°C'}
+            elif action == 'climate_off':
+                result = self.call_service('climate', 'turn_off', entity_id)
+                return {'success': True, 'message': '🌡️ Topení vypnuto'}
+            elif action == 'lock':
+                result = self.lock(entity_id)
+                return {'success': True, 'message': '🔒 Zamčeno'}
+            elif action == 'unlock':
+                result = self.unlock(entity_id)
+                return {'success': True, 'message': '🔓 Odemčeno'}
+            elif action == 'cover_open':
+                result = self.cover_open(entity_id)
+                return {'success': True, 'message': '🪟 Roleta otevřena'}
+            elif action == 'cover_close':
+                result = self.cover_close(entity_id)
+                return {'success': True, 'message': '🪟 Roleta zavřena'}
+            elif action == 'switch_on':
+                result = self.switch_on(entity_id)
+                return {'success': True, 'message': '🔌 Zapnuto'}
+            elif action == 'switch_off':
+                result = self.switch_off(entity_id)
+                return {'success': True, 'message': '🔌 Vypnuto'}
+            elif action == 'get_temperature':
+                sensors = self.get_sensors_summary()
+                temps = sensors.get('temperature', [])
+                if temps:
+                    avg = sum(t['value'] for t in temps) / len(temps)
+                    details = ', '.join(f"{t['name']}: {t['value']}°C" for t in temps[:5])
+                    return {'success': True, 'message': f'🌡️ Průměrná teplota: {avg:.1f}°C ({details})', 'data': temps}
+                return {'success': True, 'message': '🌡️ Žádné teplotní senzory nenalezeny'}
+            elif action == 'get_humidity':
+                sensors = self.get_sensors_summary()
+                hums = sensors.get('humidity', [])
+                if hums:
+                    avg = sum(h['value'] for h in hums) / len(hums)
+                    return {'success': True, 'message': f'💧 Průměrná vlhkost: {avg:.1f}%', 'data': hums}
+                return {'success': True, 'message': '💧 Žádné senzory vlhkosti'}
+            elif action == 'get_status':
+                return self._get_home_status()
+            elif action == 'alarm_arm':
+                result = self.alarm_arm(entity_id, params.get('code'))
+                return {'success': True, 'message': '🚨 Alarm aktivován'}
+            elif action == 'alarm_disarm':
+                result = self.alarm_disarm(entity_id, params.get('code'))
+                return {'success': True, 'message': '🚨 Alarm deaktivován'}
+            else:
+                return {'success': False, 'message': f'Neznámá akce: {action}'}
+        except Exception as e:
+            return {'success': False, 'message': f'Chyba: {str(e)}'}
+
+    def _find_entity(self, room, device_type):
+        """Find entity by room and device type."""
+        room_entities = self._rooms.get(room, [])
+        for eid in room_entities:
+            if eid.startswith(f'{device_type}.'):
+                return eid
+        # Fallback: search all entities
+        for eid in self._cache:
+            if eid.startswith(f'{device_type}.') and room.replace('_', '') in eid.replace('_', ''):
+                return eid
+        return None
+
+    def _get_home_status(self):
+        """Get overall home status summary."""
+        sensors = self.get_sensors_summary()
+        devices = self.get_devices_by_type()
+
+        lights_on = sum(1 for d in devices.get('light', []) if d['state'] == 'on')
+        lights_total = len(devices.get('light', []))
+        locks_locked = sum(1 for d in devices.get('lock', []) if d['state'] == 'locked')
+        locks_total = len(devices.get('lock', []))
+        doors_open = sum(1 for s in sensors.get('door', []) if s['state'] == 'on')
+        motion_detected = sum(1 for s in sensors.get('motion', []) if s['state'] == 'on')
+
+        temps = sensors.get('temperature', [])
+        avg_temp = sum(t['value'] for t in temps) / len(temps) if temps else None
+
+        low_battery = [s for s in sensors.get('battery', []) if s['value'] < 20]
+
+        status = {
+            'lights': f'{lights_on}/{lights_total} zapnuto',
+            'locks': f'{locks_locked}/{locks_total} zamčeno',
+            'doors_open': doors_open,
+            'motion': motion_detected > 0,
+            'temperature': f'{avg_temp:.1f}°C' if avg_temp else 'N/A',
+            'low_battery': [{'name': s['name'], 'level': s['value']} for s in low_battery],
+        }
+
+        msg_parts = [
+            f'🏠 Stav domácnosti:',
+            f'💡 Světla: {status["lights"]}',
+            f'🔒 Zámky: {status["locks"]}',
+        ]
+        if avg_temp:
+            msg_parts.append(f'🌡️ Teplota: {avg_temp:.1f}°C')
+        if doors_open:
+            msg_parts.append(f'🚪 Otevřené dveře: {doors_open}')
+        if low_battery:
+            msg_parts.append(f'🔋 Slabá baterie: {", ".join(b["name"] for b in low_battery)}')
+
+        return {
+            'success': True,
+            'message': '\n'.join(msg_parts),
+            'data': status
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# SIMULATED DEVICES (for testing without HA)
+# ═══════════════════════════════════════════════════════════════════
+
+class SimulatedHomeAssistant(HomeAssistantClient):
+    """Simulated HA for development/demo when no HA instance available."""
+
+    def __init__(self):
+        super().__init__(url='http://simulated', token='simulated')
+        self.connected = True
+        self._sim_devices = {
+            'light.living_room': {'state': 'off', 'attributes': {'friendly_name': 'Obývák světlo', 'brightness': 0, 'area_id': 'living_room', 'device_class': 'light'}},
+            'light.bedroom': {'state': 'off', 'attributes': {'friendly_name': 'Ložnice světlo', 'brightness': 0, 'area_id': 'bedroom'}},
+            'light.kitchen': {'state': 'on', 'attributes': {'friendly_name': 'Kuchyně světlo', 'brightness': 80, 'area_id': 'kitchen'}},
+            'light.hallway': {'state': 'on', 'attributes': {'friendly_name': 'Chodba světlo', 'brightness': 40, 'area_id': 'hallway'}},
+            'climate.living_room': {'state': 'heat', 'attributes': {'friendly_name': 'Obývák topení', 'temperature': 22, 'current_temperature': 21.5, 'area_id': 'living_room'}},
+            'climate.bedroom': {'state': 'heat', 'attributes': {'friendly_name': 'Ložnice topení', 'temperature': 20, 'current_temperature': 19.8, 'area_id': 'bedroom'}},
+            'sensor.living_room_temperature': {'state': '21.5', 'attributes': {'friendly_name': 'Obývák teplota', 'unit_of_measurement': '°C', 'device_class': 'temperature', 'area_id': 'living_room'}},
+            'sensor.bedroom_temperature': {'state': '19.8', 'attributes': {'friendly_name': 'Ložnice teplota', 'unit_of_measurement': '°C', 'device_class': 'temperature', 'area_id': 'bedroom'}},
+            'sensor.kitchen_temperature': {'state': '22.3', 'attributes': {'friendly_name': 'Kuchyně teplota', 'unit_of_measurement': '°C', 'device_class': 'temperature', 'area_id': 'kitchen'}},
+            'sensor.living_room_humidity': {'state': '45', 'attributes': {'friendly_name': 'Obývák vlhkost', 'unit_of_measurement': '%', 'device_class': 'humidity', 'area_id': 'living_room'}},
+            'binary_sensor.front_door': {'state': 'off', 'attributes': {'friendly_name': 'Vchodové dveře', 'device_class': 'door', 'area_id': 'hallway'}},
+            'binary_sensor.motion_hallway': {'state': 'off', 'attributes': {'friendly_name': 'Pohyb chodba', 'device_class': 'motion', 'area_id': 'hallway'}},
+            'binary_sensor.motion_living_room': {'state': 'on', 'attributes': {'friendly_name': 'Pohyb obývák', 'device_class': 'motion', 'area_id': 'living_room'}},
+            'lock.front_door': {'state': 'locked', 'attributes': {'friendly_name': 'Vchodový zámek', 'area_id': 'hallway'}},
+            'cover.living_room': {'state': 'open', 'attributes': {'friendly_name': 'Obývák roleta', 'area_id': 'living_room'}},
+            'media_player.living_room': {'state': 'idle', 'attributes': {'friendly_name': 'Obývák TV', 'area_id': 'living_room'}},
+            'sensor.front_door_battery': {'state': '85', 'attributes': {'friendly_name': 'Zámek baterie', 'unit_of_measurement': '%', 'device_class': 'battery', 'area_id': 'hallway'}},
+            'sensor.motion_battery': {'state': '15', 'attributes': {'friendly_name': 'Pohybový senzor baterie', 'unit_of_measurement': '%', 'device_class': 'battery', 'area_id': 'hallway'}},
+            'switch.kitchen_kettle': {'state': 'off', 'attributes': {'friendly_name': 'Kuchyně varná konvice', 'area_id': 'kitchen'}},
+        }
+        self._init_cache()
+
+    def _init_cache(self):
+        for eid, dev in self._sim_devices.items():
+            self._cache[eid] = {
+                'entity_id': eid,
+                'state': dev['state'],
+                'attributes': dev['attributes'],
+                'last_changed': datetime.utcnow().isoformat(),
+            }
+        self._build_rooms()
+
+    def check_connection(self):
+        return {'connected': True, 'message': 'Simulated HA (demo mode)', 'simulated': True}
+
+    def get_all_states(self, use_cache=True):
+        return list(self._cache.values())
+
+    def call_service(self, domain, service, entity_id=None, data=None):
+        """Simulate service call."""
+        if entity_id and entity_id in self._cache:
+            if service in ('turn_on',):
+                self._cache[entity_id]['state'] = 'on'
+                if data and 'brightness_pct' in data:
+                    self._cache[entity_id]['attributes']['brightness'] = data['brightness_pct']
+            elif service in ('turn_off',):
+                self._cache[entity_id]['state'] = 'off'
+            elif service == 'lock':
+                self._cache[entity_id]['state'] = 'locked'
+            elif service == 'unlock':
+                self._cache[entity_id]['state'] = 'unlocked'
+            elif service == 'open_cover':
+                self._cache[entity_id]['state'] = 'open'
+            elif service == 'close_cover':
+                self._cache[entity_id]['state'] = 'closed'
+            elif service == 'set_temperature' and data:
+                self._cache[entity_id]['attributes']['temperature'] = data.get('temperature', 22)
+            self._cache[entity_id]['last_changed'] = datetime.utcnow().isoformat()
+            return [self._cache[entity_id]]
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════
+# GLOBAL INSTANCE
+# ═══════════════════════════════════════════════════════════════════
+
+def get_ha_client():
+    """Get the appropriate HA client (real or simulated)."""
+    if HA_URL and HA_TOKEN:
+        return HomeAssistantClient()
+    return SimulatedHomeAssistant()
+
+# Singleton
+_ha_client = None
+
+def ha():
+    """Get singleton HA client."""
+    global _ha_client
+    if _ha_client is None:
+        _ha_client = get_ha_client()
+    return _ha_client
+
+
+# ═══════════════════════════════════════════════════════════════════
+# FLASK BLUEPRINT — API ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════
+
+ha_bp = Blueprint('home_assistant', __name__)
+
+@ha_bp.route('/api/ha/status', methods=['GET'])
+def ha_status():
+    """Check HA connection and get home status."""
+    client = ha()
+    conn = client.check_connection()
+    if conn.get('connected'):
+        status = client._get_home_status()
+        return jsonify({**conn, **status})
+    return jsonify(conn)
+
+@ha_bp.route('/api/ha/devices', methods=['GET'])
+def ha_devices():
+    """Get all devices, optionally grouped by room or type."""
+    client = ha()
+    group_by = request.args.get('group', 'room')  # room or type
+    if group_by == 'room':
+        return jsonify({'success': True, 'rooms': client.get_devices_by_room()})
+    else:
+        return jsonify({'success': True, 'devices': client.get_devices_by_type()})
+
+@ha_bp.route('/api/ha/device/<entity_id>', methods=['GET'])
+def ha_device_state(entity_id):
+    """Get single device state."""
+    client = ha()
+    state = client.get_state(entity_id)
+    if state:
+        return jsonify({'success': True, 'state': state})
+    return jsonify({'success': False, 'error': 'Device not found'}), 404
+
+@ha_bp.route('/api/ha/action', methods=['POST'])
+def ha_action():
+    """Execute a device action.
+
+    Body: {"action": "light_on", "entity_id": "light.living_room", "params": {"brightness": 80}}
+    Or: {"action": "light_on", "room": "living_room"} — auto-find entity
+    """
+    data = request.json or {}
+    action = data.get('action', '')
+    params = data.get('params', {})
+
+    if data.get('entity_id'):
+        params['entity_id'] = data['entity_id']
+    if data.get('room'):
+        params['room'] = data['room']
+        # Guess device type from action
+        if 'light' in action:
+            params['device_type'] = 'light'
+        elif 'climate' in action or 'temperature' in action:
+            params['device_type'] = 'climate'
+        elif 'lock' in action or 'unlock' in action:
+            params['device_type'] = 'lock'
+        elif 'cover' in action:
+            params['device_type'] = 'cover'
+        elif 'switch' in action:
+            params['device_type'] = 'switch'
+
+    client = ha()
+    result = client.execute_agent_action(action, params)
+    return jsonify(result)
+
+@ha_bp.route('/api/ha/sensors', methods=['GET'])
+def ha_sensors():
+    """Get sensor summary (temperature, humidity, motion, etc.)."""
+    client = ha()
+    sensors = client.get_sensors_summary()
+    return jsonify({'success': True, 'sensors': sensors})
+
+@ha_bp.route('/api/ha/rooms', methods=['GET'])
+def ha_rooms():
+    """Get room list with device counts."""
+    client = ha()
+    rooms = client.get_devices_by_room()
+    summary = {}
+    for room_id, room_data in rooms.items():
+        summary[room_id] = {
+            'name': room_data['name'],
+            'device_count': len(room_data['devices']),
+            'devices': room_data['devices']
+        }
+    return jsonify({'success': True, 'rooms': summary})
+
+@ha_bp.route('/api/ha/webhook', methods=['POST'])
+def ha_webhook():
+    """Receive events from HA automations (HA → Radim)."""
+    secret = request.headers.get('X-HA-Secret', '')
+    if HA_WEBHOOK_SECRET and secret != HA_WEBHOOK_SECRET:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.json or {}
+    event_type = data.get('event_type', 'unknown')
+    entity_id = data.get('entity_id', '')
+    new_state = data.get('new_state', '')
+
+    logger.info(f'HA webhook: {event_type} {entity_id} → {new_state}')
+
+    # Process events for agent loop
+    if event_type == 'motion_detected' and 'motion' in entity_id:
+        # Update cache
+        ha()._cache.setdefault(entity_id, {})['state'] = 'on'
+    elif event_type == 'door_opened':
+        ha()._cache.setdefault(entity_id, {})['state'] = 'on'
+    elif event_type == 'temperature_alert':
+        # Could trigger agent loop alert
+        pass
+
+    return jsonify({'success': True, 'processed': event_type})

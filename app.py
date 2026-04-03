@@ -421,6 +421,13 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Medical Team routes: {e}")
 
+try:
+    from home_assistant import ha_bp
+    app.register_blueprint(ha_bp)
+    logger.info("✅ Home Assistant routes registered: /api/ha/*")
+except Exception as e:
+    logger.warning(f"⚠️ Home Assistant routes: {e}")
+
 # Audit Log Routes
 try:
     from audit_log import audit_bp

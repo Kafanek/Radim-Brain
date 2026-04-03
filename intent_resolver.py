@@ -228,6 +228,169 @@ def _handle_who_am_i(**kwargs):
         return None
 
 
+# ============================================================================
+# 🏠 HOME ASSISTANT HANDLERS
+# ============================================================================
+
+def _handle_ha_light_on(**kwargs):
+    """Turn on lights."""
+    try:
+        from home_assistant import ha
+        msg = kwargs.get('message', '').lower()
+        # Detect room from message
+        room = _detect_room(msg)
+        entity_id = None
+        if room:
+            result = ha().execute_agent_action('light_on', {'room': room, 'device_type': 'light'})
+        else:
+            # Turn on all lights or first found
+            devices = ha().get_devices_by_type('light')
+            lights = devices.get('light', [])
+            if lights:
+                off_lights = [l for l in lights if l['state'] == 'off']
+                target = off_lights[0] if off_lights else lights[0]
+                result = ha().execute_agent_action('light_on', {'entity_id': target['entity_id']})
+            else:
+                return "Nemám žádná světla k ovládání."
+        return result.get('message', 'Světlo zapnuto.')
+    except Exception as e:
+        return f"Bohužel se mi nepodařilo zapnout světlo: {e}"
+
+def _handle_ha_light_off(**kwargs):
+    try:
+        from home_assistant import ha
+        msg = kwargs.get('message', '').lower()
+        room = _detect_room(msg)
+        if room:
+            result = ha().execute_agent_action('light_off', {'room': room, 'device_type': 'light'})
+        else:
+            devices = ha().get_devices_by_type('light')
+            lights = devices.get('light', [])
+            on_lights = [l for l in lights if l['state'] == 'on']
+            if on_lights:
+                result = ha().execute_agent_action('light_off', {'entity_id': on_lights[0]['entity_id']})
+            else:
+                return "Všechna světla jsou už zhasnutá."
+        return result.get('message', 'Světlo vypnuto.')
+    except Exception as e:
+        return f"Nepodařilo se vypnout světlo: {e}"
+
+def _handle_ha_temperature(**kwargs):
+    try:
+        from home_assistant import ha
+        result = ha().execute_agent_action('get_temperature')
+        return result.get('message', 'Nemám data o teplotě.')
+    except Exception:
+        return None  # Pass to AI
+
+def _handle_ha_home_status(**kwargs):
+    try:
+        from home_assistant import ha
+        result = ha().execute_agent_action('get_status')
+        return result.get('message', 'Stav domácnosti není dostupný.')
+    except Exception:
+        return None
+
+def _handle_ha_lock(**kwargs):
+    try:
+        from home_assistant import ha
+        msg = kwargs.get('message', '').lower()
+        if any(w in msg for w in ['odemkni', 'odemknout', 'otevři zámek', 'otevrit zamek']):
+            devices = ha().get_devices_by_type('lock')
+            locks = devices.get('lock', [])
+            if locks:
+                result = ha().execute_agent_action('unlock', {'entity_id': locks[0]['entity_id']})
+                return result.get('message', 'Odemčeno.')
+        else:
+            devices = ha().get_devices_by_type('lock')
+            locks = devices.get('lock', [])
+            if locks:
+                result = ha().execute_agent_action('lock', {'entity_id': locks[0]['entity_id']})
+                return result.get('message', 'Zamčeno.')
+        return "Nemám žádný zámek k ovládání."
+    except Exception:
+        return None
+
+def _handle_ha_climate(**kwargs):
+    try:
+        from home_assistant import ha
+        import re
+        msg = kwargs.get('message', '').lower()
+        # Extract temperature number
+        temp_match = re.search(r'(\d{1,2})\s*(?:°|stup[nň]|°C)', msg)
+        if temp_match:
+            temp = int(temp_match.group(1))
+            temp = max(15, min(30, temp))  # Safety limits
+            devices = ha().get_devices_by_type('climate')
+            climates = devices.get('climate', [])
+            if climates:
+                result = ha().execute_agent_action('climate_set', {
+                    'entity_id': climates[0]['entity_id'],
+                    'temperature': temp
+                })
+                return result.get('message', f'Teplota nastavena na {temp}°C.')
+        # No specific temp — adjust based on request
+        if any(w in msg for w in ['zima', 'studeno', 'chladno', 'přitop', 'pritop', 'zatop']):
+            # Raise by 2°C
+            devices = ha().get_devices_by_type('climate')
+            climates = devices.get('climate', [])
+            if climates:
+                current = climates[0].get('attributes', {}).get('temperature', 20)
+                new_temp = min(25, current + 2)
+                result = ha().execute_agent_action('climate_set', {
+                    'entity_id': climates[0]['entity_id'], 'temperature': new_temp
+                })
+                return f"🌡️ Zvýšil jsem topení na {new_temp}°C."
+        elif any(w in msg for w in ['teplo', 'horko', 'moc topí']):
+            devices = ha().get_devices_by_type('climate')
+            climates = devices.get('climate', [])
+            if climates:
+                current = climates[0].get('attributes', {}).get('temperature', 22)
+                new_temp = max(18, current - 2)
+                result = ha().execute_agent_action('climate_set', {
+                    'entity_id': climates[0]['entity_id'], 'temperature': new_temp
+                })
+                return f"🌡️ Snížil jsem topení na {new_temp}°C."
+        return None  # Pass to AI
+    except Exception:
+        return None
+
+def _handle_ha_cover(**kwargs):
+    try:
+        from home_assistant import ha
+        msg = kwargs.get('message', '').lower()
+        devices = ha().get_devices_by_type('cover')
+        covers = devices.get('cover', [])
+        if not covers:
+            return "Nemám žádné rolety k ovládání."
+        if any(w in msg for w in ['otevři', 'otevrit', 'nahoru', 'vytas', 'vytáhni']):
+            result = ha().execute_agent_action('cover_open', {'entity_id': covers[0]['entity_id']})
+        else:
+            result = ha().execute_agent_action('cover_close', {'entity_id': covers[0]['entity_id']})
+        return result.get('message', 'Hotovo.')
+    except Exception:
+        return None
+
+def _detect_room(text):
+    """Detect room name from Czech text."""
+    room_map = {
+        'living_room': ['obývák', 'obyvak', 'obývací', 'obyvaci', 'obýváku', 'obyvaku'],
+        'bedroom': ['ložnice', 'loznice', 'ložnici', 'loznici', 'spaní', 'spani'],
+        'kitchen': ['kuchyň', 'kuchyn', 'kuchyně', 'kuchyne', 'kuchyni'],
+        'bathroom': ['koupelna', 'koupelně', 'koupelne', 'záchod', 'zachod'],
+        'hallway': ['chodba', 'chodbě', 'chodbe', 'předsíň', 'predsín', 'predsini'],
+        'balcony': ['balkón', 'balkon', 'balkoně', 'balkone'],
+        'garden': ['zahrada', 'zahradě', 'zahrade'],
+        'garage': ['garáž', 'garaz', 'garáži'],
+        'office': ['pracovna', 'pracovně', 'pracovne', 'kancelář', 'kancelar'],
+    }
+    for room, keywords in room_map.items():
+        for kw in keywords:
+            if kw in text:
+                return room
+    return None
+
+
 _HANDLERS = {
     "time": _handle_time,
     "date": _handle_date,
@@ -244,6 +407,14 @@ _HANDLERS = {
     "my_medications": _handle_my_medications,
     "weather": _handle_weather,
     "who_am_i": _handle_who_am_i,
+    # 🏠 Home Assistant
+    "ha_light_on": _handle_ha_light_on,
+    "ha_light_off": _handle_ha_light_off,
+    "ha_temperature": _handle_ha_temperature,
+    "ha_home_status": _handle_ha_home_status,
+    "ha_lock": _handle_ha_lock,
+    "ha_climate": _handle_ha_climate,
+    "ha_cover": _handle_ha_cover,
 }
 
 
