@@ -428,6 +428,20 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Home Assistant routes: {e}")
 
+try:
+    from predictive_agent import prediction_bp
+    app.register_blueprint(prediction_bp)
+    logger.info("✅ Predictive Agent routes registered: /api/predict/*")
+except Exception as e:
+    logger.warning(f"⚠️ Predictive Agent routes: {e}")
+
+try:
+    from advanced_agents import agents_bp
+    app.register_blueprint(agents_bp)
+    logger.info("✅ Advanced Agents routes registered: /api/agents/*")
+except Exception as e:
+    logger.warning(f"⚠️ Advanced Agents routes: {e}")
+
 # Audit Log Routes
 try:
     from audit_log import audit_bp
