@@ -1,12 +1,14 @@
 """
-Proactive Agent Loop v1.0
+Proactive Agent Loop v2.0
 =========================
 Scheduled job (every 5 min) that makes Radim a proactive AI agent.
 
 For each active senior:
-1. Gather state (brain_states, IoT, memory_learning)
+1. Gather state (brain_states, IoT, memory_learning, Home Assistant)
 2. Detect anomalies (statistical, no ML)
 3. Graduated actions: INFO → WARNING → ALERT → CRISIS
+4. Crisis → Home Assistant actions (lights on, door unlock)
+5. HA sensor sync → iot_sensor_data DB
 """
 
 import json
@@ -23,6 +25,13 @@ try:
 except ImportError as e:
     _AVAILABLE = False
     logger.warning(f"agent_loop: dependencies not available: {e}")
+
+# Home Assistant integration (optional)
+try:
+    from home_assistant import ha as _get_ha
+    _HAS_HA = True
+except ImportError:
+    _HAS_HA = False
 
 # Severity levels
 INFO = "INFO"
@@ -48,6 +57,9 @@ def run_agent_cycle(app):
 
     with app.app_context():
         try:
+            # v2.0: Sync HA sensors → DB before evaluation
+            _sync_ha_sensors()
+
             active = _get_active_users()
             if not active:
                 return
@@ -110,6 +122,11 @@ def _evaluate_user(user_id, app):
         obs = check(user_id, baselines)
         if obs and not _is_in_cooldown(user_id, obs["type"]):
             observations.append(obs)
+
+    # v2.0: Check HA environment (temperature extremes, low battery)
+    ha_obs = _ha_check_environment(user_id)
+    if ha_obs and not _is_in_cooldown(user_id, ha_obs["type"]):
+        observations.append(ha_obs)
 
     for obs in observations:
         _save_observation(user_id, obs)
@@ -373,6 +390,10 @@ def _execute_action(user_id, obs, app):
 
     if severity == CRISIS:
         _crisis_escalate(user_id, obs, app)
+
+    # v2.0: Home Assistant emergency actions
+    if severity in (WARNING, ALERT, CRISIS):
+        _ha_crisis_actions(user_id, obs)
 
     # v485: Route to medical team — filtered by observation type
     # v4.1: Now also sends push notifications to team members
@@ -1053,4 +1074,199 @@ def run_daily_summary(app):
             logger.error(f"Daily summary error: {e}")
 
 
-logger.info("Agent Loop v1.6 loaded — monitoring + calls + morning + cleanup + activity + engagement + summary")
+
+# ============================================================================
+# 🏠 HOME ASSISTANT INTEGRATION
+# ============================================================================
+
+def _sync_ha_sensors():
+    """Sync Home Assistant sensors → iot_sensor_data DB.
+
+    Called every 5 min at start of agent cycle.
+    Writes temperature, humidity, motion, door data from HA to DB
+    so all existing detectors (_check_activity, _check_vitals) work.
+    """
+    if not _HAS_HA:
+        return
+
+    try:
+        ha_client = _get_ha()
+        if not ha_client.connected:
+            return
+
+        sensors = ha_client.get_sensors_summary()
+        if not sensors:
+            return
+
+        synced = 0
+        with db_context(commit=True) as db:
+            # Sync temperature sensors
+            for s in sensors.get('temperature', []):
+                _upsert_sensor(db, s['entity_id'], 'temperature', s['value'], s.get('name', ''))
+                synced += 1
+
+            # Sync humidity sensors
+            for s in sensors.get('humidity', []):
+                _upsert_sensor(db, s['entity_id'], 'humidity', s['value'], s.get('name', ''))
+                synced += 1
+
+            # Sync motion sensors
+            for s in sensors.get('motion', []):
+                val = 1.0 if s['state'] == 'on' else 0.0
+                _upsert_sensor(db, s['entity_id'], 'motion', val, s.get('name', ''))
+                synced += 1
+
+            # Sync door sensors
+            for s in sensors.get('door', []):
+                val = 1.0 if s['state'] == 'on' else 0.0
+                _upsert_sensor(db, s['entity_id'], 'door', val, s.get('name', ''))
+                synced += 1
+
+            # Sync battery (for low battery alerts)
+            for s in sensors.get('battery', []):
+                _upsert_sensor(db, s['entity_id'], 'battery', s['value'], s.get('name', ''))
+                synced += 1
+
+        if synced > 0:
+            logger.debug(f"HA sync: {synced} sensors → DB")
+
+    except Exception as e:
+        logger.debug(f"HA sensor sync error: {e}")
+
+
+def _upsert_sensor(db, entity_id, sensor_type, value, name=''):
+    """Insert or update sensor data in iot_sensor_data."""
+    try:
+        # Extract room from entity_id (e.g., sensor.living_room_temperature → living_room)
+        parts = entity_id.split('.')
+        room_id = parts[1].rsplit('_', 1)[0] if len(parts) > 1 else 'unknown'
+
+        # Ensure device exists
+        if is_postgres():
+            db.execute(
+                "INSERT INTO iot_devices (device_id, device_type, room_id, device_name) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT (device_id) DO UPDATE SET device_name = ?",
+                (entity_id, sensor_type, room_id, name, name)
+            )
+        else:
+            db.execute(
+                "INSERT OR REPLACE INTO iot_devices (device_id, device_type, room_id, device_name) "
+                "VALUES (?, ?, ?, ?)",
+                (entity_id, sensor_type, room_id, name)
+            )
+
+        # Insert sensor reading
+        db.execute(
+            "INSERT INTO iot_sensor_data (device_id, sensor_type, value, room_id) VALUES (?, ?, ?, ?)",
+            (entity_id, sensor_type, float(value), room_id)
+        )
+    except Exception as e:
+        logger.debug(f"upsert_sensor {entity_id}: {e}")
+
+
+def _ha_crisis_actions(user_id, obs):
+    """Execute Home Assistant emergency actions on CRISIS/ALERT.
+
+    - CRISIS: Turn on ALL lights, unlock front door (for paramedics)
+    - ALERT: Turn on lights in user's room, flash hallway light
+    """
+    if not _HAS_HA:
+        return
+
+    try:
+        ha_client = _get_ha()
+        if not ha_client.connected:
+            return
+
+        severity = obs.get("severity", "")
+        obs_type = obs.get("type", "")
+
+        if severity == CRISIS:
+            # 🚨 CRISIS: All lights ON + unlock door
+            logger.info(f"🏠 HA CRISIS ACTIONS for {user_id}: lights ON, door UNLOCK")
+            devices = ha_client.get_devices_by_type()
+
+            # Turn on ALL lights at maximum brightness
+            for light in devices.get('light', []):
+                ha_client.light_on(light['entity_id'], brightness=100)
+
+            # Unlock front door for paramedics
+            for lock_dev in devices.get('lock', []):
+                ha_client.unlock(lock_dev['entity_id'])
+
+            # Open all covers/blinds
+            for cover in devices.get('cover', []):
+                ha_client.cover_open(cover['entity_id'])
+
+            audit_log(user_id, "ha_crisis_action", "agent_loop",
+                      "CRISIS: All lights ON, doors unlocked, covers opened")
+
+        elif severity == ALERT:
+            # ⚠️ ALERT: Lights on in main rooms
+            logger.info(f"🏠 HA ALERT ACTIONS for {user_id}: lights ON")
+            devices = ha_client.get_devices_by_type('light')
+            for light in devices.get('light', []):
+                if light['state'] == 'off':
+                    ha_client.light_on(light['entity_id'], brightness=80)
+
+            audit_log(user_id, "ha_alert_action", "agent_loop",
+                      "ALERT: Lights turned on")
+
+        elif severity == WARNING and obs_type == 'activity_drop':
+            # 💡 WARNING + no activity: subtle light pulse
+            logger.info(f"🏠 HA WARNING for {user_id}: checking lights")
+            devices = ha_client.get_devices_by_type('light')
+            # Ensure at least one light is on
+            any_on = any(l['state'] == 'on' for l in devices.get('light', []))
+            if not any_on:
+                for light in devices.get('light', [])[:1]:
+                    ha_client.light_on(light['entity_id'], brightness=40)
+
+    except Exception as e:
+        logger.warning(f"HA crisis actions error: {e}")
+
+
+def _ha_check_environment(user_id):
+    """Check HA environment sensors for potential issues.
+
+    Returns observation or None.
+    Called as part of _evaluate_user.
+    """
+    if not _HAS_HA:
+        return None
+
+    try:
+        ha_client = _get_ha()
+        if not ha_client.connected:
+            return None
+
+        sensors = ha_client.get_sensors_summary()
+
+        # Check temperature extremes
+        for t in sensors.get('temperature', []):
+            if t['value'] < 16:
+                return {"type": "environment_cold", "severity": WARNING,
+                        "message": f"V místnosti {t['name']} je příliš chladno ({t['value']}°C). Zkontrolujte topení.",
+                        "details": {"sensor": t['name'], "value": t['value'], "entity_id": t['entity_id']}}
+            elif t['value'] > 30:
+                return {"type": "environment_hot", "severity": WARNING,
+                        "message": f"V místnosti {t['name']} je příliš horko ({t['value']}°C). Otevřete okna nebo zapněte ventilátor.",
+                        "details": {"sensor": t['name'], "value": t['value'], "entity_id": t['entity_id']}}
+
+        # Check low battery devices
+        low = [s for s in sensors.get('battery', []) if s['value'] < 10]
+        if low:
+            names = ', '.join(s['name'] for s in low)
+            return {"type": "low_battery", "severity": INFO,
+                    "message": f"Nízká baterie u: {names}. Vyměňte baterie.",
+                    "details": {"devices": [{'name': s['name'], 'level': s['value']} for s in low]}}
+
+        # Check door open too long (would need tracking, skip for now)
+
+    except Exception as e:
+        logger.debug(f"HA environment check error: {e}")
+
+    return None
+
+
+logger.info("Agent Loop v2.0 loaded — monitoring + HA integration + calls + morning + cleanup + engagement + summary")
