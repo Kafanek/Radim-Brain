@@ -633,7 +633,7 @@ class SimulatedHomeAssistant(HomeAssistantClient):
             'cover.living_room': {'state': 'open', 'attributes': {'friendly_name': 'Obývák roleta', 'area_id': 'living_room'}},
             'media_player.living_room': {'state': 'idle', 'attributes': {'friendly_name': 'Obývák TV', 'area_id': 'living_room'}},
             'sensor.front_door_battery': {'state': '85', 'attributes': {'friendly_name': 'Zámek baterie', 'unit_of_measurement': '%', 'device_class': 'battery', 'area_id': 'hallway'}},
-            'sensor.motion_battery': {'state': '15', 'attributes': {'friendly_name': 'Pohybový senzor baterie', 'unit_of_measurement': '%', 'device_class': 'battery', 'area_id': 'hallway'}},
+            'sensor.motion_battery': {'state': '8', 'attributes': {'friendly_name': 'Pohybový senzor baterie', 'unit_of_measurement': '%', 'device_class': 'battery', 'area_id': 'hallway'}},
             'switch.kitchen_kettle': {'state': 'off', 'attributes': {'friendly_name': 'Kuchyně varná konvice', 'area_id': 'kitchen'}},
         }
         self._init_cache()

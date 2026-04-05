@@ -67,11 +67,11 @@ def _signal_c_trend(user_id, baselines):
 
 
 def _signal_activity_drop(user_id, baselines):
-    """Activity drop signal from IoT motion data."""
+    """Activity drop signal from IoT motion data or HA."""
     motion_bl = baselines.get("motion_by_window", {})
-    if not motion_bl:
-        return 0.0
 
+    # Try DB first
+    current = None
     try:
         with db_context() as db:
             if is_postgres():
@@ -90,7 +90,26 @@ def _signal_activity_drop(user_id, baselines):
                 ).fetchone()
             current = row['cnt'] or row[0] or 0
     except Exception:
+        pass
+
+    # Fallback: HA sensors
+    if current is None or current == 0:
+        try:
+            from home_assistant import ha as _get_ha
+            client = _get_ha()
+            if client.connected:
+                sensors = client.get_sensors_summary()
+                active_motion = sum(1 for m in sensors.get('motion', []) if m.get('state') == 'on')
+                current = active_motion
+        except Exception:
+            pass
+
+    if current is None:
         return 0.0
+
+    if not motion_bl:
+        # No baseline — use simple heuristic
+        return 0.0 if current > 0 else 0.3
 
     # Average across all windows
     all_avgs = [v.get("avg", 0) for v in motion_bl.values() if v.get("avg", 0) > 0]

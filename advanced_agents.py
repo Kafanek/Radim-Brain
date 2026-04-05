@@ -418,19 +418,19 @@ class WeeklyReportAgent:
                 # 2. Brain state stats
                 if is_postgres():
                     brain_rows = db.execute(
-                        "SELECT C, brain_mode FROM brain_states "
+                        "SELECT C, mode FROM brain_states "
                         "WHERE user_id = ? AND created_at > NOW() - INTERVAL '%s days' ORDER BY created_at" % days,
                         (user_id,)
                     ).fetchall()
                 else:
                     brain_rows = db.execute(
-                        "SELECT C, brain_mode FROM brain_states "
+                        "SELECT C, mode FROM brain_states "
                         "WHERE user_id = ? AND created_at > datetime('now', '-%d days') ORDER BY created_at" % days,
                         (user_id,)
                     ).fetchall()
 
-                c_values = [float(r['C'] or r[0]) for r in brain_rows if (r.get('C') or r[0])]
-                modes = [r['brain_mode'] or r[1] for r in brain_rows if (r.get('brain_mode') or (len(r) > 1 and r[1]))]
+                c_values = [float(r['C'] if isinstance(r, dict) else r[0]) for r in brain_rows if (r.get('C') if isinstance(r, dict) else r[0])]
+                modes = [r['mode'] if isinstance(r, dict) else r[1] for r in brain_rows if (r.get('mode') if isinstance(r, dict) else (len(r) > 1 and r[1]))]
 
                 # 3. Agent observations
                 if is_postgres():
