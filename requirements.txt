@@ -42,4 +42,10 @@ twilio>=9.0.0
 # ⏰ Background Scheduler (task reminders push notifications)
 APScheduler==3.10.4
 
+# 🏠 Home Assistant + Smart Home
+homeassistant_api>=5.0.0
+paho-mqtt>=2.0.0
+python-kasa>=0.7.0
+yeelight>=0.7.0
+
 # 🎙️ Voice filter is SSML-based (no audio processing deps needed)

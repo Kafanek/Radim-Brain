@@ -1,21 +1,35 @@
 """
-🏠 HOME ASSISTANT INTEGRATION v1.0
+🏠 HOME ASSISTANT INTEGRATION v2.0
 ====================================
 Radim ↔ Home Assistant hybrid integration.
 HA runs on NUC (hardware layer), Radim is the AI brain.
 
 Features:
-    - REST API client for HA states/services
-    - WebSocket for real-time events
+    - homeassistant_api library (official Python client)
+    - REST API + WebSocket for real-time events
+    - MQTT bridge for IoT sensors (paho-mqtt)
+    - Direct device control: TP-Link Kasa, Yeelight (no HA needed)
     - Device discovery & caching
     - Room-based grouping for seniors
     - Agent-compatible actions (lights, climate, sensors, locks, media)
     - Fallback to simulated devices when HA unavailable
 
+Libraries:
+    homeassistant_api  — Official HA REST/WS Python client
+    paho-mqtt          — MQTT for Zigbee/IoT sensors
+    python-kasa        — TP-Link Kasa smart plugs/lights (direct, no HA)
+    yeelight           — Xiaomi Yeelight bulbs (direct, no HA)
+
 Config (env vars):
-    HA_URL          — Home Assistant URL (e.g., http://192.168.1.100:8123)
-    HA_TOKEN        — Long-lived access token
-    HA_WEBHOOK_SECRET — For HA → Radim webhooks
+    HA_URL              — Home Assistant URL (e.g., http://192.168.1.100:8123)
+    HA_TOKEN            — Long-lived access token
+    HA_WEBHOOK_SECRET   — For HA → Radim webhooks
+    MQTT_BROKER         — MQTT broker IP (e.g., 192.168.1.100)
+    MQTT_PORT           — MQTT port (default 1883)
+    MQTT_USER           — MQTT username (optional)
+    MQTT_PASS           — MQTT password (optional)
+    KASA_DEVICES        — Comma-separated Kasa IPs (e.g., 192.168.1.50,192.168.1.51)
+    YEELIGHT_DEVICES    — Comma-separated Yeelight IPs
 """
 
 import os
@@ -27,6 +41,40 @@ from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify
 
 logger = logging.getLogger(__name__)
+
+# ═══════════════════════════════════════════════════════════════════
+# OPTIONAL LIBRARY IMPORTS (graceful fallback)
+# ═══════════════════════════════════════════════════════════════════
+
+try:
+    from homeassistant_api import Client as HAAPIClient
+    HAS_HA_LIB = True
+    logger.info("✅ homeassistant_api library loaded")
+except ImportError:
+    HAS_HA_LIB = False
+    logger.info("⚠️ homeassistant_api not installed — using REST fallback")
+
+try:
+    import paho.mqtt.client as mqtt
+    HAS_MQTT = True
+    logger.info("✅ paho-mqtt library loaded")
+except ImportError:
+    HAS_MQTT = False
+
+try:
+    import asyncio
+    from kasa import Discover as KasaDiscover, SmartPlug, SmartBulb
+    HAS_KASA = True
+    logger.info("✅ python-kasa library loaded")
+except ImportError:
+    HAS_KASA = False
+
+try:
+    from yeelight import Bulb as YeelightBulb, discover_bulbs as yeelight_discover
+    HAS_YEELIGHT = True
+    logger.info("✅ yeelight library loaded")
+except ImportError:
+    HAS_YEELIGHT = False
 
 # ═══════════════════════════════════════════════════════════════════
 # CONFIG
@@ -634,9 +682,294 @@ class SimulatedHomeAssistant(HomeAssistantClient):
 # GLOBAL INSTANCE
 # ═══════════════════════════════════════════════════════════════════
 
+
+# ═══════════════════════════════════════════════════════════════════
+# 📡 MQTT BRIDGE — IoT sensors via Zigbee2MQTT / Mosquitto
+# ═══════════════════════════════════════════════════════════════════
+
+MQTT_BROKER = os.environ.get('MQTT_BROKER', '')
+MQTT_PORT = int(os.environ.get('MQTT_PORT', '1883'))
+MQTT_USER = os.environ.get('MQTT_USER', '')
+MQTT_PASS = os.environ.get('MQTT_PASS', '')
+
+class MQTTBridge:
+    """MQTT client for Zigbee2MQTT and other IoT sensors."""
+
+    def __init__(self):
+        self.client = None
+        self.connected = False
+        self.sensor_data = {}  # topic → last payload
+        self._handlers = []
+
+    def start(self):
+        if not HAS_MQTT or not MQTT_BROKER:
+            logger.info("MQTT not configured — skipping")
+            return
+
+        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        if MQTT_USER:
+            self.client.username_pw_set(MQTT_USER, MQTT_PASS)
+
+        self.client.on_connect = self._on_connect
+        self.client.on_message = self._on_message
+        self.client.on_disconnect = self._on_disconnect
+
+        thread = threading.Thread(target=self._connect, daemon=True)
+        thread.start()
+
+    def _connect(self):
+        try:
+            self.client.connect(MQTT_BROKER, MQTT_PORT, 60)
+            self.client.loop_forever()
+        except Exception as e:
+            logger.warning(f"MQTT connect error: {e}")
+
+    def _on_connect(self, client, userdata, flags, rc, properties=None):
+        self.connected = True
+        logger.info(f"✅ MQTT connected to {MQTT_BROKER}")
+        # Subscribe to Zigbee2MQTT topics
+        client.subscribe("zigbee2mqtt/#")
+        # Subscribe to general sensor topics
+        client.subscribe("sensors/#")
+        client.subscribe("home/#")
+
+    def _on_message(self, client, userdata, msg):
+        try:
+            topic = msg.topic
+            payload = json.loads(msg.payload.decode()) if msg.payload else {}
+            self.sensor_data[topic] = {
+                'payload': payload,
+                'timestamp': datetime.utcnow().isoformat(),
+                'topic': topic
+            }
+            # Notify handlers
+            for handler in self._handlers:
+                try:
+                    handler(topic, payload)
+                except Exception as e:
+                    logger.warning(f"MQTT handler error: {e}")
+        except Exception as e:
+            logger.debug(f"MQTT parse error on {msg.topic}: {e}")
+
+    def _on_disconnect(self, client, userdata, flags, rc, properties=None):
+        self.connected = False
+        logger.warning("MQTT disconnected — will retry")
+
+    def publish(self, topic, payload):
+        """Publish command to MQTT (e.g., Zigbee2MQTT set)."""
+        if self.client and self.connected:
+            self.client.publish(topic, json.dumps(payload))
+            return True
+        return False
+
+    def on_sensor_update(self, handler):
+        """Register handler: handler(topic, payload)."""
+        self._handlers.append(handler)
+
+    def get_sensors(self):
+        """Get all recent sensor readings."""
+        return self.sensor_data
+
+    def zigbee_set(self, device_name, command):
+        """Send command to Zigbee2MQTT device.
+
+        Example: zigbee_set('living_room_light', {'state': 'ON', 'brightness': 200})
+        """
+        return self.publish(f'zigbee2mqtt/{device_name}/set', command)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 🔌 DIRECT DEVICE CONTROL — TP-Link Kasa + Yeelight (no HA needed)
+# ═══════════════════════════════════════════════════════════════════
+
+KASA_DEVICES = [ip.strip() for ip in os.environ.get('KASA_DEVICES', '').split(',') if ip.strip()]
+YEELIGHT_DEVICES = [ip.strip() for ip in os.environ.get('YEELIGHT_DEVICES', '').split(',') if ip.strip()]
+
+class DirectDeviceManager:
+    """Control smart devices directly without Home Assistant."""
+
+    def __init__(self):
+        self._kasa_cache = {}
+        self._yeelight_cache = {}
+
+    # ─── TP-Link Kasa ───
+
+    async def _kasa_discover(self):
+        """Discover Kasa devices on network."""
+        if not HAS_KASA:
+            return {}
+        try:
+            devices = await KasaDiscover.discover()
+            self._kasa_cache = devices
+            return {ip: {'alias': dev.alias, 'is_on': dev.is_on, 'type': type(dev).__name__}
+                    for ip, dev in devices.items()}
+        except Exception as e:
+            logger.warning(f"Kasa discover error: {e}")
+            return {}
+
+    def kasa_discover_sync(self):
+        """Synchronous wrapper for Kasa discovery."""
+        if not HAS_KASA:
+            return {'available': False, 'reason': 'python-kasa not installed'}
+        try:
+            loop = asyncio.new_event_loop()
+            result = loop.run_until_complete(self._kasa_discover())
+            loop.close()
+            return {'available': True, 'devices': result}
+        except Exception as e:
+            return {'available': False, 'error': str(e)}
+
+    async def _kasa_control(self, ip, action):
+        """Control a Kasa device."""
+        if not HAS_KASA:
+            return False
+        try:
+            dev = SmartPlug(ip)
+            await dev.update()
+            if action == 'on':
+                await dev.turn_on()
+            elif action == 'off':
+                await dev.turn_off()
+            elif action == 'toggle':
+                if dev.is_on:
+                    await dev.turn_off()
+                else:
+                    await dev.turn_on()
+            return True
+        except Exception as e:
+            logger.warning(f"Kasa control error ({ip}): {e}")
+            return False
+
+    def kasa_control_sync(self, ip, action):
+        """Synchronous Kasa control."""
+        try:
+            loop = asyncio.new_event_loop()
+            result = loop.run_until_complete(self._kasa_control(ip, action))
+            loop.close()
+            return result
+        except Exception as e:
+            return False
+
+    # ─── Yeelight ───
+
+    def yeelight_discover(self):
+        """Discover Yeelight bulbs."""
+        if not HAS_YEELIGHT:
+            return {'available': False, 'reason': 'yeelight not installed'}
+        try:
+            bulbs = yeelight_discover()
+            return {'available': True, 'bulbs': bulbs}
+        except Exception as e:
+            return {'available': False, 'error': str(e)}
+
+    def yeelight_control(self, ip, action, params=None):
+        """Control a Yeelight bulb."""
+        if not HAS_YEELIGHT:
+            return False
+        try:
+            bulb = YeelightBulb(ip)
+            if action == 'on':
+                bulb.turn_on()
+            elif action == 'off':
+                bulb.turn_off()
+            elif action == 'toggle':
+                bulb.toggle()
+            elif action == 'brightness':
+                bulb.set_brightness(params.get('brightness', 50))
+            elif action == 'color_temp':
+                bulb.set_color_temp(params.get('temp', 4000))
+            elif action == 'rgb':
+                r, g, b = params.get('r', 255), params.get('g', 255), params.get('b', 255)
+                bulb.set_rgb(r, g, b)
+            return True
+        except Exception as e:
+            logger.warning(f"Yeelight control error ({ip}): {e}")
+            return False
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 🏗️ ENHANCED HA CLIENT — uses homeassistant_api library when available
+# ═══════════════════════════════════════════════════════════════════
+
+class EnhancedHAClient(HomeAssistantClient):
+    """Extended HA client that uses homeassistant_api library."""
+
+    def __init__(self, url=None, token=None):
+        super().__init__(url, token)
+        self.ha_lib_client = None
+        self.mqtt_bridge = MQTTBridge()
+        self.device_manager = DirectDeviceManager()
+
+        # Initialize homeassistant_api library
+        if HAS_HA_LIB and self.available:
+            try:
+                api_url = f'{self.url}/api'
+                self.ha_lib_client = HAAPIClient(api_url, self.token)
+                logger.info(f"✅ homeassistant_api connected to {self.url}")
+            except Exception as e:
+                logger.warning(f"homeassistant_api init error: {e}")
+
+        # Start MQTT if configured
+        if MQTT_BROKER:
+            self.mqtt_bridge.start()
+
+    def get_all_states(self, use_cache=True):
+        """Get states using library if available, fallback to REST."""
+        if self.ha_lib_client and HAS_HA_LIB:
+            try:
+                entities = self.ha_lib_client.get_entities()
+                states = []
+                for domain_group in entities.values():
+                    for entity_id, entity in domain_group.items():
+                        state_obj = entity.state
+                        states.append({
+                            'entity_id': state_obj.entity_id,
+                            'state': state_obj.state,
+                            'attributes': dict(state_obj.attributes) if state_obj.attributes else {},
+                            'last_changed': str(state_obj.last_changed) if state_obj.last_changed else '',
+                        })
+                self._cache = {s['entity_id']: s for s in states}
+                self._cache_time = time.time()
+                self._build_rooms()
+                return states
+            except Exception as e:
+                logger.warning(f"HA lib get_entities failed: {e}, falling back to REST")
+
+        return super().get_all_states(use_cache)
+
+    def call_service(self, domain, service, entity_id=None, data=None):
+        """Call service using library if available."""
+        if self.ha_lib_client and HAS_HA_LIB:
+            try:
+                svc = self.ha_lib_client.get_domain(domain)
+                kwargs = data or {}
+                if entity_id:
+                    kwargs['entity_id'] = entity_id
+                result = getattr(svc, service)(**kwargs)
+                return result
+            except Exception as e:
+                logger.warning(f"HA lib service call failed: {e}, falling back to REST")
+
+        return super().call_service(domain, service, entity_id, data)
+
+    def get_mqtt_sensors(self):
+        """Get sensor data from MQTT bridge."""
+        return self.mqtt_bridge.get_sensors()
+
+    def zigbee_command(self, device, command):
+        """Send Zigbee2MQTT command."""
+        return self.mqtt_bridge.zigbee_set(device, command)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# GLOBAL INSTANCE
+# ═══════════════════════════════════════════════════════════════════
+
 def get_ha_client():
-    """Get the appropriate HA client (real or simulated)."""
+    """Get the appropriate HA client (real, enhanced, or simulated)."""
     if HA_URL and HA_TOKEN:
+        if HAS_HA_LIB:
+            return EnhancedHAClient()
         return HomeAssistantClient()
     return SimulatedHomeAssistant()
 
@@ -649,6 +982,16 @@ def ha():
     if _ha_client is None:
         _ha_client = get_ha_client()
     return _ha_client
+
+# Direct device manager singleton
+_device_manager = None
+
+def devices():
+    """Get direct device manager."""
+    global _device_manager
+    if _device_manager is None:
+        _device_manager = DirectDeviceManager()
+    return _device_manager
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -763,3 +1106,103 @@ def ha_webhook():
         pass
 
     return jsonify({'success': True, 'processed': event_type})
+
+
+# ─── MQTT ENDPOINTS ───
+
+@ha_bp.route('/api/ha/mqtt/sensors', methods=['GET'])
+def ha_mqtt_sensors():
+    """Get MQTT sensor data."""
+    client = ha()
+    if hasattr(client, 'mqtt_bridge'):
+        data = client.mqtt_bridge.get_sensors()
+        return jsonify({
+            'success': True,
+            'connected': client.mqtt_bridge.connected,
+            'sensors': data,
+            'count': len(data)
+        })
+    return jsonify({'success': True, 'connected': False, 'sensors': {}, 'count': 0})
+
+
+@ha_bp.route('/api/ha/mqtt/publish', methods=['POST'])
+def ha_mqtt_publish():
+    """Publish MQTT message (e.g., Zigbee2MQTT command)."""
+    data = request.json or {}
+    topic = data.get('topic', '')
+    payload = data.get('payload', {})
+    if not topic:
+        return jsonify({'success': False, 'error': 'topic required'}), 400
+
+    client = ha()
+    if hasattr(client, 'mqtt_bridge') and client.mqtt_bridge.connected:
+        result = client.mqtt_bridge.publish(topic, payload)
+        return jsonify({'success': result, 'topic': topic})
+    return jsonify({'success': False, 'error': 'MQTT not connected'})
+
+
+# ─── DIRECT DEVICE ENDPOINTS ───
+
+@ha_bp.route('/api/ha/direct/discover', methods=['GET'])
+def ha_direct_discover():
+    """Discover direct devices (Kasa, Yeelight)."""
+    dm = devices()
+    result = {
+        'kasa': dm.kasa_discover_sync() if HAS_KASA else {'available': False},
+        'yeelight': dm.yeelight_discover() if HAS_YEELIGHT else {'available': False},
+        'libraries': {
+            'homeassistant_api': HAS_HA_LIB,
+            'paho_mqtt': HAS_MQTT,
+            'python_kasa': HAS_KASA,
+            'yeelight': HAS_YEELIGHT,
+        }
+    }
+    return jsonify({'success': True, **result})
+
+
+@ha_bp.route('/api/ha/direct/kasa', methods=['POST'])
+def ha_direct_kasa():
+    """Control Kasa device directly."""
+    data = request.json or {}
+    ip = data.get('ip', '')
+    action = data.get('action', 'toggle')
+    if not ip:
+        return jsonify({'success': False, 'error': 'ip required'}), 400
+    dm = devices()
+    result = dm.kasa_control_sync(ip, action)
+    return jsonify({'success': result, 'ip': ip, 'action': action})
+
+
+@ha_bp.route('/api/ha/direct/yeelight', methods=['POST'])
+def ha_direct_yeelight():
+    """Control Yeelight bulb directly."""
+    data = request.json or {}
+    ip = data.get('ip', '')
+    action = data.get('action', 'toggle')
+    params = data.get('params', {})
+    if not ip:
+        return jsonify({'success': False, 'error': 'ip required'}), 400
+    dm = devices()
+    result = dm.yeelight_control(ip, action, params)
+    return jsonify({'success': result, 'ip': ip, 'action': action})
+
+
+@ha_bp.route('/api/ha/libraries', methods=['GET'])
+def ha_libraries():
+    """Show available smart home libraries and their status."""
+    return jsonify({
+        'success': True,
+        'libraries': {
+            'homeassistant_api': {'installed': HAS_HA_LIB, 'version': '5.0.3' if HAS_HA_LIB else None, 'purpose': 'Official HA REST/WS Python client'},
+            'paho_mqtt': {'installed': HAS_MQTT, 'purpose': 'MQTT for Zigbee2MQTT, IoT sensors'},
+            'python_kasa': {'installed': HAS_KASA, 'purpose': 'TP-Link Kasa smart plugs/lights (direct)'},
+            'yeelight': {'installed': HAS_YEELIGHT, 'purpose': 'Xiaomi Yeelight bulbs (direct)'},
+        },
+        'config': {
+            'ha_url': bool(HA_URL),
+            'ha_token': bool(HA_TOKEN),
+            'mqtt_broker': bool(MQTT_BROKER),
+            'kasa_devices': len(KASA_DEVICES),
+            'yeelight_devices': len(YEELIGHT_DEVICES),
+        }
+    })
