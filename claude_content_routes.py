@@ -194,7 +194,7 @@ def get_weather():
 
 
 @claude_content_bp.route('/quiz', methods=['POST'])
-@require_auth
+@optional_auth
 @rate_limit(max_requests=10, window_seconds=60, key_func='user')
 def generate_quiz():
     """🎮 Vygenerovat kvíz"""
@@ -270,7 +270,7 @@ FORMÁT (pouze JSON):
 
 
 @claude_content_bp.route('/story', methods=['POST'])
-@require_auth
+@optional_auth
 @rate_limit(max_requests=10, window_seconds=60, key_func='user')
 def generate_story():
     """📖 Vygenerovat příběh"""
