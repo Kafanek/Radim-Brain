@@ -114,19 +114,23 @@ def _get_active_users():
 # ============================================================================
 
 def _evaluate_user(user_id, app):
-    """Evaluate one user: detect anomalies, take actions."""
+    """Evaluate one user: detect anomalies, take actions, run advanced agents."""
     baselines = get_baselines(user_id)
     observations = []
 
+    # ── Core detectors ──
     for check in (_check_c_trend, _check_activity_drop, _check_vitals, _check_interaction_silence):
         obs = check(user_id, baselines)
         if obs and not _is_in_cooldown(user_id, obs["type"]):
             observations.append(obs)
 
-    # v2.0: Check HA environment (temperature extremes, low battery)
+    # ── HA environment check ──
     ha_obs = _ha_check_environment(user_id)
     if ha_obs and not _is_in_cooldown(user_id, ha_obs["type"]):
         observations.append(ha_obs)
+
+    # ── v3.0: Advanced agents integration ──
+    _run_advanced_agents(user_id, baselines, observations)
 
     for obs in observations:
         _save_observation(user_id, obs)
@@ -1073,6 +1077,119 @@ def run_daily_summary(app):
         except Exception as e:
             logger.error(f"Daily summary error: {e}")
 
+
+
+# ============================================================================
+# 🤖 ADVANCED AGENTS INTEGRATION (v3.0)
+# ============================================================================
+
+def _run_advanced_agents(user_id, baselines, observations):
+    """Run all advanced agents and add their observations.
+
+    Called once per user per agent cycle (every 5 min).
+    Each agent is try/excepted independently — one failure doesn't block others.
+    """
+
+    # 1. Predictive Agent — 24h risk prediction
+    try:
+        from predictive_agent import predict_risk
+        prediction = predict_risk(user_id)
+        risk_score = prediction.get('risk_score', 0)
+        risk_level = prediction.get('risk_level', 'low')
+
+        if risk_level == 'critical' and not _is_in_cooldown(user_id, 'prediction_critical'):
+            observations.append({
+                "type": "prediction_critical",
+                "severity": CRISIS,
+                "message": f"Prediktivní model detekoval kritické riziko (skóre {risk_score}/100). {prediction.get('prediction', '')}",
+                "details": {"risk_score": risk_score, "actions": prediction.get('recommended_actions', [])}
+            })
+        elif risk_level == 'high' and not _is_in_cooldown(user_id, 'prediction_high'):
+            observations.append({
+                "type": "prediction_high",
+                "severity": ALERT,
+                "message": f"Predikce ukazuje vysoké riziko (skóre {risk_score}/100). Doporučujeme zvýšený dohled.",
+                "details": {"risk_score": risk_score}
+            })
+    except Exception as e:
+        logger.debug(f"Predictive agent error for {user_id}: {e}")
+
+    # 2. Sleep Agent — analyze last night
+    try:
+        from advanced_agents import SleepAgent
+        sleep = SleepAgent.analyze_sleep(user_id)
+        SleepAgent.save_sleep_analysis(user_id, sleep)
+
+        if sleep.get('quality') == 'very_poor' and not _is_in_cooldown(user_id, 'sleep_poor'):
+            observations.append({
+                "type": "sleep_poor",
+                "severity": WARNING,
+                "message": f"Poslední noc byl špatný spánek ({sleep.get('motion_events', '?')} pohybových událostí). Jak se cítíte?",
+                "details": sleep
+            })
+    except Exception as e:
+        logger.debug(f"Sleep agent error for {user_id}: {e}")
+
+    # 3. Social Isolation — weekly check (only run once per day)
+    try:
+        from advanced_agents import SocialIsolationAgent
+        isolation = SocialIsolationAgent.compute_score(user_id)
+
+        if isolation.get('level') == 'critical' and not _is_in_cooldown(user_id, 'isolation_critical'):
+            observations.append({
+                "type": "isolation_critical",
+                "severity": ALERT,
+                "message": "Senior vykazuje vysokou míru izolace. Doporučujeme sociální aktivitu nebo kontakt s rodinou.",
+                "details": isolation
+            })
+        elif isolation.get('level') == 'high' and not _is_in_cooldown(user_id, 'isolation_high'):
+            observations.append({
+                "type": "isolation_high",
+                "severity": WARNING,
+                "message": "Všimli jsme si, že jste méně komunikoval/a. Chcete si popovídat nebo zavolat rodině?",
+                "details": isolation
+            })
+    except Exception as e:
+        logger.debug(f"Isolation agent error for {user_id}: {e}")
+
+    # 4. Medication compliance — check if missed recently
+    try:
+        from advanced_agents import MedicationTracker
+        compliance = MedicationTracker.get_compliance(user_id, days=7)
+
+        pct = compliance.get('compliance_pct')
+        if pct is not None and pct < 50 and not _is_in_cooldown(user_id, 'medication_low'):
+            observations.append({
+                "type": "medication_low",
+                "severity": WARNING,
+                "message": f"Za posledních 7 dní jste potvrdil/a léky jen v {pct:.0f}% případů. Nezapomínejte na pravidelné užívání.",
+                "details": compliance
+            })
+    except Exception as e:
+        logger.debug(f"Medication agent error for {user_id}: {e}")
+
+    # 5. Learning Agent — adapt thresholds (once per cycle, no observation)
+    try:
+        from advanced_agents import LearningAgent
+        LearningAgent.update_thresholds(user_id)
+    except Exception as e:
+        logger.debug(f"Learning agent error for {user_id}: {e}")
+
+    # 6. Weather suggestions — inject into memory for next chat (once per day)
+    try:
+        from advanced_agents import WeatherAgent
+        from memory_helpers import db_load_learning, db_save_learning
+        learning = db_load_learning(user_id)
+        last_weather = learning.get('last_weather_check', '')
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        if last_weather != today:
+            weather = WeatherAgent.get_suggestions()
+            if weather.get('suggestions'):
+                learning['weather_suggestions'] = weather['suggestions'][:2]
+                learning['last_weather_check'] = today
+                db_save_learning(user_id, learning)
+    except Exception as e:
+        logger.debug(f"Weather agent error for {user_id}: {e}")
 
 
 # ============================================================================
