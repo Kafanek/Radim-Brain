@@ -254,7 +254,7 @@ def submit_response():
             db.execute(
                 "INSERT INTO survey_responses (user_id, answers, points_earned, source) "
                 "VALUES (?, ?, ?, ?)",
-                (user_id, json.dumps({'survey_id': survey_id, 'answers': answers}), points, source)
+                (user_id, json.dumps({'survey_id': survey_id, 'answers': answers, 'client_submission_id': client_submission_id or None}), points, source)
             )
 
             # Update rewards
