@@ -303,6 +303,20 @@ def submit_response():
                     (user_id, total, level, json.dumps(existing_badges), streak)
                 )
 
+        # Generate empathetic response (context-aware, not generic)
+        try:
+            from survey_telemetry import generate_empathetic_response
+            empathetic_msg = generate_empathetic_response(user_id, answers)
+        except Exception:
+            empathetic_msg = f'Děkuji! +{points} bodů 🌟'
+
+        # Get milestone info
+        try:
+            from survey_engine import get_milestone
+            reached, next_goal = get_milestone(streak)
+        except Exception:
+            reached, next_goal = None, None
+
         result = {
             'success': True,
             'points_earned': points,
@@ -310,11 +324,13 @@ def submit_response():
             'streak_days': streak,
             'level': level,
             'new_badges': [{'name': b['name'], 'icon': b['icon']} for b in new_badges] if new_badges else [],
-            'message': f'Děkuji! +{points} bodů 🌟'
+            'message': empathetic_msg,
+            'milestone': reached,
+            'next_milestone': next_goal,
         }
 
         if new_badges:
-            result['message'] += f' Nový badge: {new_badges[0]["name"]}!'
+            result['message'] += f' {new_badges[0]["icon"]} {new_badges[0]["name"]}!'
 
         return jsonify(result)
 

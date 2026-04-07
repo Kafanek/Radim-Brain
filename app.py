@@ -445,7 +445,9 @@ except Exception as e:
 try:
     from survey_engine import survey_engine_bp
     app.register_blueprint(survey_engine_bp)
-    logger.info("✅ Survey Engine routes registered: /api/surveys/adaptive, trends, risk, alerts")
+    from survey_telemetry import telemetry_bp as survey_telemetry_bp
+    app.register_blueprint(survey_telemetry_bp)
+    logger.info("✅ Survey Engine + Telemetry routes registered")
 except Exception as e:
     logger.warning(f"⚠️ Survey Engine routes: {e}")
 
