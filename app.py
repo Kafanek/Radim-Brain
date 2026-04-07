@@ -449,6 +449,13 @@ try:
     app.register_blueprint(survey_telemetry_bp)
     logger.info("✅ Survey Engine + Telemetry routes registered")
 except Exception as e:
+    logger.warning(f"⚠️ Survey Engine/Telemetry: {e}")
+
+try:
+    from scenario_engine import scenario_bp
+    app.register_blueprint(scenario_bp)
+    logger.info("✅ Scenario Engine routes registered: /api/scenario/*")
+except Exception as e:
     logger.warning(f"⚠️ Survey Engine routes: {e}")
 
 # Audit Log Routes

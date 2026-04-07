@@ -299,6 +299,32 @@ def radim_chat():
             except Exception as ir_err:
                 logger.warning(f"Intent resolver warning (non-fatal): {ir_err}")
 
+        # v10.1: Scenario Engine — detect situation and use trained response
+        if text_response is None:
+            try:
+                from scenario_engine import detect_scenario, generate_scenario_response, execute_scenario_actions
+                scenario = detect_scenario(message, user_id)
+                if scenario:
+                    sr = generate_scenario_response(scenario, user_id, message)
+                    # For crisis/high scenarios, use trained response directly (no AI needed)
+                    if scenario['severity'] in ('critical', 'high'):
+                        text_response = sr['text']
+                        _resolved_intent = 'scenario_' + scenario['id']
+                        brain_meta = brain_meta or {}
+                        brain_meta['tts_mode'] = sr.get('tts_mode', 'alert')
+                        # Execute side effects (notify, HA, log)
+                        execute_scenario_actions(sr.get('actions'), user_id)
+                        logger.info(f"🎭 Scenario '{scenario['id']}' ({scenario['severity']}) for {user_id}")
+                    elif scenario['severity'] == 'medium':
+                        # Medium: use as context hint for AI, let AI respond with empathy
+                        personalized += f"\n\nDŮLEŽITÉ: Senior právě zmínil situaci '{scenario['id']}' ({scenario['category']}). " \
+                                       f"Doporučená odpověď: {sr['text'][:150]}... Odpověz empaticky a podpůrně."
+                        execute_scenario_actions(sr.get('actions'), user_id)
+            except ImportError:
+                pass
+            except Exception as se_err:
+                logger.debug(f"Scenario engine: {se_err}")
+
         # v321+v3: Inject neuron intervention + rhythm into AI prompt
         if neuron_ctx:
             ntype = neuron_ctx.get('type', 'unknown')
