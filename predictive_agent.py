@@ -280,6 +280,16 @@ def _signal_social_isolation(user_id, baselines):
         return 0.0
 
 
+def _signal_survey_risk(user_id, baselines):
+    """Survey-based risk signal from survey_engine."""
+    try:
+        from survey_engine import compute_survey_risk
+        risk = compute_survey_risk(user_id)
+        return risk.get('score', 0) / 100.0  # normalize to 0-1
+    except Exception:
+        return 0.0
+
+
 def _signal_environment(user_id):
     """Environmental risk from HA sensors."""
     try:
@@ -319,6 +329,7 @@ SIGNAL_WEIGHTS = {
     'silence':       PHI ** 2,    # 2.618
     'sleep':         PHI,         # 1.618
     'medication':    PHI,         # 1.618
+    'survey':        PHI,         # 1.618 — survey risk signal (NEW)
     'social':        1.0,         # 1.000
     'environment':   1.0,         # 1.000
 }
@@ -354,6 +365,7 @@ def predict_risk(user_id):
         'sleep': _signal_sleep_quality(user_id, baselines),
         'medication': _signal_medication_compliance(user_id, baselines),
         'social': _signal_social_isolation(user_id, baselines),
+        'survey': _signal_survey_risk(user_id, baselines),
         'environment': _signal_environment(user_id),
     }
 

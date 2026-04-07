@@ -1268,44 +1268,33 @@ def _run_advanced_agents(user_id, baselines, observations):
     except Exception as e:
         logger.debug(f"Weather agent error for {user_id}: {e}")
 
-    # 7. Survey mood check — detect declining mood from survey answers
+    # 7. Survey Engine — multi-signal risk assessment (replaces simple mood check)
     try:
-        with db_context() as db:
-            if is_postgres():
-                rows = db.execute(
-                    "SELECT answers FROM survey_responses WHERE user_id = ? "
-                    "AND created_at > NOW() - INTERVAL '7 days' ORDER BY created_at DESC LIMIT 7",
-                    (user_id,)
-                ).fetchall()
-            else:
-                rows = db.execute(
-                    "SELECT answers FROM survey_responses WHERE user_id = ? "
-                    "AND created_at > datetime('now', '-7 days') ORDER BY created_at DESC LIMIT 7",
-                    (user_id,)
-                ).fetchall()
+        from survey_engine import compute_survey_risk, create_memory_hint
+        risk = compute_survey_risk(user_id)
+        severity_map = {'URGENT': CRISIS, 'WARNING': WARNING, 'WATCH': INFO}
 
-            mood_scores = []
-            for r in rows:
-                try:
-                    answers = json.loads(r[0] if isinstance(r, (list, tuple)) else r.get('answers', '{}'))
-                    if answers.get('survey_id') == 'mood':
-                        for a in answers.get('answers', []):
-                            if isinstance(a.get('value'), (int, float)):
-                                mood_scores.append(a['value'])
-                except Exception:
-                    pass
+        if risk['severity'] in ('WARNING', 'URGENT') and not _is_in_cooldown(user_id, 'survey_risk'):
+            observations.append({
+                "type": "survey_risk",
+                "severity": severity_map.get(risk['severity'], WARNING),
+                "message": risk['summary'],
+                "details": {
+                    "score": risk['score'],
+                    "severity": risk['severity'],
+                    "confidence": risk['confidence'],
+                    "reasons": risk['reasons'][:3]
+                }
+            })
+            # Create gentle memory hint for next chat
+            create_memory_hint(user_id, risk)
 
-            if len(mood_scores) >= 3:
-                avg_mood = sum(mood_scores) / len(mood_scores)
-                if avg_mood <= 2.0 and not _is_in_cooldown(user_id, 'mood_declining'):
-                    observations.append({
-                        "type": "mood_declining",
-                        "severity": WARNING,
-                        "message": f"Za posledních {len(mood_scores)} dotazníků je průměrná nálada {avg_mood:.1f}/5. Jak se cítíte?",
-                        "details": {"avg_mood": avg_mood, "scores": mood_scores}
-                    })
+        elif risk['severity'] == 'WATCH' and not _is_in_cooldown(user_id, 'survey_watch'):
+            # Softer: just inject hint, no formal observation
+            create_memory_hint(user_id, risk)
+
     except Exception as e:
-        logger.debug(f"Survey mood check error for {user_id}: {e}")
+        logger.debug(f"Survey risk engine error for {user_id}: {e}")
 
 
 # ============================================================================
