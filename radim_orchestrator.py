@@ -572,6 +572,32 @@ def radim_chat():
             except Exception:
                 pass
 
+        # v10.1: Anticipation Engine → speech rhythm adaptation
+        _speech_rhythm = None
+        try:
+            from anticipation_engine import anticipate
+            antic = anticipate(user_id)
+            if antic and antic.get('speech_adaptation'):
+                sa = antic['speech_adaptation']
+                _speech_rhythm = {
+                    'rate_factor': sa.get('rate_factor', 1.0),
+                    'pause_delta_ms': sa.get('pause_delta_ms', 0),
+                    'empathy_delta': sa.get('empathy_delta', 0),
+                    'predicted_mode': antic.get('predicted', {}).get('mode_predicted', 'HARMONY'),
+                    'risk_direction': antic.get('risk_direction', 'stable'),
+                    'C_hat': antic.get('predicted', {}).get('C_hat'),
+                    'emotions': antic.get('predicted_emotions', {}),
+                }
+                # Override brain_mode if anticipation predicts transition
+                if antic.get('breaking_points', {}).get('B27') and _brain_mode_val != 'CRISIS':
+                    _brain_mode_val = 'CRISIS'
+                    logger.info(f"🔮 Anticipation override: B₂₇ → CRISIS for {user_id}")
+                elif antic.get('breaking_points', {}).get('B12') and _brain_mode_val == 'HARMONY':
+                    _brain_mode_val = 'ALERT'
+                    logger.info(f"🔮 Anticipation override: B₁₂ → ALERT for {user_id}")
+        except Exception as ae:
+            logger.debug(f"Anticipation rhythm: {ae}")
+
         result = {
             'success': True,
             'response': text_response,
@@ -581,6 +607,7 @@ def radim_chat():
             'ai_provider': _ai_provider or 'local',
             'brain_C': _brain_C_val,
             'brain_mode': _brain_mode_val,
+            'speech_rhythm': _speech_rhythm,
             'timestamp': datetime.utcnow().isoformat() + 'Z'
         }
         if anticipation_meta:
