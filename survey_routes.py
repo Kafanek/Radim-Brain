@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, g
 
 from auth_middleware import optional_auth, require_auth
-from database import db_context, db_insert
+from database import db_context, db_insert, is_postgres
 
 logger = logging.getLogger(__name__)
 
@@ -164,11 +164,19 @@ def get_today_survey():
     try:
         today_start = datetime.utcnow().replace(hour=0, minute=0, second=0).isoformat()
         with db_context() as db:
-            rows = db.execute(
-                "SELECT answers->>'survey_id' as sid FROM survey_responses "
-                "WHERE user_id = ? AND created_at >= ?",
-                (user_id, today_start)
-            ).fetchall()
+            # FIX #5: Use JSON extraction compatible with both PG and SQLite
+            if is_postgres():
+                rows = db.execute(
+                    "SELECT answers->>'survey_id' as sid FROM survey_responses "
+                    "WHERE user_id = ? AND created_at >= ?",
+                    (user_id, today_start)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT json_extract(answers, '$.survey_id') as sid FROM survey_responses "
+                    "WHERE user_id = ? AND created_at >= ?",
+                    (user_id, today_start)
+                ).fetchall()
             for r in rows:
                 sid = r[0] if isinstance(r, (list, tuple)) else r.get('sid', '')
                 if sid:
@@ -176,9 +184,14 @@ def get_today_survey():
     except Exception:
         pass
 
-    # Find first unanswered daily survey
+    # FIX #1+#7: Serve both daily AND weekly surveys (weekly on correct day)
+    today_weekday = datetime.utcnow().weekday()  # 0=Monday, 6=Sunday
     for survey in DAILY_SURVEYS:
-        if survey['type'] == 'daily' and survey['id'] not in answered_today:
+        if survey['id'] in answered_today:
+            continue
+        if survey['type'] == 'daily':
+            return jsonify({'success': True, 'survey': survey, 'answered_today': len(answered_today)})
+        elif survey['type'] == 'weekly' and today_weekday == 6:  # Sunday = weekly survey day
             return jsonify({'success': True, 'survey': survey, 'answered_today': len(answered_today)})
 
     # All done for today
@@ -275,7 +288,7 @@ def submit_response():
 
                 db.execute(
                     "UPDATE survey_rewards SET total_points = ?, streak_days = ?, level = ?, "
-                    "badges = ?, last_survey_at = NOW(), updated_at = NOW() WHERE user_id = ?",
+                    "badges = ?, last_survey_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
                     (total, streak, level, json.dumps(existing_badges), user_id)
                 )
             else:
@@ -286,7 +299,7 @@ def submit_response():
                 level = 'starter'
                 db.execute(
                     "INSERT INTO survey_rewards (user_id, total_points, level, badges, streak_days, last_survey_at) "
-                    "VALUES (?, ?, ?, ?, ?, NOW())",
+                    "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
                     (user_id, total, level, json.dumps(existing_badges), streak)
                 )
 
