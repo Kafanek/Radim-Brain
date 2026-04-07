@@ -218,23 +218,19 @@ def submit_response():
     if client_submission_id:
         try:
             with db_context() as db:
-                if is_postgres():
-                    existing = db.execute(
-                        "SELECT id FROM survey_responses WHERE answers::text LIKE %s AND user_id = %s LIMIT 1",
-                        (f'%{client_submission_id}%', user_id)
-                    ).fetchone()
-                else:
-                    existing = db.execute(
-                        "SELECT id FROM survey_responses WHERE answers LIKE ? AND user_id = ? LIMIT 1",
-                        (f'%{client_submission_id}%', user_id)
-                    ).fetchone()
+                ans_col = "answers::text" if is_postgres() else "answers"
+                existing = db.execute(
+                    f"SELECT id FROM survey_responses WHERE {ans_col} LIKE ? AND user_id = ? LIMIT 1",
+                    (f'%{client_submission_id}%', user_id)
+                ).fetchone()
                 if existing:
                     return jsonify({
                         'success': True,
                         'duplicate': True,
                         'message': 'Tuto odpověď jsme již zaznamenali.',
                     })
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Idempotency check error: {e}")
             pass  # If check fails, proceed normally
 
     if not survey_id or not answers:
