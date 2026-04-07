@@ -442,6 +442,13 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Advanced Agents routes: {e}")
 
+try:
+    from survey_engine import survey_engine_bp
+    app.register_blueprint(survey_engine_bp)
+    logger.info("✅ Survey Engine routes registered: /api/surveys/adaptive, trends, risk, alerts")
+except Exception as e:
+    logger.warning(f"⚠️ Survey Engine routes: {e}")
+
 # Audit Log Routes
 try:
     from audit_log import audit_bp
