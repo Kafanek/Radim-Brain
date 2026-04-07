@@ -1302,4 +1302,52 @@ def care_plan(senior_id):
             return jsonify({'success': False, 'error': str(e)}), 500
 
 
-logger.info("🏥 Medical Team v4.0 loaded — audit, alerts lifecycle, clinical notes, care plan")
+
+# ============================================================================
+# 📹 MEDICAL VIDEO CALL — doctor calls senior
+# ============================================================================
+
+@medical_bp.route('/api/medical/video-call/<senior_id>', methods=['POST'])
+@optional_auth
+def medical_video_call(senior_id):
+    """Doctor initiates video call to senior from medical module."""
+    data = request.json or {}
+    auth = getattr(g, 'auth_user', None) or {}
+    caller_name = data.get('name', auth.get('name', 'Lékař'))
+    role = data.get('role', 'coordinator')
+
+    import time as _time
+    room_code = f"radim-med-{role}-{int(_time.time())}"
+    jitsi_url = f"https://meet.jit.si/{room_code}"
+
+    # Notify senior via SocketIO
+    try:
+        from app import socketio
+        role_name = MEDICAL_ROLES.get(role, {}).get('name', 'Lékař')
+        socketio.emit('incoming_call', {
+            'room_code': room_code,
+            'jitsi_url': jitsi_url,
+            'caller_name': f"{role_name}: {caller_name}",
+            'call_type': 'video',
+            'reason': 'medical',
+            'senior_id': senior_id,
+        }, room=senior_id)
+    except Exception as e:
+        logger.debug(f"Medical video SocketIO error: {e}")
+
+    # Push notification
+    try:
+        from push_helpers import send_push_to_user
+        send_push_to_user(senior_id, f'📹 {caller_name} vám volá (video)', 'Klikněte pro přijetí')
+    except Exception:
+        pass
+
+    return jsonify({
+        'success': True,
+        'room_code': room_code,
+        'jitsi_url': jitsi_url,
+        'message': f'Video hovor zahájen — čekáme na seniora'
+    })
+
+
+logger.info("🏥 Medical Team v4.1 loaded — audit, alerts, clinical notes, care plan, video call")

@@ -609,6 +609,136 @@ def send_call_invitation():
         return jsonify({"success": False, "error": "Interní chyba serveru"}), 500
 
 
+# ============================================================================
+# 📹 VIDEO CALL SIGNALING — incoming calls + agent auto-call
+# ============================================================================
+
+# In-memory store for pending calls (room_code → call info)
+_pending_calls = {}
+
+@twilio_bp.route('/video/request', methods=['POST', 'OPTIONS'])
+@optional_auth
+def video_call_request():
+    """Request a video call TO a senior (from family, doctor, or agent).
+
+    Creates a pending call that the senior's frontend polls for.
+    Also sends push notification + SocketIO event to senior.
+
+    Body: {
+        "senior_id": "user-123",
+        "caller_name": "Dcera Marie",
+        "caller_phone": "+420...",
+        "call_type": "video" | "audio",
+        "reason": "family" | "medical" | "agent_crisis" | "agent_alert"
+    }
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    data = request.json or {}
+    senior_id = data.get('senior_id', '')
+    caller_name = data.get('caller_name', 'Někdo')
+    call_type = data.get('call_type', 'video')
+    reason = data.get('reason', 'family')
+
+    if not senior_id:
+        return jsonify({'success': False, 'error': 'senior_id required'}), 400
+
+    import time
+    room_code = f"radim-{reason}-{int(time.time())}"
+    jitsi_url = f"https://meet.jit.si/{room_code}"
+
+    call_info = {
+        'room_code': room_code,
+        'jitsi_url': jitsi_url,
+        'caller_name': caller_name,
+        'call_type': call_type,
+        'reason': reason,
+        'senior_id': senior_id,
+        'created_at': datetime.utcnow().isoformat(),
+        'status': 'ringing',  # ringing → accepted → ended → expired
+    }
+    _pending_calls[senior_id] = call_info
+
+    # Push notification to senior
+    try:
+        from push_helpers import send_push_to_user
+        icon = '📹' if call_type == 'video' else '📞'
+        send_push_to_user(senior_id, f'{icon} {caller_name} vám volá!', 'Klikněte pro přijetí hovoru')
+    except Exception as e:
+        logger.debug(f"Push for video call failed: {e}")
+
+    # SocketIO notification to senior's frontend
+    try:
+        from app import socketio
+        socketio.emit('incoming_call', call_info, room=senior_id)
+    except Exception as e:
+        logger.debug(f"SocketIO incoming_call failed: {e}")
+
+    logger.info(f"📹 Video call request: {caller_name} → {senior_id} (room={room_code})")
+
+    return jsonify({
+        'success': True,
+        'room_code': room_code,
+        'jitsi_url': jitsi_url,
+        **call_info
+    })
+
+
+@twilio_bp.route('/video/pending/<senior_id>', methods=['GET'])
+def video_call_pending(senior_id):
+    """Check if there's a pending incoming call for this senior.
+    Frontend polls this every 5 seconds.
+    """
+    call = _pending_calls.get(senior_id)
+    if call and call.get('status') == 'ringing':
+        # Auto-expire after 60s
+        from datetime import datetime as dt
+        created = dt.fromisoformat(call['created_at'])
+        if (datetime.utcnow() - created).total_seconds() > 60:
+            call['status'] = 'expired'
+            return jsonify({'pending': False, 'expired': True})
+        return jsonify({'pending': True, **call})
+    return jsonify({'pending': False})
+
+
+@twilio_bp.route('/video/accept/<senior_id>', methods=['POST'])
+def video_call_accept(senior_id):
+    """Senior accepts the incoming call."""
+    call = _pending_calls.get(senior_id)
+    if not call or call.get('status') != 'ringing':
+        return jsonify({'success': False, 'error': 'No pending call'}), 404
+
+    call['status'] = 'accepted'
+
+    # Notify caller via SocketIO
+    try:
+        from app import socketio
+        socketio.emit('call_accepted', call, room=call.get('caller_id', ''))
+    except Exception:
+        pass
+
+    return jsonify({'success': True, **call})
+
+
+@twilio_bp.route('/video/reject/<senior_id>', methods=['POST'])
+def video_call_reject(senior_id):
+    """Senior rejects the incoming call."""
+    call = _pending_calls.pop(senior_id, None)
+    if call:
+        call['status'] = 'rejected'
+    return jsonify({'success': True})
+
+
+@twilio_bp.route('/video/end/<senior_id>', methods=['POST'])
+def video_call_end(senior_id):
+    """End active video call."""
+    call = _pending_calls.pop(senior_id, None)
+    if call:
+        call['status'] = 'ended'
+    return jsonify({'success': True})
+
+
 @twilio_bp.route('/tts', methods=['GET'])
 @rate_limit(60, 60, 'ip')
 def twilio_tts():

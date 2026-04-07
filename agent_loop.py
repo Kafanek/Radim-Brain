@@ -558,8 +558,68 @@ def _crisis_escalate(user_id, obs, app):
         except Exception:
             pass
 
+        # v3.1: Auto-initiate video call with emergency contact on CRISIS
+        _initiate_crisis_video_call(user_id, obs, app)
+
     except Exception as e:
         logger.debug(f"crisis_escalate error: {e}")
+
+
+def _initiate_crisis_video_call(user_id, obs, app):
+    """Auto-initiate video call to emergency contact on CRISIS."""
+    try:
+        profile = db_load_profile(user_id)
+        contacts = profile.get("emergency_contacts", [])
+        name = profile.get("name", "Senior")
+
+        if not contacts:
+            return
+
+        # Find first contact with phone
+        contact = next((c for c in contacts if c.get("phone")), None)
+        if not contact:
+            return
+
+        import time
+        room_code = f"radim-crisis-{int(time.time())}"
+        jitsi_url = f"https://meet.jit.si/{room_code}"
+
+        # 1. Notify senior's frontend to open video call
+        try:
+            from app import socketio
+            socketio.emit('incoming_call', {
+                'room_code': room_code,
+                'jitsi_url': jitsi_url,
+                'caller_name': f"Nouzový hovor ({contact.get('name', 'Kontakt')})",
+                'call_type': 'video',
+                'reason': 'agent_crisis',
+                'auto_accept': True,  # Frontend auto-accepts crisis calls
+                'senior_id': user_id,
+            }, room=user_id)
+        except Exception:
+            pass
+
+        # 2. Send SMS/WhatsApp to emergency contact with join link
+        try:
+            from twilio_voice_helpers import get_twilio_client
+            client = get_twilio_client()
+            phone = contact.get("phone", "").strip()
+            if not phone.startswith('+'):
+                phone = '+420' + phone.lstrip('0')
+            if client:
+                msg = (f"🚨 KRIZE: {name} potřebuje pomoc!\n"
+                       f"Připojte se na video hovor: {jitsi_url}\n"
+                       f"Důvod: {obs.get('message', '')[:80]}")
+                client.messages.create(to=phone, from_=os.environ.get('TWILIO_PHONE_NUMBER', ''), body=msg)
+                logger.info(f"📹 Crisis video call initiated: {name} ↔ {contact.get('name')} (room={room_code})")
+        except Exception as e:
+            logger.debug(f"Crisis video SMS error: {e}")
+
+        audit_log(user_id, "crisis_video_call", "agent_loop",
+                  f"Video call room={room_code} with {contact.get('name', '?')}")
+
+    except Exception as e:
+        logger.debug(f"Crisis video call error: {e}")
 
 
 def _call_senior(user_id, obs):
