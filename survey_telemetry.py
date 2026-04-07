@@ -160,6 +160,13 @@ def get_alert_reviews(user_id):
 # QUALITY DASHBOARD — aggregated metrics
 # ═══════════════════════════════════════════════════════════════════
 
+def _answers_like(pattern):
+    """LIKE query on answers column — handles PG JSONB vs SQLite TEXT."""
+    if is_postgres():
+        return f"answers::text LIKE '%{pattern}%'"
+    return f"answers LIKE '%{pattern}%'"
+
+
 @telemetry_bp.route('/api/surveys/quality', methods=['GET'])
 def quality_dashboard():
     """Survey quality metrics for admin/caregiver dashboard.
@@ -179,6 +186,9 @@ def quality_dashboard():
 
             user_filter = f" AND user_id = '{user_id}'" if user_id else ""
 
+            # JSONB text cast for LIKE queries
+            ans_col = "answers::text" if is_postgres() else "answers"
+
             # 1. Total responses
             row = db.execute(
                 f"SELECT COUNT(*) FROM survey_responses WHERE source != 'telemetry' AND {date_filter}{user_filter}"
@@ -188,25 +198,25 @@ def quality_dashboard():
             # 2. Telemetry events
             started = db.execute(
                 f"SELECT COUNT(*) FROM survey_responses WHERE source = 'telemetry' "
-                f"AND answers LIKE '%survey_started%' AND {date_filter}{user_filter}"
+                f"AND {ans_col} LIKE '%survey_started%' AND {date_filter}{user_filter}"
             ).fetchone()
             started_count = started[0] if started else 0
 
             completed = db.execute(
                 f"SELECT COUNT(*) FROM survey_responses WHERE source = 'telemetry' "
-                f"AND answers LIKE '%survey_completed%' AND {date_filter}{user_filter}"
+                f"AND {ans_col} LIKE '%survey_completed%' AND {date_filter}{user_filter}"
             ).fetchone()
             completed_count = completed[0] if completed else 0
 
             followups = db.execute(
                 f"SELECT COUNT(*) FROM survey_responses WHERE source = 'telemetry' "
-                f"AND answers LIKE '%followup_triggered%' AND {date_filter}{user_filter}"
+                f"AND {ans_col} LIKE '%followup_triggered%' AND {date_filter}{user_filter}"
             ).fetchone()
             followup_count = followups[0] if followups else 0
 
             tts_replays = db.execute(
                 f"SELECT COUNT(*) FROM survey_responses WHERE source = 'telemetry' "
-                f"AND answers LIKE '%tts_replayed%' AND {date_filter}{user_filter}"
+                f"AND {ans_col} LIKE '%tts_replayed%' AND {date_filter}{user_filter}"
             ).fetchone()
             tts_replay_count = tts_replays[0] if tts_replays else 0
 
