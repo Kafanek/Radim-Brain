@@ -118,10 +118,18 @@ def _evaluate_user(user_id, app):
     baselines = get_baselines(user_id)
     observations = []
 
+    # ── v3.1: Get adaptive sensitivity from Learning Agent ──
+    sensitivity = _get_user_sensitivity(user_id)
+
     # ── Core detectors ──
     for check in (_check_c_trend, _check_activity_drop, _check_vitals, _check_interaction_silence):
         obs = check(user_id, baselines)
         if obs and not _is_in_cooldown(user_id, obs["type"]):
+            # Apply sensitivity filter: if sensitivity < 1.0, skip low-severity
+            if sensitivity < 0.8 and obs["severity"] == INFO:
+                continue  # Too many false alarms → skip INFO
+            if sensitivity < 0.6 and obs["severity"] == WARNING:
+                continue  # Very low sensitivity → skip WARNING too
             observations.append(obs)
 
     # ── HA environment check ──
@@ -1077,6 +1085,15 @@ def run_daily_summary(app):
         except Exception as e:
             logger.error(f"Daily summary error: {e}")
 
+
+
+def _get_user_sensitivity(user_id):
+    """Get adaptive sensitivity from Learning Agent (0.5-1.5, default 1.0)."""
+    try:
+        learning = db_load_learning(user_id)
+        return learning.get("agent_sensitivity", 1.0)
+    except Exception:
+        return 1.0
 
 
 # ============================================================================
