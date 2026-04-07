@@ -23,6 +23,7 @@ Routes:
 import os
 import time
 import logging
+from datetime import datetime
 from xml.sax.saxutils import escape as xml_escape
 from flask import Blueprint, request, jsonify, Response
 from auth_middleware import require_auth, optional_auth
@@ -693,8 +694,7 @@ def video_call_pending(senior_id):
     call = _pending_calls.get(senior_id)
     if call and call.get('status') == 'ringing':
         # Auto-expire after 60s
-        from datetime import datetime as dt
-        created = dt.fromisoformat(call['created_at'])
+        created = datetime.fromisoformat(call['created_at'])
         if (datetime.utcnow() - created).total_seconds() > 60:
             call['status'] = 'expired'
             return jsonify({'pending': False, 'expired': True})
