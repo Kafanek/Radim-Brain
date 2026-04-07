@@ -1252,6 +1252,22 @@ def _run_advanced_agents(user_id, baselines, observations):
     except Exception as e:
         logger.debug(f"Learning agent error for {user_id}: {e}")
 
+    # 5b. Anticipation Engine — predict Ĉ_{t+1}, detect anomalies
+    try:
+        from anticipation_engine import run_anticipation_cycle
+        run_anticipation_cycle(user_id, observations)
+    except Exception as e:
+        logger.debug(f"Anticipation engine error for {user_id}: {e}")
+
+    # 5c. Circadian proactive triggers — HA → Radim speaks at right time
+    try:
+        from circadian_engine import check_proactive_triggers, execute_proactive_trigger
+        triggers = check_proactive_triggers(user_id, app)
+        for trigger in triggers:
+            execute_proactive_trigger(trigger, user_id, app)
+    except Exception as e:
+        logger.debug(f"Circadian triggers error for {user_id}: {e}")
+
     # 6. Weather suggestions — inject into memory for next chat (once per day)
     try:
         from advanced_agents import WeatherAgent

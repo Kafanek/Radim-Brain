@@ -454,7 +454,11 @@ except Exception as e:
 try:
     from scenario_engine import scenario_bp
     app.register_blueprint(scenario_bp)
-    logger.info("✅ Scenario Engine routes registered: /api/scenario/*")
+    from anticipation_engine import anticipation_bp
+    app.register_blueprint(anticipation_bp)
+    from circadian_engine import circadian_bp
+    app.register_blueprint(circadian_bp)
+    logger.info("✅ Scenario + Anticipation + Circadian routes registered")
 except Exception as e:
     logger.warning(f"⚠️ Survey Engine routes: {e}")
 
