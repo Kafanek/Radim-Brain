@@ -212,6 +212,30 @@ def submit_response():
     survey_id = data.get('survey_id', '')
     answers = data.get('answers', [])
     source = data.get('source', 'ui')  # 'ui' or 'voice'
+    client_submission_id = data.get('client_submission_id', '')
+
+    # Idempotency: check if this submission was already processed
+    if client_submission_id:
+        try:
+            with db_context() as db:
+                if is_postgres():
+                    existing = db.execute(
+                        "SELECT id FROM survey_responses WHERE answers::text LIKE %s AND user_id = %s LIMIT 1",
+                        (f'%{client_submission_id}%', user_id)
+                    ).fetchone()
+                else:
+                    existing = db.execute(
+                        "SELECT id FROM survey_responses WHERE answers LIKE ? AND user_id = ? LIMIT 1",
+                        (f'%{client_submission_id}%', user_id)
+                    ).fetchone()
+                if existing:
+                    return jsonify({
+                        'success': True,
+                        'duplicate': True,
+                        'message': 'Tuto odpověď jsme již zaznamenali.',
+                    })
+        except Exception:
+            pass  # If check fails, proceed normally
 
     if not survey_id or not answers:
         return jsonify({'success': False, 'error': 'survey_id a answers jsou povinné'}), 400
