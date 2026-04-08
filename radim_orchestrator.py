@@ -213,6 +213,15 @@ def radim_chat():
             except Exception as mem_err:
                 logger.warning(f"Memory load warning: {mem_err}")
 
+        # v10.4: Personal Growth Engine — inject personalized context
+        try:
+            from personal_growth import build_personal_context, extract_memorable_topics
+            growth_ctx = build_personal_context(user_id)
+            if growth_ctx:
+                personalized += '\n\n═══ OSOBNÍ KONTEXT ═══\n' + growth_ctx
+        except (ImportError, Exception) as ge:
+            logger.debug(f"Personal growth context: {ge}")
+
         # Load pending tasks context for AI awareness
         if _ORCH_TASK_SERVICE:
             try:
@@ -556,6 +565,13 @@ def radim_chat():
                 _orch_record(user_id, message, text_response, brain_C=_brain_C_val, brain_mode=_brain_mode_val)
             except Exception as rec_err:
                 logger.warning(f"Memory record warning: {rec_err}")
+
+        # v10.4: Extract memorable topics for future follow-up
+        try:
+            from personal_growth import extract_memorable_topics
+            extract_memorable_topics(user_id, message, text_response)
+        except (ImportError, Exception):
+            pass
 
         # v452: Voice profile learning — detect "pomaleji", "hlasitěji"
         try:

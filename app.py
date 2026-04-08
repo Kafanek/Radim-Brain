@@ -458,7 +458,9 @@ try:
     app.register_blueprint(anticipation_bp)
     from circadian_engine import circadian_bp
     app.register_blueprint(circadian_bp)
-    logger.info("✅ Scenario + Anticipation + Circadian routes registered")
+    from personal_growth import growth_bp
+    app.register_blueprint(growth_bp)
+    logger.info("✅ Scenario + Anticipation + Circadian + Growth routes registered")
 except Exception as e:
     logger.warning(f"⚠️ Survey Engine routes: {e}")
 
