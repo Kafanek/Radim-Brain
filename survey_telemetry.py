@@ -36,6 +36,18 @@ try:
 except ImportError:
     _AVAILABLE = False
 
+def _parse_json_or_dict(val):
+    """Parse JSON string or return dict as-is (PG JSONB auto-parses)."""
+    if isinstance(val, dict):
+        return val
+    if isinstance(val, str):
+        try:
+            return json.loads(val)
+        except Exception:
+            return {'raw': val}
+    return {}
+
+
 telemetry_bp = Blueprint('survey_telemetry', __name__)
 
 
@@ -313,7 +325,7 @@ def export_survey_data():
             for r in rows:
                 data.append({
                     'user_id': r[0] if isinstance(r, (list, tuple)) else r.get('user_id'),
-                    'answers': json.loads(r[1] if isinstance(r, (list, tuple)) else r.get('answers', '{}')),
+                    'answers': _parse_json_or_dict(r[1] if isinstance(r, (list, tuple)) else r.get('answers', '{}')),
                     'points': r[2] if isinstance(r, (list, tuple)) else r.get('points_earned'),
                     'source': r[3] if isinstance(r, (list, tuple)) else r.get('source'),
                     'created_at': str(r[4] if isinstance(r, (list, tuple)) else r.get('created_at')),
