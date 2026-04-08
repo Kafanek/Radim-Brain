@@ -58,7 +58,7 @@ SCENARIOS = [
         'id': 'chest_pain',
         'category': 'crisis',
         'severity': 'critical',
-        'patterns': [r'bolest na hrudi|tlak na hrudi|svírá.*hrud|srdce.*bolí|infarkt'],
+        'patterns': [r'bolest.*hrud|bolí.*hrud|tlak.*hrud|svírá.*hrud|svírá.*prs|srdce.*bolí|bolí.*srdce|na hrudi|infarkt|tíží.*hrud'],
         'response': 'Tohle bereme vážně. Posaďte se, nedělajte žádnou námahu. Dýchejte pomalu a klidně. Volám záchrannou službu na 155.',
         'tts_mode': 'crisis',
         'escalation': 'call_155',
