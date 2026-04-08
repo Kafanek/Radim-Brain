@@ -198,6 +198,7 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 PRODUCTION_ORIGINS = [
     "https://app.radimcare.cz",
     "https://brain.radimcare.cz",
+    "https://radimcare-app.pages.dev",
     "https://polite-bush-001303503.6.azurestaticapps.net",
     "https://mykolibri-academy.cz",
     "https://app.mykolibri-academy.cz",
