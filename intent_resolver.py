@@ -107,6 +107,16 @@ def _handle_nameday(**kwargs):
 
 
 def _handle_greeting(**kwargs):
+    msg = (kwargs.get('message', '') or '').lower().strip()
+    # Mirror senior's greeting style
+    if any(w in msg for w in ['ahoj', 'cau', 'čau', 'nazdar', 'zdar']):
+        return random.choice(["Ahoj! Jak se máte?", "Ahoj! Rád vás slyším.", "Ahoj! Co je nového?"])
+    elif any(w in msg for w in ['dobrý den', 'dobry den', 'zdravím']):
+        return random.choice(["Dobrý den! Co pro vás mohu udělat?", "Dobrý den! Jak vám mohu pomoci?", "Dobrý den! Jsem tu pro vás."])
+    elif any(w in msg for w in ['dobré ráno', 'dobre rano']):
+        return random.choice(["Dobré ráno! Jak jste se vyspal/a?", "Dobré ráno! Přeji vám krásný den."])
+    elif any(w in msg for w in ['dobrý večer', 'dobry vecer']):
+        return random.choice(["Dobrý večer! Jak se máte?", "Dobrý večer! Už se chystáte ke spánku?"])
     return random.choice(_GREETINGS)
 
 

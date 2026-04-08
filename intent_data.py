@@ -568,19 +568,20 @@ GOODBYES = [
 ]
 
 THANKS_REPLIES = [
-    "Není zač! Rád pomáhám.",
     "Rádo se stalo! Jsem tu pro vás.",
-    "To je v pořádku! Kdykoli se ptejte.",
+    "To mě těší! Kdykoli se ptejte.",
+    "Rádo se stalo. Potřebujete ještě něco?",
+    "To je samozřejmost. Jsem tu pro vás.",
 ]
 
 CZ_JOKES = [
+    "Přijde senior k doktorovi a říká: Pane doktore, když se ráno probudím, 20 minut nemůžu vstát. A doktor říká: Tak vstávejte o 20 minut dřív!",
+    "Ptá se vnuk dědečka: Dědečku, kolik ti je? A dědeček říká: No, když jsem byl v tvém věku, tak mi bylo šest!",
+    "Babička říká dědečkovi: Vzpomínáš, jak jsme před padesáti lety seděli na lavičce? A dědeček: Jo, a ta lavička tam stojí dodnes. My ne!",
     "Co řekne nula osmičce? Hezký pásek!",
-    "Proč nemůže bicykl stát sám? Protože je dvou-kolý!",
-    "Co je to žába na suchu? Přískoč!",
-    "Jaký je rozdíl mezi školou a blázincem? Telefonní číslo!",
-    "Co dělá kočka na počítači? Chytá myš!",
-    "Proč se houby nezvou na párty? Protože zabírají moc místa!",
-    "Co řekne jeden strom druhému? Listuj!",
+    "Víte, proč se starší lidé usmívají? Protože vědí, co je v životě důležité.",
+    "Doktor říká pacientovi: Máte se víc hýbat. Pacient: Dobře, budu víc kývat hlavou!",
+    "Vnučka se ptá babičky: Babičko, jak se ti daří? Babička: Výborně, dcero! Vnučka: Já jsem vnučka! Babička: Vidíš, jak mi to výborně jde?",
     "Jaký je nejlepší den na vaření? Pátek — pá-tek!",
     "Proč nosí klauni velké boty? Protože mají velké nohy!",
     "Co říká ryba, když narazí do zdi? Pláč!",
