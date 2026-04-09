@@ -705,6 +705,12 @@ def app_to_app_call():
 
     data = request.json or {}
     to_user_id = data.get('to_user_id', '')
+    # Duplicate call prevention
+    existing = _pending_calls.get(to_user_id)
+    if existing and existing.get('status') == 'ringing':
+        created = datetime.fromisoformat(existing['created_at'])
+        if (datetime.utcnow() - created).total_seconds() < 60:
+            return jsonify({'success': False, 'error': 'Hovor již probíhá'}), 409
     caller_name = data.get('caller_name', 'Někdo')
     call_type = data.get('call_type', 'video')
 
