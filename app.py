@@ -42,6 +42,13 @@ from radim_service_routes import radim_service_bp
 # 🎭 Import Orchestrator Blueprint
 from orchestrator_blueprint import orchestrator_bp
 
+# 📺 Import TV Proxy Blueprint
+try:
+    from tv_proxy_routes import tv_proxy_bp
+    TV_PROXY_AVAILABLE = True
+except ImportError:
+    TV_PROXY_AVAILABLE = False
+
 # Import Memory & Learning routes
 try:
     from memory_routes import memory_bp
@@ -139,6 +146,11 @@ app.register_blueprint(radim_service_bp)
 
 # 🎭 Register Orchestrator Blueprint
 app.register_blueprint(orchestrator_bp)
+
+# 📺 Register TV Proxy Blueprint
+if TV_PROXY_AVAILABLE:
+    app.register_blueprint(tv_proxy_bp)
+    logger.info("✅ TV proxy registered: /api/tv/*")
 logger.info("✅ Orchestrator routes registered: /api/orchestrator/*")
 
 # 👴 Register Seniors Blueprint
