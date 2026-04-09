@@ -686,6 +686,71 @@ def video_call_request():
     })
 
 
+@twilio_bp.route('/app/call', methods=['POST', 'OPTIONS'])
+@optional_auth
+def app_to_app_call():
+    """App-to-app call — no SMS, just SocketIO popup.
+
+    Used for in-house calling (e.g., senior home → café).
+    Reuses _pending_calls + incoming_call SocketIO event.
+
+    Body: {
+        "to_user_id": "kavarna-haje",
+        "caller_name": "Václav Novák",
+        "call_type": "video" | "audio"
+    }
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    data = request.json or {}
+    to_user_id = data.get('to_user_id', '')
+    caller_name = data.get('caller_name', 'Někdo')
+    call_type = data.get('call_type', 'video')
+
+    if not to_user_id:
+        return jsonify({'success': False, 'error': 'to_user_id required'}), 400
+
+    import time
+    room_code = f"radim-app-{int(time.time())}"
+    jitsi_url = f"https://meet.jit.si/{room_code}"
+
+    call_info = {
+        'room_code': room_code,
+        'jitsi_url': jitsi_url,
+        'caller_name': caller_name,
+        'call_type': call_type,
+        'reason': 'app',
+        'senior_id': to_user_id,
+        'created_at': datetime.utcnow().isoformat(),
+        'status': 'ringing',
+    }
+    _pending_calls[to_user_id] = call_info
+
+    # Push notification
+    try:
+        from push_helpers import send_push_to_user
+        icon = '📹' if call_type == 'video' else '📞'
+        send_push_to_user(to_user_id, f'{icon} {caller_name} volá!', 'Klikněte pro přijetí')
+    except Exception as e:
+        logger.debug(f"Push for app call failed: {e}")
+
+    # SocketIO — real-time popup
+    try:
+        from app import socketio
+        socketio.emit('incoming_call', call_info, room=to_user_id)
+    except Exception as e:
+        logger.debug(f"SocketIO app call failed: {e}")
+
+    logger.info(f"📱 App call: {caller_name} → {to_user_id} (room={room_code})")
+
+    return jsonify({
+        'success': True,
+        'room_code': room_code,
+        'jitsi_url': jitsi_url,
+    })
+
+
 @twilio_bp.route('/video/pending/<senior_id>', methods=['GET'])
 def video_call_pending(senior_id):
     """Check if there's a pending incoming call for this senior.
