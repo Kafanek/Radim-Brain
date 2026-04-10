@@ -260,30 +260,23 @@ def check_all_agents_status():
 
 
 def save_admin_report(report_text):
-    """Save a comprehensive report to database for admin to read in the app."""
+    """Save report to dedicated table (auto-created)."""
     timestamp = datetime.utcnow().isoformat()
     try:
         from database import db_context
-        # Ensure summary column exists (may not on older schema)
-        try:
-            with db_context(commit=True) as db:
-                db.execute("ALTER TABLE agent_observations ADD COLUMN IF NOT EXISTS summary TEXT")
-        except Exception:
-            pass
-
         with db_context(commit=True) as db:
-            try:
-                db.execute("""
-                    INSERT INTO agent_observations (user_id, observation_type, severity, summary, created_at)
-                    VALUES (?, ?, ?, ?, ?)
-                """, ('system-health-agent', 'admin_report', 'INFO', report_text[:4000], timestamp))
-            except Exception:
-                # Fallback without summary — store in observation_type
-                db.execute("""
-                    INSERT INTO agent_observations (user_id, observation_type, severity, created_at)
-                    VALUES (?, ?, ?, ?)
-                """, ('system-health-agent', 'admin_report:' + report_text[:3000], 'INFO', timestamp))
-
+            # Auto-create table if not exists
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS agent_reports (
+                    id SERIAL PRIMARY KEY,
+                    report_text TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            db.execute(
+                "INSERT INTO agent_reports (report_text, created_at) VALUES (?, ?)",
+                (report_text[:4000], timestamp)
+            )
         logger.info(f"🤖 Admin report saved ({len(report_text)} chars)")
         return f"Report uložen ({len(report_text)} znaků)"
     except Exception as e:
@@ -784,45 +777,20 @@ def trigger_summary_report():
 
 @health_agent_bp.route('/reports', methods=['GET'])
 def get_reports():
-    """Get saved admin reports for display in admin module."""
+    """Get saved admin reports from dedicated table."""
     try:
         from database import db_context
-        reports = []
         with db_context(commit=False) as db:
-            # Try with summary column first
-            try:
-                rows = db.execute("""
-                    SELECT summary, created_at
-                    FROM agent_observations
-                    WHERE user_id = 'system-health-agent'
-                    AND observation_type = 'admin_report'
-                    ORDER BY created_at DESC LIMIT 5
-                """).fetchall()
-                for r in (rows or []):
-                    if r[0]:
-                        reports.append({'text': r[0], 'created_at': str(r[1])})
-            except Exception:
-                pass
+            rows = db.execute("""
+                SELECT report_text, created_at
+                FROM agent_reports
+                ORDER BY created_at DESC LIMIT 5
+            """).fetchall()
 
-            # Also try observation_type starting with admin_report:
-            if not reports:
-                try:
-                    rows = db.execute("""
-                        SELECT observation_type, created_at
-                        FROM agent_observations
-                        WHERE user_id = 'system-health-agent'
-                        AND observation_type LIKE 'admin_report:%'
-                        ORDER BY created_at DESC LIMIT 5
-                    """).fetchall()
-                    for r in (rows or []):
-                        text = str(r[0]).replace('admin_report:', '', 1)
-                        reports.append({'text': text, 'created_at': str(r[1])})
-                except Exception:
-                    pass
-
+        reports = [{'text': r[0], 'created_at': str(r[1])} for r in (rows or [])]
         return jsonify({'success': True, 'reports': reports})
     except Exception as e:
-        return jsonify({'success': True, 'reports': [], 'note': str(e)})
+        return jsonify({'success': True, 'reports': [], 'note': 'Zatím žádné reporty — table se vytvoří při prvním reportu'})
 
 
 @health_agent_bp.route('/health-check', methods=['GET'])
