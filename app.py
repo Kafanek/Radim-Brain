@@ -56,6 +56,13 @@ try:
 except ImportError:
     FAMILY_AVAILABLE = False
 
+# 🤖 Import Health Agent
+try:
+    from radim_health_agent import health_agent_bp
+    HEALTH_AGENT_AVAILABLE = True
+except ImportError:
+    HEALTH_AGENT_AVAILABLE = False
+
 # Import Memory & Learning routes
 try:
     from memory_routes import memory_bp
@@ -163,6 +170,11 @@ if TV_PROXY_AVAILABLE:
 if FAMILY_AVAILABLE:
     app.register_blueprint(family_bp)
     logger.info("✅ Family routes registered: /api/family/*")
+
+# 🤖 Register Health Agent
+if HEALTH_AGENT_AVAILABLE:
+    app.register_blueprint(health_agent_bp)
+    logger.info("✅ Health Agent registered: /api/agent/*")
 logger.info("✅ Orchestrator routes registered: /api/orchestrator/*")
 
 # 👴 Register Seniors Blueprint
