@@ -183,6 +183,36 @@ def clear_application_cache():
         return f"Cache clear failed: {str(e)}"
 
 
+def check_chat_ai():
+    """Test chat AI response — send test message and check response."""
+    import requests
+    try:
+        resp = requests.post(
+            f'{BACKEND_URL}/api/radim/chat',
+            json={'message': 'Kolik je hodin?', 'mode': 'senior'},
+            timeout=15
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return f"Chat OK — response: {str(data.get('response',''))[:100]}"
+        return f"Chat returned {resp.status_code}: {resp.text[:200]}"
+    except Exception as e:
+        return f"Chat test failed: {str(e)}"
+
+
+def check_frontend_status():
+    """Check frontend (Cloudflare Pages) availability."""
+    import requests
+    try:
+        resp = requests.get('https://app.radimcare.cz/', timeout=10)
+        size = len(resp.content)
+        has_modules = 'module-home' in resp.text
+        has_scripts = 'radim-app.min.js' in resp.text
+        return f"Frontend OK — HTTP {resp.status_code}, {size}b, modules: {has_modules}, scripts: {has_scripts}"
+    except Exception as e:
+        return f"Frontend check failed: {str(e)}"
+
+
 def get_health_history():
     """Get last 10 health check results for trend analysis."""
     try:
@@ -279,6 +309,16 @@ TOOLS = [
         "description": "Get last 10 health check results for trend analysis. Shows if issues are recurring or new.",
         "input_schema": {"type": "object", "properties": {}, "required": []}
     },
+    {
+        "name": "check_chat_ai",
+        "description": "Test the main chat AI by sending a test question. Checks if Gemini/Claude AI responds correctly.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "check_frontend_status",
+        "description": "Check Cloudflare Pages frontend (app.radimcare.cz). Verifies HTML loads, modules present, scripts loaded.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
 ]
 
 TOOL_FUNCTIONS = {
@@ -293,6 +333,8 @@ TOOL_FUNCTIONS = {
     "reset_circuit_breaker": lambda args: reset_circuit_breaker(args.get("service_name", "")),
     "clear_application_cache": lambda _: clear_application_cache(),
     "get_health_history": lambda _: get_health_history(),
+    "check_chat_ai": lambda _: check_chat_ai(),
+    "check_frontend_status": lambda _: check_frontend_status(),
 }
 
 SYSTEM_PROMPT = """Jsi RadimCare Health Agent — autonomní monitorovací a opravný agent pro senior care aplikaci RadimCare.
@@ -325,14 +367,52 @@ SYSTEM_PROMPT = """Jsi RadimCare Health Agent — autonomní monitorovací a opr
 - Buď stručný ale přesný — tabulka služeb + summary
 - Vždy ukonči odesláním notifikace adminu
 
-## Kontext:
-- Backend: Flask na Heroku (radim-brain-2025), v3.5, 52+ blueprintů
-- DB: PostgreSQL Essential-0 (Heroku)
-- TTS: Azure cs-CZ-AntoninNeural
+## Architektura aplikace (ZNÁŠ JI):
+
+### Backend (Flask, Heroku v537)
+- 52+ blueprintů, 17 registrovaných v app.py
+- DB: PostgreSQL Essential-0, 75+ tabulek
 - AI: Gemini 2.0 Flash (primary) + Claude (fallback)
-- Self-healing: Circuit breakers pro 6 služeb
-- 13 proaktivních agentů běží každých 5 minut
-- Agent běží automaticky každých 15 minut
+- TTS: Azure cs-CZ-AntoninNeural (SSML, φ-pauzy, voice filter)
+- STT: Browser Web Speech API (cs-CZ, continuous)
+- Self-healing: 6 circuit breakers (gemini, claude, azure_tts, azure_stt, twilio, database)
+
+### Frontend (Cloudflare Pages, app.radimcare.cz)
+- 27 modulů: home, chat, calls, news, music, tv, quiz, exercises, medical, settings, help, tasks, calendar, stories, notes, education, library, email, smarthome, gallery, skillmap, trend, survey, caregiver, admin
+- 3 JS bundly: radim-head (51KB), radim-services (108KB), radim-app (362KB)
+- 32 lazy-loaded section scripts
+- Service Worker v15 s cache
+
+### Klíčové systémy:
+- **SpeechOrchestrator**: FSM (idle→fetching→playing), token-based race prevention, priority queue
+- **SpeechPipeline**: TTS warmup (3min), 12 pre-cached phrases, FastAck, Turn Manager
+- **Agent Loop**: 5 detektorů (C trend, activity drop, vitals, interaction silence, fall detection)
+- **Anticipation Engine**: Ĉ predikce, behavioral patterns, speech rhythm adaptation
+- **Circadian Engine**: Wake/sleep detection, 7 proactive triggers
+- **Scenario Engine**: 20 crisis situations, instant response
+- **TV Module**: YouTube embed + search (backend proxy), 16 kanálů
+- **Calls**: Jitsi WebRTC + app-to-app (SocketIO popup), group calls
+- **Family Dashboard**: /api/family/* (checkin, activity, cognitive, photos, remote profile)
+- **Drug Interactions**: 10 common dangerous combinations
+- **i18n**: cs/sk/en (80 keys)
+
+### APScheduler (8 jobs):
+1. radim_reminders (5 min)
+2. telemed_reminders (5 min)
+3. agent_loop (5 min) — senior monitoring
+4. morning_checkin (8:00)
+5. daily_cleanup (3:00)
+6. daily_engagement (14:00)
+7. daily_summary (20:00)
+8. health_agent (15 min) — TY
+
+### Běžné problémy a řešení:
+- Circuit breaker open → reset_circuit_breaker (pokud služba funguje)
+- TTS timeout → Azure cold start, warmup ping pomáhá
+- DB connection pool → restart pomáhá, PostgreSQL Essential-0 má limit 20 connections
+- Memory high → clear_application_cache
+- Frontend cache starý → bump CACHE_VERSION v service-worker.js
+- Heroku dyno restart (24h) → normální, agent_loop se restartuje automaticky
 """
 
 
