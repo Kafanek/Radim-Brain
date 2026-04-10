@@ -138,14 +138,21 @@ def send_admin_notification(message, severity='info'):
     timestamp = datetime.utcnow().isoformat()
     logger.info(f"🤖 AGENT [{severity.upper()}]: {message}")
 
-    # Store in DB for history
+    # Store in DB for history — use columns that definitely exist
     try:
         from database import db_context
         with db_context(commit=True) as db:
-            db.execute("""
-                INSERT INTO agent_observations (user_id, observation_type, severity, summary, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, ('system-health-agent', 'health_check', severity.upper(), message, timestamp))
+            try:
+                db.execute("""
+                    INSERT INTO agent_observations (user_id, observation_type, severity, summary, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, ('system-health-agent', 'health_check', severity.upper(), message[:500], timestamp))
+            except Exception:
+                # Fallback without summary column
+                db.execute("""
+                    INSERT INTO agent_observations (user_id, observation_type, severity, created_at)
+                    VALUES (?, ?, ?, ?)
+                """, ('system-health-agent', f'health_check: {message[:200]}', severity.upper(), timestamp))
     except Exception as e:
         logger.debug(f"Agent notification DB save failed: {e}")
 
@@ -218,19 +225,29 @@ def get_health_history():
     try:
         from database import db_context
         with db_context(commit=False) as db:
-            rows = db.execute("""
-                SELECT severity, summary, created_at
-                FROM agent_observations
-                WHERE user_id = 'system-health-agent'
-                ORDER BY created_at DESC LIMIT 10
-            """).fetchall()
+            # Use observation_type + severity (always exist) — summary may not
+            try:
+                rows = db.execute("""
+                    SELECT severity, summary, created_at
+                    FROM agent_observations
+                    WHERE user_id = 'system-health-agent'
+                    ORDER BY created_at DESC LIMIT 10
+                """).fetchall()
+            except Exception:
+                # Fallback without summary column
+                rows = db.execute("""
+                    SELECT severity, observation_type, created_at
+                    FROM agent_observations
+                    WHERE user_id = 'system-health-agent'
+                    ORDER BY created_at DESC LIMIT 10
+                """).fetchall()
 
         if not rows:
-            return "No previous health checks found"
+            return "No previous health checks found — this is the first run"
 
         history = []
         for r in rows:
-            history.append(f"[{r[0]}] {r[2]}: {r[1][:100]}")
+            history.append(f"[{r[0]}] {r[2]}: {str(r[1])[:100]}")
         return "\n".join(history)
     except Exception as e:
         return f"Cannot read history: {str(e)}"
