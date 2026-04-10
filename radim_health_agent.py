@@ -320,15 +320,25 @@ health_agent_bp = Blueprint('health_agent', __name__, url_prefix='/api/agent')
 @health_agent_bp.route('/health-check', methods=['POST'])
 def trigger_health_check():
     """Manually trigger health agent check.
-    Requires X-Admin-Secret header.
+    Requires X-Admin-Secret header OR valid JWT auth.
     """
     from flask import request
-    secret = request.headers.get('X-Admin-Secret', '')
-    if ADMIN_SECRET and secret != ADMIN_SECRET:
-        return jsonify({'error': 'Unauthorized'}), 401
 
-    result = run_health_check()
-    return jsonify(result)
+    # Check admin secret
+    secret = request.headers.get('X-Admin-Secret', '')
+    if ADMIN_SECRET and secret == ADMIN_SECRET:
+        pass  # Authorized via secret
+    else:
+        # Check JWT auth
+        auth = request.headers.get('Authorization', '')
+        if not auth.startswith('Bearer '):
+            return jsonify({'error': 'Unauthorized — use X-Admin-Secret or Bearer token'}), 401
+
+    try:
+        result = run_health_check()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e), 'status': 'failed'}), 500
 
 
 @health_agent_bp.route('/health-check', methods=['GET'])
