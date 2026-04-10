@@ -122,7 +122,7 @@ def _evaluate_user(user_id, app):
     sensitivity = _get_user_sensitivity(user_id)
 
     # ── Core detectors ──
-    for check in (_check_c_trend, _check_activity_drop, _check_vitals, _check_interaction_silence):
+    for check in (_check_c_trend, _check_activity_drop, _check_vitals, _check_interaction_silence, _check_fall_detection):
         obs = check(user_id, baselines)
         if obs and not _is_in_cooldown(user_id, obs["type"]):
             # Apply sensitivity filter: if sensitivity < 1.0, skip low-severity
@@ -307,6 +307,63 @@ def _check_interaction_silence(user_id, baselines):
         return {"type": "no_interaction", "severity": INFO,
                 "message": "Uživatel se delší dobu neozval. Při příštím rozhovoru se zeptejte, jak se má.",
                 "details": {"hours_since": round(hours_since, 1)}}
+    return None
+
+
+def _check_fall_detection(user_id, baselines):
+    """Detect potential falls from IoT accelerometer/motion data.
+
+    Patterns:
+    1. Sudden high acceleration spike → impact
+    2. No motion after spike → person on floor
+    3. Motion sensor active at unusual hour (2-5 AM) + no interaction → night fall
+    """
+    try:
+        with db_context(commit=False) as db:
+            # Get recent accelerometer data (last 10 min)
+            recent = db.execute("""
+                SELECT sensor_type, value, recorded_at
+                FROM iot_sensor_data
+                WHERE user_id = ? AND recorded_at > ?
+                AND sensor_type IN ('accelerometer', 'motion', 'fall_sensor')
+                ORDER BY recorded_at DESC LIMIT 20
+            """, (user_id, (datetime.utcnow() - timedelta(minutes=10)).isoformat())).fetchall()
+
+            if not recent:
+                return None
+
+            # Pattern 1: High acceleration spike (fall impact)
+            for row in recent:
+                sensor_type, value, recorded_at = row[0], row[1], row[2]
+                try:
+                    val = float(value) if not isinstance(value, (int, float)) else value
+                except (ValueError, TypeError):
+                    continue
+
+                # Fall sensor direct trigger
+                if sensor_type == 'fall_sensor' and val > 0:
+                    return {"type": "fall_detected", "severity": CRISIS,
+                            "message": "⚠️ Senzor pádu aktivován! Zkontrolujte seniora IHNED.",
+                            "details": {"sensor": sensor_type, "value": val, "time": str(recorded_at)}}
+
+                # Accelerometer spike > 3G = likely fall
+                if sensor_type == 'accelerometer' and val > 3.0:
+                    return {"type": "fall_suspected", "severity": ALERT,
+                            "message": "Podezření na pád — vysoká akcelerace detekována. Ověřte stav seniora.",
+                            "details": {"acceleration_g": round(val, 1), "time": str(recorded_at)}}
+
+            # Pattern 2: Night motion (2-5 AM) without interaction
+            hour = datetime.utcnow().hour
+            if 2 <= hour <= 5:
+                motion_count = sum(1 for r in recent if r[0] == 'motion')
+                if motion_count > 3:
+                    return {"type": "night_activity", "severity": WARNING,
+                            "message": "Noční aktivita detekována (pohyb v " + str(hour) + ":00). Může to být nespavost nebo problém.",
+                            "details": {"motion_events": motion_count, "hour": hour}}
+
+    except Exception as e:
+        logger.debug(f"Fall detection check error: {e}")
+
     return None
 
 

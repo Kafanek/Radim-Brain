@@ -193,6 +193,133 @@ def _build_checkin_message(status, count, last_time, mood, alerts):
     return msg
 
 
+# ============================================
+# 🔧 REMOTE MANAGEMENT — family configures senior's app
+# ============================================
+
+@family_bp.route('/remote/profile/<user_id>', methods=['GET'])
+@optional_auth
+def get_remote_profile(user_id):
+    """Family reads senior's profile for remote management."""
+    try:
+        from memory_helpers import db_load_profile
+        profile = db_load_profile(user_id) or {}
+        # Return only safe fields (not passwords/tokens)
+        safe = {
+            'name': profile.get('name', ''),
+            'age_group': profile.get('age_group', ''),
+            'medications_list': profile.get('medications_list', []),
+            'medication_times': profile.get('medication_times', {}),
+            'contacts': profile.get('contacts', []),
+            'hearing': profile.get('hearing', 'normal'),
+            'vision': profile.get('vision', 'normal'),
+            'memory': profile.get('memory', 'normal'),
+        }
+        return jsonify({'success': True, 'profile': safe})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@family_bp.route('/remote/profile/<user_id>', methods=['PUT'])
+@optional_auth
+def update_remote_profile(user_id):
+    """Family updates senior's profile remotely.
+
+    Body: { "medications_list": [...], "contacts": [...], ... }
+    Only whitelisted fields can be updated.
+    """
+    data = request.json or {}
+    ALLOWED_FIELDS = ['name', 'age_group', 'medications_list', 'medication_times',
+                      'contacts', 'hearing', 'vision', 'memory']
+
+    try:
+        from memory_helpers import db_load_profile, db_save_profile
+        profile = db_load_profile(user_id) or {}
+
+        updated = []
+        for field in ALLOWED_FIELDS:
+            if field in data:
+                profile[field] = data[field]
+                updated.append(field)
+
+        if updated:
+            db_save_profile(user_id, profile)
+            logger.info(f"👨‍👩‍👧 Remote profile update for {user_id}: {updated}")
+
+        return jsonify({
+            'success': True,
+            'updated_fields': updated,
+            'message': f'Aktualizováno: {", ".join(updated)}' if updated else 'Žádné změny'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@family_bp.route('/remote/settings/<user_id>', methods=['GET', 'PUT'])
+@optional_auth
+def remote_settings(user_id):
+    """Family reads/updates senior's app settings remotely.
+
+    Settings stored in memory_learning JSONB under 'remote_settings' key.
+    """
+    try:
+        with db_context(commit=(request.method == 'PUT')) as db:
+            if request.method == 'GET':
+                row = db.execute(
+                    "SELECT data FROM memory_learning WHERE user_id = ?", (user_id,)
+                ).fetchone()
+                settings = {}
+                if row:
+                    import json
+                    learning = json.loads(row[0]) if isinstance(row[0], str) else (row[0] or {})
+                    settings = learning.get('remote_settings', {})
+                return jsonify({'success': True, 'settings': settings})
+
+            else:  # PUT
+                data = request.json or {}
+                row = db.execute(
+                    "SELECT data FROM memory_learning WHERE user_id = ?", (user_id,)
+                ).fetchone()
+                import json
+                learning = {}
+                if row:
+                    learning = json.loads(row[0]) if isinstance(row[0], str) else (row[0] or {})
+                learning['remote_settings'] = data
+                db.execute(
+                    "UPDATE memory_learning SET data = ?, updated_at = ? WHERE user_id = ?",
+                    (json.dumps(learning), datetime.utcnow().isoformat(), user_id)
+                )
+                return jsonify({'success': True, 'message': 'Nastavení aktualizováno'})
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================
+# 🧠 COGNITIVE ASSESSMENT
+# ============================================
+
+@family_bp.route('/cognitive/<user_id>', methods=['GET'])
+@optional_auth
+def get_cognitive_assessment(user_id):
+    """Get cognitive assessment score and history.
+
+    Returns score (0-100), trend, signals, recommendations.
+    Used by family to monitor cognitive health over time.
+    """
+    try:
+        from cognitive_assessment import compute_cognitive_score, get_cognitive_history
+        score = compute_cognitive_score(user_id)
+        history = get_cognitive_history(user_id, days=90)
+        return jsonify({
+            'success': True,
+            **score,
+            'history': history
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @family_bp.route('/photos', methods=['POST'])
 @optional_auth
 def share_photo():
