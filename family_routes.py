@@ -26,36 +26,34 @@ def get_activity(user_id):
     Family sees: "chat at 14:30", "music at 15:00" — not WHAT was said/played.
     """
     try:
-        with db_context(commit=False) as db:
-            # Last brain states (activity indicator)
-            states = db.execute("""
-                SELECT created_at, mode, coherence
-                FROM brain_states
-                WHERE user_id = ?
-                ORDER BY created_at DESC LIMIT 10
-            """, (user_id,)).fetchall()
+        states = []
+        observations = []
 
-            # Last chat messages (just timestamps, not content)
-            try:
-                chats = db.execute("""
-                    SELECT created_at
-                    FROM chat_history
+        try:
+            with db_context(commit=False) as db:
+                states = db.execute("""
+                    SELECT created_at, mode, coherence
+                    FROM brain_states
                     WHERE user_id = ?
-                    ORDER BY created_at DESC LIMIT 5
+                    ORDER BY created_at DESC LIMIT 10
                 """, (user_id,)).fetchall()
-            except Exception:
-                chats = []  # chat_history table may not exist
+        except Exception:
+            pass
 
-            # Agent observations (health alerts)
-            observations = db.execute("""
-                SELECT created_at, observation_type, severity, summary
-                FROM agent_observations
-                WHERE user_id = ?
-                AND created_at > ?
-                ORDER BY created_at DESC LIMIT 10
-            """, (user_id, (datetime.utcnow() - timedelta(days=1)).isoformat())).fetchall()
+        try:
+            with db_context(commit=False) as db:
+                observations = db.execute("""
+                    SELECT created_at, observation_type, severity, summary
+                    FROM agent_observations
+                    WHERE user_id = ?
+                    AND created_at > ?
+                    ORDER BY created_at DESC LIMIT 10
+                """, (user_id, (datetime.utcnow() - timedelta(days=1)).isoformat())).fetchall()
+        except Exception:
+            pass
 
         # Build activity timeline
+        chats = []  # chat_history not used (table may not exist)
         activities = []
 
         if states:
