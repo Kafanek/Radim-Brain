@@ -220,6 +220,62 @@ def check_frontend_status():
         return f"Frontend check failed: {str(e)}"
 
 
+def check_all_agents_status():
+    """Check status of all 13 proactive agents in the system."""
+    try:
+        from database import db_context
+        with db_context(commit=False) as db:
+            # Count observations by type in last 48h
+            rows = db.execute("""
+                SELECT observation_type, severity, COUNT(*) as cnt
+                FROM agent_observations
+                WHERE created_at > ?
+                GROUP BY observation_type, severity
+                ORDER BY cnt DESC
+            """, ((datetime.utcnow() - __import__('datetime').timedelta(hours=48)).isoformat(),)).fetchall()
+
+            # Count unique active users
+            users = db.execute("""
+                SELECT COUNT(DISTINCT user_id) FROM brain_states
+                WHERE created_at > ?
+            """, ((datetime.utcnow() - __import__('datetime').timedelta(hours=48)).isoformat(),)).fetchone()
+
+            # Brain state stats
+            brain = db.execute("""
+                SELECT AVG(coherence), MIN(coherence), MAX(coherence), COUNT(*)
+                FROM brain_states WHERE created_at > ?
+            """, ((datetime.utcnow() - __import__('datetime').timedelta(hours=48)).isoformat(),)).fetchone()
+
+        result = "== Agent Activity (48h) ==\n"
+        result += f"Active users: {users[0] if users else 0}\n"
+        result += f"Brain states: {brain[3] if brain else 0} records, avg C={brain[0]:.1f}, min={brain[1]:.1f}, max={brain[2]:.1f}\n" if brain and brain[0] else "Brain states: no data\n"
+        result += "\nObservations by type:\n"
+        for r in (rows or []):
+            result += f"  {r[0]} [{r[1]}]: {r[2]}×\n"
+        if not rows:
+            result += "  No observations in 48h\n"
+        return result
+    except Exception as e:
+        return f"Agent status check failed: {str(e)}"
+
+
+def save_admin_report(report_text):
+    """Save a comprehensive report to database for admin to read in the app."""
+    timestamp = datetime.utcnow().isoformat()
+    try:
+        from database import db_context
+        with db_context(commit=True) as db:
+            # Store as special observation type
+            db.execute("""
+                INSERT INTO agent_observations (user_id, observation_type, severity, summary, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, ('system-health-agent', 'admin_report', 'INFO', report_text[:4000], timestamp))
+        logger.info(f"🤖 Admin report saved ({len(report_text)} chars)")
+        return f"Report uložen do databáze ({len(report_text)} znaků). Admin ho uvidí v modulu Admin."
+    except Exception as e:
+        return f"Report save failed: {str(e)}"
+
+
 def get_health_history():
     """Get last 10 health check results for trend analysis."""
     try:
@@ -336,6 +392,22 @@ TOOLS = [
         "description": "Check Cloudflare Pages frontend (app.radimcare.cz). Verifies HTML loads, modules present, scripts loaded.",
         "input_schema": {"type": "object", "properties": {}, "required": []}
     },
+    {
+        "name": "check_all_agents_status",
+        "description": "Check activity of all 13 proactive agents. Shows observations by type, active users, brain state stats for last 48h.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "save_admin_report",
+        "description": "Save a comprehensive report to database. Admin will see it in the Admin module. Use for 48h summary reports with recommendations.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "report_text": {"type": "string", "description": "Full report text in Czech with markdown formatting. Include: system status, agent activity, recommendations, improvement ideas."}
+            },
+            "required": ["report_text"]
+        }
+    },
 ]
 
 TOOL_FUNCTIONS = {
@@ -352,6 +424,8 @@ TOOL_FUNCTIONS = {
     "get_health_history": lambda _: get_health_history(),
     "check_chat_ai": lambda _: check_chat_ai(),
     "check_frontend_status": lambda _: check_frontend_status(),
+    "check_all_agents_status": lambda _: check_all_agents_status(),
+    "save_admin_report": lambda args: save_admin_report(args.get("report_text", "")),
 }
 
 SYSTEM_PROMPT = """Jsi RadimCare Health Agent — autonomní monitorovací a opravný agent pro senior care aplikaci RadimCare.
@@ -494,6 +568,100 @@ def run_health_check():
     return {"status": "max_turns_reached", "turns": turn}
 
 
+SUMMARY_SYSTEM_PROMPT = """Jsi RadimCare Coordination Agent — píšeš 48-hodinový souhrnný report pro admina.
+
+## Tvůj úkol:
+1. Zkontroluj zdraví systému (check_backend_health)
+2. Zjisti aktivitu všech agentů za 48h (check_all_agents_status)
+3. Podívej se na historii (get_health_history)
+4. Napiš KOMPLETNÍ report a ulož ho (save_admin_report)
+
+## Report musí obsahovat:
+
+### 📊 Stav systému
+- Backend, DB, TTS, AI — funguje/nefunguje
+- Latence DB, počet blueprintů
+
+### 🤖 Aktivita agentů (48h)
+- Kolik observací, jaké typy, jaké severity
+- Kolik aktivních seniorů
+- Brain state statistiky (průměr C, trend)
+
+### 👴 Péče o seniory
+- Kolik seniorů bylo aktivních
+- Jaké problémy agenti detekovali
+- Krizové situace (ALERT/CRISIS)
+
+### 💡 Doporučení
+- Co vylepšit v systému
+- Jaké moduly potřebují pozornost
+- Návrhy na nové funkce nebo úpravy
+- Koordinace mezi agenty — co by měli dělat jinak
+
+### 🔮 Proaktivní návrhy
+- Predikce možných problémů
+- Sezonní doporučení (počasí, svátky)
+- Návrhy na engagement seniorů
+
+## Pravidla:
+- Piš ČESKY, markdown formátování
+- Buď konkrétní — čísla, data, trendy
+- Report ulož přes save_admin_report
+"""
+
+
+def run_summary_report():
+    """Run 48h summary report for admin."""
+    if not ANTHROPIC_API_KEY:
+        return {"status": "skipped", "reason": "no API key"}
+
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+    messages = [
+        {"role": "user", "content": "Vytvoř kompletní 48-hodinový souhrnný report pro admina. Zkontroluj systém, agenty, seniory a napiš doporučení. Ulož report do databáze."}
+    ]
+
+    max_turns = 8
+    turn = 0
+
+    while turn < max_turns:
+        turn += 1
+        response = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=8000,
+            system=SUMMARY_SYSTEM_PROMPT,
+            tools=TOOLS,
+            messages=messages
+        )
+
+        if response.stop_reason == "end_turn":
+            final_text = next((b.text for b in response.content if b.type == "text"), "")
+            logger.info(f"🤖 Summary report completed in {turn} turns")
+            return {"status": "completed", "turns": turn, "summary": final_text}
+
+        tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
+        if not tool_use_blocks:
+            break
+
+        messages.append({"role": "assistant", "content": response.content})
+
+        tool_results = []
+        for tool in tool_use_blocks:
+            func = TOOL_FUNCTIONS.get(tool.name)
+            if func:
+                try:
+                    result = func(tool.input)
+                except Exception as e:
+                    result = f"Tool error: {str(e)}"
+            else:
+                result = f"Unknown tool: {tool.name}"
+            tool_results.append({"type": "tool_result", "tool_use_id": tool.id, "content": str(result)})
+
+        messages.append({"role": "user", "content": tool_results})
+
+    return {"status": "max_turns_reached", "turns": turn}
+
+
 # ============================================
 # FLASK ENDPOINT — trigger via API or cron
 # ============================================
@@ -525,6 +693,45 @@ def trigger_health_check():
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e), 'status': 'failed'}), 500
+
+
+@health_agent_bp.route('/summary-report', methods=['POST'])
+def trigger_summary_report():
+    """Generate 48h summary report for admin module."""
+    from flask import request
+    secret = request.headers.get('X-Admin-Secret', '')
+    auth = request.headers.get('Authorization', '')
+    if ADMIN_SECRET and secret != ADMIN_SECRET and not auth.startswith('Bearer '):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    try:
+        result = run_summary_report()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e), 'status': 'failed'}), 500
+
+
+@health_agent_bp.route('/reports', methods=['GET'])
+def get_reports():
+    """Get saved admin reports for display in admin module."""
+    try:
+        from database import db_context
+        with db_context(commit=False) as db:
+            rows = db.execute("""
+                SELECT summary, created_at
+                FROM agent_observations
+                WHERE user_id = 'system-health-agent'
+                AND observation_type = 'admin_report'
+                ORDER BY created_at DESC LIMIT 5
+            """).fetchall()
+
+        reports = []
+        for r in (rows or []):
+            reports.append({'text': r[0], 'created_at': str(r[1])})
+
+        return jsonify({'success': True, 'reports': reports})
+    except Exception as e:
+        return jsonify({'success': True, 'reports': [], 'note': str(e)})
 
 
 @health_agent_bp.route('/health-check', methods=['GET'])
