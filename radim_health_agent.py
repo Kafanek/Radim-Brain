@@ -574,6 +574,52 @@ def run_health_check():
     return {"status": "max_turns_reached", "turns": turn}
 
 
+REPORT_TOOLS = [t for t in TOOLS if t['name'] in (
+    'check_backend_health', 'check_database_status', 'check_tts_health',
+    'check_all_agents_status', 'get_health_history', 'save_admin_report',
+    'send_admin_notification'
+)]
+
+
+def run_health_check_with_report():
+    """Quick health check that saves result as admin report."""
+    if not ANTHROPIC_API_KEY:
+        return {"status": "skipped", "reason": "no API key"}
+
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    messages = [{"role": "user", "content": "Zkontroluj backend, DB, TTS, aktivitu agentů. Napiš report a ULOŽ ho přes save_admin_report. Max 4 kroky."}]
+
+    prompt = """Jsi RadimCare Health Agent. Zkontroluj systém a ULOŽ report přes save_admin_report tool.
+Report: stav služeb, DB latence, aktivita agentů, doporučení.
+ČESKY, stručně, emoji. VŽDY volej save_admin_report."""
+
+    max_turns = 5
+    turn = 0
+    while turn < max_turns:
+        turn += 1
+        response = client.messages.create(
+            model="claude-haiku-4-5", max_tokens=3000, system=prompt,
+            tools=REPORT_TOOLS, messages=messages
+        )
+        if response.stop_reason == "end_turn":
+            return {"status": "completed", "turns": turn,
+                    "summary": next((b.text for b in response.content if b.type == "text"), "")}
+        tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
+        if not tool_use_blocks:
+            break
+        messages.append({"role": "assistant", "content": response.content})
+        tool_results = []
+        for tool in tool_use_blocks:
+            func = TOOL_FUNCTIONS.get(tool.name)
+            try:
+                result = func(tool.input) if func else f"Unknown: {tool.name}"
+            except Exception as e:
+                result = f"Error: {e}"
+            tool_results.append({"type": "tool_result", "tool_use_id": tool.id, "content": str(result)})
+        messages.append({"role": "user", "content": tool_results})
+    return {"status": "completed", "turns": turn}
+
+
 SUMMARY_SYSTEM_PROMPT = """Jsi RadimCare Coordination Agent — píšeš 48-hodinový souhrnný report pro admina.
 
 ## Tvůj úkol:
@@ -703,36 +749,19 @@ def trigger_health_check():
 
 @health_agent_bp.route('/summary-report', methods=['POST'])
 def trigger_summary_report():
-    """Generate 48h summary report asynchronously (Heroku 30s timeout)."""
+    """Generate quick health report and save it (synchronous, fits 30s)."""
     from flask import request
     secret = request.headers.get('X-Admin-Secret', '')
     auth = request.headers.get('Authorization', '')
     if ADMIN_SECRET and secret != ADMIN_SECRET and not auth.startswith('Bearer '):
         return jsonify({'error': 'Unauthorized'}), 401
 
-    # Run in background thread (Heroku 30s timeout)
-    import threading
-    def _bg_report():
-        try:
-            from flask import current_app
-            with current_app.app_context() if hasattr(current_app, 'app_context') else __import__('contextlib').nullcontext():
-                run_summary_report()
-        except Exception as e:
-            logger.warning(f"🤖 Background summary report failed: {e}")
-
     try:
-        # Try app context
-        from flask import current_app
-        app = current_app._get_current_object()
-        def _run():
-            with app.app_context():
-                run_summary_report()
-        t = threading.Thread(target=_run, daemon=True)
-    except Exception:
-        t = threading.Thread(target=lambda: run_summary_report(), daemon=True)
-
-    t.start()
-    return jsonify({'status': 'generating', 'message': 'Report se generuje na pozadí. Podívejte se za minutu na záložku Agent Reporty.'})
+        # Quick check that saves report
+        result = run_health_check_with_report()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e), 'status': 'failed'}), 500
 
 
 @health_agent_bp.route('/reports', methods=['GET'])
