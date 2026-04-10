@@ -9,7 +9,7 @@
 import logging
 import re
 from urllib.parse import urljoin, quote
-from flask import Blueprint, request, Response
+from flask import Blueprint, request, Response, jsonify
 
 logger = logging.getLogger(__name__)
 
