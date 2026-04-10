@@ -28,32 +28,32 @@ def get_activity(user_id):
     try:
         with db_context(commit=False) as db:
             # Last brain states (activity indicator)
-            db.execute("""
+            states = db.execute("""
                 SELECT created_at, mode, coherence
                 FROM brain_states
                 WHERE user_id = ?
                 ORDER BY created_at DESC LIMIT 10
-            """, (user_id,))
-            states = db.fetchall()
+            """, (user_id,)).fetchall()
 
             # Last chat messages (just timestamps, not content)
-            db.execute("""
-                SELECT created_at
-                FROM chat_history
-                WHERE user_id = ?
-                ORDER BY created_at DESC LIMIT 5
-            """, (user_id,))
-            chats = db.fetchall()
+            try:
+                chats = db.execute("""
+                    SELECT created_at
+                    FROM chat_history
+                    WHERE user_id = ?
+                    ORDER BY created_at DESC LIMIT 5
+                """, (user_id,)).fetchall()
+            except Exception:
+                chats = []  # chat_history table may not exist
 
             # Agent observations (health alerts)
-            db.execute("""
+            observations = db.execute("""
                 SELECT created_at, observation_type, severity, summary
                 FROM agent_observations
                 WHERE user_id = ?
                 AND created_at > ?
                 ORDER BY created_at DESC LIMIT 10
-            """, (user_id, (datetime.utcnow() - timedelta(days=1)).isoformat()))
-            observations = db.fetchall()
+            """, (user_id, (datetime.utcnow() - timedelta(days=1)).isoformat())).fetchall()
 
         # Build activity timeline
         activities = []
@@ -127,23 +127,22 @@ def daily_checkin(user_id):
 
         with db_context(commit=False) as db:
             # Today's brain states
-            db.execute("""
+            row = db.execute("""
                 SELECT COUNT(*), MAX(created_at), AVG(coherence)
                 FROM brain_states
                 WHERE user_id = ? AND created_at >= ?
-            """, (user_id, today))
-            row = db.fetchone()
-            count = row[0] or 0
-            last_time = row[1]
-            avg_c = row[2]
+            """, (user_id, today)).fetchone()
+            count = (row[0] or 0) if row else 0
+            last_time = row[1] if row else None
+            avg_c = row[2] if row else None
 
             # Any alerts today
-            db.execute("""
+            alert_row = db.execute("""
                 SELECT COUNT(*)
                 FROM agent_observations
                 WHERE user_id = ? AND created_at >= ? AND severity IN ('WARNING', 'ALERT', 'CRISIS')
-            """, (user_id, today))
-            alert_count = db.fetchone()[0] or 0
+            """, (user_id, today)).fetchone()
+            alert_count = (alert_row[0] or 0) if alert_row else 0
 
         status = 'active' if count > 0 else 'inactive'
         mood = 'good'
@@ -254,13 +253,15 @@ def get_shared_photos(user_id):
     """Get photos shared by senior for family viewing."""
     try:
         with db_context(commit=False) as db:
-            db.execute("""
-                SELECT photo_url, caption, created_at
-                FROM family_shared_photos
-                WHERE user_id = ?
-                ORDER BY created_at DESC LIMIT 20
-            """, (user_id,))
-            photos = db.fetchall()
+            try:
+                photos = db.execute("""
+                    SELECT photo_url, caption, created_at
+                    FROM family_shared_photos
+                    WHERE user_id = ?
+                    ORDER BY created_at DESC LIMIT 20
+                """, (user_id,)).fetchall()
+            except Exception:
+                photos = []  # Table may not exist yet
 
         return jsonify({
             'success': True,
