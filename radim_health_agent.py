@@ -507,8 +507,14 @@ SYSTEM_PROMPT = """Jsi RadimCare Health Agent — autonomní monitorovací a opr
 """
 
 
+QUICK_TOOLS = [t for t in TOOLS if t['name'] in (
+    'check_backend_health', 'check_database_status', 'check_tts_health',
+    'send_admin_notification', 'get_health_history', 'reset_circuit_breaker'
+)]
+
+
 def run_health_check():
-    """Run autonomous health check using Claude API with tool use."""
+    """Run QUICK health check (fits in 30s Heroku timeout)."""
     if not ANTHROPIC_API_KEY:
         logger.warning("🤖 Health Agent: ANTHROPIC_API_KEY not set, skipping")
         return {"status": "skipped", "reason": "no API key"}
@@ -516,20 +522,20 @@ def run_health_check():
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
     messages = [
-        {"role": "user", "content": "Proveď kompletní zdravotní kontrolu systému RadimCare. Zkontroluj všechny služby a pošli report."}
+        {"role": "user", "content": "Rychlá kontrola: backend, DB, TTS. Pokud problém → oprav a notifikuj. Pokud OK → krátká notifikace. Max 3 kroky."}
     ]
 
-    max_turns = 10
+    max_turns = 4
     turn = 0
 
     while turn < max_turns:
         turn += 1
 
         response = client.messages.create(
-            model="claude-haiku-4-5",  # Fast + cheap for monitoring
-            max_tokens=4096,
+            model="claude-haiku-4-5",
+            max_tokens=2000,
             system=SYSTEM_PROMPT,
-            tools=TOOLS,
+            tools=QUICK_TOOLS,
             messages=messages
         )
 
