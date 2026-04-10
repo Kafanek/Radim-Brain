@@ -602,8 +602,11 @@ Report: stav služeb, DB latence, aktivita agentů, doporučení.
             tools=REPORT_TOOLS, messages=messages
         )
         if response.stop_reason == "end_turn":
-            return {"status": "completed", "turns": turn,
-                    "summary": next((b.text for b in response.content if b.type == "text"), "")}
+            final_text = next((b.text for b in response.content if b.type == "text"), "")
+            # Always save final report to DB (don't rely on agent calling save tool)
+            if final_text and len(final_text) > 50:
+                save_admin_report(final_text)
+            return {"status": "completed", "turns": turn, "summary": final_text}
         tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
         if not tool_use_blocks:
             break
