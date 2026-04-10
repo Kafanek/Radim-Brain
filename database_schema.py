@@ -1228,4 +1228,26 @@ def init_survey_schema(db):
         logger.debug(f"Survey schema: {e}")
 
 
-logger.info("Database Schema v4.1 loaded — PG + SQLite + Surveys")
+FAMILY_SCHEMA_PG = """
+    CREATE TABLE IF NOT EXISTS family_shared_photos (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        photo_url TEXT NOT NULL,
+        caption TEXT DEFAULT '',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_family_photos_user ON family_shared_photos(user_id);
+"""
+
+def init_family_schema(db):
+    """Create family tables."""
+    try:
+        for stmt in FAMILY_SCHEMA_PG.strip().split(';'):
+            stmt = stmt.strip()
+            if stmt:
+                db.execute(stmt)
+        logger.info("✅ Family schema created")
+    except Exception as e:
+        logger.debug(f"Family schema: {e}")
+
+logger.info("Database Schema v4.2 loaded — PG + SQLite + Surveys + Family")

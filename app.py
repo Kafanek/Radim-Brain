@@ -49,6 +49,13 @@ try:
 except ImportError:
     TV_PROXY_AVAILABLE = False
 
+# 👨‍👩‍👧 Import Family Routes
+try:
+    from family_routes import family_bp
+    FAMILY_AVAILABLE = True
+except ImportError:
+    FAMILY_AVAILABLE = False
+
 # Import Memory & Learning routes
 try:
     from memory_routes import memory_bp
@@ -151,6 +158,11 @@ app.register_blueprint(orchestrator_bp)
 if TV_PROXY_AVAILABLE:
     app.register_blueprint(tv_proxy_bp)
     logger.info("✅ TV proxy registered: /api/tv/*")
+
+# 👨‍👩‍👧 Register Family Routes
+if FAMILY_AVAILABLE:
+    app.register_blueprint(family_bp)
+    logger.info("✅ Family routes registered: /api/family/*")
 logger.info("✅ Orchestrator routes registered: /api/orchestrator/*")
 
 # 👴 Register Seniors Blueprint
