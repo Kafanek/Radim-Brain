@@ -1,8 +1,8 @@
 # ============================================
-# 📺 TV STREAM PROXY — bypass CORS for Czech TV
+# 📺 TV STREAM PROXY + YOUTUBE SEARCH
 # ============================================
-# Czech TV stations (Prima, ČT) block browser CORS.
-# This proxy fetches HLS manifests/segments server-side
+# 1. HLS proxy: bypass CORS for Czech TV streams
+# 2. YouTube search: scrape youtube.com/results (no API key needed)
 # and re-serves them to the frontend.
 # ============================================
 
@@ -106,3 +106,95 @@ def _rewrite_manifest(body, manifest_url):
         else:
             result.append(line)
     return '\n'.join(result)
+
+
+# ============================================
+# 🔍 YOUTUBE SEARCH — no API key needed
+# ============================================
+
+@tv_proxy_bp.route('/youtube/search', methods=['GET'])
+def youtube_search():
+    """Search YouTube videos by scraping youtube.com/results.
+
+    Usage:
+        GET /api/tv/youtube/search?q=czech+news&limit=6
+
+    Returns JSON array of video results with videoId, title, author, thumbnail, duration.
+    """
+    query = request.args.get('q', '')
+    limit = min(int(request.args.get('limit', '6')), 12)
+
+    if not query:
+        return jsonify({'results': [], 'error': 'Missing q parameter'}), 400
+
+    try:
+        import requests as req_lib
+        import json as json_lib
+
+        resp = req_lib.get(
+            f'https://www.youtube.com/results',
+            params={'search_query': query, 'sp': 'EgIQAQ=='},  # sp = Videos filter
+            headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept-Language': 'cs,en;q=0.9',
+            },
+            timeout=10,
+        )
+
+        if resp.status_code != 200:
+            return jsonify({'results': [], 'error': f'YouTube returned {resp.status_code}'}), 502
+
+        # Extract ytInitialData JSON from HTML
+        match = re.search(r'var ytInitialData = ({.*?});', resp.text)
+        if not match:
+            return jsonify({'results': [], 'error': 'Could not parse YouTube response'}), 502
+
+        data = json_lib.loads(match.group(1))
+
+        # Navigate to video results
+        contents = (data.get('contents', {})
+                    .get('twoColumnSearchResultsRenderer', {})
+                    .get('primaryContents', {})
+                    .get('sectionListRenderer', {})
+                    .get('contents', []))
+
+        results = []
+        for section in contents:
+            items = section.get('itemSectionRenderer', {}).get('contents', [])
+            for item in items:
+                vid = item.get('videoRenderer', {})
+                video_id = vid.get('videoId')
+                if not video_id:
+                    continue
+
+                title_runs = vid.get('title', {}).get('runs', [])
+                title = title_runs[0].get('text', '') if title_runs else ''
+
+                author_runs = vid.get('ownerText', {}).get('runs', [])
+                author = author_runs[0].get('text', '') if author_runs else ''
+
+                length_text = vid.get('lengthText', {}).get('simpleText', 'LIVE')
+
+                thumbnail = f'https://i.ytimg.com/vi/{video_id}/mqdefault.jpg'
+
+                results.append({
+                    'videoId': video_id,
+                    'title': title,
+                    'author': author,
+                    'duration': length_text,
+                    'thumbnail': thumbnail,
+                })
+
+                if len(results) >= limit:
+                    break
+            if len(results) >= limit:
+                break
+
+        return jsonify({
+            'results': results,
+            'query': query,
+        }), 200, {'Access-Control-Allow-Origin': '*'}
+
+    except Exception as e:
+        logger.warning(f'📺 YouTube search error: {e}')
+        return jsonify({'results': [], 'error': str(e)}), 502
