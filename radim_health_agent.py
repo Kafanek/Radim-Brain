@@ -697,18 +697,36 @@ def trigger_health_check():
 
 @health_agent_bp.route('/summary-report', methods=['POST'])
 def trigger_summary_report():
-    """Generate 48h summary report for admin module."""
+    """Generate 48h summary report asynchronously (Heroku 30s timeout)."""
     from flask import request
     secret = request.headers.get('X-Admin-Secret', '')
     auth = request.headers.get('Authorization', '')
     if ADMIN_SECRET and secret != ADMIN_SECRET and not auth.startswith('Bearer '):
         return jsonify({'error': 'Unauthorized'}), 401
 
+    # Run in background thread (Heroku 30s timeout)
+    import threading
+    def _bg_report():
+        try:
+            from flask import current_app
+            with current_app.app_context() if hasattr(current_app, 'app_context') else __import__('contextlib').nullcontext():
+                run_summary_report()
+        except Exception as e:
+            logger.warning(f"🤖 Background summary report failed: {e}")
+
     try:
-        result = run_summary_report()
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'error': str(e), 'status': 'failed'}), 500
+        # Try app context
+        from flask import current_app
+        app = current_app._get_current_object()
+        def _run():
+            with app.app_context():
+                run_summary_report()
+        t = threading.Thread(target=_run, daemon=True)
+    except Exception:
+        t = threading.Thread(target=lambda: run_summary_report(), daemon=True)
+
+    t.start()
+    return jsonify({'status': 'generating', 'message': 'Report se generuje na pozadí. Podívejte se za minutu na záložku Agent Reporty.'})
 
 
 @health_agent_bp.route('/reports', methods=['GET'])
