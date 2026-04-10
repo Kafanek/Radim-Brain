@@ -134,24 +134,76 @@ def get_recent_errors():
 
 
 def send_admin_notification(message, severity='info'):
-    """Send notification to admin (log + optional webhook)."""
+    """Send notification to admin (log + DB storage)."""
     timestamp = datetime.utcnow().isoformat()
-    notification = f"[{severity.upper()}] {timestamp}: {message}"
-    logger.info(f"🤖 AGENT NOTIFICATION: {notification}")
+    logger.info(f"🤖 AGENT [{severity.upper()}]: {message}")
 
-    # Store in DB for admin dashboard
-    import requests
+    # Store in DB for history
     try:
-        requests.post(
-            f'{BACKEND_URL}/api/admin/agent-notification',
-            json={'message': message, 'severity': severity, 'timestamp': timestamp},
-            headers={'X-Admin-Secret': ADMIN_SECRET} if ADMIN_SECRET else {},
-            timeout=5
-        )
-    except Exception:
-        pass
+        from database import db_context
+        with db_context(commit=True) as db:
+            db.execute("""
+                INSERT INTO agent_observations (user_id, observation_type, severity, summary, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, ('system-health-agent', 'health_check', severity.upper(), message, timestamp))
+    except Exception as e:
+        logger.debug(f"Agent notification DB save failed: {e}")
 
     return f"Notification sent: [{severity}] {message}"
+
+
+def reset_circuit_breaker(service_name):
+    """Reset a circuit breaker to closed (healthy) state."""
+    try:
+        from self_healing import SelfHealingEngine
+        engine = SelfHealingEngine()
+        if service_name in engine.circuit_breakers:
+            cb = engine.circuit_breakers[service_name]
+            cb['state'] = 'closed'
+            cb['failures'] = 0
+            return f"Circuit breaker '{service_name}' reset to closed"
+        return f"Circuit breaker '{service_name}' not found"
+    except Exception as e:
+        return f"Cannot reset circuit breaker: {str(e)}"
+
+
+def clear_application_cache():
+    """Clear backend caches to free memory."""
+    import requests
+    try:
+        # Clear brain state cache
+        resp = requests.post(f'{BACKEND_URL}/api/admin/clear-cache',
+                             headers={'X-Admin-Secret': ADMIN_SECRET} if ADMIN_SECRET else {},
+                             timeout=10)
+        if resp.status_code == 200:
+            return "Cache cleared successfully"
+        # Fallback: at least clear what we can
+        return f"Cache clear returned {resp.status_code} — may need manual intervention"
+    except Exception as e:
+        return f"Cache clear failed: {str(e)}"
+
+
+def get_health_history():
+    """Get last 10 health check results for trend analysis."""
+    try:
+        from database import db_context
+        with db_context(commit=False) as db:
+            rows = db.execute("""
+                SELECT severity, summary, created_at
+                FROM agent_observations
+                WHERE user_id = 'system-health-agent'
+                ORDER BY created_at DESC LIMIT 10
+            """).fetchall()
+
+        if not rows:
+            return "No previous health checks found"
+
+        history = []
+        for r in rows:
+            history.append(f"[{r[0]}] {r[2]}: {r[1][:100]}")
+        return "\n".join(history)
+    except Exception as e:
+        return f"Cannot read history: {str(e)}"
 
 
 # ============================================
@@ -196,7 +248,7 @@ TOOLS = [
     },
     {
         "name": "send_admin_notification",
-        "description": "Send a notification to the admin about system status or issues found.",
+        "description": "Send a notification to the admin about system status or issues found. Also saves to database for history.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -205,6 +257,27 @@ TOOLS = [
             },
             "required": ["message", "severity"]
         }
+    },
+    {
+        "name": "reset_circuit_breaker",
+        "description": "Reset a stuck circuit breaker back to closed (healthy) state. Use when a service recovered but breaker is still open.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "service_name": {"type": "string", "enum": ["gemini", "claude", "azure_tts", "azure_stt", "twilio", "database"], "description": "Service name"}
+            },
+            "required": ["service_name"]
+        }
+    },
+    {
+        "name": "clear_application_cache",
+        "description": "Clear backend application caches to free memory. Safe operation, no data loss.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "get_health_history",
+        "description": "Get last 10 health check results for trend analysis. Shows if issues are recurring or new.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
     },
 ]
 
@@ -217,33 +290,49 @@ TOOL_FUNCTIONS = {
     "check_tts_health": lambda _: check_tts_health(),
     "get_recent_errors": lambda _: get_recent_errors(),
     "send_admin_notification": lambda args: send_admin_notification(args.get("message", ""), args.get("severity", "info")),
+    "reset_circuit_breaker": lambda args: reset_circuit_breaker(args.get("service_name", "")),
+    "clear_application_cache": lambda _: clear_application_cache(),
+    "get_health_history": lambda _: get_health_history(),
 }
 
-SYSTEM_PROMPT = """Jsi RadimCare Health Agent — autonomní monitorovací agent pro senior care aplikaci RadimCare.
+SYSTEM_PROMPT = """Jsi RadimCare Health Agent — autonomní monitorovací a opravný agent pro senior care aplikaci RadimCare.
 
-Tvůj úkol:
-1. Zkontroluj zdraví všech služeb (backend, databáze, TTS, agent loop)
-2. Analyzuj nalezené problémy
-3. Diagnostikuj root cause
-4. Pokud najdeš problém, pošli notifikaci adminovi s doporučením
-5. Pokud je vše v pořádku, pošli krátký info report
+## Tvůj úkol:
+1. Zkontroluj zdraví VŠECH služeb
+2. Podívej se na historii předchozích kontrol (get_health_history)
+3. Analyzuj a diagnostikuj problémy
+4. OPRAV co můžeš sám (reset circuit breaker, clear cache)
+5. Pošli report adminu
 
-Pravidla:
-- Kontroluj VŠECHNY služby systematicky
-- Vždy začni s check_backend_health
-- Pokud je služba degradovaná, zkontroluj detaily
+## Auto-fix pravidla (co můžeš opravit sám):
+- Circuit breaker stuck open → reset_circuit_breaker (služba se mezitím zotavila)
+- Vysoké využití paměti → clear_application_cache
+- Degradovaná služba → zkontroluj detaily, pokud se zotavila → reset breaker
+
+## Co NEOPRAVUJ sám (jen notifikuj admin):
+- Database down → critical notifikace
+- Opakující se stejný problém 3+ → escalate
+- Neznámý error → notifikuj s full context
+
+## Učení z historie:
+- Vždy začni s get_health_history — podívej se na předchozí problémy
+- Pokud vidíš opakující se pattern → zmíň to v reportu
+- Pokud problém z minula je vyřešen → zmíň že se zlepšilo
+
+## Pravidla:
 - Notifikace piš ČESKY
-- Severity: info (vše OK), warning (degradace), critical (výpadek)
-- Buď stručný ale přesný
+- Severity: info (vše OK), warning (degradace/opraveno), critical (výpadek)
+- Buď stručný ale přesný — tabulka služeb + summary
 - Vždy ukonči odesláním notifikace adminu
 
-Kontext:
-- Backend: Flask na Heroku (radim-brain-2025)
-- DB: PostgreSQL Essential-0
+## Kontext:
+- Backend: Flask na Heroku (radim-brain-2025), v3.5, 52+ blueprintů
+- DB: PostgreSQL Essential-0 (Heroku)
 - TTS: Azure cs-CZ-AntoninNeural
 - AI: Gemini 2.0 Flash (primary) + Claude (fallback)
+- Self-healing: Circuit breakers pro 6 služeb
 - 13 proaktivních agentů běží každých 5 minut
-- 5+ aktivních seniorů
+- Agent běží automaticky každých 15 minut
 """
 
 

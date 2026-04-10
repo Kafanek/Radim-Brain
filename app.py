@@ -682,9 +682,26 @@ try:
     except ImportError:
         logger.warning("⚠️ daily summary not available")
 
+    # 🤖 Health Agent — autonomous monitoring + auto-fix (every 15 min)
+    try:
+        from radim_health_agent import run_health_check
+        def _run_health_agent():
+            try:
+                with app.app_context():
+                    result = run_health_check()
+                    logger.info(f"🤖 Health Agent: {result.get('status')} in {result.get('turns', '?')} turns")
+            except Exception as e:
+                logger.warning(f"🤖 Health Agent error (non-fatal): {e}")
+
+        scheduler.add_job(_run_health_agent, 'interval', minutes=15,
+                          id='health_agent', max_instances=1, misfire_grace_time=300)
+        logger.info("✅ Health Agent registered (every 15 min)")
+    except ImportError:
+        logger.warning("⚠️ Health Agent not available")
+
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
-    logger.info("✅ APScheduler started: 7 jobs")
+    logger.info("✅ APScheduler started: 8 jobs")
 
 except ImportError:
     logger.warning("⚠️ APScheduler not installed — reminders will not auto-send")
