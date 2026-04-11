@@ -207,6 +207,67 @@ def check_chat_ai():
         return f"Chat test failed: {str(e)}"
 
 
+def check_rhythm_state(user_id='test'):
+    """Check rhythm state for a user — shows energy, stress, mood, risk, phase."""
+    try:
+        from rhythm_state import compute_rhythm_state
+        state = compute_rhythm_state(user_id)
+        return json.dumps(state.to_dict(), indent=2, ensure_ascii=False)
+    except Exception as e:
+        return f"Rhythm state error: {str(e)}"
+
+
+def check_quiz_api():
+    """Test quiz generation API — sends test request and checks response."""
+    import requests
+    try:
+        resp = requests.post(
+            f'{BACKEND_URL}/api/claude/quiz',
+            json={'topic': 'general', 'count': 1, 'difficulty': 'easy'},
+            timeout=15
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            q = data.get('questions', [])
+            if q:
+                return f"Quiz OK — {len(q)} questions generated. Sample: {q[0].get('question','')[:60]}"
+            return "Quiz API returned 200 but no questions"
+        return f"Quiz returned {resp.status_code}"
+    except Exception as e:
+        return f"Quiz test failed: {str(e)}"
+
+
+def check_module_status():
+    """Check which frontend modules are loaded on app.radimcare.cz."""
+    import requests
+    try:
+        resp = requests.get('https://app.radimcare.cz/', timeout=10)
+        import re
+        modules = re.findall(r'id="module-([^"]+)"', resp.text)
+        scripts = len(re.findall(r'src="[^"]+\.js"', resp.text))
+        return f"Frontend: {len(modules)} modules ({', '.join(modules[:10])}...), {scripts} scripts loaded"
+    except Exception as e:
+        return f"Module check failed: {str(e)}"
+
+
+def evaluate_agents(user_id='test', message=''):
+    """Run multi-agent evaluation — shows which agent would respond to a message."""
+    try:
+        from rhythm_state import compute_rhythm_state
+        from agent_coordinator import evaluate_all_agents, pick_best_action
+        state = compute_rhythm_state(user_id)
+        decisions = evaluate_all_agents(state, message)
+        best = pick_best_action(state, message)
+        result = f"Rhythm: phase={state.rhythm_phase}, energy={state.energy:.2f}, risk={state.risk:.2f}\n"
+        result += f"Winner: {best.agent_name if best else 'none'}\n"
+        for d in decisions:
+            if d.should_act:
+                result += f"  → {d.agent_name}: {d.action} (p={d.priority:.2f}) {d.reason[:50]}\n"
+        return result
+    except Exception as e:
+        return f"Agent evaluation error: {str(e)}"
+
+
 def check_frontend_status():
     """Check frontend (Cloudflare Pages) availability."""
     import requests
@@ -401,6 +462,37 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {}, "required": []}
     },
     {
+        "name": "check_rhythm_state",
+        "description": "Check UserRhythmState for a user — energy, stress, mood, risk, phase, tone, speech rate. Shows the multi-agent rhythm awareness.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"user_id": {"type": "string", "description": "User ID (default: test)"}},
+            "required": []
+        }
+    },
+    {
+        "name": "check_quiz_api",
+        "description": "Test quiz generation API — sends test request to /api/claude/quiz and checks if questions are generated correctly.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "check_module_status",
+        "description": "Check which frontend modules are loaded on app.radimcare.cz. Reports module count and names.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "evaluate_agents",
+        "description": "Run multi-agent evaluation for a message. Shows which agent would respond, rhythm state, and decisions. Use to test agent routing.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "string", "description": "User ID (default: test)"},
+                "message": {"type": "string", "description": "Test message (e.g., 'Spadl jsem', 'Bolí mě hlava')"}
+            },
+            "required": []
+        }
+    },
+    {
         "name": "check_all_agents_status",
         "description": "Check activity of all 13 proactive agents. Shows observations by type, active users, brain state stats for last 48h.",
         "input_schema": {"type": "object", "properties": {}, "required": []}
@@ -434,6 +526,10 @@ TOOL_FUNCTIONS = {
     "check_frontend_status": lambda _: check_frontend_status(),
     "check_all_agents_status": lambda _: check_all_agents_status(),
     "save_admin_report": lambda args: save_admin_report(args.get("report_text", "")),
+    "check_rhythm_state": lambda args: check_rhythm_state(args.get("user_id", "test")),
+    "check_quiz_api": lambda _: check_quiz_api(),
+    "check_module_status": lambda _: check_module_status(),
+    "evaluate_agents": lambda args: evaluate_agents(args.get("user_id", "test"), args.get("message", "")),
 }
 
 SYSTEM_PROMPT = """Jsi RadimCare Health Agent — autonomní monitorovací a opravný agent pro senior care aplikaci RadimCare.
