@@ -203,6 +203,56 @@ def radim_chat():
                     'brain_mode': 'CRISIS',
                 })
 
+        # ═══ RHYTHM-AWARE MULTI-AGENT LAYER ═══
+        # Compute rhythm state and let agents decide before AI
+        rhythm_context = ''
+        rhythm_meta = {}
+        try:
+            from rhythm_state import compute_rhythm_state
+            from agent_coordinator import pick_best_action
+            from response_composer import compose_response
+
+            rhythm = compute_rhythm_state(user_id)
+            rhythm_meta = {
+                'energy': round(rhythm.energy, 2),
+                'stress': round(rhythm.stress, 2),
+                'phase': rhythm.rhythm_phase,
+                'tone': rhythm.preferred_tone,
+                'speech_rate': rhythm.speech_rate,
+                'pause_ms': rhythm.pause_ms,
+                'mode': rhythm.brain_mode,
+            }
+
+            # Let agents evaluate (safety/care might override AI)
+            decision = pick_best_action(rhythm, message)
+            if decision and decision.should_act and decision.action == 'escalate':
+                # Safety agent takes over — skip AI, return immediately
+                composed = compose_response(decision, rhythm)
+                return jsonify({
+                    'success': True,
+                    'response': composed.text,
+                    'intent': 'safety',
+                    'brain_mode': rhythm.brain_mode,
+                    'brain_C': rhythm.coherence,
+                    'speech_rhythm': rhythm_meta,
+                    'agent': decision.agent_name,
+                    'mode': mode
+                })
+
+            # Inject rhythm context into AI prompt
+            rhythm_context = f"\n═══ RHYTHM STATE ═══\n"
+            rhythm_context += f"Energie: {rhythm.energy:.1f}/1.0 | Stres: {rhythm.stress:.1f} | Fáze: {rhythm.rhythm_phase}\n"
+            rhythm_context += f"Tón: {rhythm.preferred_tone} | Délka odpovědi: {rhythm.response_length}\n"
+            if rhythm.should_be_quiet:
+                rhythm_context += "POZOR: Senior by měl odpočívat. Odpovídej stručně a jemně.\n"
+            if rhythm.needs_comfort:
+                rhythm_context += "POZOR: Senior potřebuje útěchu. Buď empatický a laskavý.\n"
+            if decision and decision.agent_name == 'care':
+                rhythm_context += f"Care Agent doporučuje: {decision.tone} tón. {decision.reason}\n"
+
+        except Exception as rhythm_err:
+            logger.debug(f"Rhythm layer (non-fatal): {rhythm_err}")
+
         # Load personalization and history from memory
         personalized = ''
         history = None
@@ -230,6 +280,10 @@ def radim_chat():
                     personalized += tasks_ctx
             except Exception as tc_err:
                 logger.warning(f"Tasks context warning: {tc_err}")
+
+        # Inject rhythm context into personalization
+        if rhythm_context:
+            personalized += rhythm_context
 
         # Text Rhythm: matematika → styl textu
         anticipation_prompt = ''
@@ -623,9 +677,11 @@ def radim_chat():
             'ai_provider': _ai_provider or 'local',
             'brain_C': _brain_C_val,
             'brain_mode': _brain_mode_val,
-            'speech_rhythm': _speech_rhythm,
+            'speech_rhythm': rhythm_meta if rhythm_meta else _speech_rhythm,
             'timestamp': datetime.utcnow().isoformat() + 'Z'
         }
+        if rhythm_meta:
+            result['rhythm_state'] = rhythm_meta
         if anticipation_meta:
             result['anticipation'] = anticipation_meta
         if brain_meta:
