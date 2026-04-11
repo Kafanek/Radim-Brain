@@ -100,6 +100,7 @@ def _fetch_with_ai(category, interests, count):
         'tips': 'praktické rady — zahrada, vaření, domácnost, úspory, zdravé recepty',
         'nature': 'příroda — zvířata, rostliny, počasí, ekologie, národní parky',
         'history': 'české dějiny — významné události, osobnosti, výročí, zajímavosti',
+        'tv_program': 'dnešní televizní program hlavních českých stanic. Pro každý pořad uveď: v poli "source" název stanice (ČT1, ČT2, Nova, Prima), v "title" čas a název pořadu (např. "20:00 — Zprávy"), v "summary" krátký popis co to je.',
     }
 
     topic = category_prompts.get(category, category_prompts['general'])
@@ -187,6 +188,16 @@ def _get_fallback(category):
         ],
         'history': [
             {'title': 'Výročí: 80 let od konce války', 'summary': 'Letos si připomínáme 80. výročí osvobození. Po celé republice se konají vzpomínkové akce.', 'source': 'ČTK'},
+        ],
+        'tv_program': [
+            {'title': '8:00 — Studio 6', 'summary': 'Ranní zpravodajský magazín', 'source': 'ČT1'},
+            {'title': '12:00 — Zprávy', 'summary': 'Polední zprávy', 'source': 'ČT1'},
+            {'title': '14:10 — Receptář', 'summary': 'Vaření a tipy pro domácnost', 'source': 'ČT1'},
+            {'title': '18:00 — Události v regionech', 'summary': 'Regionální zpravodajství', 'source': 'ČT1'},
+            {'title': '19:15 — Události', 'summary': 'Hlavní zprávy dne', 'source': 'ČT1'},
+            {'title': '20:00 — Film / Seriál', 'summary': 'Hlavní večerní program', 'source': 'ČT1'},
+            {'title': '17:00 — Odpolední zprávy', 'summary': 'Přehled dne', 'source': 'Nova'},
+            {'title': '19:30 — Televizní noviny', 'summary': 'Hlavní zprávy Nova', 'source': 'Nova'},
         ],
     }
 
