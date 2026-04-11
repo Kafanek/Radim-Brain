@@ -387,6 +387,18 @@ def check_personal_growth(user_id='test'):
         return f"Personal growth error: {str(e)}"
 
 
+def check_feedback_effectiveness(user_id='test'):
+    """Check how effective agent recommendations are for this user."""
+    try:
+        from feedback_loop import get_agent_effectiveness
+        result = get_agent_effectiveness(user_id)
+        if result:
+            return json.dumps(result, indent=2, ensure_ascii=False)
+        return "No feedback data yet — recommendations haven't been tracked"
+    except Exception as e:
+        return f"Feedback error: {str(e)}"
+
+
 def evaluate_agents(user_id='test', message=''):
     """Run multi-agent evaluation — shows which agent would respond to a message."""
     try:
@@ -652,6 +664,11 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {"user_id": {"type": "string"}}, "required": []}
     },
     {
+        "name": "check_feedback_effectiveness",
+        "description": "Check how effective agent recommendations are for a user. Shows follow-through rate per agent (e.g., 'care agent: 70% followed').",
+        "input_schema": {"type": "object", "properties": {"user_id": {"type": "string"}}, "required": []}
+    },
+    {
         "name": "check_user_memory",
         "description": "Read user's memory profile — name, medications, contacts, learning history, interaction count, trust level. Essential for understanding who the user is.",
         "input_schema": {
@@ -735,6 +752,7 @@ TOOL_FUNCTIONS = {
     "check_user_memory": lambda args: check_user_memory(args.get("user_id", "test")),
     "update_user_memory": lambda args: update_user_memory(args.get("user_id", ""), args.get("field", ""), args.get("value", "")),
     "check_conversation_history": lambda args: check_conversation_history(args.get("user_id", "test")),
+    "check_feedback_effectiveness": lambda args: check_feedback_effectiveness(args.get("user_id", "test")),
     "run_anticipation": lambda args: run_anticipation(args.get("user_id", "test")),
     "run_scenario_detect": lambda args: run_scenario_detect(args.get("message", ""), args.get("user_id", "test")),
     "check_relationship": lambda args: check_relationship(args.get("user_id", "test")),

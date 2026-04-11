@@ -203,6 +203,42 @@ def radim_chat():
                     'brain_mode': 'CRISIS',
                 })
 
+        # ═══ ONBOARDING — detect new user, ask for basics ═══
+        try:
+            from memory_helpers import db_load_profile, db_load_learning
+            _profile = db_load_profile(user_id) or {}
+            _learning = db_load_learning(user_id) or {}
+            _interaction_count = _learning.get('interaction_count', 0)
+
+            # First 3 interactions → onboarding mode
+            if _interaction_count < 3 and not _profile.get('name'):
+                onboard_msg = ''
+                if _interaction_count == 0:
+                    onboard_msg = 'Ahoj! Jsem Radim, váš osobní asistent. Rád vás poznám. Jak se jmenujete?'
+                elif _interaction_count == 1 and not _profile.get('medications_list'):
+                    onboard_msg = 'Děkuji! Abych vám mohl lépe pomáhat — berete nějaké léky pravidelně? Klidně mi řekněte které.'
+                elif _interaction_count == 2 and not _profile.get('contacts'):
+                    onboard_msg = 'Výborně! Poslední věc — na koho mám zavolat v případě potřeby? Řekněte mi jméno a telefon nejbližšího člověka.'
+
+                if onboard_msg:
+                    # Increment interaction count
+                    _learning['interaction_count'] = _interaction_count + 1
+                    try:
+                        from memory_helpers import db_save_learning
+                        db_save_learning(user_id, _learning)
+                    except Exception:
+                        pass
+
+                    return jsonify({
+                        'success': True,
+                        'response': onboard_msg,
+                        'intent': 'onboarding',
+                        'mode': mode,
+                        'onboarding_step': _interaction_count,
+                    })
+        except Exception as onboard_err:
+            logger.debug(f"Onboarding check (non-fatal): {onboard_err}")
+
         # ═══ RHYTHM-AWARE MULTI-AGENT LAYER ═══
         # Compute rhythm state and let agents decide before AI
         rhythm_context = ''
@@ -682,6 +718,19 @@ def radim_chat():
         }
         if rhythm_meta:
             result['rhythm_state'] = rhythm_meta
+
+        # ═══ CONVERSATION MEMORY — auto-extract facts from chat ═══
+        try:
+            from conversation_memory import extract_and_save
+            import threading
+            threading.Thread(
+                target=extract_and_save,
+                args=(user_id, message, result.get('response', '')),
+                daemon=True
+            ).start()
+        except Exception:
+            pass
+
         if anticipation_meta:
             result['anticipation'] = anticipation_meta
         if brain_meta:
