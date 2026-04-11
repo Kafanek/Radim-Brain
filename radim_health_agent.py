@@ -310,6 +310,83 @@ def check_conversation_history(user_id='test'):
         return f"History read error: {str(e)}"
 
 
+def run_anticipation(user_id='test'):
+    """Predict user's consciousness Ĉ_{t+1} — breaking points B12/B27, anomalies."""
+    try:
+        from anticipation_engine import anticipate
+        result = anticipate(user_id)
+        if result:
+            return json.dumps(result, indent=2, ensure_ascii=False, default=str)
+        return "No anticipation data — user may not have enough brain_states history"
+    except Exception as e:
+        return f"Anticipation error: {str(e)}"
+
+
+def run_scenario_detect(message, user_id='test'):
+    """Detect crisis/emotional scenario from a message (20 trained situations)."""
+    try:
+        from scenario_engine import detect_scenario
+        result = detect_scenario(message, user_id=user_id)
+        if result:
+            return json.dumps({
+                'id': result.get('id'),
+                'category': result.get('category'),
+                'severity': result.get('severity'),
+                'response': result.get('response', '')[:200],
+                'escalation': result.get('escalation'),
+                'actions': result.get('actions', []),
+            }, indent=2, ensure_ascii=False)
+        return "No scenario matched"
+    except Exception as e:
+        return f"Scenario detection error: {str(e)}"
+
+
+def check_relationship(user_id='test'):
+    """Check relationship level — trust, permission, Confucian virtues."""
+    try:
+        from relationship_engine import identify_relationship
+        rel = identify_relationship(user_id)
+        if rel:
+            return json.dumps(rel, indent=2, ensure_ascii=False, default=str)
+        return "No relationship data"
+    except Exception as e:
+        return f"Relationship error: {str(e)}"
+
+
+def check_circadian(user_id='test'):
+    """Get circadian profile — wake/sleep hours, activity patterns, stability."""
+    try:
+        from circadian_engine import compute_circadian_profile
+        profile = compute_circadian_profile(user_id)
+        if profile:
+            return json.dumps(profile, indent=2, ensure_ascii=False, default=str)
+        return "No circadian data — needs IoT sensors or more interactions"
+    except Exception as e:
+        return f"Circadian error: {str(e)}"
+
+
+def check_survey_risk(user_id='test'):
+    """Compute multi-signal risk from survey data (mood, sleep, pain, activity, isolation)."""
+    try:
+        from survey_engine import compute_survey_risk
+        risk = compute_survey_risk(user_id)
+        if risk:
+            return json.dumps(risk, indent=2, ensure_ascii=False, default=str)
+        return "No survey risk data"
+    except Exception as e:
+        return f"Survey risk error: {str(e)}"
+
+
+def check_personal_growth(user_id='test'):
+    """Get personal growth context — communication style, emotional patterns, relationship level."""
+    try:
+        from personal_growth import build_personal_context
+        ctx = build_personal_context(user_id)
+        return ctx if ctx else "No personal growth data yet"
+    except Exception as e:
+        return f"Personal growth error: {str(e)}"
+
+
 def evaluate_agents(user_id='test', message=''):
     """Run multi-agent evaluation — shows which agent would respond to a message."""
     try:
@@ -541,6 +618,40 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {}, "required": []}
     },
     {
+        "name": "run_anticipation",
+        "description": "Predict user's consciousness Ĉ_{t+1} using Anticipation Engine. Shows breaking points B12/B27, behavioral anomalies, activity timeline.",
+        "input_schema": {"type": "object", "properties": {"user_id": {"type": "string"}}, "required": []}
+    },
+    {
+        "name": "run_scenario_detect",
+        "description": "Detect crisis/emotional scenario from a message. Uses 20 trained situations (fall, chest pain, loneliness, anxiety, etc.). Returns severity, response, escalation actions.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"message": {"type": "string", "description": "User's message to analyze"}, "user_id": {"type": "string"}},
+            "required": ["message"]
+        }
+    },
+    {
+        "name": "check_relationship",
+        "description": "Check relationship level with user — trust score, permission level (SUGGEST/ASSIST/EXECUTE), Confucian virtues (ren/yi/li/zhi/xin).",
+        "input_schema": {"type": "object", "properties": {"user_id": {"type": "string"}}, "required": []}
+    },
+    {
+        "name": "check_circadian",
+        "description": "Get circadian rhythm profile — usual wake/sleep hours, active/quiet hours, routine stability, night restlessness score.",
+        "input_schema": {"type": "object", "properties": {"user_id": {"type": "string"}}, "required": []}
+    },
+    {
+        "name": "check_survey_risk",
+        "description": "Compute multi-signal risk from survey data — combines mood decline, sleep quality, pain level, activity drop, social isolation, non-response rate.",
+        "input_schema": {"type": "object", "properties": {"user_id": {"type": "string"}}, "required": []}
+    },
+    {
+        "name": "check_personal_growth",
+        "description": "Get personal growth context — communication style, emotional patterns by day/hour, relationship level, memorable topics for follow-up.",
+        "input_schema": {"type": "object", "properties": {"user_id": {"type": "string"}}, "required": []}
+    },
+    {
         "name": "check_user_memory",
         "description": "Read user's memory profile — name, medications, contacts, learning history, interaction count, trust level. Essential for understanding who the user is.",
         "input_schema": {
@@ -624,6 +735,12 @@ TOOL_FUNCTIONS = {
     "check_user_memory": lambda args: check_user_memory(args.get("user_id", "test")),
     "update_user_memory": lambda args: update_user_memory(args.get("user_id", ""), args.get("field", ""), args.get("value", "")),
     "check_conversation_history": lambda args: check_conversation_history(args.get("user_id", "test")),
+    "run_anticipation": lambda args: run_anticipation(args.get("user_id", "test")),
+    "run_scenario_detect": lambda args: run_scenario_detect(args.get("message", ""), args.get("user_id", "test")),
+    "check_relationship": lambda args: check_relationship(args.get("user_id", "test")),
+    "check_circadian": lambda args: check_circadian(args.get("user_id", "test")),
+    "check_survey_risk": lambda args: check_survey_risk(args.get("user_id", "test")),
+    "check_personal_growth": lambda args: check_personal_growth(args.get("user_id", "test")),
 }
 
 SYSTEM_PROMPT = """Jsi RadimCare Health Agent — autonomní monitorovací a opravný agent pro senior care aplikaci RadimCare.
