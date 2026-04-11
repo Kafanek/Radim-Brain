@@ -62,8 +62,8 @@ class SafetyAgent(BaseAgent):
         try:
             from scenario_engine import detect_scenario
             if user_input:
-                scenario = detect_scenario(user_input)
-                if scenario and scenario.get('severity', 0) >= 7:
+                scenario = detect_scenario(user_input, user_id=state.user_id)
+                if scenario and scenario.get('severity', 0) >= 5:
                     return AgentDecision(
                         agent_name=self.name,
                         should_act=True,
@@ -112,10 +112,13 @@ class CareAgent(BaseAgent):
         return self.base_priority
 
     def evaluate(self, state: UserRhythmState, user_input: str = '') -> AgentDecision:
-        # Check medication intent
+        # Check health/medication intent
         if user_input:
             lower = user_input.lower()
-            if any(w in lower for w in ['lék', 'léky', 'prášky', 'bolí', 'bolest']):
+            health_words = ['lék', 'léky', 'prášky', 'bolí', 'bolest', 'hlava', 'břicho',
+                            'nevolnost', 'závrat', 'teplota', 'horečka', 'kašel', 'dýchání']
+            if any(w in lower for w in health_words):
+                # Check drug interactions
                 try:
                     from drug_interactions import check_user_interactions
                     warnings = check_user_interactions(state.user_id)
@@ -133,6 +136,19 @@ class CareAgent(BaseAgent):
                         )
                 except Exception:
                     pass
+
+                # General health concern
+                return AgentDecision(
+                    agent_name=self.name,
+                    should_act=True,
+                    priority=0.75,
+                    action='speak',
+                    message='',  # AI will handle the health question
+                    reason=f'Health keyword detected: {[w for w in health_words if w in lower][:2]}',
+                    confidence=0.7,
+                    tone='gentle' if 'bolí' in lower else 'calm',
+                    urgency='normal'
+                )
 
         # Proactive: cognitive decline
         if state.cognitive_load > 0.7:

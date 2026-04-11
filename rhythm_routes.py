@@ -89,8 +89,8 @@ def list_agents():
 def get_skills(user_id):
     """Get skill progress from existing skill_map engine."""
     try:
-        from skill_map import compute_skill_map
-        skills = compute_skill_map(user_id)
-        return jsonify({'success': True, **skills})
+        from skill_map import compute_all_skills
+        skills = compute_all_skills(user_id)
+        return jsonify({'success': True, 'skills': skills})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
