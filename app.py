@@ -63,6 +63,13 @@ try:
 except ImportError:
     NEWS_API_AVAILABLE = False
 
+# 🎵 Import Rhythm Multi-Agent Routes
+try:
+    from rhythm_routes import rhythm_bp
+    RHYTHM_AVAILABLE = True
+except ImportError:
+    RHYTHM_AVAILABLE = False
+
 # 🤖 Import Health Agent
 try:
     from radim_health_agent import health_agent_bp
@@ -182,6 +189,11 @@ if FAMILY_AVAILABLE:
 if NEWS_API_AVAILABLE:
     app.register_blueprint(news_api_bp)
     logger.info("✅ News API registered: /api/news/*")
+
+# 🎵 Register Rhythm Multi-Agent API
+if RHYTHM_AVAILABLE:
+    app.register_blueprint(rhythm_bp)
+    logger.info("✅ Rhythm Multi-Agent registered: /api/rhythm/*")
 
 # 🤖 Register Health Agent
 if HEALTH_AGENT_AVAILABLE:
