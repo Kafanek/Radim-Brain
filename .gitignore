@@ -33,5 +33,22 @@ secrets.txt
 
 # Node
 node_modules/
-mcp-server/node_modules/
+**/node_modules/
 mcp-server/build/
+**/build/dist/
+
+# Claude Code
+.claude/
+
+# Frontend (separate repo / deploy)
+mykolibri-academy-project/
+
+# WordPress pages (separate)
+wordpress-pages/
+
+# Docs (not needed on Heroku)
+docs/
+
+# Removed ecosystem (was accidentally committed)
+radim-brain-ecosystem/
+_CLEANUP_ARCHIVE_*/
