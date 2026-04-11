@@ -793,6 +793,99 @@ def get_reports():
         return jsonify({'success': True, 'reports': [], 'note': 'Zatím žádné reporty — table se vytvoří při prvním reportu'})
 
 
+@health_agent_bp.route('/chat', methods=['POST'])
+def agent_chat():
+    """Chat with Health Agent — admin sends question, agent responds with tools.
+
+    Body: { "message": "Kolik máme aktivních seniorů?" }
+    Agent can use all 15 tools to answer.
+    """
+    from flask import request
+    auth = request.headers.get('Authorization', '')
+    secret = request.headers.get('X-Admin-Secret', '')
+    if ADMIN_SECRET and secret != ADMIN_SECRET and not auth.startswith('Bearer '):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.json or {}
+    message = data.get('message', '').strip()
+    if not message:
+        return jsonify({'error': 'Message required'}), 400
+
+    try:
+        result = run_agent_chat(message)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e), 'status': 'failed'}), 500
+
+
+CHAT_SYSTEM_PROMPT = """Jsi RadimCare Orchestrator Agent — hlavní mozek celého systému RadimCare.
+Admin ti píše otázky a příkazy. Máš přístup ke všem nástrojům.
+
+## Co můžeš:
+- Zkontrolovat zdraví služeb (backend, DB, TTS, frontend, chat AI)
+- Podívat se na aktivitu agentů a seniorů
+- Opravit problémy (reset circuit breaker, clear cache)
+- Vidět historii kontrol
+- Napsat a uložit report
+
+## Jak odpovídej:
+- ČESKY, stručně, věcně
+- Pokud potřebuješ data — použij tool
+- Pokud admin žádá akci — proveď ji a potvrď
+- Pokud nevíš — řekni co víš a co bys potřeboval
+
+## Koordinace agentů:
+Znáš všech 9 agentů (reminders, telemed, agent_loop, morning, cleanup, engagement, summary, health_agent, report).
+Pokud admin chce změnit chování agenta — vysvětli co je možné a doporuč postup.
+
+## Kontext:
+""" + SYSTEM_PROMPT.split('## Architektura')[1] if '## Architektura' in SYSTEM_PROMPT else SYSTEM_PROMPT
+
+
+def run_agent_chat(user_message):
+    """Run agent chat — admin asks, agent answers with tools."""
+    if not ANTHROPIC_API_KEY:
+        return {"status": "error", "response": "ANTHROPIC_API_KEY není nastaven"}
+
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    messages = [{"role": "user", "content": user_message}]
+
+    max_turns = 5
+    turn = 0
+
+    while turn < max_turns:
+        turn += 1
+        response = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=3000,
+            system=CHAT_SYSTEM_PROMPT,
+            tools=TOOLS,
+            messages=messages
+        )
+
+        if response.stop_reason == "end_turn":
+            final_text = next((b.text for b in response.content if b.type == "text"), "")
+            return {"status": "completed", "response": final_text, "turns": turn}
+
+        tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
+        if not tool_use_blocks:
+            final_text = next((b.text for b in response.content if b.type == "text"), "")
+            return {"status": "completed", "response": final_text, "turns": turn}
+
+        messages.append({"role": "assistant", "content": response.content})
+        tool_results = []
+        for tool in tool_use_blocks:
+            func = TOOL_FUNCTIONS.get(tool.name)
+            try:
+                result = func(tool.input) if func else f"Unknown: {tool.name}"
+            except Exception as e:
+                result = f"Error: {e}"
+            tool_results.append({"type": "tool_result", "tool_use_id": tool.id, "content": str(result)})
+        messages.append({"role": "user", "content": tool_results})
+
+    return {"status": "max_turns", "response": "Agent potřebuje víc kroků. Zkuste jednodušší otázku.", "turns": turn}
+
+
 @health_agent_bp.route('/health-check', methods=['GET'])
 def get_last_check():
     """Get last health check result."""
