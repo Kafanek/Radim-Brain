@@ -211,7 +211,9 @@ def radim_chat():
             _interaction_count = _learning.get('interaction_count', 0)
 
             # First 3 interactions → onboarding mode
-            if _interaction_count < 3 and not _profile.get('name'):
+            # But SKIP onboarding if message already contains personal info
+            msg_has_info = any(w in message.lower() for w in ['jmenuj', 'jsem', 'beru', 'léky', 'dcera', 'syn', 'manžel'])
+            if _interaction_count < 3 and not _profile.get('name') and not msg_has_info:
                 onboard_msg = ''
                 if _interaction_count == 0:
                     onboard_msg = 'Ahoj! Jsem Radim, váš osobní asistent. Rád vás poznám. Jak se jmenujete?'
