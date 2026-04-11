@@ -794,11 +794,26 @@ def video_call_accept(senior_id):
 
 @twilio_bp.route('/video/reject/<senior_id>', methods=['POST'])
 def video_call_reject(senior_id):
-    """Senior rejects the incoming call."""
+    """Senior rejects or is busy for the incoming call."""
+    data = request.json or {}
+    reason = data.get('reason', 'rejected')  # 'rejected' or 'busy'
+
     call = _pending_calls.pop(senior_id, None)
     if call:
-        call['status'] = 'rejected'
-    return jsonify({'success': True})
+        call['status'] = reason
+
+        # Notify caller that call was rejected/busy
+        try:
+            from app import socketio
+            socketio.emit('call_rejected', {
+                'senior_id': senior_id,
+                'reason': reason,
+                'caller_name': call.get('caller_name', ''),
+            }, room=call.get('caller_id', ''))
+        except Exception:
+            pass
+
+    return jsonify({'success': True, 'reason': reason})
 
 
 @twilio_bp.route('/video/end/<senior_id>', methods=['POST'])
