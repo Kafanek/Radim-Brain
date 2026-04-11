@@ -88,13 +88,18 @@ def _fetch_with_ai(category, interests, count):
     import os
 
     category_prompts = {
-        'general': 'nejdůležitější české zprávy dne',
-        'health': 'zdraví, wellness a zdravotní tipy pro seniory',
-        'culture': 'česká kultura, divadlo, výstavy, koncerty',
-        'sport': 'český sport, fotbal, hokej, tenis',
-        'local': 'lokální zprávy z Prahy a okolí',
-        'science': 'věda, technologie, příroda, zajímavosti',
-        'tips': 'praktické tipy pro seniory, zahrada, vaření, domácnost',
+        'general': 'nejdůležitější české zprávy dne — politika, společnost, ekonomika',
+        'politics': 'česká politika, vláda, sněmovna, prezident, komunální politika',
+        'health': 'zdraví, wellness, zdravotní tipy pro seniory, prevence nemocí',
+        'sport': 'český sport — fotbal, hokej, tenis, olympiáda, Fortuna liga',
+        'culture': 'česká kultura — divadlo, výstavy, koncerty, film, knihy',
+        'local': 'zprávy z Prahy a Středočeského kraje, doprava, události',
+        'world': 'světové zprávy — mezinárodní politika, konflikty, EU, diplomacie',
+        'economy': 'česká ekonomika — inflace, důchody, ceny, práce, firmy, burza',
+        'science': 'věda a technologie — objevy, vesmír, AI, medicínský výzkum',
+        'tips': 'praktické rady — zahrada, vaření, domácnost, úspory, zdravé recepty',
+        'nature': 'příroda — zvířata, rostliny, počasí, ekologie, národní parky',
+        'history': 'české dějiny — významné události, osobnosti, výročí, zajímavosti',
     }
 
     topic = category_prompts.get(category, category_prompts['general'])
@@ -150,16 +155,38 @@ def _get_fallback(category):
             {'title': 'Počasí na víkend: teploty až 18°C', 'summary': 'Meteorologové předpovídají příjemný víkend s teplotami kolem 18 stupňů. Ideální na procházku.', 'source': 'ČHMÚ'},
             {'title': 'Nová tramvajová linka v Praze', 'summary': 'Praha spouští novou tramvajovou linku, která propojí Dejvice s Barrandovem.', 'source': 'Praha.eu'},
         ],
+        'politics': [
+            {'title': 'Vláda schválila nový balíček pro seniory', 'summary': 'Kabinet odsouhlasil zvýšení příspěvku na bydlení a valorizaci důchodů od července.', 'source': 'ČTK'},
+            {'title': 'Volby do Senátu: přehled kandidátů', 'summary': 'V říjnu se konají doplňovací volby. Přinášíme přehled hlavních kandidátů ve vašem obvodu.', 'source': 'iDNES'},
+        ],
         'health': [
             {'title': 'Procházky snižují riziko demence', 'summary': 'Studie ukázala, že 30 minut chůze denně snižuje riziko demence o 25%. Stačí krátká procházka.', 'source': 'Zdraví.cz'},
             {'title': 'Jarní zelenina plná vitamínů', 'summary': 'Ředkvičky, špenát a chřest jsou bohaté na vitamíny. Ideální do jarních salátů.', 'source': 'VZP'},
         ],
+        'sport': [
+            {'title': 'Sparta vede tabulku', 'summary': 'AC Sparta Praha zvítězila v derby a upevnila si vedení v tabulce Fortuna ligy.', 'source': 'Sport.cz'},
+            {'title': 'Český tenista postoupil do finále', 'summary': 'Na turnaji ATP Masters postoupil český reprezentant do semifinále. Zápas ve čtvrtek.', 'source': 'iSport'},
+        ],
         'culture': [
             {'title': 'Národní divadlo: nová premiéra', 'summary': 'Národní divadlo uvede novou inscenaci Dvořákovy Rusalky. Vstupenky v předprodeji.', 'source': 'Kultura.cz'},
+            {'title': 'Muzejní noc v Praze', 'summary': 'Přes 50 pražských muzeí a galerií otevře své brány zdarma. Program pro všechny věkové skupiny.', 'source': 'Praha.eu'},
+        ],
+        'world': [
+            {'title': 'Summit EU: klíčová rozhodnutí', 'summary': 'Lídři evropských zemí jednají o rozpočtu a bezpečnostní politice. Česko prosazuje vlastní priority.', 'source': 'ČTK'},
+        ],
+        'economy': [
+            {'title': 'Důchody porostou od července', 'summary': 'Vláda potvrdila valorizaci důchodů. Průměrný důchod vzroste o 350 Kč měsíčně.', 'source': 'Novinky.cz'},
+            {'title': 'Inflace klesá, ceny potravin stabilní', 'summary': 'Česká národní banka hlásí pokles inflace. Ceny základních potravin se stabilizovaly.', 'source': 'ČNB'},
         ],
         'tips': [
             {'title': 'Jak na jarní úklid zahrady', 'summary': 'Odborníci radí: začněte prořezáváním keřů a připravte záhony. Sázet můžete od dubna.', 'source': 'Zahrada.cz'},
             {'title': '5 receptů z jarní zeleniny', 'summary': 'Chřestová polévka, špenátové knedlíky a další jednoduché recepty pro každý den.', 'source': 'Recepty.cz'},
+        ],
+        'nature': [
+            {'title': 'Ptáci se vracejí z jihu', 'summary': 'Ornitologové hlásí návrat vlaštovek a čápů. Letos přiletěli o týden dříve než obvykle.', 'source': 'ČSO'},
+        ],
+        'history': [
+            {'title': 'Výročí: 80 let od konce války', 'summary': 'Letos si připomínáme 80. výročí osvobození. Po celé republice se konají vzpomínkové akce.', 'source': 'ČTK'},
         ],
     }
 
