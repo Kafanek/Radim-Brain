@@ -50,7 +50,7 @@ class SafetyAgent(BaseAgent):
     base_priority = 1.0  # Always highest
 
     def should_act(self, state: UserRhythmState) -> bool:
-        return state.risk > 0.3 or state.stress > 0.6
+        return True  # Safety ALWAYS evaluates — user input might be crisis
 
     def get_priority(self, state: UserRhythmState) -> float:
         if state.is_crisis:
