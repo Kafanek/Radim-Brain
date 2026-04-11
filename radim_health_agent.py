@@ -250,6 +250,66 @@ def check_module_status():
         return f"Module check failed: {str(e)}"
 
 
+def check_user_memory(user_id='test'):
+    """Read user's memory profile — name, meds, contacts, learning history."""
+    try:
+        from memory_helpers import db_load_profile, db_load_learning
+        profile = db_load_profile(user_id) or {}
+        learning = db_load_learning(user_id) or {}
+        result = "=== User Profile ===\n"
+        result += f"Name: {profile.get('name', 'unknown')}\n"
+        result += f"Age group: {profile.get('age_group', '?')}\n"
+        result += f"Medications: {profile.get('medications_list', [])}\n"
+        result += f"Hearing: {profile.get('hearing', '?')}, Vision: {profile.get('vision', '?')}\n"
+        result += f"Contacts: {len(profile.get('contacts', []))} saved\n"
+        result += "\n=== Learning ===\n"
+        result += f"Interactions: {learning.get('interaction_count', 0)}\n"
+        result += f"Topics: {list(learning.get('topics', {}).keys())[:5]}\n"
+        result += f"News interests: {learning.get('news_reading_history', {})}\n"
+        result += f"Trust: {learning.get('relationship', {}).get('trust_score', 'unknown')}\n"
+        return result
+    except Exception as e:
+        return f"Memory read error: {str(e)}"
+
+
+def update_user_memory(user_id, field, value):
+    """Update a field in user's memory profile. Safe fields only."""
+    SAFE_FIELDS = ['name', 'age_group', 'hearing', 'vision', 'memory', 'interests']
+    if field not in SAFE_FIELDS:
+        return f"Field '{field}' is not safe to update. Allowed: {SAFE_FIELDS}"
+    try:
+        from memory_helpers import db_load_profile, db_save_profile
+        profile = db_load_profile(user_id) or {}
+        profile[field] = value
+        db_save_profile(user_id, profile)
+        return f"Updated {field} = {value} for user {user_id}"
+    except Exception as e:
+        return f"Memory update error: {str(e)}"
+
+
+def check_conversation_history(user_id='test'):
+    """Read last 5 conversation messages for context."""
+    try:
+        from database import db_context
+        with db_context(commit=False) as db:
+            rows = db.execute("""
+                SELECT role, content, created_at FROM chat_messages
+                WHERE conversation_id IN (
+                    SELECT id FROM chat_conversations WHERE user_id = ?
+                    ORDER BY created_at DESC LIMIT 1
+                )
+                ORDER BY created_at DESC LIMIT 5
+            """, (user_id,)).fetchall()
+        if not rows:
+            return "No conversation history found"
+        result = "=== Last 5 messages ===\n"
+        for r in reversed(rows or []):
+            result += f"[{r[0]}] {str(r[1])[:80]}\n"
+        return result
+    except Exception as e:
+        return f"History read error: {str(e)}"
+
+
 def evaluate_agents(user_id='test', message=''):
     """Run multi-agent evaluation — shows which agent would respond to a message."""
     try:
@@ -481,6 +541,37 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {}, "required": []}
     },
     {
+        "name": "check_user_memory",
+        "description": "Read user's memory profile — name, medications, contacts, learning history, interaction count, trust level. Essential for understanding who the user is.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"user_id": {"type": "string", "description": "User ID"}},
+            "required": []
+        }
+    },
+    {
+        "name": "update_user_memory",
+        "description": "Update a safe field in user's profile. Allowed fields: name, age_group, hearing, vision, memory, interests.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "string", "description": "User ID"},
+                "field": {"type": "string", "enum": ["name", "age_group", "hearing", "vision", "memory", "interests"]},
+                "value": {"type": "string", "description": "New value"}
+            },
+            "required": ["user_id", "field", "value"]
+        }
+    },
+    {
+        "name": "check_conversation_history",
+        "description": "Read last 5 messages from user's conversation. Shows context of recent chat.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"user_id": {"type": "string", "description": "User ID"}},
+            "required": []
+        }
+    },
+    {
         "name": "evaluate_agents",
         "description": "Run multi-agent evaluation for a message. Shows which agent would respond, rhythm state, and decisions. Use to test agent routing.",
         "input_schema": {
@@ -530,6 +621,9 @@ TOOL_FUNCTIONS = {
     "check_quiz_api": lambda _: check_quiz_api(),
     "check_module_status": lambda _: check_module_status(),
     "evaluate_agents": lambda args: evaluate_agents(args.get("user_id", "test"), args.get("message", "")),
+    "check_user_memory": lambda args: check_user_memory(args.get("user_id", "test")),
+    "update_user_memory": lambda args: update_user_memory(args.get("user_id", ""), args.get("field", ""), args.get("value", "")),
+    "check_conversation_history": lambda args: check_conversation_history(args.get("user_id", "test")),
 }
 
 SYSTEM_PROMPT = """Jsi RadimCare Health Agent — autonomní monitorovací a opravný agent pro senior care aplikaci RadimCare.
