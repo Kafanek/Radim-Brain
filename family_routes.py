@@ -399,3 +399,293 @@ def get_shared_photos(user_id):
 
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================
+# 🎯 ACTIVITY PROPOSALS — Family → Senior workflow
+# ============================================
+# Family member proposes activity → Senior sees notification → Accept/Reject
+# Accepted proposals auto-open the module + notify family
+# Rejected/expired proposals notify family with reason
+# ============================================
+
+VALID_ACTIVITIES = {
+    'quiz': 'Kvíz',
+    'exercises': 'Cvičení',
+    'music': 'Hudba',
+    'stories': 'Příběhy',
+    'news': 'Novinky',
+    'calls': 'Videohovor',
+    'walk': 'Procházka',
+    'medication': 'Léky',
+    'hydration': 'Pití',
+    'custom': 'Vlastní aktivita',
+}
+
+
+def _ensure_proposals_table():
+    """Create proposals table if not exists (auto-migration)."""
+    try:
+        with db_context(commit=True) as db:
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS family_activity_proposals (
+                    id SERIAL PRIMARY KEY,
+                    senior_id TEXT NOT NULL,
+                    proposed_by TEXT NOT NULL,
+                    proposed_by_name TEXT DEFAULT '',
+                    activity_type TEXT NOT NULL,
+                    activity_title TEXT DEFAULT '',
+                    description TEXT DEFAULT '',
+                    reasoning TEXT DEFAULT '',
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    responded_at TIMESTAMP,
+                    response_note TEXT DEFAULT '',
+                    expires_at TIMESTAMP
+                )
+            """)
+    except Exception as e:
+        logger.debug(f"Proposals table creation: {e}")
+
+
+@family_bp.route('/proposals/<senior_id>', methods=['POST'])
+@optional_auth
+def create_proposal(senior_id):
+    """Family member proposes an activity for the senior.
+
+    POST /api/family/proposals/<senior_id>
+    Body: {
+        "activity_type": "quiz|exercises|music|...|custom",
+        "title": "Paměťový kvíz",
+        "description": "Zkus paměťový kvíz",
+        "reasoning": "Paní doktorka doporučila",
+        "proposed_by": "family-member-id",
+        "proposed_by_name": "Jana"
+    }
+    """
+    _ensure_proposals_table()
+    try:
+        data = request.get_json() or {}
+        activity = data.get('activity_type', '').strip()
+        if activity not in VALID_ACTIVITIES:
+            return jsonify({
+                'success': False,
+                'error': f'Neplatný typ aktivity. Povolené: {", ".join(VALID_ACTIVITIES.keys())}'
+            }), 400
+
+        proposed_by = data.get('proposed_by', 'family')
+        proposed_by_name = data.get('proposed_by_name', 'Rodina')
+        title = data.get('title', VALID_ACTIVITIES.get(activity, activity))
+        description = data.get('description', '')
+        reasoning = data.get('reasoning', '')
+
+        # Expire in 24 hours
+        expires_at = (datetime.utcnow() + timedelta(hours=24)).isoformat()
+
+        with db_context(commit=True) as db:
+            # Check for duplicate pending proposals
+            existing = db.execute("""
+                SELECT COUNT(*) FROM family_activity_proposals
+                WHERE senior_id = ? AND activity_type = ? AND status = 'pending'
+            """, (senior_id, activity)).fetchone()
+
+            if existing and existing[0] > 0:
+                return jsonify({
+                    'success': False,
+                    'error': 'Tato aktivita je už navržena a čeká na schválení.'
+                }), 409
+
+            db.execute("""
+                INSERT INTO family_activity_proposals
+                (senior_id, proposed_by, proposed_by_name, activity_type,
+                 activity_title, description, reasoning, status, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+            """, (senior_id, proposed_by, proposed_by_name, activity,
+                  title, description, reasoning, expires_at))
+
+        logger.info(f"📋 Proposal: {proposed_by_name} → {senior_id}: {activity}")
+
+        # Push notification to senior via SocketIO
+        try:
+            from flask_socketio import emit
+            from app import socketio
+            socketio.emit('family_proposal', {
+                'type': 'activity_proposal',
+                'activity': activity,
+                'title': title,
+                'from': proposed_by_name,
+                'description': description
+            }, room=senior_id)
+        except Exception:
+            pass
+
+        return jsonify({
+            'success': True,
+            'message': f'Návrh "{title}" odeslán seniorovi.',
+            'activity_type': activity
+        })
+
+    except Exception as e2:
+        logger.error(f"Proposal create error: {e2}")
+        return jsonify({'success': False, 'error': str(e2)}), 500
+
+
+@family_bp.route('/proposals/<senior_id>', methods=['GET'])
+@optional_auth
+def get_proposals(senior_id):
+    """Get all activity proposals for a senior.
+
+    GET /api/family/proposals/<senior_id>?status=pending
+    """
+    _ensure_proposals_table()
+    try:
+        status_filter = request.args.get('status', '')
+
+        with db_context(commit=False) as db:
+            if status_filter:
+                rows = db.execute("""
+                    SELECT id, activity_type, activity_title, description, reasoning,
+                           proposed_by_name, status, created_at, responded_at,
+                           response_note, expires_at
+                    FROM family_activity_proposals
+                    WHERE senior_id = ? AND status = ?
+                    ORDER BY created_at DESC LIMIT 50
+                """, (senior_id, status_filter)).fetchall()
+            else:
+                rows = db.execute("""
+                    SELECT id, activity_type, activity_title, description, reasoning,
+                           proposed_by_name, status, created_at, responded_at,
+                           response_note, expires_at
+                    FROM family_activity_proposals
+                    WHERE senior_id = ?
+                    ORDER BY created_at DESC LIMIT 50
+                """, (senior_id,)).fetchall()
+
+        now = datetime.utcnow()
+        proposals = []
+        for r in (rows or []):
+            p = {
+                'id': r[0], 'activity_type': r[1], 'title': r[2],
+                'description': r[3], 'reasoning': r[4], 'from': r[5],
+                'status': r[6], 'created_at': r[7], 'responded_at': r[8],
+                'response_note': r[9], 'expires_at': r[10],
+                'activity_label': VALID_ACTIVITIES.get(r[1], r[1])
+            }
+            # Auto-expire old pending proposals
+            if p['status'] == 'pending' and p['expires_at']:
+                try:
+                    exp = datetime.fromisoformat(str(p['expires_at']).replace('Z', ''))
+                    if now > exp:
+                        p['status'] = 'expired'
+                        _update_proposal_status(p['id'], 'expired', 'Vypršelo (24h)')
+                except Exception:
+                    pass
+            proposals.append(p)
+
+        return jsonify({
+            'success': True,
+            'proposals': proposals,
+            'pending_count': sum(1 for p in proposals if p['status'] == 'pending')
+        })
+
+    except Exception as e3:
+        return jsonify({'success': False, 'error': str(e3)}), 500
+
+
+@family_bp.route('/proposals/<senior_id>/<int:proposal_id>', methods=['PUT'])
+@optional_auth
+def respond_to_proposal(senior_id, proposal_id):
+    """Senior accepts or rejects a proposal.
+
+    PUT /api/family/proposals/<senior_id>/<proposal_id>
+    Body: { "action": "accept" | "reject", "note": "Díky, hned to zkusím" }
+    """
+    try:
+        data = request.get_json() or {}
+        action = data.get('action', '').strip().lower()
+        note = data.get('note', '')
+
+        if action not in ('accept', 'reject'):
+            return jsonify({'success': False, 'error': 'Akce musí být accept nebo reject'}), 400
+
+        new_status = 'accepted' if action == 'accept' else 'rejected'
+        _update_proposal_status(proposal_id, new_status, note)
+
+        # Get proposal details
+        with db_context(commit=False) as db:
+            row = db.execute("""
+                SELECT activity_type, activity_title, proposed_by, proposed_by_name
+                FROM family_activity_proposals WHERE id = ?
+            """, (proposal_id,)).fetchone()
+
+        activity_type = row[0] if row else ''
+        activity_title = row[1] if row else ''
+        proposed_by = row[2] if row else ''
+
+        # Notify family via SocketIO
+        try:
+            from flask_socketio import emit
+            from app import socketio
+            socketio.emit('proposal_response', {
+                'proposal_id': proposal_id,
+                'status': new_status,
+                'activity': activity_type,
+                'note': note,
+                'senior_id': senior_id
+            }, room=proposed_by)
+        except Exception:
+            pass
+
+        result = {
+            'success': True,
+            'status': new_status,
+            'message': f'Aktivita "{activity_title}" {"přijata" if action == "accept" else "odmítnuta"}.'
+        }
+        if action == 'accept' and activity_type in VALID_ACTIVITIES:
+            result['open_module'] = activity_type
+
+        logger.info(f"📋 Proposal #{proposal_id}: {new_status} by {senior_id}")
+        return jsonify(result)
+
+    except Exception as e4:
+        return jsonify({'success': False, 'error': str(e4)}), 500
+
+
+def _update_proposal_status(proposal_id, status, note=''):
+    """Update proposal status in DB."""
+    try:
+        with db_context(commit=True) as db:
+            db.execute("""
+                UPDATE family_activity_proposals
+                SET status = ?, responded_at = ?, response_note = ?
+                WHERE id = ?
+            """, (status, datetime.utcnow().isoformat(), note, proposal_id))
+    except Exception as e:
+        logger.debug(f"Proposal status update error: {e}")
+
+
+def get_pending_proposals(senior_id):
+    """Get pending proposals for orchestrator context injection."""
+    try:
+        _ensure_proposals_table()
+        with db_context(commit=False) as db:
+            rows = db.execute("""
+                SELECT activity_title, proposed_by_name, reasoning
+                FROM family_activity_proposals
+                WHERE senior_id = ? AND status = 'pending'
+                ORDER BY created_at DESC LIMIT 5
+            """, (senior_id,)).fetchall()
+
+        if not rows:
+            return ''
+
+        lines = [f'Rodina navrhuje: {r[0]} (od: {r[1]}' +
+                 (f', důvod: {r[2]}' if r[2] else '') + ')'
+                 for r in rows]
+        return 'NÁVRHY OD RODINY:\n' + '\n'.join(lines)
+
+    except Exception:
+        return ''
+
+
+logger.info("👨‍👩‍👧 Family proposals workflow loaded — propose → approve/reject → notify")

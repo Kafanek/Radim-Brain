@@ -323,6 +323,16 @@ def radim_chat():
         if rhythm_context:
             personalized += rhythm_context
 
+        # v10.6: Family proposals — inject pending proposals from family
+        try:
+            from family_routes import get_pending_proposals
+            family_ctx = get_pending_proposals(user_id)
+            if family_ctx:
+                personalized += '\n\n═══ ' + family_ctx + '\n'
+                personalized += 'Pokud se senior zeptá co dělat, navrhni aktivity od rodiny.\n'
+        except (ImportError, Exception):
+            pass
+
         # Text Rhythm: matematika → styl textu
         anticipation_prompt = ''
         anticipation_meta = None
