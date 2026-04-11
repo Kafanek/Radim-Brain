@@ -40,15 +40,15 @@ def extract_and_save(user_id: str, message: str, ai_response: str = ''):
 
     # 2. MEDICATIONS — "Beru warfarin", "Moje léky jsou...", "Užívám metformin"
     med_patterns = [
-        r'(?:beru|užívám|mám předepsaný|předepsal mi|dávám si)\s+(.+?)(?:\.|,|$)',
-        r'(?:léky|prášky|tablety)(?:\s+jsou)?\s*:?\s*(.+?)(?:\.|$)',
+        r'(?:beru|užívám|mám předepsaný|předepsal mi|dávám si)\s+(.+?)(?:\.\s|$)',
+        r'(?:léky|prášky|tablety)(?:\s+jsou)?\s*:?\s*(.+?)(?:\.\s|$)',
     ]
     for pattern in med_patterns:
-        med_match = re.search(pattern, lower)
+        med_match = re.search(pattern, message, re.IGNORECASE)  # Use original case for drug names
         if med_match:
-            meds_text = med_match.group(1).strip()
-            # Split by "a", ","
-            meds = [m.strip() for m in re.split(r'\s*[,a]\s*', meds_text) if len(m.strip()) > 2]
+            meds_text = med_match.group(1).strip().rstrip('.')
+            # Split by " a ", ","
+            meds = [m.strip() for m in re.split(r'\s*,\s*|\s+a\s+', meds_text) if len(m.strip()) > 2]
             if meds:
                 updates['medications_found'] = meds
                 logger.info(f"🧠 Memory: learned meds {meds} for {user_id}")
@@ -56,20 +56,20 @@ def extract_and_save(user_id: str, message: str, ai_response: str = ''):
 
     # 3. FAMILY — "Dcera se jmenuje Jana", "Můj syn Karel", "Manželka Marie"
     family_patterns = [
-        (r'(?:dcera|dcerka)\s+(?:se jmenuje\s+)?(\w+)', 'dcera'),
-        (r'(?:syn|synek)\s+(?:se jmenuje\s+)?(\w+)', 'syn'),
-        (r'(?:manžel|muž)\s+(?:se jmenuje\s+)?(\w+)', 'manžel'),
-        (r'(?:manželka|žena)\s+(?:se jmenuje\s+)?(\w+)', 'manželka'),
-        (r'(?:vnuk|vnouček)\s+(?:se jmenuje\s+)?(\w+)', 'vnuk'),
-        (r'(?:vnučka)\s+(?:se jmenuje\s+)?(\w+)', 'vnučka'),
-        (r'(?:bratr)\s+(?:se jmenuje\s+)?(\w+)', 'bratr'),
-        (r'(?:sestra)\s+(?:se jmenuje\s+)?(\w+)', 'sestra'),
+        (r'(?:dcera|dcerka)\s+(?:se jmenuje\s+|je\s+)?([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]\w+)', 'dcera'),
+        (r'(?:syn|synek)\s+(?:se jmenuje\s+|je\s+)?([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]\w+)', 'syn'),
+        (r'(?:manžel|muž)\s+(?:se jmenuje\s+|je\s+)?([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]\w+)', 'manžel'),
+        (r'(?:manželka|žena)\s+(?:se jmenuje\s+|je\s+)?([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]\w+)', 'manželka'),
+        (r'(?:vnuk|vnouček)\s+(?:se jmenuje\s+|je\s+)?([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]\w+)', 'vnuk'),
+        (r'(?:vnučka)\s+(?:se jmenuje\s+|je\s+)?([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]\w+)', 'vnučka'),
+        (r'(?:bratr)\s+(?:se jmenuje\s+|je\s+)?([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]\w+)', 'bratr'),
+        (r'(?:sestra)\s+(?:se jmenuje\s+|je\s+)?([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]\w+)', 'sestra'),
     ]
     for pattern, role in family_patterns:
-        fm = re.search(pattern, message, re.IGNORECASE)
+        fm = re.search(pattern, message)  # Case-sensitive for names
         if fm:
             name = fm.group(1)
-            if name[0].isupper() and len(name) > 2:
+            if len(name) > 2:
                 updates.setdefault('family_members', []).append({'role': role, 'name': name})
                 logger.info(f"🧠 Memory: learned family {role}={name} for {user_id}")
 
