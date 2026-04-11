@@ -56,6 +56,13 @@ try:
 except ImportError:
     FAMILY_AVAILABLE = False
 
+# 📰 Import News Routes
+try:
+    from news_routes import news_bp as news_api_bp
+    NEWS_API_AVAILABLE = True
+except ImportError:
+    NEWS_API_AVAILABLE = False
+
 # 🤖 Import Health Agent
 try:
     from radim_health_agent import health_agent_bp
@@ -170,6 +177,11 @@ if TV_PROXY_AVAILABLE:
 if FAMILY_AVAILABLE:
     app.register_blueprint(family_bp)
     logger.info("✅ Family routes registered: /api/family/*")
+
+# 📰 Register News API
+if NEWS_API_AVAILABLE:
+    app.register_blueprint(news_api_bp)
+    logger.info("✅ News API registered: /api/news/*")
 
 # 🤖 Register Health Agent
 if HEALTH_AGENT_AVAILABLE:
