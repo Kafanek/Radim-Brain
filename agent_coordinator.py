@@ -63,7 +63,9 @@ class SafetyAgent(BaseAgent):
             from scenario_engine import detect_scenario
             if user_input:
                 scenario = detect_scenario(user_input, user_id=state.user_id)
-                if scenario and scenario.get('severity', 0) >= 5:
+                sev = scenario.get('severity', '') if scenario else ''
+                is_critical = sev in ('critical', 'high') or (isinstance(sev, (int, float)) and sev >= 5)
+                if scenario and is_critical:
                     return AgentDecision(
                         agent_name=self.name,
                         should_act=True,
@@ -77,6 +79,24 @@ class SafetyAgent(BaseAgent):
                     )
         except Exception:
             pass
+
+        # Keyword-based safety fallback (if scenario_engine unavailable)
+        if user_input:
+            lower = user_input.lower()
+            crisis_words = ['spadl', 'upadl', 'nemůžu vstát', 'pomoc', 'záchrank', 'bolí na hrudi',
+                            'nemůžu dýchat', 'omdlel', 'krev', 'bezvědomí', '155', '112']
+            if any(w in lower for w in crisis_words):
+                return AgentDecision(
+                    agent_name=self.name,
+                    should_act=True,
+                    priority=1.0,
+                    action='escalate',
+                    message='Jsem tady s vámi. Zůstaňte v klidu. Potřebujete záchranku? Stiskněte nouzové tlačítko nebo řekněte "zavolej záchranku".',
+                    reason=f'Crisis keyword detected: {[w for w in crisis_words if w in lower][:2]}',
+                    confidence=0.85,
+                    tone='calm',
+                    urgency='critical'
+                )
 
         # Proactive safety from rhythm state
         if state.risk > 0.7:
