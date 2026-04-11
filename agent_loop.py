@@ -458,7 +458,13 @@ def _execute_action(user_id, obs, app):
         _call_senior(user_id, obs)  # v387: proactive phone call
 
     if severity == CRISIS:
-        _crisis_escalate(user_id, obs, app)
+        # v10.7: Emergency with retry logic (bridge)
+        try:
+            from agent_bridge import emergency_with_retry
+            emergency_with_retry(user_id, obs.get('message', 'Crisis'), app)
+        except (ImportError, Exception) as bridge_err:
+            logger.debug(f"Bridge emergency fallback: {bridge_err}")
+            _crisis_escalate(user_id, obs, app)
 
     # v2.0: Home Assistant emergency actions
     if severity in (WARNING, ALERT, CRISIS):
@@ -550,12 +556,21 @@ def _push_to_medical_team(user_id, obs, routed_roles, app):
 
 
 def _push_to_senior(user_id, obs, app):
-    """Push notification to senior."""
+    """Push notification to senior — rhythm-adapted via Text Rhythm."""
     try:
+        # v10.7: Adapt message to brain state via agent_bridge
+        message = obs["message"]
+        try:
+            from agent_bridge import compose_proactive_message
+            adapted = compose_proactive_message(user_id, message, obs.get("severity", "INFO"))
+            message = adapted.get('text', message)
+        except (ImportError, Exception):
+            pass
+
         send_push = app.config.get('SEND_PUSH_FN')
         if send_push:
             send_push(user_id, "Radim — pozornost",
-                      obs["message"],
+                      message,
                       data={"type": "agent_observation", "severity": obs["severity"]})
     except Exception as e:
         logger.debug(f"push_to_senior error: {e}")

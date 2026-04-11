@@ -56,6 +56,13 @@ try:
 except ImportError:
     FAMILY_AVAILABLE = False
 
+# 🌉 Import Agent Bridge (reactive↔proactive + live risk)
+try:
+    from agent_bridge import agent_bridge_bp
+    AGENT_BRIDGE_AVAILABLE = True
+except ImportError:
+    AGENT_BRIDGE_AVAILABLE = False
+
 # 📰 Import News Routes
 try:
     from news_routes import news_bp as news_api_bp
@@ -184,6 +191,11 @@ if TV_PROXY_AVAILABLE:
 if FAMILY_AVAILABLE:
     app.register_blueprint(family_bp)
     logger.info("✅ Family routes registered: /api/family/*")
+
+# 🌉 Register Agent Bridge
+if AGENT_BRIDGE_AVAILABLE:
+    app.register_blueprint(agent_bridge_bp)
+    logger.info("✅ Agent Bridge registered: /api/bridge/*")
 
 # 📰 Register News API
 if NEWS_API_AVAILABLE:
