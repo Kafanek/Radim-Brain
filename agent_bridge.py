@@ -413,29 +413,48 @@ def api_live_risk(user_id):
 
 @agent_bridge_bp.route('/live-risk-all', methods=['GET'])
 def api_live_risk_all():
-    """Live risk for ALL active seniors (caregiver overview).
+    """Lightweight risk overview for ALL active seniors.
 
     GET /api/bridge/live-risk-all
-    Returns: list of risk summaries.
+    Returns: list of basic risk data (1 query, no per-user iteration).
     """
     try:
         from database import db_context
         with db_context(commit=False) as db:
+            # Single query: latest brain state per user + observation count
             rows = db.execute("""
-                SELECT DISTINCT user_id FROM brain_states
-                WHERE created_at > ?
-                ORDER BY user_id
-            """, ((datetime.utcnow() - timedelta(hours=48)).isoformat(),)).fetchall()
+                SELECT b.user_id, b.coherence, b.created_at,
+                       (SELECT COUNT(*) FROM agent_observations o
+                        WHERE o.user_id = b.user_id AND o.created_at > ?) as alert_count
+                FROM brain_states b
+                INNER JOIN (
+                    SELECT user_id, MAX(created_at) as max_ts
+                    FROM brain_states
+                    WHERE created_at > ?
+                    GROUP BY user_id
+                ) latest ON b.user_id = latest.user_id AND b.created_at = latest.max_ts
+                ORDER BY b.coherence DESC
+                LIMIT 20
+            """, (
+                (datetime.utcnow() - timedelta(hours=24)).isoformat(),
+                (datetime.utcnow() - timedelta(hours=48)).isoformat()
+            )).fetchall()
 
         seniors = []
-        for r in (rows or [])[:20]:  # Max 20
-            try:
-                summary = get_live_risk_summary(r[0])
-                seniors.append(summary)
-            except Exception:
-                continue
+        for r in (rows or []):
+            c = float(r[1]) if r[1] else 5.0
+            risk_level = 'critical' if c > 27 else 'high' if c > 20 else 'medium' if c > 12 else 'low'
+            brain_mode = 'CRISIS' if c > 27 else 'ALERT' if c > 12 else 'HARMONY'
+            seniors.append({
+                'user_id': r[0],
+                'risk_score': min(100, int(c * 3.7)),
+                'risk_level': risk_level,
+                'brain_mode': brain_mode,
+                'last_active': r[2],
+                'recent_alerts': int(r[3]) if r[3] else 0,
+                'dimensions': {'stress': min(1.0, c / 40.0)}
+            })
 
-        # Sort by risk (highest first)
         seniors.sort(key=lambda s: s.get('risk_score', 0), reverse=True)
 
         return jsonify({

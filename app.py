@@ -1142,17 +1142,36 @@ def _get_healing_status():
 ADMIN_SECRET = os.environ.get('ADMIN_SECRET', '')
 
 def _check_admin():
-    """Check admin auth via X-Admin-Secret header.
+    """Check admin auth via X-Admin-Secret header OR JWT admin role.
 
-    PRODUCTION: Always requires ADMIN_SECRET to be set.
-    No dev mode bypass — if ADMIN_SECRET is empty, all admin endpoints return 403.
+    Supports:
+    1. X-Admin-Secret header (for scripts/CLI)
+    2. JWT with role=administrator (for frontend admin module)
+
+    OPTIONS preflight always passes (CORS requirement).
     """
-    if not ADMIN_SECRET:
-        logger.warning("⚠️ ADMIN_SECRET not set — admin endpoints disabled")
-        return False
-    token = request.headers.get('X-Admin-Secret', '')
-    # Constant-time comparison to prevent timing attacks
-    return hmac.compare_digest(token, ADMIN_SECRET) if token else False
+    # Always allow OPTIONS (CORS preflight)
+    if request.method == 'OPTIONS':
+        return True
+
+    # Method 1: X-Admin-Secret header
+    if ADMIN_SECRET:
+        token = request.headers.get('X-Admin-Secret', '')
+        if token and hmac.compare_digest(token, ADMIN_SECRET):
+            return True
+
+    # Method 2: JWT with admin role
+    auth_header = request.headers.get('Authorization', '')
+    if auth_header.startswith('Bearer '):
+        try:
+            from auth_middleware import _decode_jwt
+            payload = _decode_jwt(auth_header.split(' ', 1)[1])
+            if payload and payload.get('user', {}).get('role') in ('administrator', 'admin'):
+                return True
+        except Exception:
+            pass
+
+    return False
 
 # v383: Admin IoT simulator
 @app.route('/api/admin/iot-simulate', methods=['POST'])
