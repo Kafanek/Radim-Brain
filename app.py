@@ -1174,7 +1174,7 @@ def _check_admin():
     return False
 
 # v383: Admin IoT simulator
-@app.route('/api/admin/iot-simulate', methods=['POST'])
+@app.route('/api/admin/iot-simulate', methods=['POST', 'OPTIONS'])
 def admin_iot_simulate():
     """Seed IoT devices + 7 days of sensor data for demo_senior_1."""
     if not _check_admin():
@@ -1188,7 +1188,7 @@ def admin_iot_simulate():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # v383: Debug personalized prompt (check if agent observations appear)
-@app.route('/api/admin/debug-prompt/<user_id>')
+@app.route('/api/admin/debug-prompt/<user_id>', methods=['GET', 'OPTIONS'])
 def admin_debug_prompt(user_id):
     """Show the personalized system prompt for a user."""
     if not _check_admin():
@@ -1201,7 +1201,7 @@ def admin_debug_prompt(user_id):
         return jsonify({'error': str(e)}), 500
 
 # v382: Admin seed demo data
-@app.route('/api/admin/seed-demo', methods=['POST'])
+@app.route('/api/admin/seed-demo', methods=['POST', 'OPTIONS'])
 def admin_seed_demo():
     """Create demo senior with 7 days of brain_states for agent loop testing."""
     if not _check_admin():
@@ -1215,7 +1215,7 @@ def admin_seed_demo():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # v382: Manual agent loop trigger (full cycle with saves)
-@app.route('/api/admin/agent-run', methods=['POST'])
+@app.route('/api/admin/agent-run', methods=['POST', 'OPTIONS'])
 def admin_agent_run():
     """Manually trigger one full agent loop cycle."""
     if not _check_admin():
@@ -1243,7 +1243,7 @@ def admin_agent_run():
         logger.error(f"Agent run error: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/admin/status')
+@app.route('/api/admin/status', methods=['GET', 'OPTIONS'])
 def admin_status():
     """Comprehensive system status — all subsystems at a glance."""
     if not _check_admin():
