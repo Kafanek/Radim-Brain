@@ -526,6 +526,19 @@ def radim_chat():
         _ai_provider = None
         _brain_C_val = None
         _brain_mode_val = None
+
+        # ⚡ AI Response Cache — skip LLM for repeated messages (5min TTL)
+        if text_response is None:
+            try:
+                from scaling_optimizations import ai_cache
+                cached = ai_cache.get(message, user_id, mode)
+                if cached:
+                    text_response = cached
+                    _ai_provider = 'cache'
+                    logger.debug(f"AI cache HIT: {message[:30]}...")
+            except ImportError:
+                pass
+
         if text_response is None:
             try:
                 from self_healing import get_breaker, log_healing_event
@@ -618,6 +631,14 @@ def radim_chat():
             if '155' not in text_response and '112' not in text_response:
                 text_response += ' Doporučuji zavolat záchrannou službu na číslo 155.'
                 logger.info(f"🚨 Safety gate: injected 155 into response for user {user_id}")
+
+        # ⚡ Cache successful AI response (5min TTL)
+        if text_response and _ai_provider in ('gemini', 'claude'):
+            try:
+                from scaling_optimizations import ai_cache
+                ai_cache.put(message, text_response, user_id, mode)
+            except Exception:
+                pass
 
         # Crisis enforcement: hard limit na počet vět (ALERT/CRISIS)
         if _ORCH_TEXT_RHYTHM and anticipation_meta and text_response != "Promiňte, zkuste to za chvíli. 🙏":

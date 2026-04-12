@@ -101,6 +101,21 @@ def azure_tts_proxy():
         if not text:
             return jsonify({'error': 'Text is required'}), 400
 
+        # ⚡ TTS Cache — check before Azure API call
+        rate = float(data.get('rate', 0.9))
+        try:
+            from scaling_optimizations import tts_cache
+            cached_audio = tts_cache.get(text, voice, rate)
+            if cached_audio:
+                logger.debug(f"TTS cache HIT: {text[:30]}...")
+                return Response(
+                    cached_audio,
+                    mimetype='audio/mpeg',
+                    headers={'X-Voice-Name': voice, 'X-Cache': 'HIT', 'Cache-Control': 'no-cache'}
+                )
+        except ImportError:
+            pass
+
         # Sanitize voice name
         if not re.match(r'^[a-zA-Z]{2}-[A-Z]{2}-[a-zA-Z]+$', voice):
             voice = 'cs-CZ-AntoninNeural'
@@ -174,10 +189,18 @@ def azure_tts_proxy():
             return jsonify({'error': f'Azure TTS error: {response.status_code if response else "no response"}', 'fallback': 'browser'}), 503
 
         if response.status_code == 200:
+            # ⚡ Cache the audio for future requests
+            try:
+                from scaling_optimizations import tts_cache
+                tts_cache.put(text, response.content, voice, rate)
+            except Exception:
+                pass
+
             resp_headers = {
                 'X-Voice-Name': voice,
                 'X-Voice-Mode': _mode,
-                'Cache-Control': 'no-cache'
+                'Cache-Control': 'no-cache',
+                'X-Cache': 'MISS'
             }
             if ant_state:
                 resp_headers['X-Anticipation-State'] = ant_state

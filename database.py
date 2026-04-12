@@ -65,9 +65,13 @@ def _get_pg_pool():
         # Double-check inside lock
         if _pg_pool is None or _pg_pool.closed:
             # Heroku PG connections may idle-timeout; keepalives prevent this
+            # ⚡ v10.8: Increased pool from 10→18 for scaling
+            # Heroku Essential-0 = 20 max connections, keep 2 for admin/migrations
+            import os
+            _max_conn = int(os.environ.get('DB_POOL_MAX', '18'))
             _pg_pool = psycopg2.pool.ThreadedConnectionPool(
-                minconn=1,
-                maxconn=10,
+                minconn=2,
+                maxconn=_max_conn,
                 dsn=DATABASE_URL,
                 connect_timeout=10,
                 keepalives=1,
@@ -76,7 +80,7 @@ def _get_pg_pool():
                 keepalives_count=3,
                 options='-c statement_timeout=25000'  # 25s query timeout
             )
-            logger.info("PostgreSQL pool created (maxconn=10, keepalive=30s, stmt_timeout=25s)")
+            logger.info(f"PostgreSQL pool created (maxconn={_max_conn}, minconn=2, keepalive=30s)")
     return _pg_pool
 
 

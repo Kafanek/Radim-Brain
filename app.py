@@ -987,6 +987,28 @@ from socketio_handlers import register_socketio_handlers
 register_socketio_handlers(socketio, users_online, _cleanup_users_online)
 
 
+@app.route("/health/scaling")
+def scaling_stats():
+    """⚡ Scaling optimization stats — TTS cache, AI cache, DB pool."""
+    try:
+        from scaling_optimizations import get_optimization_stats
+        stats = get_optimization_stats()
+        # Add DB pool info
+        try:
+            from database import _pg_pool
+            if _pg_pool:
+                stats['db_pool'] = {
+                    'min': _pg_pool.minconn,
+                    'max': _pg_pool.maxconn,
+                    'closed': _pg_pool.closed
+                }
+        except Exception:
+            pass
+        return jsonify({'success': True, **stats})
+    except ImportError:
+        return jsonify({'success': False, 'error': 'Scaling module not loaded'}), 503
+
+
 @app.route("/health/ready")
 def health_ready():
     """Readiness check for frontend"""

@@ -65,11 +65,27 @@ def run_agent_cycle(app):
                 return
             logger.info(f"Agent loop: evaluating {len(active)} active users")
 
+            # ⚡ Adaptive evaluation: skip low-risk users on some cycles
+            evaluated = 0
+            skipped = 0
             for user_id in active:
                 try:
+                    from scaling_optimizations import should_evaluate_user, get_user_risk_level
+                    risk = get_user_risk_level(user_id)
+                    if not should_evaluate_user(user_id, risk):
+                        skipped += 1
+                        continue
+                except ImportError:
+                    pass  # No optimization module — evaluate all
+
+                try:
                     _evaluate_user(user_id, app)
+                    evaluated += 1
                 except Exception as e:
                     logger.debug(f"Agent loop skip {user_id}: {e}")
+
+            if skipped > 0:
+                logger.info(f"Agent loop: evaluated {evaluated}, skipped {skipped} (low-risk adaptive)")
 
         except Exception as e:
             logger.error(f"Agent loop cycle error: {e}")
