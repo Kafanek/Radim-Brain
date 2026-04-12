@@ -12,6 +12,7 @@ import hmac
 import hashlib
 import logging
 import requests as http_requests
+from rate_limiter import rate_limit
 
 from datetime import datetime
 from flask import Blueprint, request, jsonify, g
@@ -59,9 +60,30 @@ def _create_jwt(user_id, email, name, role='subscriber'):
 
 
 def _hash_password(password):
-    """Hash password with SHA256 + salt."""
-    salt = os.environ.get('WP_JWT_SECRET', 'radim-default-salt')
-    return hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+    """Hash password with PBKDF2-SHA256 (production-safe).
+
+    v10.9: Replaced raw SHA256 with werkzeug PBKDF2 (600k iterations).
+    Backwards compatible: _verify_password checks both formats.
+    """
+    from werkzeug.security import generate_password_hash
+    return generate_password_hash(password, method='pbkdf2:sha256', salt_length=16)
+
+
+def _verify_password(stored_hash, password):
+    """Verify password against stored hash.
+
+    Supports both:
+    - NEW: PBKDF2 hashes (werkzeug format: pbkdf2:sha256:...)
+    - LEGACY: SHA256 hashes (hex string, 64 chars) — auto-migrated on next login
+    """
+    if stored_hash.startswith('pbkdf2:'):
+        from werkzeug.security import check_password_hash
+        return check_password_hash(stored_hash, password)
+    else:
+        # Legacy SHA256 — check and flag for migration
+        salt = os.environ.get('WP_JWT_SECRET', 'radim-default-salt')
+        legacy_hash = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+        return hmac.compare_digest(stored_hash, legacy_hash)
 
 
 def _ensure_auth_table():
@@ -106,6 +128,7 @@ except Exception:
 # ============================================
 
 @auth_bp.route('/api/auth/register', methods=['POST', 'OPTIONS'])
+@rate_limit(max_requests=5, window_seconds=300, key_func='ip')
 def auth_register():
     """Register user in PostgreSQL (+ try WordPress sync)"""
     if request.method == 'OPTIONS':
@@ -154,6 +177,7 @@ def auth_register():
 
 
 @auth_bp.route('/api/auth/login', methods=['POST', 'OPTIONS'])
+@rate_limit(max_requests=10, window_seconds=300, key_func='ip')
 def auth_login():
     """Login from PostgreSQL (+ WordPress fallback)"""
     if request.method == 'OPTIONS':
@@ -177,7 +201,15 @@ def auth_login():
                 user_name = row['name'] if isinstance(row, dict) else row[2]
                 role = row['role'] if isinstance(row, dict) else row[3]
                 pw_hash = row['password_hash'] if isinstance(row, dict) else row[4]
-                if pw_hash == _hash_password(password):
+                if _verify_password(pw_hash, password):
+                    # Auto-migrate legacy SHA256 → PBKDF2 on successful login
+                    if not pw_hash.startswith('pbkdf2:'):
+                        try:
+                            new_hash = _hash_password(password)
+                            db.execute("UPDATE auth_users SET password_hash = ? WHERE id = ?", (new_hash, user_id))
+                            logger.info(f"Password migrated to PBKDF2 for user {user_id}")
+                        except Exception:
+                            pass
                     token = _create_jwt(user_id, user_email, user_name, role or 'subscriber')
                     gdpr_consent = False
                     try:

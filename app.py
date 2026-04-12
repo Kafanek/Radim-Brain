@@ -298,6 +298,20 @@ CORS(app,
      allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
+# ═══════════════════════════════════════
+# v10.9: SECURITY HEADERS — production hardening
+# ═══════════════════════════════════════
+@app.after_request
+def add_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    if request.is_secure:
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
+
+
 # Socket.IO
 socketio = SocketIO(
     app,
@@ -1119,15 +1133,21 @@ def _get_healing_status():
     except ImportError:
         return {'overall': 'unavailable'}
 
-# v384: Admin auth guard
+# v10.9: Admin auth guard — NO dev mode bypass
 ADMIN_SECRET = os.environ.get('ADMIN_SECRET', '')
 
 def _check_admin():
-    """Check admin auth via X-Admin-Secret header or ?secret= param."""
+    """Check admin auth via X-Admin-Secret header.
+
+    PRODUCTION: Always requires ADMIN_SECRET to be set.
+    No dev mode bypass — if ADMIN_SECRET is empty, all admin endpoints return 403.
+    """
     if not ADMIN_SECRET:
-        return True  # dev mode — no secret configured
-    token = request.headers.get('X-Admin-Secret') or request.args.get('secret')
-    return token == ADMIN_SECRET
+        logger.warning("⚠️ ADMIN_SECRET not set — admin endpoints disabled")
+        return False
+    token = request.headers.get('X-Admin-Secret', '')
+    # Constant-time comparison to prevent timing attacks
+    return hmac.compare_digest(token, ADMIN_SECRET) if token else False
 
 # v383: Admin IoT simulator
 @app.route('/api/admin/iot-simulate', methods=['POST'])
