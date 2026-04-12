@@ -590,3 +590,30 @@ def auth_reset_password():
     except Exception as e:
         logger.error(f"Reset password error: {e}")
         return jsonify({"success": False, "error": "Chyba při změně hesla"}), 500
+
+
+@auth_bp.route('/api/auth/admin-set-password', methods=['POST', 'OPTIONS'])
+@require_auth
+def admin_set_password():
+    """Admin: set password for any user (requires admin role)."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    user = getattr(g, 'auth_user', {})
+    if user.get('role') not in ('administrator', 'admin'):
+        return jsonify({"success": False, "error": "Vyžaduje admin oprávnění"}), 403
+    data = request.get_json(silent=True) or {}
+    email = data.get('email', '').strip().lower()
+    new_password = data.get('new_password', '')
+    if not email or not new_password or len(new_password) < 6:
+        return jsonify({"success": False, "error": "Email a nové heslo (6+ znaků) jsou povinné"}), 400
+    try:
+        pw_hash = _hash_password(new_password)
+        with db_context(commit=True) as db:
+            result = db.execute("UPDATE auth_users SET password_hash = ? WHERE email = ?", (pw_hash, email))
+            if getattr(result, 'rowcount', 0) == 0:
+                return jsonify({"success": False, "error": f"Účet {email} nenalezen"}), 404
+        logger.info(f"Admin password set for {email} by {user.get('email')}")
+        return jsonify({"success": True, "message": f"Heslo pro {email} bylo změněno."})
+    except Exception as e:
+        logger.error(f"Admin set password error: {e}")
+        return jsonify({"success": False, "error": "Chyba při změně hesla"}), 500
