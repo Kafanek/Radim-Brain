@@ -384,3 +384,4 @@ def pick_best_action(state: UserRhythmState, user_input: str = '') -> Optional[A
 
 
 logger.info("🎭 Agent Coordinator loaded — 6 agents (safety, care, coordinator, daily, social, growth)")
+# v10.9.1 — force rebuild Mon Apr 13 00:26:20 CEST 2026
