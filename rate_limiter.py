@@ -136,6 +136,10 @@ def rate_limit(max_requests=30, window_seconds=60, key_func='user'):
     def decorator(f):
         @wraps(f)
         def decorated(*args, **kwargs):
+            # Skip rate limiting for CORS preflight (OPTIONS)
+            if request.method == 'OPTIONS':
+                return f(*args, **kwargs)
+
             endpoint_name = f.__name__
             bucket_key = _get_key(key_func, endpoint_name)
 
