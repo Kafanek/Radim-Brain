@@ -1164,8 +1164,8 @@ def _check_admin():
     auth_header = request.headers.get('Authorization', '')
     if auth_header.startswith('Bearer '):
         try:
-            from auth_middleware import _decode_jwt
-            payload = _decode_jwt(auth_header.split(' ', 1)[1])
+            from auth_middleware import decode_jwt
+            payload = decode_jwt(auth_header.split(' ', 1)[1])
             if payload and payload.get('user', {}).get('role') in ('administrator', 'admin'):
                 return True
         except Exception:
