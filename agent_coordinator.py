@@ -58,6 +58,7 @@ class SafetyAgent(BaseAgent):
         return 0.8 + state.risk * 0.2
 
     def evaluate(self, state: UserRhythmState, user_input: str = '') -> AgentDecision:
+        logger.info(f"🛡️ SafetyAgent.evaluate(input='{user_input[:30]}', risk={state.risk})")
         if not user_input:
             # No input — check proactive safety from state only
             if state.risk > 0.7:
