@@ -104,8 +104,8 @@ def azure_tts_proxy():
         # ⚡ TTS Cache — check before Azure API call
         # v10.15: Include context in cache key (poetry ≠ harmony for same text)
         rate = float(data.get('rate', 0.9))
-        _cache_key_extra = _context or _frontend_style or ''
-        _cache_rate = str(rate) + ':' + _cache_key_extra
+        _cache_ctx = data.get('context', '') or data.get('style', '') or ''
+        _cache_rate = str(rate) + ':' + _cache_ctx
         try:
             from scaling_optimizations import tts_cache
             cached_audio = tts_cache.get(text, voice, _cache_rate)
