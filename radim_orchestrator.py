@@ -122,7 +122,8 @@ def radim_chat():
                     'success': True,
                     'response': message,  # safe replacement text
                     'intent': 'blocked',
-                    'mode': mode
+                    'mode': mode,
+                    'voice_mode': 'HARMONY',
                 })
         except ImportError:
             pass
@@ -174,6 +175,7 @@ def radim_chat():
                 'intent': 'safety',
                 'brain_C': 35.0,
                 'brain_mode': 'CRISIS',
+                'voice_mode': 'CRISIS',
                 'mode': mode
             })
             else:
@@ -201,6 +203,7 @@ def radim_chat():
                     'mode': 'CRISIS',
                     'brain_C': 30.0,
                     'brain_mode': 'CRISIS',
+                    'voice_mode': 'CRISIS',
                 })
 
         # ═══ ONBOARDING — detect new user, ask for basics ═══
@@ -236,6 +239,7 @@ def radim_chat():
                         'response': onboard_msg,
                         'intent': 'onboarding',
                         'mode': mode,
+                        'voice_mode': 'HARMONY',
                         'onboarding_step': _interaction_count,
                     })
         except Exception as onboard_err:
@@ -272,6 +276,7 @@ def radim_chat():
                     'intent': 'safety',
                     'brain_mode': rhythm.brain_mode,
                     'brain_C': rhythm.coherence,
+                    'voice_mode': 'CRISIS' if rhythm.brain_mode == 'CRISIS' else 'ALERT',
                     'speech_rhythm': rhythm_meta,
                     'agent': decision.agent_name,
                     'mode': mode
