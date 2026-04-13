@@ -53,42 +53,43 @@ VOICE_PROFILES = {
         "pause_ms": 1618,        # φ × 1000
         "emphasis": True,
     },
-    # ── v10.11: Context modes — per-module voice styling ──
+    # ── v10.15: Context modes — prosody-based (Antonín ignores express-as styles) ──
+    # Only rate/pitch/volume/pauses make audible difference for cs-CZ-AntoninNeural
     "POETRY": {
-        "style": "poetry-reading",
-        "styledegree": "1.8",    # expressive recitation
-        "rate": "-20%",          # slow, deliberate
-        "pitch": "+3%",          # slightly higher — clearer articulation
+        "style": "friendly",     # Antonín ignores other styles — use friendly
+        "styledegree": "1.0",
+        "rate": "-25%",          # very slow — like reciting
+        "pitch": "+5%",          # higher pitch — expressive
         "volume": "loud",
-        "pause_ms": 1200,        # long pauses between verses
-        "emphasis": False,       # natural rhythm, no forced emphasis
+        "pause_ms": 1500,        # long pauses between verses
+        "emphasis": False,
     },
     "NARRATION": {
-        "style": "narration-relaxed",
-        "styledegree": "1.5",    # warm storytelling
-        "rate": "-12%",          # slightly slower than normal
-        "pitch": "+1%",
+        "style": "friendly",
+        "styledegree": "1.0",
+        "rate": "-18%",          # slower storytelling pace
+        "pitch": "+2%",          # slightly warmer
         "volume": "loud",
-        "pause_ms": 800,         # natural story pauses
+        "pause_ms": 1000,        # natural story pauses
         "emphasis": False,
     },
     "NEWS": {
-        "style": "newscast",
-        "styledegree": "1.2",
-        "rate": "-8%",           # close to normal — clear delivery
+        "style": "friendly",
+        "styledegree": "1.0",
+        "rate": "-5%",           # close to normal — clear delivery
         "pitch": "+0%",
         "volume": "loud",
-        "pause_ms": 500,         # shorter pauses — info flow
+        "pause_ms": 500,         # shorter pauses
         "emphasis": False,
     },
     "EDUCATION": {
         "style": "friendly",
-        "styledegree": "1.4",
-        "rate": "-15%",          # slower for learning
-        "pitch": "+2%",
+        "styledegree": "1.0",
+        "rate": "-18%",          # slower for learning
+        "pitch": "+3%",          # clearer
         "volume": "loud",
-        "pause_ms": 1000,        # time to process
-        "emphasis": True,        # emphasize key terms
+        "pause_ms": 1000,
+        "emphasis": True,
     },
 }
 
