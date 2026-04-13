@@ -92,6 +92,27 @@ VOICE_PROFILES = {
         "pause_ms": 1000,
         "emphasis": True,
     },
+    # ── v10.17: Melodic voice modes ──
+    "SINGING": {
+        "style": "friendly",
+        "styledegree": "2.0",
+        "rate": "-30%",
+        "pitch": "+0%",
+        "volume": "loud",
+        "pause_ms": 300,
+        "emphasis": False,
+        "contour": "song",       # → voice_melody.get_voice_contour(mode='song')
+    },
+    "RHYTHMIC": {
+        "style": "friendly",
+        "styledegree": "2.0",
+        "rate": "-8%",
+        "pitch": "+1%",
+        "volume": "loud",
+        "pause_ms": 500,
+        "emphasis": False,
+        "contour": "speech",     # → voice_melody.get_voice_contour(mode='speech')
+    },
 }
 
 # Words that should get gentle emphasis in ALERT/CRISIS
@@ -293,6 +314,15 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
         except Exception as e:
             logger.warning(f"Adaptive voice failed for {user_id}: {e}")
 
+    # v10.17: Apply voice learning (per-user adaptation)
+    if user_id:
+        try:
+            from voice_learning import apply_voice_learning
+            profile = apply_voice_learning(profile, user_id)
+            overrides.append("learned")
+        except (ImportError, Exception):
+            pass
+
     # Add pauses between sentences (with variability)
     pause = _add_pause_variability(profile["pause_ms"])
     is_poetry = profile.get("poetry_mode", False)
@@ -302,6 +332,28 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
     if profile["emphasis"]:
         styled_text = _add_emphasis(styled_text)
 
+    # v10.17: Melodic contour (φ-řízená intonace)
+    contour_attr = ""
+    contour_type = profile.get("contour")
+    if contour_type:
+        try:
+            from voice_melody import get_voice_contour
+            # Energy z brain state (default 0.5)
+            _energy = 0.5
+            if user_id:
+                try:
+                    from voice_learning import get_voice_prefs
+                    vp = get_voice_prefs(user_id)
+                    _energy = vp.get('preferred_energy', 0.5)
+                except Exception:
+                    pass
+            contour = get_voice_contour(text, mode=contour_type, energy=_energy)
+            if contour:
+                contour_attr = f' contour="{contour}"'
+                overrides.append(f"contour:{contour_type}")
+        except (ImportError, Exception) as e:
+            logger.debug(f"Contour generation skipped: {e}")
+
     if overrides:
         logger.info(f"TTS [{mode}] {len(text)}ch overrides=[{','.join(overrides)}]")
 
@@ -309,7 +361,7 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
            xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="cs-CZ">
     <voice name="{voice}">
         <mstts:express-as style="{profile['style']}" styledegree="{profile['styledegree']}">
-            <prosody rate="{profile['rate']}" pitch="{profile['pitch']}" volume="{profile['volume']}">
+            <prosody rate="{profile['rate']}" pitch="{profile['pitch']}" volume="{profile['volume']}"{contour_attr}>
                 {styled_text}
             </prosody>
         </mstts:express-as>
