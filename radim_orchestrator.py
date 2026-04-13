@@ -737,12 +737,32 @@ def radim_chat():
         except Exception as ae:
             logger.debug(f"Anticipation rhythm: {ae}")
 
+        # v10.17: Autonomous voice mode selection for HTTP endpoint
+        _voice_mode = _brain_mode_val or 'HARMONY'
+        try:
+            from voice_melody import match_song
+            from voice_learning import should_use_melody
+
+            if text_response and match_song(text_response):
+                _voice_mode = 'SINGING'
+            elif _brain_mode_val in ('CRISIS', 'ALERT'):
+                _voice_mode = _brain_mode_val
+            elif _brain_mode_val == 'HARMONY' and user_id:
+                if should_use_melody(str(user_id)):
+                    _voice_mode = 'RHYTHMIC'
+                    hour = datetime.utcnow().hour + 1  # CET ≈ UTC+1
+                    if hour < 6 or hour > 21:
+                        _voice_mode = 'HARMONY'
+        except (ImportError, Exception):
+            pass
+
         result = {
             'success': True,
             'response': text_response,
             'radim_action': action_json,
             'intent': _resolved_intent if _INTENT_RESOLVER else intent,
             'mode': mode,
+            'voice_mode': _voice_mode,
             'ai_provider': _ai_provider or 'local',
             'brain_C': _brain_C_val,
             'brain_mode': _brain_mode_val,
