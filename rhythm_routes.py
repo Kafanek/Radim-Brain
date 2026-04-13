@@ -33,7 +33,7 @@ def evaluate_input():
     """
     data = request.json or {}
     user_id = data.get('user_id', '')
-    message = data.get('message', '')
+    message = data.get('message', '') or data.get('user_input', '')
 
     if not user_id:
         return jsonify({'success': False, 'error': 'user_id required'}), 400
