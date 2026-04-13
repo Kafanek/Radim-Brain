@@ -207,16 +207,17 @@ def generate_speech_contour(text, mood='neutral', energy=0.5):
     if not text or energy < 0.1:
         return None
 
-    # Amplituda závisí na energii
-    max_hz = int(energy * 50)  # 0-50Hz range
-    if max_hz < 5:
+    # v10.17: Azure needs ±30Hz minimum for audible pitch change
+    # Previous: energy*50 → max 25Hz at 0.5 energy → INAUDIBLE
+    max_hz = int(30 + energy * 50)  # 30-80Hz range
+    if max_hz < 15:
         return None
 
-    # Mood modifiers
+    # Mood modifiers (v10.17: increased for audibility)
     mood_offsets = {
-        'happy': +10, 'excited': +15, 'sad': -10,
-        'calm': -5, 'neutral': 0, 'tender': -5,
-        'playful': +10, 'romantic': +5, 'lullaby': -15,
+        'happy': +15, 'excited': +20, 'sad': -15,
+        'calm': -10, 'neutral': 0, 'tender': -5,
+        'playful': +15, 'romantic': +10, 'lullaby': -20,
     }
     base_offset = mood_offsets.get(mood, 0)
 
