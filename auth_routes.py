@@ -115,6 +115,28 @@ def _ensure_auth_table():
     except Exception as e:
         logger.warning(f"Auth table init: {e}")
 
+    # v10.10: Subscription columns (auto-migration)
+    try:
+        with db_context(commit=True) as db:
+            if is_postgres():
+                db.execute("ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS subscription_status VARCHAR(20) DEFAULT 'trial'")
+                db.execute("ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS subscription_expires TIMESTAMP")
+                db.execute("ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS trial_started TIMESTAMP DEFAULT NOW()")
+                db.execute("ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS last_active TIMESTAMP")
+            else:
+                # SQLite — check if columns exist
+                cols = [r[1] for r in db.execute("PRAGMA table_info(auth_users)").fetchall()]
+                if 'subscription_status' not in cols:
+                    db.execute("ALTER TABLE auth_users ADD COLUMN subscription_status TEXT DEFAULT 'trial'")
+                if 'subscription_expires' not in cols:
+                    db.execute("ALTER TABLE auth_users ADD COLUMN subscription_expires TEXT")
+                if 'trial_started' not in cols:
+                    db.execute("ALTER TABLE auth_users ADD COLUMN trial_started TEXT DEFAULT CURRENT_TIMESTAMP")
+                if 'last_active' not in cols:
+                    db.execute("ALTER TABLE auth_users ADD COLUMN last_active TEXT")
+    except Exception as e:
+        logger.debug(f"Subscription columns migration: {e}")
+
 
 # Init auth table at startup
 try:
@@ -617,3 +639,187 @@ def admin_set_password():
     except Exception as e:
         logger.error(f"Admin set password error: {e}")
         return jsonify({"success": False, "error": "Chyba při změně hesla"}), 500
+
+
+# ============================================
+# 🔧 ADMIN: User Detail + Subscription Management
+# ============================================
+
+@auth_bp.route('/api/auth/admin-user-detail/<user_id>', methods=['GET', 'OPTIONS'])
+@require_auth
+def admin_user_detail(user_id):
+    """Admin: get comprehensive user detail.
+
+    Returns: profile, meds, contacts, brain state, activity, subscription.
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+    user = getattr(g, 'auth_user', {})
+    if user.get('role') not in ('administrator', 'admin'):
+        return jsonify({"success": False, "error": "Admin required"}), 403
+
+    try:
+        result = {'user_id': user_id}
+
+        with db_context(commit=False) as db:
+            # Auth info + subscription
+            row = db.execute("""
+                SELECT id, email, name, role, created_at,
+                       subscription_status, subscription_expires, trial_started, last_active
+                FROM auth_users WHERE id = ?
+            """, (int(user_id),)).fetchone()
+
+            if not row:
+                return jsonify({"success": False, "error": "Uživatel nenalezen"}), 404
+
+            result['account'] = {
+                'id': row[0], 'email': row[1], 'name': row[2], 'role': row[3],
+                'created_at': str(row[4]) if row[4] else None,
+                'subscription_status': row[5] or 'trial',
+                'subscription_expires': str(row[6]) if row[6] else None,
+                'trial_started': str(row[7]) if row[7] else None,
+                'last_active': str(row[8]) if row[8] else None,
+            }
+
+            # Message count
+            try:
+                mc = db.execute("SELECT COUNT(*) FROM memory_history WHERE user_id = ?", (str(user_id),)).fetchone()
+                result['message_count'] = mc[0] if mc else 0
+            except Exception:
+                result['message_count'] = 0
+
+            # Latest brain state
+            try:
+                bs = db.execute("""
+                    SELECT coherence, created_at FROM brain_states
+                    WHERE user_id = ? ORDER BY created_at DESC LIMIT 1
+                """, (str(user_id),)).fetchone()
+                if bs:
+                    c = float(bs[0]) if bs[0] else 5.0
+                    result['brain'] = {
+                        'C': c,
+                        'mode': 'CRISIS' if c > 27 else 'ALERT' if c > 12 else 'HARMONY',
+                        'last_update': str(bs[1]) if bs[1] else None
+                    }
+            except Exception:
+                pass
+
+            # Observations count (24h)
+            try:
+                from datetime import datetime, timedelta
+                obs = db.execute("""
+                    SELECT COUNT(*) FROM agent_observations
+                    WHERE user_id = ? AND created_at > ?
+                """, (str(user_id), (datetime.utcnow() - timedelta(hours=24)).isoformat())).fetchone()
+                result['alerts_24h'] = obs[0] if obs else 0
+            except Exception:
+                result['alerts_24h'] = 0
+
+        # Profile (meds, contacts, etc.)
+        try:
+            from memory_helpers import db_load_profile
+            profile = db_load_profile(str(user_id)) or {}
+            result['profile'] = {
+                'name': profile.get('name', ''),
+                'medications': profile.get('medications', []),
+                'emergency_contacts': profile.get('emergency_contacts', []),
+                'interests': profile.get('interests', []),
+                'hearing': profile.get('hearing', ''),
+                'mobility': profile.get('mobility', ''),
+            }
+        except Exception:
+            result['profile'] = {}
+
+        return jsonify({"success": True, **result})
+
+    except Exception as e:
+        logger.error(f"Admin user detail error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@auth_bp.route('/api/auth/admin-subscription/<user_id>', methods=['PUT', 'OPTIONS'])
+@require_auth
+def admin_set_subscription(user_id):
+    """Admin: update user subscription status.
+
+    Body: {
+        "status": "trial|active|expired|suspended",
+        "expires": "2026-06-01"  (optional, YYYY-MM-DD)
+    }
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+    user = getattr(g, 'auth_user', {})
+    if user.get('role') not in ('administrator', 'admin'):
+        return jsonify({"success": False, "error": "Admin required"}), 403
+
+    data = request.get_json(silent=True) or {}
+    new_status = data.get('status', '').strip()
+    expires = data.get('expires', '')
+
+    valid_statuses = ('trial', 'active', 'expired', 'suspended')
+    if new_status not in valid_statuses:
+        return jsonify({"success": False, "error": f"Status musí být: {', '.join(valid_statuses)}"}), 400
+
+    try:
+        with db_context(commit=True) as db:
+            if expires:
+                db.execute("""
+                    UPDATE auth_users SET subscription_status = ?, subscription_expires = ?
+                    WHERE id = ?
+                """, (new_status, expires, int(user_id)))
+            else:
+                db.execute("""
+                    UPDATE auth_users SET subscription_status = ?
+                    WHERE id = ?
+                """, (new_status, int(user_id)))
+
+        logger.info(f"Subscription updated: user {user_id} → {new_status} (by {user.get('email')})")
+        return jsonify({"success": True, "status": new_status, "expires": expires or None})
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@auth_bp.route('/api/auth/admin-users-list', methods=['GET', 'OPTIONS'])
+@require_auth
+def admin_users_list():
+    """Admin: list all users with subscription info.
+
+    Returns compact list: id, email, name, role, subscription, last_active, message_count
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+    user = getattr(g, 'auth_user', {})
+    if user.get('role') not in ('administrator', 'admin'):
+        return jsonify({"success": False, "error": "Admin required"}), 403
+
+    try:
+        with db_context(commit=False) as db:
+            rows = db.execute("""
+                SELECT a.id, a.email, a.name, a.role, a.created_at,
+                       a.subscription_status, a.subscription_expires, a.last_active,
+                       (SELECT COUNT(*) FROM memory_history WHERE user_id = CAST(a.id AS TEXT)) as msg_count
+                FROM auth_users a
+                ORDER BY a.last_active DESC NULLS LAST, a.id DESC
+                LIMIT 100
+            """).fetchall()
+
+        users = []
+        for r in (rows or []):
+            users.append({
+                'id': r[0], 'email': r[1], 'name': r[2], 'role': r[3],
+                'created_at': str(r[4]) if r[4] else None,
+                'subscription': r[5] or 'trial',
+                'expires': str(r[6]) if r[6] else None,
+                'last_active': str(r[7]) if r[7] else None,
+                'messages': r[8] or 0
+            })
+
+        return jsonify({"success": True, "users": users, "count": len(users)})
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+logger.info("🔧 Admin user management v10.10 loaded — subscription, detail, auto-cleanup")

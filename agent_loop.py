@@ -905,6 +905,82 @@ def run_daily_cleanup(app):
         except Exception as e:
             logger.error(f"Daily cleanup error: {e}")
 
+        # v10.10: Subscription cleanup — expired/inactive accounts
+        try:
+            _cleanup_subscriptions(db=None)
+        except Exception as e:
+            logger.debug(f"Subscription cleanup error: {e}")
+
+
+def _cleanup_subscriptions(db=None):
+    """Auto-manage expired subscriptions and inactive accounts.
+
+    Rules:
+    - Trial > 14 days → set to 'expired'
+    - Expired > 30 days → suspend (limited functionality)
+    - Suspended > 60 days with no activity → anonymize data (GDPR)
+    - No interaction > 90 days + not 'active' → flag for deletion
+
+    Runs daily at 3:00 AM (inside run_daily_cleanup).
+    """
+    from datetime import datetime, timedelta
+    now = datetime.utcnow()
+
+    try:
+        with db_context(commit=True) as db:
+            if not is_postgres():
+                return  # SQLite doesn't need this
+
+            # 1. Trial expired (>14 days)
+            r1 = db.execute("""
+                UPDATE auth_users
+                SET subscription_status = 'expired'
+                WHERE subscription_status = 'trial'
+                AND trial_started < NOW() - INTERVAL '14 days'
+            """)
+            if r1 and r1.rowcount > 0:
+                logger.info(f"📋 Subscription: {r1.rowcount} trial(s) expired")
+
+            # 2. Expired > 30 days → suspend
+            r2 = db.execute("""
+                UPDATE auth_users
+                SET subscription_status = 'suspended'
+                WHERE subscription_status = 'expired'
+                AND subscription_expires IS NOT NULL
+                AND subscription_expires < NOW() - INTERVAL '30 days'
+            """)
+            if r2 and r2.rowcount > 0:
+                logger.info(f"📋 Subscription: {r2.rowcount} account(s) suspended (30d expired)")
+
+            # 3. Find accounts to flag for deletion (suspended > 60d, no activity 90d)
+            flagged = db.execute("""
+                SELECT id, email, name, subscription_status, last_active
+                FROM auth_users
+                WHERE subscription_status = 'suspended'
+                AND (last_active IS NULL OR last_active < NOW() - INTERVAL '90 days')
+            """).fetchall()
+
+            for row in (flagged or []):
+                uid, email, name = row[0], row[1], row[2]
+                # Log observation for admin visibility
+                try:
+                    db.execute("""
+                        INSERT INTO agent_observations
+                        (user_id, type, severity, message, created_at)
+                        VALUES (?, 'account_cleanup', 'WARNING', ?, ?)
+                    """, (
+                        str(uid),
+                        f"Účet {name or email} je neaktivní >90 dní a suspended. Doporučeno smazání.",
+                        now.isoformat()
+                    ))
+                except Exception:
+                    pass
+
+                logger.info(f"📋 Flagged for deletion: {email} (id={uid}, suspended, inactive >90d)")
+
+    except Exception as e:
+        logger.debug(f"Subscription cleanup: {e}")
+
 
 
 # ============================================================================

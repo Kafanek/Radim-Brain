@@ -852,6 +852,13 @@ def radim_chat_internal(message, user_id=None, mode="senior"):
         except Exception:
             pass
 
+        # v10.10: Update last_active for subscription tracking
+        try:
+            with db_context(commit=True) as _db:
+                _db.execute("UPDATE auth_users SET last_active = NOW() WHERE id = ?", (int(user_id),))
+        except Exception:
+            pass
+
         return {"success": True, "response": text_response, "intent": intent, "brain_mode": brain_mode}
 
     except Exception as e:
