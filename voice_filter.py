@@ -28,9 +28,9 @@ VOICE_PROFILES = {
     # ── Brain-state modes ──
     "HARMONY": {
         "style": "friendly",
-        "styledegree": "1.3",
-        "rate": "-10%",
-        "pitch": "+2%",
+        "styledegree": "1.5",    # v10.16: warmer expression
+        "rate": "-8%",           # v10.16: slightly faster — more natural
+        "pitch": "+0%",          # v10.16: neutral pitch — no artificial raise
         "volume": "loud",
         "pause_ms": 618,         # φ × 382
         "emphasis": False,
@@ -56,10 +56,10 @@ VOICE_PROFILES = {
     # ── v10.15: Context modes — prosody-based (Antonín ignores express-as styles) ──
     # Only rate/pitch/volume/pauses make audible difference for cs-CZ-AntoninNeural
     "POETRY": {
-        "style": "friendly",     # Antonín ignores other styles — use friendly
-        "styledegree": "1.0",
-        "rate": "-25%",          # very slow — like reciting
-        "pitch": "+5%",          # higher pitch — expressive
+        "style": "friendly",
+        "styledegree": "1.5",    # v10.16: expressive but natural
+        "rate": "-20%",          # v10.16: slow but not dragging
+        "pitch": "+0%",          # v10.16: natural pitch (was +5% = too high/unnatural)
         "volume": "loud",
         "pause_ms": 1500,        # long pauses between verses
         "emphasis": False,
