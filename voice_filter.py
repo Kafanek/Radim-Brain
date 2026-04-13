@@ -28,11 +28,11 @@ VOICE_PROFILES = {
     # ── Brain-state modes ──
     "HARMONY": {
         "style": "friendly",
-        "styledegree": "1.5",    # v10.16: warmer expression
-        "rate": "-8%",           # v10.16: slightly faster — more natural
-        "pitch": "+0%",          # v10.16: neutral pitch — no artificial raise
+        "styledegree": "2.0",    # v10.17: maximum warmth for friendly chat
+        "rate": "-5%",           # v10.17: almost natural speed — not slow
+        "pitch": "+1%",          # v10.17: tiny lift for clarity
         "volume": "loud",
-        "pause_ms": 618,         # φ × 382
+        "pause_ms": 500,         # v10.17: shorter pauses — conversational
         "emphasis": False,
     },
     "ALERT": {
@@ -57,12 +57,13 @@ VOICE_PROFILES = {
     # Only rate/pitch/volume/pauses make audible difference for cs-CZ-AntoninNeural
     "POETRY": {
         "style": "friendly",
-        "styledegree": "1.5",    # v10.16: expressive but natural
-        "rate": "-20%",          # v10.16: slow but not dragging
-        "pitch": "+0%",          # v10.16: natural pitch (was +5% = too high/unnatural)
+        "styledegree": "2.0",    # v10.17: maximum expressivity for recitation
+        "rate": "-15%",          # v10.17: natural recitation pace (not dragging)
+        "pitch": "+2%",          # v10.17: slight lift for warmth
         "volume": "loud",
-        "pause_ms": 1500,        # long pauses between verses
+        "pause_ms": 800,         # v10.17: shorter — verse pauses handled by SSML logic
         "emphasis": False,
+        "poetry_mode": True,     # v10.17: special SSML handling for verse structure
     },
     "NARRATION": {
         "style": "friendly",
@@ -113,11 +114,21 @@ EMPHASIS_PATTERNS = [
 ]
 
 
-def _add_sentence_pauses(text, pause_ms):
-    """Insert SSML breaks between sentences."""
+def _add_sentence_pauses(text, pause_ms, poetry_mode=False):
+    """Insert SSML breaks between sentences.
+
+    v10.17: poetry_mode uses verse-aware pausing:
+    - Period/exclamation/question at end → full pause (verse end)
+    - Comma, semicolon, dash → short breath pause (200-300ms)
+    - Within a verse line (no punctuation) → no pause (flow)
+    """
     if not text:
         return ""
-    # Split on sentence boundaries
+
+    if poetry_mode:
+        return _add_poetry_pauses(text, pause_ms)
+
+    # Standard prose pausing
     sentences = re.split(r'(?<=[.!?])\s+', text.strip())
     if len(sentences) <= 1:
         return xml_escape(text)
@@ -128,6 +139,35 @@ def _add_sentence_pauses(text, pause_ms):
         if i < len(sentences) - 1:
             parts.append(f'<break time="{pause_ms}ms"/>')
     return " ".join(parts)
+
+
+def _add_poetry_pauses(text, base_pause_ms):
+    """Verse-aware SSML pausing for poetry recitation.
+
+    Rules:
+    - Period (.) → medium pause (verse/stanza end)
+    - Comma (,) → breath pause (250ms) — keeps flow within verse
+    - Semicolon (;) → short pause (350ms)
+    - Dash (—/-) → dramatic pause (400ms)
+    - Line break (already converted to '. ') → verse pause
+    - No punctuation between words → continuous flow
+    """
+    escaped = xml_escape(text)
+
+    # Replace punctuation with SSML breaks
+    # Comma → tiny breath (keeps verse flowing)
+    escaped = re.sub(r',\s*', f', <break time="250ms"/> ', escaped)
+
+    # Semicolon → slightly longer
+    escaped = re.sub(r';\s*', f'; <break time="350ms"/> ', escaped)
+
+    # Dash (em-dash or en-dash) → dramatic pause
+    escaped = re.sub(r'\s*[—–-]\s*', f' <break time="400ms"/> ', escaped)
+
+    # Period/exclamation/question → verse end pause
+    escaped = re.sub(r'([.!?])\s+', rf'\1 <break time="{base_pause_ms}ms"/> ', escaped)
+
+    return escaped
 
 
 def _add_emphasis(text_with_breaks):
@@ -255,7 +295,8 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
 
     # Add pauses between sentences (with variability)
     pause = _add_pause_variability(profile["pause_ms"])
-    styled_text = _add_sentence_pauses(text, pause)
+    is_poetry = profile.get("poetry_mode", False)
+    styled_text = _add_sentence_pauses(text, pause, poetry_mode=is_poetry)
 
     # Add emphasis in ALERT/CRISIS
     if profile["emphasis"]:
