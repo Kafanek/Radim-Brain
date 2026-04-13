@@ -124,23 +124,50 @@ def azure_tts_proxy():
             voice = 'cs-CZ-AntoninNeural'
 
         # ═══ SINGLE SOURCE OF TRUTH: voice_filter.build_radim_ssml() ═══
-        # Mode priority: context → frontend style → brain state → default
-        # v10.11: Context modes for per-module styling (poetry, narration, news, education)
+        # v10.17: Autonomous voice mode selection
+        # Priority: singing > context > frontend > brain > autonomous > HARMONY
         _context = data.get('context', '')
+        _frontend_style = data.get('style', '')
+
         _context_to_mode = {
             'poetry': 'POETRY', 'poem': 'POETRY', 'recitation': 'POETRY',
             'narration': 'NARRATION', 'story': 'NARRATION', 'library': 'NARRATION',
             'news': 'NEWS', 'newscast': 'NEWS',
             'education': 'EDUCATION', 'learning': 'EDUCATION', 'quiz': 'EDUCATION',
+            'singing': 'SINGING', 'song': 'SINGING', 'sing': 'SINGING',
+            'rhythmic': 'RHYTHMIC', 'melodic': 'RHYTHMIC',
         }
-        _frontend_style = data.get('style', '')
         _style_to_mode = {
             'calm': 'CRISIS', 'empathetic': 'ALERT', 'cheerful': 'HARMONY', 'friendly': 'HARMONY',
-            'poetry-reading': 'POETRY', 'narration-relaxed': 'NARRATION', 'newscast': 'NEWS',
+            'singing': 'SINGING', 'rhythmic': 'RHYTHMIC',
         }
+
         _context_mode = _context_to_mode.get(_context)
         _frontend_mode = _style_to_mode.get(_frontend_style)
-        _mode = _context_mode or _frontend_mode or ant_state or (brain_speech.get('mode') if brain_speech else None) or 'HARMONY'
+        _brain_mode = ant_state or (brain_speech.get('mode') if brain_speech else None)
+
+        # Auto-detect singing (text matches known song)
+        _auto_singing = None
+        if not _context_mode and not _frontend_mode:
+            try:
+                from voice_melody import match_song
+                if match_song(text):
+                    _auto_singing = 'SINGING'
+            except Exception:
+                pass
+
+        # Autonomous: use RHYTHMIC for happy/energetic brain states
+        _auto_rhythmic = None
+        if not _context_mode and not _frontend_mode and not _auto_singing:
+            if _brain_mode == 'HARMONY' and uid:
+                try:
+                    from voice_learning import should_use_melody
+                    if should_use_melody(uid):
+                        _auto_rhythmic = 'RHYTHMIC'
+                except Exception:
+                    pass
+
+        _mode = _context_mode or _frontend_mode or _auto_singing or _auto_rhythmic or _brain_mode or 'HARMONY'
         try:
             from voice_filter import build_radim_ssml
             ssml = build_radim_ssml(text, mode=_mode, voice=voice, user_id=uid or None)
