@@ -121,14 +121,23 @@ def azure_tts_proxy():
             voice = 'cs-CZ-AntoninNeural'
 
         # ═══ SINGLE SOURCE OF TRUTH: voice_filter.build_radim_ssml() ═══
-        # Mode priority: frontend hint → brain state → default HARMONY
-        # Frontend sends style='calm'/'empathetic' for crisis/alert responses
+        # Mode priority: context → frontend style → brain state → default
+        # v10.11: Context modes for per-module styling (poetry, narration, news, education)
+        _context = data.get('context', '')
+        _context_to_mode = {
+            'poetry': 'POETRY', 'poem': 'POETRY', 'recitation': 'POETRY',
+            'narration': 'NARRATION', 'story': 'NARRATION', 'library': 'NARRATION',
+            'news': 'NEWS', 'newscast': 'NEWS',
+            'education': 'EDUCATION', 'learning': 'EDUCATION', 'quiz': 'EDUCATION',
+        }
         _frontend_style = data.get('style', '')
         _style_to_mode = {
-            'calm': 'CRISIS', 'empathetic': 'ALERT', 'cheerful': 'HARMONY', 'friendly': 'HARMONY'
+            'calm': 'CRISIS', 'empathetic': 'ALERT', 'cheerful': 'HARMONY', 'friendly': 'HARMONY',
+            'poetry-reading': 'POETRY', 'narration-relaxed': 'NARRATION', 'newscast': 'NEWS',
         }
+        _context_mode = _context_to_mode.get(_context)
         _frontend_mode = _style_to_mode.get(_frontend_style)
-        _mode = _frontend_mode or ant_state or (brain_speech.get('mode') if brain_speech else None) or 'HARMONY'
+        _mode = _context_mode or _frontend_mode or ant_state or (brain_speech.get('mode') if brain_speech else None) or 'HARMONY'
         try:
             from voice_filter import build_radim_ssml
             ssml = build_radim_ssml(text, mode=_mode, voice=voice, user_id=uid or None)

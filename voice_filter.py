@@ -25,32 +25,70 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 VOICE_PROFILES = {
+    # ── Brain-state modes ──
     "HARMONY": {
         "style": "friendly",
         "styledegree": "1.3",
-        "rate": "-10%",          # v455: pomalejší = jasnější pro seniory
-        "pitch": "+2%",          # v455: mírně vyšší = jasnější artikulace
+        "rate": "-10%",
+        "pitch": "+2%",
         "volume": "loud",
-        "pause_ms": 618,         # φ × 382 — golden ratio pause
-        "emphasis": False,       # natural, no emphasis
+        "pause_ms": 618,         # φ × 382
+        "emphasis": False,
     },
     "ALERT": {
         "style": "empathetic",
         "styledegree": "1.5",
-        "rate": "-18%",          # v455: pomalejší pro jasnost
-        "pitch": "+0%",          # neutrální
+        "rate": "-18%",
+        "pitch": "+0%",
         "volume": "loud",
-        "pause_ms": 1000,        # longer pauses for processing
-        "emphasis": True,        # gentle emphasis on key words
+        "pause_ms": 1000,
+        "emphasis": True,
     },
     "CRISIS": {
         "style": "calm",
-        "styledegree": "2.0",    # maximum emotional expression
-        "rate": "-25%",          # very slow, deliberate
-        "pitch": "-3%",          # v455: méně hluboký = srozumitelnější
-        "volume": "x-loud",     # louder for clarity
-        "pause_ms": 1618,        # φ × 1000 — maximum pause
+        "styledegree": "2.0",
+        "rate": "-25%",
+        "pitch": "-3%",
+        "volume": "x-loud",
+        "pause_ms": 1618,        # φ × 1000
         "emphasis": True,
+    },
+    # ── v10.11: Context modes — per-module voice styling ──
+    "POETRY": {
+        "style": "poetry-reading",
+        "styledegree": "1.8",    # expressive recitation
+        "rate": "-20%",          # slow, deliberate
+        "pitch": "+3%",          # slightly higher — clearer articulation
+        "volume": "loud",
+        "pause_ms": 1200,        # long pauses between verses
+        "emphasis": False,       # natural rhythm, no forced emphasis
+    },
+    "NARRATION": {
+        "style": "narration-relaxed",
+        "styledegree": "1.5",    # warm storytelling
+        "rate": "-12%",          # slightly slower than normal
+        "pitch": "+1%",
+        "volume": "loud",
+        "pause_ms": 800,         # natural story pauses
+        "emphasis": False,
+    },
+    "NEWS": {
+        "style": "newscast",
+        "styledegree": "1.2",
+        "rate": "-8%",           # close to normal — clear delivery
+        "pitch": "+0%",
+        "volume": "loud",
+        "pause_ms": 500,         # shorter pauses — info flow
+        "emphasis": False,
+    },
+    "EDUCATION": {
+        "style": "friendly",
+        "styledegree": "1.4",
+        "rate": "-15%",          # slower for learning
+        "pitch": "+2%",
+        "volume": "loud",
+        "pause_ms": 1000,        # time to process
+        "emphasis": True,        # emphasize key terms
     },
 }
 
