@@ -859,7 +859,39 @@ def radim_chat_internal(message, user_id=None, mode="senior"):
         except Exception:
             pass
 
-        return {"success": True, "response": text_response, "intent": intent, "brain_mode": brain_mode}
+        # v10.17: Autonomous voice mode selection
+        # Orchestrátor rozhodne JAK mluvit na základě kontextu + brain state
+        voice_mode = brain_mode or 'HARMONY'
+        try:
+            from voice_melody import match_song
+            from voice_learning import should_use_melody, get_voice_prefs
+
+            # 1. Je odpověď píseň? → SINGING
+            if text_response and match_song(text_response):
+                voice_mode = 'SINGING'
+            # 2. CRISIS/ALERT → beze změny (safety)
+            elif brain_mode in ('CRISIS', 'ALERT'):
+                voice_mode = brain_mode
+            # 3. HARMONY + uživatel preferuje melodii → RHYTHMIC
+            elif brain_mode == 'HARMONY' and user_id:
+                if should_use_melody(str(user_id)):
+                    voice_mode = 'RHYTHMIC'
+                    # Ráno = veselejší, večer = klidnější
+                    try:
+                        from datetime import datetime
+                        hour = datetime.utcnow().hour + 1  # CET ≈ UTC+1
+                        if hour < 6 or hour > 21:
+                            voice_mode = 'HARMONY'  # Noc — klidný
+                    except Exception:
+                        pass
+        except (ImportError, Exception):
+            pass
+
+        return {
+            "success": True, "response": text_response,
+            "intent": intent, "brain_mode": brain_mode,
+            "voice_mode": voice_mode,  # Frontend předá TTS
+        }
 
     except Exception as e:
         logger.error(f"radim_chat_internal error: {e}")
