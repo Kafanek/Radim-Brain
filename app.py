@@ -175,6 +175,14 @@ except ImportError:
 # ============================================
 app = Flask(__name__)
 
+# v10.12: Gzip compression — reduces JSON/HTML transfer by ~60%
+try:
+    from flask_compress import Compress
+    Compress(app)
+    logger.info("✅ Gzip compression enabled (flask-compress)")
+except ImportError:
+    logger.debug("flask-compress not installed — no compression")
+
 # Register Radim Blueprints
 app.register_blueprint(radim_bp)
 app.register_blueprint(radim_service_bp)

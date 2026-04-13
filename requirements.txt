@@ -49,3 +49,4 @@ python-kasa>=0.7.0
 yeelight>=0.7.0
 
 # 🎙️ Voice filter is SSML-based (no audio processing deps needed)
+flask-compress==1.15
