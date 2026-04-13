@@ -102,10 +102,13 @@ def azure_tts_proxy():
             return jsonify({'error': 'Text is required'}), 400
 
         # ⚡ TTS Cache — check before Azure API call
+        # v10.15: Include context in cache key (poetry ≠ harmony for same text)
         rate = float(data.get('rate', 0.9))
+        _cache_key_extra = _context or _frontend_style or ''
+        _cache_rate = str(rate) + ':' + _cache_key_extra
         try:
             from scaling_optimizations import tts_cache
-            cached_audio = tts_cache.get(text, voice, rate)
+            cached_audio = tts_cache.get(text, voice, _cache_rate)
             if cached_audio:
                 logger.debug(f"TTS cache HIT: {text[:30]}...")
                 return Response(
@@ -201,7 +204,7 @@ def azure_tts_proxy():
             # ⚡ Cache the audio for future requests
             try:
                 from scaling_optimizations import tts_cache
-                tts_cache.put(text, response.content, voice, rate)
+                tts_cache.put(text, response.content, voice, _cache_rate)
             except Exception:
                 pass
 
