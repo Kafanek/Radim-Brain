@@ -28,12 +28,13 @@ VOICE_PROFILES = {
     # ── Brain-state modes ──
     "HARMONY": {
         "style": "friendly",
-        "styledegree": "2.0",    # v10.17: maximum warmth for friendly chat
-        "rate": "-5%",           # v10.17: almost natural speed — not slow
-        "pitch": "+1%",          # v10.17: tiny lift for clarity
+        "styledegree": "2.0",
+        "rate": "-5%",
+        "pitch": "+1%",
         "volume": "loud",
-        "pause_ms": 500,         # v10.17: shorter pauses — conversational
+        "pause_ms": 500,
         "emphasis": False,
+        "contour": "speech",     # v10.19: φ-rhythm i pro HARMONY (90% provozu!)
     },
     "ALERT": {
         "style": "empathetic",
@@ -43,6 +44,7 @@ VOICE_PROFILES = {
         "volume": "loud",
         "pause_ms": 1000,
         "emphasis": True,
+        "contour": "speech",     # v10.19: empathetic contour
     },
     "CRISIS": {
         "style": "calm",
@@ -52,45 +54,50 @@ VOICE_PROFILES = {
         "volume": "x-loud",
         "pause_ms": 1618,        # φ × 1000
         "emphasis": True,
+        # NO contour — crisis = flat, calming, no melodic variation
     },
     # ── v10.15: Context modes — prosody-based (Antonín ignores express-as styles) ──
     # Only rate/pitch/volume/pauses make audible difference for cs-CZ-AntoninNeural
     "POETRY": {
         "style": "friendly",
-        "styledegree": "2.0",    # v10.17: maximum expressivity for recitation
-        "rate": "-15%",          # v10.17: natural recitation pace (not dragging)
-        "pitch": "+2%",          # v10.17: slight lift for warmth
+        "styledegree": "2.0",
+        "rate": "-15%",
+        "pitch": "+2%",
         "volume": "loud",
-        "pause_ms": 800,         # v10.17: shorter — verse pauses handled by SSML logic
+        "pause_ms": 800,
         "emphasis": False,
-        "poetry_mode": True,     # v10.17: special SSML handling for verse structure
+        "poetry_mode": True,
+        "contour": "recitation", # v10.19: expresivní φ-křivka pro básně
     },
     "NARRATION": {
         "style": "friendly",
         "styledegree": "1.0",
-        "rate": "-18%",          # slower storytelling pace
-        "pitch": "+2%",          # slightly warmer
+        "rate": "-18%",
+        "pitch": "+2%",
         "volume": "loud",
-        "pause_ms": 1000,        # natural story pauses
+        "pause_ms": 1000,
         "emphasis": False,
+        "contour": "speech",     # v10.19: přirozená intonace pro vyprávění
     },
     "NEWS": {
         "style": "friendly",
         "styledegree": "1.0",
-        "rate": "-5%",           # close to normal — clear delivery
+        "rate": "-5%",
         "pitch": "+0%",
         "volume": "loud",
-        "pause_ms": 500,         # shorter pauses
+        "pause_ms": 500,
         "emphasis": False,
+        # NO contour — news = flat, informational, no melodic variation
     },
     "EDUCATION": {
         "style": "friendly",
         "styledegree": "1.0",
-        "rate": "-18%",          # slower for learning
-        "pitch": "+3%",          # clearer
+        "rate": "-18%",
+        "pitch": "+3%",
         "volume": "loud",
         "pause_ms": 1000,
         "emphasis": True,
+        "contour": "speech",     # v10.19: jasná intonace pro učení
     },
     # ── v10.17: Melodic voice modes ──
     "SINGING": {
@@ -314,14 +321,16 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
         except Exception as e:
             logger.warning(f"Adaptive voice failed for {user_id}: {e}")
 
-    # v10.17: Apply voice learning (per-user adaptation)
+    # v10.19: Apply voice learning (per-user adaptation)
     if user_id:
         try:
             from voice_learning import apply_voice_learning
             profile = apply_voice_learning(profile, user_id)
             overrides.append("learned")
-        except (ImportError, Exception):
-            pass
+        except ImportError:
+            pass  # voice_learning not installed
+        except Exception as e:
+            logger.info(f"⚠️ Voice learning failed for {user_id}: {e}")
 
     # Add pauses between sentences (with variability)
     pause = _add_pause_variability(profile["pause_ms"])
@@ -332,27 +341,21 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
     if profile["emphasis"]:
         styled_text = _add_emphasis(styled_text)
 
-    # v10.17: Melodic contour (φ-řízená intonace)
+    # v10.19: Melodic contour (φ-řízená intonace)
+    # Connected to ALL voice profiles (except CRISIS and NEWS = flat)
     contour_attr = ""
     contour_type = profile.get("contour")
     if contour_type:
         try:
             from voice_melody import get_voice_contour
-            # Energy z brain state (default 0.5)
-            _energy = 0.5
-            if user_id:
-                try:
-                    from voice_learning import get_voice_prefs
-                    vp = get_voice_prefs(user_id)
-                    _energy = vp.get('preferred_energy', 0.5)
-                except Exception:
-                    pass
-            contour = get_voice_contour(text, mode=contour_type, energy=_energy)
+            # v10.19: Energy from learned preferences (set by apply_voice_learning)
+            _energy = profile.get('learned_energy', 0.5)
+            contour = get_voice_contour(text, mode=contour_type, energy=_energy, user_id=user_id)
             if contour:
                 contour_attr = f' contour="{contour}"'
-                overrides.append(f"contour:{contour_type}")
+                overrides.append(f"φ-contour:{contour_type}:e{_energy:.1f}")
         except (ImportError, Exception) as e:
-            logger.debug(f"Contour generation skipped: {e}")
+            logger.info(f"⚠️ Contour generation FAILED for mode={mode}: {e}")
 
     if overrides:
         logger.info(f"TTS [{mode}] {len(text)}ch overrides=[{','.join(overrides)}]")

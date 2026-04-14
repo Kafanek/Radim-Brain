@@ -173,8 +173,8 @@ def apply_voice_learning(profile, user_id):
 
     Modifikuje profile dict in-place:
     - rate: přizpůsobí tempu seniora
-    - energy: přizpůsobí melodičnosti
     - pause_ms: přizpůsobí délce pauz
+    - learned_energy: předá naučenou melodičnost (pro contour generátor)
 
     Vyžaduje min. 10 interakcí (jinak vrátí profil beze změny).
     """
@@ -185,13 +185,20 @@ def apply_voice_learning(profile, user_id):
     # Rate override
     current_rate = int(profile.get('rate', '-8').replace('%', '').replace('+', ''))
     learned_rate = int(prefs['preferred_rate'])
-    # Blend profile rate with learned rate
     blended_rate = int(current_rate * 0.5 + learned_rate * 0.5)
     profile['rate'] = f"{blended_rate}%"
 
     # Pause override
     current_pause = profile.get('pause_ms', 500)
     profile['pause_ms'] = int(current_pause * 0.5 + prefs['preferred_pause'] * 0.5)
+
+    # v10.19: Energy override — feeds into contour generation
+    profile['learned_energy'] = prefs['preferred_energy']
+
+    # v10.19: Disable contour if user doesn't like melody
+    if prefs['response_to_melody'] < 0.3 and prefs['interactions'] >= 20:
+        profile.pop('contour', None)  # Remove contour → no melodic variation
+        logger.info(f"🧒 [{user_id}] Melody disabled — response_to_melody={prefs['response_to_melody']:.2f}")
 
     return profile
 
