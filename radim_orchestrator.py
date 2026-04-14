@@ -338,6 +338,37 @@ def radim_chat():
         except (ImportError, Exception):
             pass
 
+        # v10.22: Calendar — inject today's events into AI context
+        try:
+            from database import db_context as _cal_db_ctx
+            from datetime import timedelta
+            _today = datetime.utcnow().strftime('%Y-%m-%d')
+            _week = (datetime.utcnow() + timedelta(days=7)).strftime('%Y-%m-%d')
+            with _cal_db_ctx() as _cdb:
+                _today_events = _cdb.execute(
+                    "SELECT title, time, type, location FROM calendar_events WHERE user_id = ? AND date = ? ORDER BY time",
+                    (user_id, _today)
+                ).fetchall()
+                _upcoming = _cdb.execute(
+                    "SELECT title, date, time, type FROM calendar_events WHERE user_id = ? AND date > ? AND date <= ? ORDER BY date, time LIMIT 5",
+                    (user_id, _today, _week)
+                ).fetchall()
+
+            if _today_events or _upcoming:
+                personalized += '\n\n═══ KALENDÁŘ SENIORA ═══\n'
+                if _today_events:
+                    personalized += 'DNES:\n'
+                    for e in _today_events:
+                        personalized += f'  • {e[1] or "celý den"} — {e[0]} ({e[2]}){" @ " + e[3] if e[3] else ""}\n'
+                if _upcoming:
+                    personalized += 'PŘÍŠTÍ DNY:\n'
+                    for e in _upcoming:
+                        personalized += f'  • {e[1]} {e[2] or ""} — {e[0]} ({e[3]})\n'
+                personalized += 'Pokud se senior ptá co má dnes/tento týden, řekni mu jeho události.\n'
+                personalized += 'Pokud chce přidat událost, zeptej se na název, datum a čas.\n'
+        except Exception:
+            pass
+
         # Text Rhythm: matematika → styl textu
         anticipation_prompt = ''
         anticipation_meta = None
@@ -682,6 +713,26 @@ def radim_chat():
                         notes=payload.get('notes', message[:200])
                     )
                     logger.info(f"💊 AI logged medication for {user_id}")
+
+                # v10.22: Calendar — AI creates events
+                elif action_type == 'create_event':
+                    try:
+                        with db_context(commit=True) as _edb:
+                            from database import db_insert
+                            eid = db_insert(_edb, 'calendar_events',
+                                ['user_id', 'title', 'date', 'time', 'type', 'description'],
+                                [user_id,
+                                 payload.get('title', 'Událost od Radima'),
+                                 payload.get('date') or extract_date(message) or datetime.utcnow().strftime('%Y-%m-%d'),
+                                 payload.get('time') or extract_time(message) or '',
+                                 payload.get('type', 'event'),
+                                 payload.get('description', '')]
+                            )
+                        action_json['created_event'] = {'id': eid}
+                        logger.info(f"📅 AI created calendar event: #{eid} '{payload.get('title')}'")
+                    except Exception as cal_err:
+                        logger.warning(f"Calendar create: {cal_err}")
+
             except Exception as act_err:
                 logger.warning(f"Action processing warning: {act_err}")
 

@@ -411,6 +411,24 @@ INTENTS = [
         "handler": "who_am_i",
     },
     # ═══════════════════════════════════════════════════════════════
+    # 📅 CALENDAR INTENTS
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "name": "calendar",
+        "patterns": [
+            r"co\s+m[aá]m\s+dnes",
+            r"co\s+m[eě]\s+[cč]ek[aá]",
+            r"jak[eé]\s+m[aá]m\s+ud[aá]losti",
+            r"m[uů]j\s+kalend[aá][rř]",
+            r"dne[sš]n[ií]\s+(?:ud[aá]losti|program|pl[aá]n)",
+            r"co\s+je\s+(?:dnes|z[ií]tra)\s+(?:v|na)\s+(?:kalend|pl[aá]n)",
+            r"tento\s+t[yý]den",
+            r"m[aá]m\s+n[eě]co\s+(?:napl[aá]nov|v\s+kalend)",
+            r"sch[uů]zk[ay]|n[aá]v[sš]t[eě]v[ay]",
+        ],
+        "handler": "calendar",
+    },
+    # ═══════════════════════════════════════════════════════════════
     # 🎼 MUSIC INTENTS
     # ═══════════════════════════════════════════════════════════════
     {

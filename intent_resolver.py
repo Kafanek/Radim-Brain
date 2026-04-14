@@ -217,6 +217,53 @@ def _handle_music(**kwargs):
     return None  # Let AI handle it
 
 
+def _handle_calendar(**kwargs):
+    """Handle calendar queries — today's events, upcoming, what's planned."""
+    user_id = kwargs.get('user_id')
+    if not user_id:
+        return None  # Let AI handle
+
+    try:
+        from database import db_context
+        from datetime import datetime, timedelta
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        week = (datetime.utcnow() + timedelta(days=7)).strftime('%Y-%m-%d')
+
+        with db_context() as db:
+            today_events = db.execute(
+                "SELECT title, time, type, location FROM calendar_events WHERE user_id = ? AND date = ? ORDER BY time",
+                (user_id, today)
+            ).fetchall()
+            upcoming = db.execute(
+                "SELECT title, date, time, type FROM calendar_events WHERE user_id = ? AND date > ? AND date <= ? ORDER BY date, time LIMIT 5",
+                (user_id, today, week)
+            ).fetchall()
+
+        parts = []
+        if today_events:
+            parts.append("Dnes máte:")
+            for e in today_events:
+                time_str = e[1] if e[1] else "celý den"
+                loc = f" v {e[3]}" if e[3] else ""
+                parts.append(f"  {time_str} — {e[0]}{loc}")
+        else:
+            parts.append("Dnes nemáte žádné události v kalendáři.")
+
+        if upcoming:
+            parts.append("Příští dny:")
+            for e in upcoming:
+                parts.append(f"  {e[1]} {e[2] or ''} — {e[0]}")
+
+        if not today_events and not upcoming:
+            return "Váš kalendář je prázdný. Chcete přidat nějakou událost?"
+
+        return "\n".join(parts)
+
+    except Exception as e:
+        logger.debug(f"Calendar intent: {e}")
+        return None
+
+
 def _handle_my_medications(**kwargs):
     """Return senior's medication list from profile."""
     user_id = kwargs.get("user_id")
@@ -480,6 +527,8 @@ _HANDLERS = {
     "my_medications": _handle_my_medications,
     "weather": _handle_weather,
     "who_am_i": _handle_who_am_i,
+    # 📅 Calendar
+    "calendar": _handle_calendar,
     # 🎼 Music
     "music": _handle_music,
     # 🏠 Home Assistant
