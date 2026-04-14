@@ -200,6 +200,14 @@ if FAMILY_AVAILABLE:
     app.register_blueprint(family_bp)
     logger.info("✅ Family routes registered: /api/family/*")
 
+# 📅 Register Calendar Routes
+try:
+    from calendar_routes import calendar_bp
+    app.register_blueprint(calendar_bp)
+    logger.info("✅ Calendar routes registered: /api/calendar/*")
+except ImportError as e:
+    logger.warning(f"⚠️ Calendar routes not available: {e}")
+
 # 🌉 Register Agent Bridge
 if AGENT_BRIDGE_AVAILABLE:
     app.register_blueprint(agent_bridge_bp)
@@ -797,6 +805,13 @@ def close_db(exception):
 
 def init_db():
     db_init_db()
+    # v10.22: Calendar schema
+    try:
+        from database_schema import init_calendar_schema
+        with db_context(commit=True) as _db:
+            init_calendar_schema(_db)
+    except Exception as e:
+        logger.debug(f"Calendar schema init: {e}")
 
 # ============================================
 # HELPERS

@@ -1239,6 +1239,36 @@ FAMILY_SCHEMA_PG = """
     CREATE INDEX IF NOT EXISTS idx_family_photos_user ON family_shared_photos(user_id);
 """
 
+CALENDAR_SCHEMA_PG = """
+    CREATE TABLE IF NOT EXISTS calendar_events (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        date TEXT NOT NULL,
+        time TEXT DEFAULT '',
+        description TEXT DEFAULT '',
+        type TEXT DEFAULT 'event',
+        color TEXT DEFAULT '#5BA8A0',
+        reminder INTEGER DEFAULT 0,
+        repeat_type TEXT DEFAULT 'none',
+        location TEXT DEFAULT '',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_calendar_user_date ON calendar_events(user_id, date);
+"""
+
+def init_calendar_schema(db):
+    """Create calendar tables."""
+    try:
+        for stmt in CALENDAR_SCHEMA_PG.strip().split(';'):
+            stmt = stmt.strip()
+            if stmt:
+                db.execute(stmt)
+        logger.info("✅ Calendar schema created")
+    except Exception as e:
+        logger.warning(f"Calendar schema: {e}")
+
+
 def init_family_schema(db):
     """Create family tables."""
     try:
