@@ -144,29 +144,6 @@ EMPHASIS_PATTERNS = [
     r'\b\d{1,2}:\d{2}\b',    # times (8:30, 14:00)
 ]
 
-# v10.20: Pronunciation fixes for cs-CZ-AntoninNeural
-# Azure sometimes mispronounces Czech "ch" cluster and other phonemes
-PRONUNCIATION_FIXES = {
-    'dýchejte': 'dýchejte',     # Antonín says "dýčejte" → force correct via <say-as>
-    'nadechněte': 'nadechněte',
-    'vydechněte': 'vydechněte',
-    'dýchat': 'dýchat',
-    'dýchání': 'dýchání',
-}
-
-def _fix_pronunciation(text):
-    """Fix known Azure cs-CZ-AntoninNeural mispronunciations using SSML <sub> tags."""
-    for wrong_word, fix in PRONUNCIATION_FIXES.items():
-        # Use <sub alias="..."> to force correct pronunciation
-        # Also wrap in <prosody rate="-10%"> to slow down the difficult word
-        if wrong_word in text.lower():
-            import re
-            pattern = re.compile(re.escape(wrong_word), re.IGNORECASE)
-            text = pattern.sub(
-                f'<prosody rate="-5%">{fix}</prosody>',
-                text
-            )
-    return text
 
 
 def _add_sentence_pauses(text, pause_ms, poetry_mode=False):
@@ -377,8 +354,6 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
     contour_used = False
 
     for i, sentence in enumerate(sentences):
-        # v10.20: Fix known pronunciation issues
-        sentence = _fix_pronunciation(sentence)
         sentence = sentence.strip()
         if not sentence:
             continue
