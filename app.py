@@ -1115,19 +1115,18 @@ def health():
             'latency_ms': db_latency_ms
         },
         'modules': {
+            # Core (required)
             'chat': 'active',
             'websocket': True,
             'speech': bool(os.environ.get('AZURE_SPEECH_KEY')),
             'azure_tts_proxy': bool(AZURE_TTS_KEY),
-            'ai': {
-                'gemini': bool(GEMINI_API_KEY),
-                'claude': bool(ANTHROPIC_API_KEY)
-            },
-            'media': bool(CLOUDINARY_URL),
+            'ai': {'gemini': bool(GEMINI_API_KEY), 'claude': bool(ANTHROPIC_API_KEY)},
             'push': bool(VAPID_PRIVATE_KEY),
-            'wordpress': bool(WP_URL and WP_USER),
             'twilio_voice': {'configured': bool(os.environ.get('TWILIO_ACCOUNT_SID')), 'phone': os.environ.get('TWILIO_PHONE_NUMBER')},
-            'agent_loop': True
+            'agent_loop': True,
+            # Optional (not required for production)
+            'media': 'cloudinary' if CLOUDINARY_URL else 'not_configured',
+            'wordpress': 'connected' if (WP_URL and WP_USER) else 'not_configured',
         },
         'online_users': len(users_online),
         'self_healing': _get_healing_status()

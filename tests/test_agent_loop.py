@@ -123,8 +123,9 @@ class TestVoiceFilter:
         from voice_filter import build_radim_ssml
         ssml = build_radim_ssml("Dobrý den.", mode="HARMONY")
         assert 'express-as style="friendly"' in ssml
-        assert 'rate="-10%"' in ssml
+        assert 'rate="-3%"' in ssml  # v10.21: deeper voice tuning
         assert 'cs-CZ-AntoninNeural' in ssml
+        assert 'contour=' in ssml  # v10.20: per-sentence φ-contour
 
     def test_build_ssml_crisis(self):
         from voice_filter import build_radim_ssml
