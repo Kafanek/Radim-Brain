@@ -37,16 +37,15 @@ def get_events():
 
         with db_context() as db:
             if date_from and date_to:
-                db.execute(
+                rows = db.execute(
                     "SELECT id, user_id, title, date, time, description, type, color, reminder, repeat_type, location FROM calendar_events WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date, time",
                     (user_id, date_from, date_to)
-                )
+                ).fetchall()
             else:
-                db.execute(
+                rows = db.execute(
                     "SELECT id, user_id, title, date, time, description, type, color, reminder, repeat_type, location FROM calendar_events WHERE user_id = ? ORDER BY date DESC, time LIMIT 100",
                     (user_id,)
-                )
-            rows = db.fetchall()
+                ).fetchall()
 
         events = []
         for r in rows:
@@ -164,11 +163,11 @@ def get_today():
         events = []
         if user_id:
             with db_context() as db:
-                db.execute(
+                rows = db.execute(
                     "SELECT id, title, time, type FROM calendar_events WHERE user_id = ? AND date = ? ORDER BY time",
                     (user_id, today)
-                )
-                for r in db.fetchall():
+                ).fetchall()
+                for r in rows:
                     events.append({'id': r[0], 'title': r[1], 'time': r[2] or '', 'type': r[3] or 'event'})
 
         # Upcoming 7 days
@@ -176,11 +175,11 @@ def get_today():
         if user_id:
             week_later = (datetime.utcnow() + timedelta(days=7)).strftime('%Y-%m-%d')
             with db_context() as db:
-                db.execute(
+                rows = db.execute(
                     "SELECT id, title, date, time, type FROM calendar_events WHERE user_id = ? AND date > ? AND date <= ? ORDER BY date, time LIMIT 10",
                     (user_id, today, week_later)
-                )
-                for r in db.fetchall():
+                ).fetchall()
+                for r in rows:
                     upcoming.append({'id': r[0], 'title': r[1], 'date': r[2], 'time': r[3] or '', 'type': r[4] or 'event'})
 
         return jsonify({
