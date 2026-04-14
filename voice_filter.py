@@ -29,12 +29,13 @@ VOICE_PROFILES = {
     "HARMONY": {
         "style": "friendly",
         "styledegree": "2.0",
-        "rate": "-5%",
-        "pitch": "+1%",
+        "rate": "-3%",           # v10.20: téměř přirozená rychlost
+        "pitch": "+2%",          # v10.20: teplejší base pitch
         "volume": "loud",
-        "pause_ms": 500,
+        "pause_ms": 618,         # v10.20: φ-pauza (zlatý řez)
         "emphasis": False,
-        "contour": "speech",     # v10.19: φ-rhythm i pro HARMONY (90% provozu!)
+        "contour": "speech",
+        "contour_energy": 0.4,   # v10.20: jemná melodie (ne robotická)
     },
     "ALERT": {
         "style": "empathetic",
@@ -61,13 +62,14 @@ VOICE_PROFILES = {
     "POETRY": {
         "style": "friendly",
         "styledegree": "2.0",
-        "rate": "-15%",
-        "pitch": "+2%",
+        "rate": "-12%",          # v10.20: přirozené tempo recitace
+        "pitch": "+4%",          # v10.20: výrazný teplý tón
         "volume": "loud",
-        "pause_ms": 800,
+        "pause_ms": 1000,        # v10.20: dramatické pauzy mezi verši
         "emphasis": False,
         "poetry_mode": True,
-        "contour": "recitation", # v10.19: expresivní φ-křivka pro básně
+        "contour": "recitation",
+        "contour_energy": 0.8,   # v10.20: expresivní melodie
     },
     "NARRATION": {
         "style": "friendly",
@@ -113,12 +115,13 @@ VOICE_PROFILES = {
     "RHYTHMIC": {
         "style": "friendly",
         "styledegree": "2.0",
-        "rate": "-8%",
-        "pitch": "+1%",
+        "rate": "-8%",           # v10.20: pomalejší = melodičtější
+        "pitch": "+3%",          # v10.20: výraznější pitch lift
         "volume": "loud",
-        "pause_ms": 500,
+        "pause_ms": 618,         # φ-pauza
         "emphasis": False,
-        "contour": "speech",     # → voice_melody.get_voice_contour(mode='speech')
+        "contour": "speech",
+        "contour_energy": 0.7,   # v10.20: výrazná melodie
     },
 }
 
@@ -332,41 +335,84 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
         except Exception as e:
             logger.info(f"⚠️ Voice learning failed for {user_id}: {e}")
 
-    # Add pauses between sentences (with variability)
-    pause = _add_pause_variability(profile["pause_ms"])
+    # v10.20: PER-SENTENCE prosody with individual φ-contour
+    # Each sentence gets its own pitch curve → natural intonation
+    pause_ms = _add_pause_variability(profile["pause_ms"])
     is_poetry = profile.get("poetry_mode", False)
-    styled_text = _add_sentence_pauses(text, pause, poetry_mode=is_poetry)
-
-    # Add emphasis in ALERT/CRISIS
-    if profile["emphasis"]:
-        styled_text = _add_emphasis(styled_text)
-
-    # v10.19: Melodic contour (φ-řízená intonace)
-    # Connected to ALL voice profiles (except CRISIS and NEWS = flat)
-    contour_attr = ""
     contour_type = profile.get("contour")
-    if contour_type:
-        try:
-            from voice_melody import get_voice_contour
-            # v10.19: Energy from learned preferences (set by apply_voice_learning)
-            _energy = profile.get('learned_energy', 0.5)
-            contour = get_voice_contour(text, mode=contour_type, energy=_energy, user_id=user_id)
-            if contour:
-                contour_attr = f' contour="{contour}"'
-                overrides.append(f"φ-contour:{contour_type}:e{_energy:.1f}")
-        except (ImportError, Exception) as e:
-            logger.info(f"⚠️ Contour generation FAILED for mode={mode}: {e}")
+    # v10.20: Profile-specific energy → learned energy → default
+    _energy = profile.get('learned_energy', profile.get('contour_energy', 0.5))
+
+    # Split text into sentences
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    if not sentences:
+        sentences = [text]
+
+    # Build per-sentence SSML blocks
+    sentence_blocks = []
+    contour_used = False
+
+    for i, sentence in enumerate(sentences):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+
+        safe_sentence = xml_escape(sentence)
+
+        # Emphasis for ALERT/CRISIS
+        if profile["emphasis"]:
+            safe_sentence = _add_emphasis(safe_sentence)
+
+        # Poetry: verse-aware pauses within sentence
+        if is_poetry:
+            safe_sentence = _add_poetry_pauses(safe_sentence)
+
+        # Per-sentence contour (each sentence has its own melodic curve)
+        contour_attr = ""
+        if contour_type:
+            try:
+                from voice_melody import get_voice_contour
+                contour = get_voice_contour(sentence, mode=contour_type, energy=_energy, user_id=user_id)
+                if contour:
+                    contour_attr = f' contour="{contour}"'
+                    contour_used = True
+            except (ImportError, Exception):
+                pass
+
+        # Slight pitch variation per sentence position (natural declination)
+        # First sentence: +2Hz lift, last: -2Hz drop, middle: base
+        pitch_mod = profile['pitch']
+        if len(sentences) > 1:
+            if i == 0:
+                # Opening — slightly higher pitch
+                base_pitch = int(pitch_mod.replace('%', '').replace('+', ''))
+                pitch_mod = f"+{base_pitch + 2}%"
+            elif i == len(sentences) - 1:
+                # Closing — slightly lower
+                base_pitch = int(pitch_mod.replace('%', '').replace('+', ''))
+                pitch_mod = f"+{max(0, base_pitch - 1)}%"
+
+        sentence_blocks.append(
+            f'<prosody rate="{profile["rate"]}" pitch="{pitch_mod}" volume="{profile["volume"]}"{contour_attr}>'
+            f'{safe_sentence}</prosody>'
+        )
+
+        # Add pause between sentences (not after last)
+        if i < len(sentences) - 1:
+            sentence_blocks.append(f'<break time="{pause_ms}ms"/>')
+
+    if contour_used:
+        overrides.append(f"φ-contour:{contour_type}:e{_energy:.1f}:s{len(sentences)}")
 
     if overrides:
         logger.info(f"TTS [{mode}] {len(text)}ch overrides=[{','.join(overrides)}]")
 
+    inner_ssml = "\n            ".join(sentence_blocks)
     ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
            xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="cs-CZ">
     <voice name="{voice}">
         <mstts:express-as style="{profile['style']}" styledegree="{profile['styledegree']}">
-            <prosody rate="{profile['rate']}" pitch="{profile['pitch']}" volume="{profile['volume']}"{contour_attr}>
-                {styled_text}
-            </prosody>
+            {inner_ssml}
         </mstts:express-as>
     </voice>
 </speak>'''

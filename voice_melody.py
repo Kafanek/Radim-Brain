@@ -207,10 +207,10 @@ def generate_speech_contour(text, mood='neutral', energy=0.5):
     if not text or energy < 0.1:
         return None
 
-    # v10.17: Azure needs ±30Hz minimum for audible pitch change
-    # Previous: energy*50 → max 25Hz at 0.5 energy → INAUDIBLE
-    max_hz = int(30 + energy * 50)  # 30-80Hz range
-    if max_hz < 15:
+    # v10.20: Calibrated amplitude for cs-CZ-AntoninNeural
+    # Low energy (0.3-0.4) = subtle warmth, high (0.7-0.8) = expressive melodic
+    max_hz = int(20 + energy * 60)  # 20-80Hz range
+    if max_hz < 10:
         return None
 
     # Mood modifiers (v10.17: increased for audibility)
@@ -225,35 +225,43 @@ def generate_speech_contour(text, mood='neutral', energy=0.5):
     is_question = text.rstrip().endswith('?')
     is_exclamation = text.rstrip().endswith('!')
 
-    # Generuj φ-řízenou křivku
+    # Generuj φ-řízenou křivku (per-sentence, high resolution)
     points = []
-    num_points = 8  # Rozlišení křivky
+    num_points = 6  # v10.20: fewer points = smoother Azure interpolation
 
     for i in range(num_points + 1):
         pct = int(i * 100 / num_points)
         t = i / num_points  # 0.0 - 1.0
 
-        # φ-řízená intonace
+        # v10.20: φ-řízená intonace per sentence type
         if is_question:
-            # Otázka: klidný start, mírný pokles, stoupá na konci
-            hz = max_hz * (-0.3 * t + 0.8 * t * t) + base_offset
-        elif is_exclamation:
-            # Vykřičník: sharp peak na 50%, rychlý pokles
-            peak = math.exp(-((t - 0.5) ** 2) / 0.05) * max_hz
-            hz = peak + base_offset
-        else:
-            # Oznamovací: φ-křivka
-            # Stoupá do φ⁻¹ (38.2%), pak klesá
-            if t < PSI:
-                # Stoupání (0 → peak)
-                hz = max_hz * (t / PSI) + base_offset
-            elif t < PHI_INV:
-                # Plateau (peak)
-                hz = max_hz + base_offset
+            # Otázka: klidný start → pokles → výrazné stoupání na konci
+            if t < 0.6:
+                hz = max_hz * 0.2 * math.sin(t * math.pi) + base_offset
             else:
-                # Pokles (peak → 0)
+                # Stoupání od 60% do konce
+                rise = (t - 0.6) / 0.4
+                hz = max_hz * (0.3 + 0.7 * rise * rise) + base_offset
+        elif is_exclamation:
+            # Vykřičník: rychlý peak na 30%, pak energický pokles
+            if t < 0.3:
+                hz = max_hz * (t / 0.3) + base_offset
+            else:
+                hz = max_hz * (1.0 - (t - 0.3) / 0.7) * 0.8 + base_offset
+        else:
+            # Oznamovací: φ-křivka (přirozená čeština)
+            # Čeština stoupá do ~40% věty, pak postupně klesá
+            if t < PSI:
+                # Stoupání (0 → peak) — sinusová křivka pro plynulost
+                hz = max_hz * math.sin(t / PSI * math.pi / 2) + base_offset
+            elif t < PHI_INV:
+                # Plateau s mírným poklesem
+                plateau_t = (t - PSI) / (PHI_INV - PSI)
+                hz = max_hz * (1.0 - 0.15 * plateau_t) + base_offset
+            else:
+                # Pokles (peak → low) — klesající čeština na konci věty
                 descent_progress = (t - PHI_INV) / (1.0 - PHI_INV)
-                hz = max_hz * (1.0 - descent_progress) + base_offset
+                hz = max_hz * (0.85 - 0.85 * descent_progress) + base_offset
 
         points.append(f"({pct}%,{int(hz):+d}Hz)")
 
