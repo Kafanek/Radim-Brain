@@ -29,99 +29,94 @@ VOICE_PROFILES = {
     "HARMONY": {
         "style": "friendly",
         "styledegree": "2.0",
-        "rate": "-3%",           # v10.20: téměř přirozená rychlost
-        "pitch": "+2%",          # v10.20: teplejší base pitch
+        "rate": "-3%",
+        "pitch": "-3%",          # v10.21: hlubší Radim (přání uživatele)
         "volume": "loud",
-        "pause_ms": 618,         # v10.20: φ-pauza (zlatý řez)
+        "pause_ms": 618,
         "emphasis": False,
         "contour": "speech",
-        "contour_energy": 0.4,   # v10.20: jemná melodie (ne robotická)
+        "contour_energy": 0.4,
     },
     "ALERT": {
         "style": "empathetic",
         "styledegree": "1.5",
         "rate": "-18%",
-        "pitch": "+0%",
+        "pitch": "-5%",          # v10.21: hlubší = uklidňující
         "volume": "loud",
         "pause_ms": 1000,
         "emphasis": True,
-        "contour": "speech",     # v10.19: empathetic contour
+        "contour": "speech",
     },
     "CRISIS": {
         "style": "calm",
         "styledegree": "2.0",
         "rate": "-25%",
-        "pitch": "-3%",
+        "pitch": "-8%",          # v10.21: nejhlubší = maximálně klidný
         "volume": "x-loud",
-        "pause_ms": 1618,        # φ × 1000
+        "pause_ms": 1618,
         "emphasis": True,
-        # NO contour — crisis = flat, calming, no melodic variation
     },
-    # ── v10.15: Context modes — prosody-based (Antonín ignores express-as styles) ──
-    # Only rate/pitch/volume/pauses make audible difference for cs-CZ-AntoninNeural
     "POETRY": {
         "style": "friendly",
         "styledegree": "2.0",
-        "rate": "-12%",          # v10.20: přirozené tempo recitace
-        "pitch": "+4%",          # v10.20: výrazný teplý tón
+        "rate": "-12%",
+        "pitch": "-2%",          # v10.21: hlubší recitace (mužský přednes)
         "volume": "loud",
-        "pause_ms": 1000,        # v10.20: dramatické pauzy mezi verši
+        "pause_ms": 1000,
         "emphasis": False,
         "poetry_mode": True,
         "contour": "recitation",
-        "contour_energy": 0.8,   # v10.20: expresivní melodie
+        "contour_energy": 0.8,
     },
     "NARRATION": {
         "style": "friendly",
         "styledegree": "1.0",
         "rate": "-18%",
-        "pitch": "+2%",
+        "pitch": "-3%",          # v10.21: hlubší vypravěč
         "volume": "loud",
         "pause_ms": 1000,
         "emphasis": False,
-        "contour": "speech",     # v10.19: přirozená intonace pro vyprávění
+        "contour": "speech",
     },
     "NEWS": {
         "style": "friendly",
         "styledegree": "1.0",
         "rate": "-5%",
-        "pitch": "+0%",
+        "pitch": "-2%",          # v10.21: hlubší zpravodaj
         "volume": "loud",
         "pause_ms": 500,
         "emphasis": False,
-        # NO contour — news = flat, informational, no melodic variation
     },
     "EDUCATION": {
         "style": "friendly",
         "styledegree": "1.0",
         "rate": "-18%",
-        "pitch": "+3%",
+        "pitch": "-2%",          # v10.21: hlubší učitel
         "volume": "loud",
         "pause_ms": 1000,
         "emphasis": True,
-        "contour": "speech",     # v10.19: jasná intonace pro učení
+        "contour": "speech",
     },
-    # ── v10.17: Melodic voice modes ──
     "SINGING": {
         "style": "friendly",
         "styledegree": "2.0",
         "rate": "-30%",
-        "pitch": "+0%",
+        "pitch": "-3%",          # v10.21: hlubší zpěv (bariton)
         "volume": "loud",
         "pause_ms": 300,
         "emphasis": False,
-        "contour": "song",       # → voice_melody.get_voice_contour(mode='song')
+        "contour": "song",
     },
     "RHYTHMIC": {
         "style": "friendly",
         "styledegree": "2.0",
-        "rate": "-8%",           # v10.20: pomalejší = melodičtější
-        "pitch": "+3%",          # v10.20: výraznější pitch lift
+        "rate": "-8%",
+        "pitch": "-2%",          # v10.21: hlubší melodický
         "volume": "loud",
-        "pause_ms": 618,         # φ-pauza
+        "pause_ms": 618,
         "emphasis": False,
         "contour": "speech",
-        "contour_energy": 0.7,   # v10.20: výrazná melodie
+        "contour_energy": 0.7,
     },
 }
 
@@ -399,7 +394,7 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
 
         # Poetry: verse-aware pauses within sentence
         if is_poetry:
-            safe_sentence = _add_poetry_pauses(safe_sentence)
+            safe_sentence = _add_poetry_pauses(safe_sentence, pause_ms)
 
         # Per-sentence contour (each sentence has its own melodic curve)
         contour_attr = ""
