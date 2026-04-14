@@ -686,13 +686,13 @@ def radim_chat():
             except Exception:
                 pass
 
-        # Process AI actions (create_task, log_health from ---RADIM_ACTION---)
-        if action_json and _ORCH_TASK_SERVICE:
+        # Process AI actions (create_task, log_health, create_event from ---RADIM_ACTION---)
+        if action_json:
             try:
                 action_type = action_json.get('type', 'none')
                 payload = action_json.get('payload', {})
 
-                if action_type == 'create_task':
+                if action_type == 'create_task' and _ORCH_TASK_SERVICE:
                     task = _ts_create(
                         user_id=user_id,
                         title=payload.get('title', 'Připomínka od Radima'),
