@@ -121,22 +121,30 @@ def _build_time_context():
 # Orchestrator-specific action hint (appended to system prompt)
 _ORCH_ACTION_HINT = """
 
-TECHNICKÁ POZNÁMKA (ignoruj ji v konverzaci, slouží jen pro systém):
-Pokud uživatel žádá konkrétní akci, přidej na konec:
+SYSTÉMOVÉ INSTRUKCE PRO AKCE:
+Když uživatel žádá akci, VŽDY přidej blok na konec odpovědi (za text pro uživatele):
 ---RADIM_ACTION---
-{"type": "TYP", "payload": {…}}
+{"type": "TYP", "payload": {"title": "...", "date": "YYYY-MM-DD", "time": "HH:MM"}}
 ---END_ACTION---
 
-Typy akcí:
-- create_task: připomínka, úkol → payload: {title, time, date, task_type: "reminder"}
-- create_event: událost do KALENDÁŘE (schůzka, návštěva, narozeniny) → payload: {title, date, time, type: "appointment|birthday|event", description, location}
-- log_health: záznam zdraví/léků → payload: {medication, dosage, notes}
-- safety_alert: krizová situace → payload: {severity, message}
-- none: žádná akce
+AKCE:
+1. create_event — schůzka, návštěva, narozeniny, událost do kalendáře
+   Příklad: "Přidej schůzku s doktorem na zítra v 10"
+   → {"type":"create_event","payload":{"title":"Schůzka s doktorem","date":"2026-04-15","time":"10:00","type":"appointment"}}
 
-DŮLEŽITÉ: Schůzky, návštěvy lékaře, narozeniny → VŽDY type="create_event" (NE create_task).
-Připomínky (léky, úkoly) → create_task.
-Pokud akce není potřeba, nepřidávej nic."""
+2. create_task — připomínka, úkol (NE schůzka)
+   Příklad: "Připomni mi zavolat dceři"
+   → {"type":"create_task","payload":{"title":"Zavolat dceři","task_type":"reminder"}}
+
+3. log_health — záznam léků/zdraví
+   → {"type":"log_health","payload":{"medication":"warfarin","dosage":"5mg"}}
+
+PRAVIDLA:
+- Schůzky, návštěvy, narozeniny = VŽDY create_event
+- Připomínky = create_task
+- NEPTAT SE na detaily pokud jsou v textu — rovnou vytvořit
+- Datum "zítra" = spočítej konkrétní YYYY-MM-DD
+- Pokud akce není potřeba, nepřidávej blok"""
 
 
 def _get_dynamic_system_prompt(mode='senior'):
