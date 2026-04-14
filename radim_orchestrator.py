@@ -721,10 +721,11 @@ def radim_chat():
                         _evt_date = payload.get('date') or extract_date(message) or datetime.utcnow().strftime('%Y-%m-%d')
                         _evt_time = payload.get('time') or extract_time(message) or ''
                         _evt_type = payload.get('type', 'event')
+                        logger.info(f"📅 Creating event: '{_evt_title}' {_evt_date} {_evt_time} for {user_id}")
 
                         # 1. Uložit do kalendáře
+                        from database import db_insert
                         with db_context(commit=True) as _edb:
-                            from database import db_insert
                             eid = db_insert(_edb, 'calendar_events',
                                 ['user_id', 'title', 'date', 'time', 'type', 'description', 'location', 'reminder'],
                                 [user_id, _evt_title, _evt_date, _evt_time, _evt_type,
@@ -753,7 +754,7 @@ def radim_chat():
                                 pass  # Task creation is optional
 
                     except Exception as cal_err:
-                        logger.warning(f"Calendar create: {cal_err}")
+                        logger.error(f"❌ Calendar create FAILED: {cal_err}", exc_info=True)
 
             except Exception as act_err:
                 logger.warning(f"Action processing warning: {act_err}")
