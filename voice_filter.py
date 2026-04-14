@@ -97,12 +97,13 @@ VOICE_PROFILES = {
     "SINGING": {
         "style": "friendly",
         "styledegree": "2.0",
-        "rate": "-25%",          # zpěvné tempo
-        "pitch": "-3%",          # bariton
+        "rate": "-15%",          # v10.22: mezi řečí a zpěvem — hravé tempo
+        "pitch": "-2%",          # mírně hlubší
         "volume": "loud",
-        "pause_ms": 300,
+        "pause_ms": 400,
         "emphasis": False,
-        "contour": "song",       # JEDINÝ mode s contour — melodie z databáze písní
+        "contour": "song",       # melodie z databáze písní — Radim si hraje s jazykem
+        "contour_scale": 1.5,    # v10.22: 1.5× intenzivnější melodie
     },
     "RHYTHMIC": {
         "style": "friendly",
@@ -399,6 +400,14 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
                 from voice_melody import get_voice_contour
                 contour = get_voice_contour(sentence, mode=contour_type, energy=_energy, user_id=user_id)
                 if contour:
+                    # v10.22: Scale contour intensity
+                    _scale = profile.get('contour_scale', 1.0)
+                    if _scale != 1.0:
+                        import re as _re
+                        def _scale_hz(m):
+                            val = int(int(m.group(1)) * _scale)
+                            return f'{val:+d}Hz'
+                        contour = _re.sub(r'([+-]?\d+)Hz', _scale_hz, contour)
                     contour_attr = f' contour="{contour}"'
                     contour_used = True
             except (ImportError, Exception):
