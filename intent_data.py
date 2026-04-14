@@ -411,6 +411,27 @@ INTENTS = [
         "handler": "who_am_i",
     },
     # ═══════════════════════════════════════════════════════════════
+    # 🎼 MUSIC INTENTS
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "name": "music",
+        "patterns": [
+            r"zahraj\s+(?:noty?|not)\s+",
+            r"přehraj\s+(?:noty?|not)\s+",
+            r"hraj\s+(?:noty?|not)\s+",
+            r"nauč\s+se\s+(?:píseň|písničku|melodii|pisnicku|pisn)",
+            r"nauc\s+se\s+(?:pisen|melodii)",
+            r"zapamatuj\s+(?:si\s+)?(?:píseň|melodii)",
+            r"co\s+je\s+nota\s+",
+            r"jaká\s+(?:je\s+)?frekvenc",
+            r"kolik\s+(?:je|má)\s+(?:nota|tón|hz)",
+            r"fibonacci\s+melodi",
+            r"zlatý\s+(?:řez|interval)",
+            r"zlaty\s+(?:rez|interval)",
+        ],
+        "handler": "music",
+    },
+    # ═══════════════════════════════════════════════════════════════
     # 🏠 HOME ASSISTANT INTENTS
     # ═══════════════════════════════════════════════════════════════
     {

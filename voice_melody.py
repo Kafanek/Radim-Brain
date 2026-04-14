@@ -264,24 +264,58 @@ def generate_speech_contour(text, mood='neutral', energy=0.5):
 # COMBINED BUILDER
 # ============================================
 
-def get_voice_contour(text, mode='speech', mood='neutral', energy=0.5):
+def get_voice_contour(text, mode='speech', mood='neutral', energy=0.5, user_id=None):
     """Hlavní API — vrací contour string pro SSML.
 
     Args:
         text: text k vyslovení
-        mode: 'song' (hledá píseň), 'speech' (přirozená intonace), 'recitation' (expresivní)
+        mode: 'song' (hledá píseň), 'speech' (přirozená intonace),
+              'recitation' (expresivní), 'musical' (noty/Fibonacci)
         mood: nálada ovlivňující křivku
         energy: 0.0-1.0 melodičnost
+        user_id: pro melodickou paměť (naučené písně)
 
     Returns: contour string or None
     """
     if mode == 'song':
+        # 1. Hardcoded songs
         song = match_song(text)
         if song:
             logger.info(f"🎵 Song matched: {song['title']}")
             return build_song_contour(song)
-        # Fallback na speech contour pokud píseň nerozpoznána
+
+        # 2. Learned melodies (music engine)
+        try:
+            from voice_music import enhanced_match_song
+            contour, mel = enhanced_match_song(text)
+            if contour:
+                logger.info(f"🎼 Learned melody matched: {mel.get('title', '?')}")
+                return contour
+        except (ImportError, Exception) as e:
+            logger.debug(f"Music engine: {e}")
+
+        # 3. Fallback: generate φ-melody for the text
+        try:
+            from voice_music import generate_phi_melody
+            contour, notes = generate_phi_melody(text, mood=mood, energy=max(0.7, energy))
+            if contour:
+                logger.info(f"🎼 Generated φ-melody: {len(notes)} notes")
+                return contour
+        except (ImportError, Exception):
+            pass
+
         return generate_speech_contour(text, mood='happy', energy=max(0.7, energy))
+
+    elif mode == 'musical':
+        # Direct notation: "C4 D4 E4 F4 G4"
+        try:
+            from voice_music import notation_to_contour
+            contour = notation_to_contour(text)
+            if contour:
+                return contour
+        except (ImportError, Exception):
+            pass
+        return generate_speech_contour(text, mood=mood, energy=max(0.7, energy))
 
     elif mode == 'recitation':
         # Recitace = zvýšená energy (expresivnější křivka)

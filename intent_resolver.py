@@ -154,6 +154,69 @@ def _handle_how_are_you(**kwargs):
     return random.choice(_HOW_ARE_YOU_REPLIES)
 
 
+def _handle_music(**kwargs):
+    """Handle music-related commands: play notes, teach song, analyze."""
+    message = kwargs.get('message', '')
+    user_id = kwargs.get('user_id')
+    lower = message.lower()
+
+    try:
+        from voice_music import (
+            note_to_hz, parse_notation, analyze_melody,
+            teach_radim_song, fibonacci_melody, phi_interval
+        )
+
+        # "zahraj C D E F G" / "přehraj noty do re mi"
+        note_match = re.search(r'(?:zahraj|přehraj|hraj)\s+(?:noty?\s+)?(.+)', lower)
+        if note_match:
+            notation = note_match.group(1).strip()
+            notes = parse_notation(notation)
+            if notes and len(notes) >= 2:
+                analysis = analyze_melody(notation)
+                return (f"🎼 Slyším {len(notes)} not! Rozsah {analysis.get('range_cents', 0)} centů "
+                        f"({analysis.get('range_octaves', 0)} oktáv). "
+                        f"Fibonacci intervaly: {analysis.get('fibonacci_intervals', '?')}. "
+                        f"Přehrávám...")
+
+        # "nauč se píseň X: C4 D4 E4..."
+        teach_match = re.search(r'(?:nauč\s+se|nauc\s+se|zapamatuj)\s+(?:píseň|pisnicku|melodii)?\s*[:\-]?\s*(.+)', lower)
+        if teach_match:
+            parts = teach_match.group(1).split(':')
+            if len(parts) >= 2:
+                title = parts[0].strip()
+                notation = parts[1].strip()
+                if teach_radim_song(title, notation, user_id=user_id):
+                    notes = parse_notation(notation)
+                    return f"🎵 Naučil jsem se '{title}'! Má {len(notes)} not. Příště řekněte 'zazpívej {title}' a zahraju."
+            return "Řekněte: nauč se píseň Název: C4 D4 E4 F4 G4"
+
+        # "co je nota C4" / "jaká frekvence má A"
+        note_q = re.search(r'(?:co je|jaká|kolik)\s+(?:nota|frekvenc|tón)\s+(\w+)', lower)
+        if note_q:
+            note = note_q.group(1)
+            hz = note_to_hz(note)
+            if hz:
+                return f"🎵 Nota {note.upper()} má frekvenci {hz} Hz."
+
+        # "Fibonacci melodie"
+        if 'fibonacci' in lower or 'zlatý řez' in lower or 'zlaty rez' in lower:
+            melody = fibonacci_melody('C4', 8, 'pentatonic')
+            notes_str = ", ".join(f"{n[0]}={n[1]}Hz" for n in melody)
+            return f"🎼 Fibonacci melodie (pentatonická): {notes_str}. Krásná, že? Fibonacci čísla na stupnici vytvářejí přirozeně znějící melodii."
+
+        # "φ interval" / "zlatý interval"
+        if 'interval' in lower and ('phi' in lower or 'φ' in lower or 'zlat' in lower):
+            phi = phi_interval()
+            return (f"🎼 Zlatý interval (φ = {PHI:.3f}) odpovídá {phi['phi_cents']} centů — "
+                    f"leží mezi {phi['nearest_below']['name']} a {phi['nearest_above']['name']}. "
+                    f"Je to nejpříjemnější interval v přírodě!")
+
+    except (ImportError, Exception) as e:
+        logger.debug(f"Music intent: {e}")
+
+    return None  # Let AI handle it
+
+
 def _handle_my_medications(**kwargs):
     """Return senior's medication list from profile."""
     user_id = kwargs.get("user_id")
@@ -417,6 +480,8 @@ _HANDLERS = {
     "my_medications": _handle_my_medications,
     "weather": _handle_weather,
     "who_am_i": _handle_who_am_i,
+    # 🎼 Music
+    "music": _handle_music,
     # 🏠 Home Assistant
     "ha_light_on": _handle_ha_light_on,
     "ha_light_off": _handle_ha_light_off,

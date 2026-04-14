@@ -742,22 +742,37 @@ def radim_chat():
         except Exception as ae:
             logger.debug(f"Anticipation rhythm: {ae}")
 
-        # v10.17: Autonomous voice mode selection for HTTP endpoint
+        # v10.18: Autonomous voice mode selection for HTTP endpoint
         _voice_mode = _brain_mode_val or 'HARMONY'
         try:
             from voice_melody import match_song
             from voice_learning import should_use_melody
 
-            if text_response and match_song(text_response):
+            # Music intent → SINGING
+            _final_intent = _resolved_intent if _INTENT_RESOLVER else intent
+            if _final_intent == 'music':
                 _voice_mode = 'SINGING'
-            elif _brain_mode_val in ('CRISIS', 'ALERT'):
-                _voice_mode = _brain_mode_val
-            elif _brain_mode_val == 'HARMONY' and user_id:
-                if should_use_melody(str(user_id)):
-                    _voice_mode = 'RHYTHMIC'
-                    hour = datetime.utcnow().hour + 1  # CET ≈ UTC+1
-                    if hour < 6 or hour > 21:
-                        _voice_mode = 'HARMONY'
+            elif text_response and match_song(text_response):
+                _voice_mode = 'SINGING'
+            # Also check learned melodies
+            elif text_response:
+                try:
+                    from voice_music import enhanced_match_song
+                    _mc, _md = enhanced_match_song(text_response)
+                    if _mc:
+                        _voice_mode = 'SINGING'
+                except (ImportError, Exception):
+                    pass
+
+            if _voice_mode not in ('SINGING',):
+                if _brain_mode_val in ('CRISIS', 'ALERT'):
+                    _voice_mode = _brain_mode_val
+                elif _brain_mode_val == 'HARMONY' and user_id:
+                    if should_use_melody(str(user_id)):
+                        _voice_mode = 'RHYTHMIC'
+                        hour = datetime.utcnow().hour + 1  # CET ≈ UTC+1
+                        if hour < 6 or hour > 21:
+                            _voice_mode = 'HARMONY'
         except (ImportError, Exception):
             pass
 
