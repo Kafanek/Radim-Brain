@@ -38,12 +38,12 @@ def get_events():
         with db_context() as db:
             if date_from and date_to:
                 db.execute(
-                    "SELECT * FROM calendar_events WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date, time",
+                    "SELECT id, user_id, title, date, time, description, type, color, reminder, repeat_type, location FROM calendar_events WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date, time",
                     (user_id, date_from, date_to)
                 )
             else:
                 db.execute(
-                    "SELECT * FROM calendar_events WHERE user_id = ? ORDER BY date DESC, time LIMIT 100",
+                    "SELECT id, user_id, title, date, time, description, type, color, reminder, repeat_type, location FROM calendar_events WHERE user_id = ? ORDER BY date DESC, time LIMIT 100",
                     (user_id,)
                 )
             rows = db.fetchall()
@@ -51,16 +51,16 @@ def get_events():
         events = []
         for r in rows:
             events.append({
-                'id': r['id'],
-                'title': r['title'],
-                'date': r['date'],
-                'time': r['time'] or '',
-                'description': r['description'] or '',
-                'type': r['type'] or 'event',
-                'color': r['color'] or '#5BA8A0',
-                'reminder': bool(r['reminder']),
-                'repeat': r['repeat_type'] or 'none',
-                'location': r['location'] or '',
+                'id': r[0],
+                'title': r[2],
+                'date': r[3],
+                'time': r[4] or '',
+                'description': r[5] or '',
+                'type': r[6] or 'event',
+                'color': r[7] or '#5BA8A0',
+                'reminder': bool(r[8]),
+                'repeat': r[9] or 'none',
+                'location': r[10] or '',
             })
 
         return jsonify({'success': True, 'events': events, 'count': len(events)})
@@ -165,15 +165,11 @@ def get_today():
         if user_id:
             with db_context() as db:
                 db.execute(
-                    "SELECT * FROM calendar_events WHERE user_id = ? AND date = ? ORDER BY time",
+                    "SELECT id, title, time, type FROM calendar_events WHERE user_id = ? AND date = ? ORDER BY time",
                     (user_id, today)
                 )
-                rows = db.fetchall()
-                for r in rows:
-                    events.append({
-                        'id': r['id'], 'title': r['title'],
-                        'time': r['time'] or '', 'type': r['type'] or 'event'
-                    })
+                for r in db.fetchall():
+                    events.append({'id': r[0], 'title': r[1], 'time': r[2] or '', 'type': r[3] or 'event'})
 
         # Upcoming 7 days
         upcoming = []
@@ -181,14 +177,11 @@ def get_today():
             week_later = (datetime.utcnow() + timedelta(days=7)).strftime('%Y-%m-%d')
             with db_context() as db:
                 db.execute(
-                    "SELECT * FROM calendar_events WHERE user_id = ? AND date > ? AND date <= ? ORDER BY date, time LIMIT 10",
+                    "SELECT id, title, date, time, type FROM calendar_events WHERE user_id = ? AND date > ? AND date <= ? ORDER BY date, time LIMIT 10",
                     (user_id, today, week_later)
                 )
                 for r in db.fetchall():
-                    upcoming.append({
-                        'id': r['id'], 'title': r['title'],
-                        'date': r['date'], 'time': r['time'] or '', 'type': r['type'] or 'event'
-                    })
+                    upcoming.append({'id': r[0], 'title': r[1], 'date': r[2], 'time': r[3] or '', 'type': r[4] or 'event'})
 
         return jsonify({
             'success': True,
