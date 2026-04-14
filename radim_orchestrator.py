@@ -369,6 +369,27 @@ def radim_chat():
         except Exception:
             pass
 
+        # v10.22: Exercise suggestions based on brain/rhythm state
+        try:
+            _hour = datetime.utcnow().hour + 1  # CET
+            _exercise_hint = None
+            if rhythm_meta:
+                _stress = rhythm_meta.get('stress', 0)
+                _energy = rhythm_meta.get('energy', 0.5)
+                if _stress > 0.6:
+                    _exercise_hint = "Senior je ve stresu → navrhni dechové cvičení (relaxační dýchání 4-7-8)."
+                elif _energy < 0.3 and 8 <= _hour <= 11:
+                    _exercise_hint = "Senior má nízkou energii ráno → navrhni ranní protažení nebo energizující dýchání."
+                elif _energy > 0.7:
+                    _exercise_hint = "Senior má vysokou energii → navrhni paměťovou hru nebo trénink rovnováhy."
+            elif 8 <= _hour <= 10:
+                _exercise_hint = "Je ráno — můžeš nabídnout ranní protažení nebo dechové cvičení."
+
+            if _exercise_hint:
+                personalized += f'\n\n═══ CVIČENÍ ═══\n{_exercise_hint}\n'
+        except Exception:
+            pass
+
         # Text Rhythm: matematika → styl textu
         anticipation_prompt = ''
         anticipation_meta = None
