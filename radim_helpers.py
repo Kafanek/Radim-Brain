@@ -122,10 +122,20 @@ def _build_time_context():
 _ORCH_ACTION_HINT = """
 
 TECHNICKÁ POZNÁMKA (ignoruj ji v konverzaci, slouží jen pro systém):
-Pokud uživatel žádá konkrétní akci (připomínka, úkol, záznam), přidej na konec:
+Pokud uživatel žádá konkrétní akci, přidej na konec:
 ---RADIM_ACTION---
-{"type": "create_task|update_task|log_health|safety_alert|none", "payload": {}, "ui": {"suggested_buttons": []}}
+{"type": "TYP", "payload": {…}}
 ---END_ACTION---
+
+Typy akcí:
+- create_task: připomínka, úkol → payload: {title, time, date, task_type: "reminder"}
+- create_event: událost do KALENDÁŘE (schůzka, návštěva, narozeniny) → payload: {title, date, time, type: "appointment|birthday|event", description, location}
+- log_health: záznam zdraví/léků → payload: {medication, dosage, notes}
+- safety_alert: krizová situace → payload: {severity, message}
+- none: žádná akce
+
+DŮLEŽITÉ: Schůzky, návštěvy lékaře, narozeniny → VŽDY type="create_event" (NE create_task).
+Připomínky (léky, úkoly) → create_task.
 Pokud akce není potřeba, nepřidávej nic."""
 
 

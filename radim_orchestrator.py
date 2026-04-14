@@ -717,19 +717,41 @@ def radim_chat():
                 # v10.22: Calendar — AI creates events
                 elif action_type == 'create_event':
                     try:
+                        _evt_title = payload.get('title', 'Událost od Radima')
+                        _evt_date = payload.get('date') or extract_date(message) or datetime.utcnow().strftime('%Y-%m-%d')
+                        _evt_time = payload.get('time') or extract_time(message) or ''
+                        _evt_type = payload.get('type', 'event')
+
+                        # 1. Uložit do kalendáře
                         with db_context(commit=True) as _edb:
                             from database import db_insert
                             eid = db_insert(_edb, 'calendar_events',
-                                ['user_id', 'title', 'date', 'time', 'type', 'description'],
-                                [user_id,
-                                 payload.get('title', 'Událost od Radima'),
-                                 payload.get('date') or extract_date(message) or datetime.utcnow().strftime('%Y-%m-%d'),
-                                 payload.get('time') or extract_time(message) or '',
-                                 payload.get('type', 'event'),
-                                 payload.get('description', '')]
+                                ['user_id', 'title', 'date', 'time', 'type', 'description', 'location', 'reminder'],
+                                [user_id, _evt_title, _evt_date, _evt_time, _evt_type,
+                                 payload.get('description', ''),
+                                 payload.get('location', ''),
+                                 1]  # reminder=1 → auto-create task
                             )
-                        action_json['created_event'] = {'id': eid}
-                        logger.info(f"📅 AI created calendar event: #{eid} '{payload.get('title')}'")
+                        action_json['created_event'] = {'id': eid, 'title': _evt_title, 'date': _evt_date}
+                        logger.info(f"📅 Calendar event #{eid}: '{_evt_title}' {_evt_date} {_evt_time}")
+
+                        # 2. Propojit s úkoly — vytvořit připomínku
+                        if _ORCH_TASK_SERVICE:
+                            try:
+                                task = _ts_create(
+                                    user_id=user_id,
+                                    title=f"📅 {_evt_title}",
+                                    task_type='reminder',
+                                    scheduled_time=_evt_time,
+                                    scheduled_date=_evt_date,
+                                    description=f"Kalendářová událost: {_evt_title}" + (f" @ {payload.get('location','')}" if payload.get('location') else "")
+                                )
+                                if task:
+                                    action_json['created_task'] = task
+                                    logger.info(f"📋 Task #{task['id']} linked to event #{eid}")
+                            except Exception:
+                                pass  # Task creation is optional
+
                     except Exception as cal_err:
                         logger.warning(f"Calendar create: {cal_err}")
 
