@@ -26,97 +26,93 @@ logger = logging.getLogger(__name__)
 
 VOICE_PROFILES = {
     # ── Brain-state modes ──
+    # v10.22: PŘIROZENÝ HLAS — Antonín má vlastní intonaci, contour ji přepisuje
+    # Proto: contour POUZE pro SINGING (písně). Vše ostatní = Antonínova přirozená řeč
+    # + rate/pitch/pauzy pro charakter. Jednodušší = přirozenější.
     "HARMONY": {
         "style": "friendly",
         "styledegree": "2.0",
-        "rate": "-3%",
-        "pitch": "-3%",          # v10.21: hlubší Radim (přání uživatele)
+        "rate": "-5%",           # mírně pomalejší než přirozený
+        "pitch": "-3%",          # hlubší bariton
         "volume": "loud",
-        "pause_ms": 618,
+        "pause_ms": 500,         # přirozené pauzy
         "emphasis": False,
-        "contour": "speech",
-        "contour_energy": 0.4,
+        # NO contour — Antonínova vlastní intonace je nejpřirozenější
     },
     "ALERT": {
         "style": "empathetic",
         "styledegree": "1.5",
-        "rate": "-18%",
-        "pitch": "-5%",          # v10.21: hlubší = uklidňující
+        "rate": "-15%",          # pomalejší pro pochopení
+        "pitch": "-5%",          # hlubší = uklidňující
         "volume": "loud",
-        "pause_ms": 1000,
+        "pause_ms": 800,
         "emphasis": True,
-        "contour": "speech",
     },
     "CRISIS": {
         "style": "calm",
         "styledegree": "2.0",
-        "rate": "-25%",
-        "pitch": "-8%",          # v10.21: nejhlubší = maximálně klidný
+        "rate": "-20%",          # výrazně pomalejší
+        "pitch": "-8%",          # nejhlubší = maximální klid
         "volume": "x-loud",
-        "pause_ms": 1618,
+        "pause_ms": 1200,        # dlouhé pauzy
         "emphasis": True,
     },
     "POETRY": {
         "style": "friendly",
         "styledegree": "2.0",
-        "rate": "-12%",
-        "pitch": "-2%",          # v10.21: hlubší recitace (mužský přednes)
+        "rate": "-10%",          # recitační tempo
+        "pitch": "-2%",          # mírně hlubší
         "volume": "loud",
-        "pause_ms": 1000,
+        "pause_ms": 800,         # dramatické pauzy
         "emphasis": False,
         "poetry_mode": True,
-        "contour": "recitation",
-        "contour_energy": 0.8,
     },
     "NARRATION": {
         "style": "friendly",
         "styledegree": "1.0",
-        "rate": "-18%",
-        "pitch": "-3%",          # v10.21: hlubší vypravěč
+        "rate": "-12%",          # vypravěčské tempo
+        "pitch": "-3%",
         "volume": "loud",
-        "pause_ms": 1000,
+        "pause_ms": 700,
         "emphasis": False,
-        "contour": "speech",
     },
     "NEWS": {
         "style": "friendly",
         "styledegree": "1.0",
-        "rate": "-5%",
-        "pitch": "-2%",          # v10.21: hlubší zpravodaj
+        "rate": "-3%",           # skoro přirozené
+        "pitch": "-2%",
         "volume": "loud",
-        "pause_ms": 500,
+        "pause_ms": 400,
         "emphasis": False,
     },
     "EDUCATION": {
         "style": "friendly",
         "styledegree": "1.0",
-        "rate": "-18%",
-        "pitch": "-2%",          # v10.21: hlubší učitel
+        "rate": "-12%",          # pomalejší pro učení
+        "pitch": "-2%",
         "volume": "loud",
-        "pause_ms": 1000,
+        "pause_ms": 700,
         "emphasis": True,
-        "contour": "speech",
     },
     "SINGING": {
         "style": "friendly",
         "styledegree": "2.0",
-        "rate": "-30%",
-        "pitch": "-3%",          # v10.21: hlubší zpěv (bariton)
+        "rate": "-25%",          # zpěvné tempo
+        "pitch": "-3%",          # bariton
         "volume": "loud",
         "pause_ms": 300,
         "emphasis": False,
-        "contour": "song",
+        "contour": "song",       # JEDINÝ mode s contour — melodie z databáze písní
     },
     "RHYTHMIC": {
         "style": "friendly",
         "styledegree": "2.0",
         "rate": "-8%",
-        "pitch": "-2%",          # v10.21: hlubší melodický
+        "pitch": "-2%",
         "volume": "loud",
-        "pause_ms": 618,
+        "pause_ms": 500,
         "emphasis": False,
-        "contour": "speech",
-        "contour_energy": 0.7,
+        # NO contour — Antonínova přirozená intonace + pomalejší tempo
     },
 }
 
