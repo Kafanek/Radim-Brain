@@ -138,6 +138,34 @@ EMPHASIS_WORDS = {
     "léky", "lék", "tabletu", "prášek",
 }
 
+# v10.20: Czech pronunciation fixes for Azure cs-CZ-AntoninNeural
+# Applied AFTER xml_escape so SSML tags are preserved
+# Azure mispronounces "ch" /x/ as "č" /tʃ/ in some words
+_CZECH_PHONEME_FIXES = [
+    # (escaped_word_regex, ipa, display_text)
+    (r'\b[Dd]ýchejte\b', 'diːxɛjtɛ', None),
+    (r'\b[Nn]adechněte\b', 'nadɛxɲɛtɛ', None),
+    (r'\b[Vv]ydechněte\b', 'vidɛxɲɛtɛ', None),
+    (r'\b[Dd]ýchat\b', 'diːxat', None),
+    (r'\b[Dd]ýchání\b', 'diːxaɲiː', None),
+    (r'\b[Dd]ýchej\b', 'diːxɛj', None),
+]
+
+def _fix_czech_pronunciation(text):
+    """Fix Azure mispronunciations using IPA phoneme tags.
+
+    Must be called AFTER xml_escape() so the SSML tags are not escaped.
+    """
+    for pattern, ipa, display in _CZECH_PHONEME_FIXES:
+        match = re.search(pattern, text)
+        if match:
+            word = match.group(0)
+            display_text = display or word
+            replacement = f'<phoneme alphabet="ipa" ph="{ipa}">{display_text}</phoneme>'
+            text = text[:match.start()] + replacement + text[match.end():]
+    return text
+
+
 # Numbers and medicine names get emphasis automatically
 EMPHASIS_PATTERNS = [
     r'\b\d{3}\b',             # 3-digit numbers (155, 112)
@@ -359,6 +387,11 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
             continue
 
         safe_sentence = xml_escape(sentence)
+
+        # v10.20: Pronunciation fixes AFTER xml_escape (SSML tags won't be escaped)
+        # Azure cs-CZ-AntoninNeural says "dýčejte" instead of "dýchejte"
+        # Fix: use IPA phoneme tag to force correct "ch" /x/ pronunciation
+        safe_sentence = _fix_czech_pronunciation(safe_sentence)
 
         # Emphasis for ALERT/CRISIS
         if profile["emphasis"]:
