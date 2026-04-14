@@ -724,8 +724,8 @@ def radim_chat():
                         logger.info(f"📅 Creating event: '{_evt_title}' {_evt_date} {_evt_time} for {user_id}")
 
                         # 1. Uložit do kalendáře
-                        from database import db_insert
-                        with db_context(commit=True) as _edb:
+                        from database import db_insert, db_context as _evt_db_ctx
+                        with _evt_db_ctx(commit=True) as _edb:
                             eid = db_insert(_edb, 'calendar_events',
                                 ['user_id', 'title', 'date', 'time', 'type', 'description', 'location', 'reminder'],
                                 [user_id, _evt_title, _evt_date, _evt_time, _evt_type,
