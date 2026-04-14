@@ -167,7 +167,12 @@ def azure_tts_proxy():
                 except Exception:
                     pass
 
-        _mode = _context_mode or _frontend_mode or _auto_singing or _auto_rhythmic or _brain_mode or 'HARMONY'
+        # v10.20: Brain Ψ(t) ALWAYS wins for CRISIS/ALERT (safety override)
+        # Context refines within HARMONY (poetry, education, narration, singing)
+        if _brain_mode in ('CRISIS', 'ALERT'):
+            _mode = _brain_mode
+        else:
+            _mode = _auto_singing or _context_mode or _frontend_mode or _auto_rhythmic or _brain_mode or 'HARMONY'
         try:
             from voice_filter import build_radim_ssml
             ssml = build_radim_ssml(text, mode=_mode, voice=voice, user_id=uid or None)

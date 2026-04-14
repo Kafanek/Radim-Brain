@@ -731,7 +731,19 @@ def _call_senior(user_id, obs):
         }
         greeting = greetings.get(obs["type"], "Dobrý den, tady Radim. Chtěl jsem se zeptat, jak se máte.")
 
-        result = initiate_proactive_call(phone, greeting, user_id=user_id, reason=obs["type"])
+        # v10.20: Compute brain Ψ(t) → voice_mode for proactive call
+        _call_mode = 'ALERT'  # default for proactive calls
+        try:
+            from brain_core import compute_psi_state
+            from intent_resolver import quick_estimate_from_text
+            C_est, alpha_est = quick_estimate_from_text(greeting)
+            psi = compute_psi_state(C_est, alpha_est, user_id=user_id)
+            _call_mode = psi.get('mode', 'ALERT')
+            logger.info(f"📞 Proactive call brain: mode={_call_mode} for {user_id}")
+        except Exception:
+            pass
+
+        result = initiate_proactive_call(phone, greeting, user_id=user_id, reason=obs["type"], voice_mode=_call_mode)
         if result.get("success"):
             logger.info(f"📞 Proactive call to {user_id}: {result['call_sid']}")
         else:

@@ -323,6 +323,11 @@ def twiml_say(text, speech_params=None):
                 url += f'&rate={quote(str(speech_params["rate_pct"]), safe="")}'
             if speech_params.get("pitch_hz"):
                 url += f'&pitch={quote(str(speech_params["pitch_hz"]), safe="")}'
+            # v10.20: Pass brain voice_mode to TTS endpoint
+            if speech_params.get("mode"):
+                url += f'&mode={quote(str(speech_params["mode"]), safe="")}'
+            if speech_params.get("user_id"):
+                url += f'&user_id={quote(str(speech_params["user_id"]), safe="")}'
         return f'<Play>{url}</Play>'
     else:
         safe_text = xml_escape(text)
@@ -387,14 +392,40 @@ def twiml_response(twiml_xml):
 
 
 def get_ai_response_for_call(user_text, call_sid, user_id=None):
-    """Get Claude AI response for phone conversation."""
+    """Get AI response for phone conversation — through full orchestrator pipeline.
+
+    v10.20: Routes through radim_chat_internal() for brain Ψ(t) + voice_mode.
+    Falls back to direct Claude if orchestrator fails.
+    """
+    call_data = active_calls.get(call_sid, {})
+    uid = call_data.get("user_id") or user_id
+
+    # v10.20: Use orchestrator pipeline (brain Ψ, voice_mode, memory, learning)
+    try:
+        from radim_orchestrator import radim_chat_internal
+        result = radim_chat_internal(user_text, user_id=uid, mode="senior")
+        ai_text = result.get("response", "")
+        voice_mode = result.get("voice_mode", "HARMONY")
+
+        if ai_text:
+            # Record in call history
+            if call_sid in active_calls:
+                active_calls[call_sid]["history"].append({"role": "user", "content": user_text})
+                active_calls[call_sid]["history"].append({"role": "assistant", "content": ai_text})
+                active_calls[call_sid]["voice_mode"] = voice_mode
+
+            logger.info(f"📞 Call AI via orchestrator: voice_mode={voice_mode} user={uid}")
+            return ai_text
+    except Exception as orch_err:
+        logger.warning(f"📞 Orchestrator fallback: {orch_err}")
+
+    # Fallback: direct Claude (if orchestrator fails)
     if not ANTHROPIC_API_KEY:
         return "Omlouvám se, právě mám technické potíže. Zkuste to prosím za chvíli."
 
     call_data = active_calls.get(call_sid, {})
     history = call_data.get("history", [])
     caller_name = call_data.get("caller_name", "")
-    uid = call_data.get("user_id") or user_id
 
     messages = []
     for msg in history[-10:]:
@@ -503,7 +534,7 @@ def lookup_contact_phone(target, caller_phone):
 # PROACTIVE OUTBOUND CALLS (v387 — agent loop integration)
 # ============================================================================
 
-def initiate_proactive_call(phone_number, greeting, user_id=None, reason="check_in"):
+def initiate_proactive_call(phone_number, greeting, user_id=None, reason="check_in", voice_mode=None):
     """
     Initiate outbound call from Radim to a senior or caregiver.
 
@@ -538,18 +569,20 @@ def initiate_proactive_call(phone_number, greeting, user_id=None, reason="check_
         twilio_breaker = None
 
     try:
-        from xml.sax.saxutils import escape as esc
-        safe_greeting = esc(greeting)
-        safe_listen = esc("Poslouchám vás.")
+        # v10.20: Use Azure TTS with brain voice_mode (not Polly.Adela)
+        _mode = voice_mode or 'ALERT'
+        _greeting_say = twiml_say(greeting, {"mode": _mode, "user_id": user_id})
+        _listen_say = twiml_say("Poslouchám vás.", {"mode": _mode, "user_id": user_id})
+        _bye_say = twiml_say("Neslyšel jsem vás. Zkusím zavolat později.", {"mode": _mode, "user_id": user_id})
 
         twiml = (
             f'<Response>'
-            f'<Say language="cs-CZ" voice="Polly.Adela">{safe_greeting}</Say>'
+            f'{_greeting_say}'
             f'<Gather input="speech" language="cs-CZ" '
             f'action="/api/twilio/gather" method="POST" speechTimeout="auto" timeout="10">'
-            f'<Say language="cs-CZ" voice="Polly.Adela">{safe_listen}</Say>'
+            f'{_listen_say}'
             f'</Gather>'
-            f'<Say language="cs-CZ" voice="Polly.Adela">Neslyšel jsem vás. Zkusím zavolat později.</Say>'
+            f'{_bye_say}'
             f'</Response>'
         )
 

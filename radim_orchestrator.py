@@ -944,7 +944,7 @@ def radim_chat_internal(message, user_id=None, mode="senior"):
 
 @radim_bp.route('/api/radim/greeting', methods=['GET'])
 def radim_greeting():
-    """Time-based greeting — single source of truth for all frontends"""
+    """Time-based greeting with brain Ψ(t) voice_mode — single source of truth"""
     try:
         from radim_shared import get_greeting, get_nameday, build_time_context_string
         greeting_emoji = get_greeting(with_emoji=True)
@@ -952,12 +952,39 @@ def radim_greeting():
         nameday = get_nameday()
         time_ctx = build_time_context_string()
 
+        # v10.20: Compute brain state for voice_mode
+        user_id = request.args.get('user_id')
+        voice_mode = 'HARMONY'
+        if user_id:
+            try:
+                from brain_core import compute_psi_state
+                from intent_resolver import quick_estimate_from_text
+                C_est, alpha_est = quick_estimate_from_text(greeting_plain)
+                psi = compute_psi_state(C_est, alpha_est, user_id=user_id)
+                brain_mode = psi.get('mode', 'HARMONY')
+                # Greeting voice: CRISIS→CRISIS, else time-based
+                if brain_mode in ('CRISIS', 'ALERT'):
+                    voice_mode = brain_mode
+                else:
+                    hour = datetime.utcnow().hour + 1  # CET
+                    voice_mode = 'RHYTHMIC' if 6 <= hour < 21 else 'HARMONY'
+                    # Check melody preference
+                    try:
+                        from voice_learning import should_use_melody
+                        if not should_use_melody(str(user_id)):
+                            voice_mode = 'HARMONY'
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.debug(f"Greeting brain state: {e}")
+
         return jsonify({
             'success': True,
             'greeting': greeting_emoji,
             'greeting_plain': greeting_plain,
             'nameday': nameday or None,
             'time_context': time_ctx,
+            'voice_mode': voice_mode,
             'timestamp': datetime.utcnow().isoformat() + 'Z'
         })
     except Exception as e:
