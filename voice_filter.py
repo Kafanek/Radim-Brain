@@ -409,17 +409,18 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
                 pass
 
         # Slight pitch variation per sentence position (natural declination)
-        # First sentence: +2Hz lift, last: -2Hz drop, middle: base
         pitch_mod = profile['pitch']
         if len(sentences) > 1:
+            base_pitch = int(pitch_mod.replace('%', '').replace('+', ''))
             if i == 0:
                 # Opening — slightly higher pitch
-                base_pitch = int(pitch_mod.replace('%', '').replace('+', ''))
-                pitch_mod = f"+{base_pitch + 2}%"
+                val = base_pitch + 2
             elif i == len(sentences) - 1:
                 # Closing — slightly lower
-                base_pitch = int(pitch_mod.replace('%', '').replace('+', ''))
-                pitch_mod = f"+{max(0, base_pitch - 1)}%"
+                val = base_pitch - 1
+            else:
+                val = base_pitch
+            pitch_mod = f"{val:+d}%"  # Correct format: "+2%" or "-3%"
 
         sentence_blocks.append(
             f'<prosody rate="{profile["rate"]}" pitch="{pitch_mod}" volume="{profile["volume"]}"{contour_attr}>'
