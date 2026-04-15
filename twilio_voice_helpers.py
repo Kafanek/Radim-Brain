@@ -637,4 +637,76 @@ def get_senior_phone(user_id):
     return None
 
 
-logger.info("✅ Twilio Voice Helpers loaded — auth, TTS, state, AI, intent, proactive calls")
+# ============================================================================
+# WHATSAPP PROACTIVE SENDER (v10.24)
+# ============================================================================
+
+def send_whatsapp_message(phone_number, message, user_id=None):
+    """Send a proactive WhatsApp message to a senior.
+
+    Args:
+        phone_number: E.164 format (+420...)
+        message: Text to send (max 1600 chars for WhatsApp)
+        user_id: Optional user ID for logging
+
+    Returns:
+        dict with success, message_sid, or error
+    """
+    account_sid = os.environ.get('TWILIO_ACCOUNT_SID')
+    auth_token = os.environ.get('TWILIO_AUTH_TOKEN')
+    from_number = os.environ.get('TWILIO_PHONE_NUMBER')
+
+    if not all([account_sid, auth_token, from_number]):
+        return {'success': False, 'error': 'Twilio credentials not configured'}
+
+    # Validate phone format
+    phone_clean = re.sub(r'[^+\d]', '', phone_number)
+    if not phone_clean.startswith('+'):
+        phone_clean = '+420' + phone_clean
+
+    # Truncate message for WhatsApp limits
+    if len(message) > 1600:
+        message = message[:1597] + '...'
+
+    try:
+        from twilio.rest import Client
+        client = Client(account_sid, auth_token)
+
+        msg = client.messages.create(
+            body=message,
+            from_=f'whatsapp:{from_number}',
+            to=f'whatsapp:{phone_clean}'
+        )
+
+        logger.info(f"📱 WhatsApp sent to {phone_clean} (user={user_id}): sid={msg.sid}")
+        return {'success': True, 'message_sid': msg.sid, 'to': phone_clean}
+
+    except ImportError:
+        return {'success': False, 'error': 'twilio package not installed'}
+    except Exception as e:
+        logger.error(f"WhatsApp send error: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+def send_proactive_whatsapp(user_id, message, reason="check_in"):
+    """Send proactive WhatsApp to a senior by user_id (looks up phone from profile).
+
+    Args:
+        user_id: Senior's user ID
+        message: Text to send
+        reason: Reason tag for logging (check_in, alert, crisis, reminder)
+
+    Returns:
+        dict with success, message_sid, or error
+    """
+    phone = get_senior_phone(user_id)
+    if not phone:
+        return {'success': False, 'error': f'No phone number for user {user_id}'}
+
+    result = send_whatsapp_message(phone, message, user_id=user_id)
+    result['reason'] = reason
+    result['user_id'] = user_id
+    return result
+
+
+logger.info("✅ Twilio Voice Helpers loaded — auth, TTS, state, AI, intent, proactive calls, WhatsApp")

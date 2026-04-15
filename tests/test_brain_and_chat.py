@@ -133,21 +133,38 @@ class TestAdminEndpoints:
         finally:
             app_module.ADMIN_SECRET = original
 
+    def _admin_context(self):
+        """Context manager to allow admin access in tests."""
+        import app as app_module
+        original = app_module.ADMIN_SECRET
+        app_module.ADMIN_SECRET = "test_secret"
+        return original, app_module
+
     def test_debug_prompt(self, client):
         """Debug prompt endpoint returns prompt."""
-        resp = client.get('/api/admin/debug-prompt/test_user')
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert 'prompt' in data
+        original, app_module = self._admin_context()
+        try:
+            resp = client.get('/api/admin/debug-prompt/test_user',
+                              headers={'X-Admin-Secret': 'test_secret'})
+            assert resp.status_code == 200
+            data = resp.get_json()
+            assert 'prompt' in data
+        finally:
+            app_module.ADMIN_SECRET = original
 
     def test_seed_demo(self, client):
         """Seed demo creates demo senior."""
-        resp = client.post('/api/admin/seed-demo')
-        assert resp.status_code == 201
-        data = resp.get_json()
-        assert data['success'] is True
-        assert data['user_id'] == 'demo_senior_1'
-        assert data['brain_states_count'] > 0
+        original, app_module = self._admin_context()
+        try:
+            resp = client.post('/api/admin/seed-demo',
+                               headers={'X-Admin-Secret': 'test_secret'})
+            assert resp.status_code == 201
+            data = resp.get_json()
+            assert data['success'] is True
+            assert data['user_id'] == 'demo_senior_1'
+            assert data['brain_states_count'] > 0
+        finally:
+            app_module.ADMIN_SECRET = original
 
 
 class TestHealthEndpoint:

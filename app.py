@@ -1265,6 +1265,284 @@ def admin_agent_run():
         logger.error(f"Agent run error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/admin/crisis-demo', methods=['POST', 'OPTIONS'])
+def admin_crisis_demo():
+    """Live crisis demo for conference: simulate fall → full pipeline.
+
+    POST body (optional):
+    {
+        "user_id": "demo_senior_1",      # default: demo_senior_1
+        "scenario": "fall",               # fall | vital | silence
+        "call_phone": false,              # actually call (default: false = dry run)
+        "ha_actions": false               # actually trigger HA (default: false)
+    }
+
+    Returns timeline of all actions taken.
+    """
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        data = request.get_json(silent=True) or {}
+        user_id = data.get('user_id', 'demo_senior_1')
+        scenario = data.get('scenario', 'fall')
+        do_call = data.get('call_phone', False)
+        do_ha = data.get('ha_actions', False)
+
+        timeline = []
+        import time as _time
+
+        # Step 1: Build observation
+        scenarios = {
+            'fall': {
+                'type': 'fall_detected',
+                'severity': 'crisis',
+                'message': f'⚠️ Detekován pád seniora {user_id}. Akcelerometr: 4.2G impact.',
+                'details': {'sensor': 'accelerometer', 'value': 4.2, 'threshold': 3.0}
+            },
+            'vital': {
+                'type': 'vital_anomaly',
+                'severity': 'crisis',
+                'message': f'🚨 SpO2 pod 88% pro {user_id}. Možná hypoxie.',
+                'details': {'sensor': 'spo2', 'value': 88, 'threshold': 90}
+            },
+            'silence': {
+                'type': 'no_interaction',
+                'severity': 'alert',
+                'message': f'🔕 {user_id} neinteragoval 12+ hodin.',
+                'details': {'hours_silent': 12, 'threshold': 8}
+            }
+        }
+        obs = scenarios.get(scenario, scenarios['fall'])
+        timeline.append({'t': 0, 'action': 'observation_created', 'detail': obs['message']})
+
+        # Step 2: Save observation to DB
+        from database import db_context, db_insert, is_postgres
+        with db_context(commit=True) as db:
+            db_insert(db, 'agent_observations',
+                      ['user_id', 'observation_type', 'severity', 'message', 'action_taken', 'details'],
+                      [user_id, obs['type'], obs['severity'], obs['message'], 'demo_crisis_flow',
+                       json.dumps(obs.get('details', {}))])
+        timeline.append({'t': 1, 'action': 'db_saved', 'detail': 'Observation saved to agent_observations'})
+
+        # Step 3: Inject into memory (so Radim mentions it in next chat)
+        try:
+            from agent_loop import _inject_into_memory
+            _inject_into_memory(user_id, obs)
+            timeline.append({'t': 2, 'action': 'memory_injected', 'detail': 'Crisis context injected into personalized prompt'})
+        except Exception as e:
+            timeline.append({'t': 2, 'action': 'memory_inject_failed', 'detail': str(e)})
+
+        # Step 4: Push notification to senior
+        try:
+            from agent_loop import _push_to_senior
+            _push_to_senior(user_id, obs, app)
+            timeline.append({'t': 3, 'action': 'push_sent', 'detail': 'Push notification sent to senior device'})
+        except Exception as e:
+            timeline.append({'t': 3, 'action': 'push_skipped', 'detail': str(e)})
+
+        # Step 5: Alert caregiver
+        try:
+            from agent_loop import _alert_caregiver
+            _alert_caregiver(user_id, obs, app)
+            timeline.append({'t': 4, 'action': 'caregiver_alerted', 'detail': 'Caregiver notified via push + email'})
+        except Exception as e:
+            timeline.append({'t': 4, 'action': 'caregiver_alert_skipped', 'detail': str(e)})
+
+        # Step 6: Route to medical team
+        try:
+            from agent_loop import _route_to_medical_team
+            _route_to_medical_team(user_id, obs, app)
+            timeline.append({'t': 5, 'action': 'medical_team_routed', 'detail': 'Alert routed to coordinator + caregiver roles'})
+        except Exception as e:
+            timeline.append({'t': 5, 'action': 'medical_route_skipped', 'detail': str(e)})
+
+        # Step 7: Phone call (optional — only if presenter wants live call)
+        if do_call:
+            try:
+                from agent_loop import _call_senior
+                _call_senior(user_id, obs)
+                timeline.append({'t': 6, 'action': 'phone_call_initiated', 'detail': 'Proactive call via Twilio'})
+            except Exception as e:
+                timeline.append({'t': 6, 'action': 'phone_call_failed', 'detail': str(e)})
+        else:
+            timeline.append({'t': 6, 'action': 'phone_call_skipped', 'detail': 'Dry run — set call_phone=true to actually call'})
+
+        # Step 8: Home Assistant actions (optional)
+        if do_ha:
+            try:
+                from agent_loop import _ha_crisis_actions
+                _ha_crisis_actions(user_id, obs)
+                timeline.append({'t': 7, 'action': 'ha_actions_executed', 'detail': 'Lights ON 100%, door unlocked, covers opened'})
+            except Exception as e:
+                timeline.append({'t': 7, 'action': 'ha_actions_failed', 'detail': str(e)})
+        else:
+            timeline.append({'t': 7, 'action': 'ha_actions_skipped', 'detail': 'Dry run — set ha_actions=true for live HA'})
+
+        # Step 9: Generate TTS crisis greeting (for playback demo)
+        tts_greeting = None
+        try:
+            from voice_filter import build_radim_ssml
+            crisis_text = "Zaznamenal jsem pád. Jste v pořádku? Pokud potřebujete pomoc, řekněte pomoc nebo stiskněte červené tlačítko."
+            tts_greeting = build_radim_ssml(crisis_text, mode='CRISIS', user_id=user_id)
+            timeline.append({'t': 8, 'action': 'tts_crisis_ssml', 'detail': 'CRISIS voice SSML generated for playback'})
+        except Exception as e:
+            timeline.append({'t': 8, 'action': 'tts_ssml_failed', 'detail': str(e)})
+
+        return jsonify({
+            'success': True,
+            'scenario': scenario,
+            'user_id': user_id,
+            'severity': obs['severity'],
+            'timeline': timeline,
+            'tts_ssml': tts_greeting,
+            'next_steps': [
+                'Chat with senior → Radim will mention the crisis in context',
+                'Check /api/admin/debug-prompt/' + user_id + ' to see injected memory',
+                'Set call_phone=true to actually call the senior',
+                'Set ha_actions=true to trigger Home Assistant lights/door'
+            ]
+        }), 200
+    except Exception as e:
+        logger.error(f"Crisis demo error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/whatsapp-send', methods=['POST', 'OPTIONS'])
+def admin_whatsapp_send():
+    """Send a proactive WhatsApp message to a senior.
+
+    POST body:
+    {
+        "user_id": "senior_id",         # looks up phone from profile
+        "phone": "+420123456789",       # OR direct phone (overrides user_id lookup)
+        "message": "Dobrý den, tady Radim...",
+        "reason": "check_in"            # check_in | alert | crisis | reminder
+    }
+    """
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        data = request.get_json(silent=True) or {}
+        message = data.get('message')
+        if not message:
+            return jsonify({'error': 'message is required'}), 400
+
+        phone = data.get('phone')
+        user_id = data.get('user_id')
+        reason = data.get('reason', 'check_in')
+
+        if phone:
+            from twilio_voice_helpers import send_whatsapp_message
+            result = send_whatsapp_message(phone, message, user_id=user_id)
+        elif user_id:
+            from twilio_voice_helpers import send_proactive_whatsapp
+            result = send_proactive_whatsapp(user_id, message, reason=reason)
+        else:
+            return jsonify({'error': 'Either user_id or phone is required'}), 400
+
+        status_code = 200 if result.get('success') else 400
+        return jsonify(result), status_code
+    except Exception as e:
+        logger.error(f"WhatsApp send error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/financial-dashboard', methods=['GET', 'OPTIONS'])
+def admin_financial_dashboard():
+    """Financial savings dashboard — how much Radim saves per senior.
+
+    Calculates: prevented hospitalizations, reduced caregiver hours,
+    medication adherence value, emergency response savings.
+
+    Query params:
+        user_id — specific senior (default: all)
+        months  — lookback period (default: 3)
+    """
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        user_id = request.args.get('user_id')
+        months = int(request.args.get('months', 3))
+
+        with db_context() as db:
+            # Count crisis interventions (prevented hospitalizations)
+            if user_id:
+                crisis_rows = db.execute(
+                    "SELECT severity, COUNT(*) as cnt FROM agent_observations "
+                    "WHERE user_id = ? GROUP BY severity", (user_id,)
+                ).fetchall()
+                interaction_count = db.execute(
+                    "SELECT COUNT(*) FROM brain_states WHERE user_id = ?", (user_id,)
+                ).fetchone()[0]
+            else:
+                crisis_rows = db.execute(
+                    "SELECT severity, COUNT(*) as cnt FROM agent_observations "
+                    "GROUP BY severity"
+                ).fetchall()
+                interaction_count = db.execute(
+                    "SELECT COUNT(*) FROM brain_states"
+                ).fetchone()[0]
+
+        # Aggregate by severity
+        severity_counts = {r[0]: r[1] for r in crisis_rows}
+        crisis_count = severity_counts.get('crisis', 0)
+        alert_count = severity_counts.get('alert', 0)
+        warning_count = severity_counts.get('warning', 0)
+
+        # Czech healthcare cost model (2025 prices, CZK)
+        HOSPITAL_DAY_COST = 12500       # Avg cost per hospital day
+        AVG_HOSPITAL_STAY = 5           # Days per preventable admission
+        CAREGIVER_HOUR_COST = 350       # Professional caregiver hourly rate
+        EMERGENCY_CALL_COST = 8500      # Ambulance dispatch cost
+        MEDICATION_ERROR_COST = 4200    # Avg cost of medication non-adherence event
+
+        # Savings model
+        prevented_hospitalizations = max(1, crisis_count // 3)  # ~1 in 3 crises would lead to hospitalization
+        hospital_savings = prevented_hospitalizations * HOSPITAL_DAY_COST * AVG_HOSPITAL_STAY
+
+        caregiver_hours_saved = interaction_count * 0.25  # Each AI interaction saves ~15 min caregiver time
+        caregiver_savings = int(caregiver_hours_saved * CAREGIVER_HOUR_COST)
+
+        emergency_prevented = alert_count // 2  # Half of alerts would become emergencies without AI
+        emergency_savings = emergency_prevented * EMERGENCY_CALL_COST
+
+        medication_adherence = warning_count // 4  # Medication reminders prevent ~25% of events
+        medication_savings = medication_adherence * MEDICATION_ERROR_COST
+
+        total_savings = hospital_savings + caregiver_savings + emergency_savings + medication_savings
+
+        # Radim cost (Heroku $7 + Azure TTS ~$20 + Gemini ~$15/month)
+        radim_monthly_cost = 42  # USD → ~1000 CZK
+        radim_total_cost = radim_monthly_cost * months * 24  # CZK approx
+
+        roi = round(total_savings / max(radim_total_cost, 1), 1)
+
+        return jsonify({
+            'success': True,
+            'period_months': months,
+            'user_id': user_id or 'all',
+            'interactions': interaction_count,
+            'observations': {
+                'crisis': crisis_count,
+                'alert': alert_count,
+                'warning': warning_count
+            },
+            'savings_czk': {
+                'prevented_hospitalizations': {'count': prevented_hospitalizations, 'savings': hospital_savings},
+                'caregiver_hours_saved': {'hours': round(caregiver_hours_saved, 1), 'savings': caregiver_savings},
+                'emergency_prevented': {'count': emergency_prevented, 'savings': emergency_savings},
+                'medication_adherence': {'events': medication_adherence, 'savings': medication_savings},
+                'total': total_savings
+            },
+            'cost_czk': radim_total_cost,
+            'roi_multiplier': roi,
+            'summary': f"Radim ušetřil {total_savings:,} Kč za {months} měsíců. ROI: {roi}×."
+        }), 200
+    except Exception as e:
+        logger.error(f"Financial dashboard error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/admin/status', methods=['GET', 'OPTIONS'])
 def admin_status():
     """Comprehensive system status — all subsystems at a glance."""

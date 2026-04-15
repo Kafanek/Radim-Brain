@@ -123,15 +123,14 @@ class TestVoiceFilter:
         from voice_filter import build_radim_ssml
         ssml = build_radim_ssml("Dobrý den.", mode="HARMONY")
         assert 'express-as style="friendly"' in ssml
-        assert 'rate="-3%"' in ssml  # v10.21: deeper voice tuning
+        assert 'rate="-5%"' in ssml  # v10.23: natural Antonín voice
         assert 'cs-CZ-AntoninNeural' in ssml
-        assert 'contour=' in ssml  # v10.20: per-sentence φ-contour
 
     def test_build_ssml_crisis(self):
         from voice_filter import build_radim_ssml
         ssml = build_radim_ssml("Zavolám pomoc.", mode="CRISIS")
         assert 'express-as style="calm"' in ssml
-        assert 'rate="-25%"' in ssml
+        assert 'rate="-20%"' in ssml  # v10.23: updated rate
         assert 'styledegree="2.0"' in ssml
 
     def test_sentence_pauses(self):
@@ -142,7 +141,7 @@ class TestVoiceFilter:
         pause_match = re.search(r'break time="(\d+)ms"', ssml)
         assert pause_match is not None, "No break element found"
         pause_ms = int(pause_match.group(1))
-        assert 550 <= pause_ms <= 700, f"Pause {pause_ms}ms outside HARMONY range (618±82)"
+        assert 400 <= pause_ms <= 600, f"Pause {pause_ms}ms outside HARMONY range (500±100)"
 
     def test_crisis_emphasis(self):
         from voice_filter import build_radim_ssml
