@@ -319,6 +319,17 @@ def compute_psi_state(C, alpha, voice_tone=0.5, hrv=0.5, speech_tempo=0.5, user_
     }
     if rhythm_data:
         result["rhythm_return"] = rhythm_data
+
+    # v10.25: RTCF — Radim Temporal Coherence Framework (the heartbeat)
+    try:
+        from rtcf_bridge import enhance_with_rtcf, ENABLE_RTCF
+        if ENABLE_RTCF:
+            result = enhance_with_rtcf(result, C, alpha, user_id=user_id)
+    except ImportError:
+        pass
+    except Exception as rtcf_err:
+        logger.debug(f"RTCF non-fatal: {rtcf_err}")
+
     return result
 
 

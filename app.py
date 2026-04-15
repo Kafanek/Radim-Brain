@@ -440,6 +440,15 @@ except ImportError:
     RHYTHM_RETURN_AVAILABLE = False
     logger.warning("⚠️ Rhythm Return routes not available")
 
+# 💓 RTCF — Radim Temporal Coherence Framework (the heartbeat)
+try:
+    from rtcf_bridge import ENABLE_RTCF
+    RTCF_AVAILABLE = True
+    logger.info(f"💓 RTCF available (enabled={ENABLE_RTCF})")
+except ImportError:
+    RTCF_AVAILABLE = False
+    ENABLE_RTCF = False
+
 # 🧠 Import RADIM Brain Engine - Sjednocující vrstva vědomí
 try:
     from radim_brain_routes import radim_brain_bp

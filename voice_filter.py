@@ -284,7 +284,7 @@ def _add_pause_variability(pause_ms):
     return max(200, pause_ms + variation)  # minimum 200ms
 
 
-def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=None):
+def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=None, rtcf_voice=None):
     """Build rich SSML for Radim's voice with mode-adaptive styling.
 
     v405 hardening:
@@ -355,6 +355,23 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
             pass  # voice_learning not installed
         except Exception as e:
             logger.info(f"⚠️ Voice learning failed for {user_id}: {e}")
+
+    # v10.25: RTCF heartbeat voice modifiers
+    if rtcf_voice:
+        rate_adj = rtcf_voice.get('rate_adjust', 0)
+        if rate_adj:
+            current = int(profile['rate'].replace('%', '').replace('+', ''))
+            profile['rate'] = f"{current + int(rate_adj)}%"
+        pause_adj = rtcf_voice.get('pause_adjust_ms', 0)
+        if pause_adj:
+            profile['pause_ms'] = max(200, profile['pause_ms'] + pause_adj)
+        style_hint = rtcf_voice.get('style_hint')
+        if style_hint:
+            profile['style'] = style_hint
+        sd_hint = rtcf_voice.get('styledegree_hint')
+        if sd_hint:
+            profile['styledegree'] = sd_hint
+        overrides.append("rtcf")
 
     # v10.20: PER-SENTENCE prosody with individual φ-contour
     # Each sentence gets its own pitch curve → natural intonation
