@@ -33,7 +33,7 @@ VOICE_PROFILES = {
         "style": "friendly",
         "styledegree": "2.0",
         "rate": "-5%",           # mírně pomalejší než přirozený
-        "pitch": "-3%",          # hlubší bariton
+        "pitch": "+0%",          # v10.23: neutrální přirozený
         "volume": "loud",
         "pause_ms": 500,         # přirozené pauzy
         "emphasis": False,
@@ -43,7 +43,7 @@ VOICE_PROFILES = {
         "style": "empathetic",
         "styledegree": "1.5",
         "rate": "-15%",          # pomalejší pro pochopení
-        "pitch": "-5%",          # hlubší = uklidňující
+        "pitch": "+0%",          # v10.23: mírně hlubší
         "volume": "loud",
         "pause_ms": 800,
         "emphasis": True,
@@ -52,7 +52,7 @@ VOICE_PROFILES = {
         "style": "calm",
         "styledegree": "2.0",
         "rate": "-20%",          # výrazně pomalejší
-        "pitch": "-8%",          # nejhlubší = maximální klid
+        "pitch": "+0%",          # v10.23: hlubší pro klid
         "volume": "x-loud",
         "pause_ms": 1200,        # dlouhé pauzy
         "emphasis": True,
@@ -61,7 +61,7 @@ VOICE_PROFILES = {
         "style": "friendly",
         "styledegree": "2.0",
         "rate": "-10%",          # recitační tempo
-        "pitch": "-2%",          # mírně hlubší
+        "pitch": "+0%",          # v10.23: neutrální
         "volume": "loud",
         "pause_ms": 800,         # dramatické pauzy
         "emphasis": False,
@@ -71,7 +71,7 @@ VOICE_PROFILES = {
         "style": "friendly",
         "styledegree": "1.0",
         "rate": "-12%",          # vypravěčské tempo
-        "pitch": "-3%",
+        "pitch": "+0%",
         "volume": "loud",
         "pause_ms": 700,
         "emphasis": False,
@@ -80,7 +80,7 @@ VOICE_PROFILES = {
         "style": "friendly",
         "styledegree": "1.0",
         "rate": "-3%",           # skoro přirozené
-        "pitch": "-2%",
+        "pitch": "+0%",
         "volume": "loud",
         "pause_ms": 400,
         "emphasis": False,
@@ -89,7 +89,7 @@ VOICE_PROFILES = {
         "style": "friendly",
         "styledegree": "1.0",
         "rate": "-12%",          # pomalejší pro učení
-        "pitch": "-2%",
+        "pitch": "+0%",
         "volume": "loud",
         "pause_ms": 700,
         "emphasis": True,
@@ -98,7 +98,7 @@ VOICE_PROFILES = {
         "style": "friendly",
         "styledegree": "2.0",
         "rate": "-15%",          # v10.22: mezi řečí a zpěvem — hravé tempo
-        "pitch": "-2%",          # mírně hlubší
+        "pitch": "+0%",          # v10.23: neutrální
         "volume": "loud",
         "pause_ms": 400,
         "emphasis": False,
@@ -109,7 +109,7 @@ VOICE_PROFILES = {
         "style": "friendly",
         "styledegree": "2.0",
         "rate": "-8%",
-        "pitch": "-2%",
+        "pitch": "+0%",
         "volume": "loud",
         "pause_ms": 500,
         "emphasis": False,
