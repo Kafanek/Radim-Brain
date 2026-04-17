@@ -1376,16 +1376,51 @@ def admin_crisis_demo():
         else:
             timeline.append({'t': 6, 'action': 'phone_call_skipped', 'detail': 'Dry run — set call_phone=true to actually call'})
 
-        # Step 8: Home Assistant actions (optional)
-        if do_ha:
+        # Step 8: Home Assistant actions — real HA if connected, else scripted mock for conference
+        # Conference mode: ha_mock=true returns realistic scripted responses even without HA hardware
+        ha_mock = data.get('ha_mock', False)
+        ha_actions_log = []
+        if do_ha or ha_mock:
             try:
-                from agent_loop import _ha_crisis_actions
-                _ha_crisis_actions(user_id, obs)
-                timeline.append({'t': 7, 'action': 'ha_actions_executed', 'detail': 'Lights ON 100%, door unlocked, covers opened'})
+                # Try real HA first
+                from home_assistant import HA_URL, HA_TOKEN
+                ha_connected = bool(HA_URL and HA_TOKEN)
+
+                if do_ha and ha_connected:
+                    from agent_loop import _ha_crisis_actions
+                    _ha_crisis_actions(user_id, obs)
+                    ha_actions_log = [
+                        {'device': 'all_lights', 'action': 'on', 'brightness': 100, 'source': 'real_ha'},
+                        {'device': 'front_door', 'action': 'unlock', 'source': 'real_ha'},
+                        {'device': 'covers_all', 'action': 'open', 'source': 'real_ha'},
+                    ]
+                    timeline.append({'t': 7, 'action': 'ha_actions_executed',
+                                     'detail': 'Real HA: lights 100%, door unlocked, covers opened',
+                                     'actions': ha_actions_log})
+                else:
+                    # Mock mode — scripted response for conference demo without HA hardware
+                    ha_actions_log = [
+                        {'device': 'obyvak_svetlo', 'name': 'Obývák — světlo', 'action': 'on',
+                         'brightness': 100, 'duration_ms': 200, 'source': 'mock'},
+                        {'device': 'kuchyn_svetlo', 'name': 'Kuchyň — světlo', 'action': 'on',
+                         'brightness': 100, 'duration_ms': 180, 'source': 'mock'},
+                        {'device': 'loznice_svetlo', 'name': 'Ložnice — světlo', 'action': 'on',
+                         'brightness': 80, 'duration_ms': 220, 'source': 'mock'},
+                        {'device': 'chodba_svetlo', 'name': 'Chodba — světlo', 'action': 'on',
+                         'brightness': 100, 'duration_ms': 150, 'source': 'mock'},
+                        {'device': 'vchodove_dvere', 'name': 'Vchodové dveře', 'action': 'unlock',
+                         'duration_ms': 400, 'source': 'mock'},
+                        {'device': 'obyvak_rolety', 'name': 'Obývák — rolety', 'action': 'open',
+                         'duration_ms': 800, 'source': 'mock'},
+                    ]
+                    timeline.append({'t': 7, 'action': 'ha_actions_mock',
+                                     'detail': 'HA mock: 4 lights ON, door unlocked, covers opened (hardware arrives next week)',
+                                     'actions': ha_actions_log})
             except Exception as e:
                 timeline.append({'t': 7, 'action': 'ha_actions_failed', 'detail': str(e)})
         else:
-            timeline.append({'t': 7, 'action': 'ha_actions_skipped', 'detail': 'Dry run — set ha_actions=true for live HA'})
+            timeline.append({'t': 7, 'action': 'ha_actions_skipped',
+                             'detail': 'Dry run — set ha_actions=true (real) or ha_mock=true (scripted)'})
 
         # Step 9: Generate TTS crisis greeting (for playback demo)
         tts_greeting = None
@@ -1408,6 +1443,21 @@ def admin_crisis_demo():
         except Exception as e:
             timeline.append({'t': 8, 'action': 'tts_ssml_failed', 'detail': str(e)})
 
+        # v10.30: Conference-friendly narrative for stage presentation
+        narrative = [
+            {'t_ms': 0,     'event': 'detection', 'text': obs['message']},
+            {'t_ms': 1500,  'event': 'brain_analysis', 'text': 'Radim vyhodnocuje situaci — Ψ(t) stav přepnut na CRISIS'},
+            {'t_ms': 3000,  'event': 'memory_context', 'text': 'Krizový kontext injektován do paměti pro budoucí konverzace'},
+            {'t_ms': 4500,  'event': 'push_senior', 'text': 'Notifikace na zařízení seniora'},
+            {'t_ms': 6000,  'event': 'caregiver_alert', 'text': 'Pečovatel / rodina notifikováni (push + email + SMS)'},
+            {'t_ms': 8000,  'event': 'medical_team', 'text': 'Alert směřován do lékařského týmu (coordinator + caregiver)'},
+            {'t_ms': 10000, 'event': 'phone_call', 'text': 'Radim volá seniorovi: „Zaznamenal jsem pád. Jste v pořádku?"'},
+            {'t_ms': 12000, 'event': 'ha_lights', 'text': '💡 Světla: obývák, kuchyň, ložnice, chodba — 100 %'},
+            {'t_ms': 13000, 'event': 'ha_door', 'text': '🔓 Vchodové dveře odemčeny (pro záchranku)'},
+            {'t_ms': 14000, 'event': 'ha_covers', 'text': '🪟 Rolety otevřeny (viditelnost zvenčí)'},
+            {'t_ms': 15000, 'event': 'voice_response', 'text': 'Radim mluví uklidňujícím hlasem (CRISIS mode: -20% rate, 1200ms pauzy)'},
+        ]
+
         return jsonify({
             'success': True,
             'scenario': scenario,
@@ -1415,11 +1465,16 @@ def admin_crisis_demo():
             'severity': obs['severity'],
             'timeline': timeline,
             'tts_ssml': tts_greeting,
+            'ha_actions': ha_actions_log,
+            'narrative': narrative,
+            'narrative_duration_ms': 15000,
+            'mode': 'mock' if ha_mock else ('live' if do_ha else 'dry_run'),
             'next_steps': [
                 'Chat with senior → Radim will mention the crisis in context',
                 'Check /api/admin/debug-prompt/' + user_id + ' to see injected memory',
                 'Set call_phone=true to actually call the senior',
-                'Set ha_actions=true to trigger Home Assistant lights/door'
+                'Set ha_actions=true to trigger Home Assistant (real hardware)',
+                'Set ha_mock=true for scripted demo without hardware (conference)'
             ]
         }), 200
     except Exception as e:
