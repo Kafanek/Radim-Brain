@@ -559,6 +559,46 @@ PG_IOT_TABLES = [
         "CREATE INDEX IF NOT EXISTS idx_agent_obs_created ON agent_observations(created_at)",
         "CREATE INDEX IF NOT EXISTS idx_agent_obs_severity ON agent_observations(severity)",
     ]),
+
+    # v10.37 — In-app notifications (account-to-account, replaces Twilio SMS path for family alerts)
+    ('''CREATE TABLE IF NOT EXISTS user_notifications (
+            id SERIAL PRIMARY KEY,
+            to_user_id TEXT NOT NULL,
+            from_user_id TEXT,
+            type TEXT NOT NULL,
+            severity TEXT DEFAULT 'info',
+            title TEXT NOT NULL,
+            body TEXT,
+            data JSONB DEFAULT '{}',
+            read_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''', [
+        "CREATE INDEX IF NOT EXISTS idx_user_notifs_to ON user_notifications(to_user_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_user_notifs_type ON user_notifications(type)",
+        "CREATE INDEX IF NOT EXISTS idx_user_notifs_unread ON user_notifications(to_user_id) WHERE read_at IS NULL",
+    ]),
+
+    # v10.37 — Senior ↔ family account links (many-to-many)
+    ('''CREATE TABLE IF NOT EXISTS senior_family_links (
+            id SERIAL PRIMARY KEY,
+            senior_id TEXT NOT NULL,
+            family_user_id TEXT,
+            family_email TEXT NOT NULL,
+            family_name TEXT,
+            relation TEXT,
+            invite_token TEXT UNIQUE,
+            invite_expires_at TIMESTAMP,
+            confirmed_at TIMESTAMP,
+            revoked_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (senior_id, family_email)
+        )
+    ''', [
+        "CREATE INDEX IF NOT EXISTS idx_sfl_senior ON senior_family_links(senior_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sfl_family ON senior_family_links(family_user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sfl_token ON senior_family_links(invite_token)",
+    ]),
 ]
 
 # PostgreSQL: ALTER TABLE migrations
@@ -1090,6 +1130,41 @@ SQLITE_SCHEMA = '''
     CREATE INDEX IF NOT EXISTS idx_agent_obs_user ON agent_observations(user_id);
     CREATE INDEX IF NOT EXISTS idx_agent_obs_created ON agent_observations(created_at);
     CREATE INDEX IF NOT EXISTS idx_agent_obs_severity ON agent_observations(severity);
+
+    -- v10.37: In-app notifications (account-to-account)
+    CREATE TABLE IF NOT EXISTS user_notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        to_user_id TEXT NOT NULL,
+        from_user_id TEXT,
+        type TEXT NOT NULL,
+        severity TEXT DEFAULT 'info',
+        title TEXT NOT NULL,
+        body TEXT,
+        data TEXT DEFAULT '{}',
+        read_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_notifs_to ON user_notifications(to_user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_user_notifs_type ON user_notifications(type);
+
+    -- v10.37: Senior ↔ family account links
+    CREATE TABLE IF NOT EXISTS senior_family_links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        senior_id TEXT NOT NULL,
+        family_user_id TEXT,
+        family_email TEXT NOT NULL,
+        family_name TEXT,
+        relation TEXT,
+        invite_token TEXT UNIQUE,
+        invite_expires_at TIMESTAMP,
+        confirmed_at TIMESTAMP,
+        revoked_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (senior_id, family_email)
+    );
+    CREATE INDEX IF NOT EXISTS idx_sfl_senior ON senior_family_links(senior_id);
+    CREATE INDEX IF NOT EXISTS idx_sfl_family ON senior_family_links(family_user_id);
+    CREATE INDEX IF NOT EXISTS idx_sfl_token ON senior_family_links(invite_token);
 '''
 
 # SQLite: ALTER TABLE migrations

@@ -664,6 +664,18 @@ except ImportError as e:
     SAFE_WEB_AGENT_AVAILABLE = False
     logger.warning(f"⚠️ Safe Web Agent not available: {e}")
 
+# v10.37: In-app notifications + SOS + family account linking
+try:
+    from notification_routes import notification_bp
+    from family_link_routes import family_link_bp
+    app.register_blueprint(notification_bp)
+    app.register_blueprint(family_link_bp)
+    NOTIFICATIONS_AVAILABLE = True
+    logger.info("🔔 Notifications + Family link routes registered: /api/notifications/*, /api/family/link/*, /api/sos/trigger")
+except ImportError as e:
+    NOTIFICATIONS_AVAILABLE = False
+    logger.warning(f"⚠️ Notifications/Family link not available: {e}")
+
 # Media & Push + Admin routes registered after helper functions are defined (see below)
 
 # ============================================

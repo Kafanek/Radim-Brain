@@ -634,8 +634,30 @@ def _push_to_senior(user_id, obs, app):
 
 
 def _alert_caregiver(user_id, obs, app):
-    """Notify caregiver via push + SocketIO."""
+    """Notify caregiver via push + SocketIO + in-app notification (v10.37).
+
+    In-app notification goes to every confirmed family member linked via
+    senior_family_links + the legacy single caregiver_id from memory_profiles.
+    """
     try:
+        # v10.37: In-app notification to all linked family + legacy caregiver
+        try:
+            from notification_helpers import notify_senior_family
+            severity_map = {"WARNING": "warning", "ALERT": "alert", "CRISIS": "crisis"}
+            nice_sev = severity_map.get(obs.get("severity", "").upper(), "alert")
+            notif_type = "crisis_alert" if nice_sev == "crisis" else "health_alert"
+            notify_senior_family(
+                senior_id=user_id, type=notif_type,
+                title=f"Radim upozorňuje — {obs.get('severity', 'alert')}",
+                body=obs.get("message", ""),
+                severity=nice_sev,
+                data={"obs_type": obs.get("type") or obs.get("observation_type")},
+                include_caregiver=True,
+            )
+        except Exception as e:
+            logger.debug(f"alert_caregiver in-app notify: {e}")
+
+        # Legacy push + SocketIO paths (keep for backward compat)
         profile = db_load_profile(user_id)
         caregiver_id = profile.get("caregiver_id")
         if not caregiver_id:
