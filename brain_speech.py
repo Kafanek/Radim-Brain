@@ -206,6 +206,31 @@ def get_brain_speech_for_user(user_id, _load_adaptation=None, _adaptation_fallba
             speech["coherence"] = round(float(coherence or 0.5), 4)
             speech["user_id"] = user_id
             speech["source"] = "brain_states"
+
+            # v10.29: Attach RTCF Beat Engine output (voice_modifiers + beat_state)
+            # Feature-flagged — transparent passthrough when ENABLE_RTCF=false
+            try:
+                from rtcf_bridge import enhance_with_rtcf, ENABLE_RTCF
+                if ENABLE_RTCF:
+                    # Build minimal psi_state for the bridge
+                    E_val = float(row.get('e', row.get('E', 0.5)) or 0.5)
+                    S_val = float(row.get('s', row.get('S', 0.0)) or 0.0)
+                    stub = {
+                        "psi": {"C": C_val, "E": E_val, "R": 0.5, "S": S_val},
+                        "mode": mode,
+                        "empathy": {"E": E_val},
+                    }
+                    enriched = enhance_with_rtcf(stub, C_val, alpha_val, user_id=user_id)
+                    rtcf = enriched.get("rtcf")
+                    if rtcf:
+                        speech["rtcf_voice"] = rtcf.get("voice_modifiers")
+                        speech["rtcf_beat"] = rtcf.get("beat_state")
+                        speech["rtcf_state"] = rtcf.get("state")
+            except ImportError:
+                pass
+            except Exception as rtcf_err:
+                logger.debug(f"RTCF attach (non-fatal): {rtcf_err}")
+
             return speech
     except Exception as e:
         logger.warning(f"Brain speech lookup warning: {e}")

@@ -1392,8 +1392,19 @@ def admin_crisis_demo():
         try:
             from voice_filter import build_radim_ssml
             crisis_text = "Zaznamenal jsem pád. Jste v pořádku? Pokud potřebujete pomoc, řekněte pomoc nebo stiskněte červené tlačítko."
-            tts_greeting = build_radim_ssml(crisis_text, mode='CRISIS', user_id=user_id)
-            timeline.append({'t': 8, 'action': 'tts_crisis_ssml', 'detail': 'CRISIS voice SSML generated for playback'})
+            # v10.29: RTCF Beat Engine voice modifiers for crisis playback
+            _rtcf_voice = None
+            try:
+                from brain_speech import get_brain_speech_for_user
+                _bs = get_brain_speech_for_user(user_id)
+                if _bs:
+                    _rtcf_voice = _bs.get('rtcf_voice')
+            except Exception:
+                pass
+            tts_greeting = build_radim_ssml(crisis_text, mode='CRISIS', user_id=user_id,
+                                            rtcf_voice=_rtcf_voice)
+            timeline.append({'t': 8, 'action': 'tts_crisis_ssml',
+                             'detail': f'CRISIS voice SSML generated (rtcf_voice={"yes" if _rtcf_voice else "no"})'})
         except Exception as e:
             timeline.append({'t': 8, 'action': 'tts_ssml_failed', 'detail': str(e)})
 
