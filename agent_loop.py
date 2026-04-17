@@ -56,16 +56,27 @@ def run_agent_cycle(app):
         return
 
     with app.app_context():
+        # v10.33: Reset per-cycle telemetry counters
+        global _CYCLE_TELEMETRY
+        _CYCLE_TELEMETRY = {
+            'started_at': datetime.utcnow().isoformat(),
+            'users_active': 0,
+            'users_evaluated': 0,
+            'users_skipped': 0,
+            'observations_generated': 0,
+            'agents_called': {},  # agent_name → call count
+            'agents_observations': {},  # agent_name → obs count
+        }
+
         try:
-            # v2.0: Sync HA sensors → DB before evaluation
             _sync_ha_sensors()
 
             active = _get_active_users()
             if not active:
                 return
+            _CYCLE_TELEMETRY['users_active'] = len(active)
             logger.info(f"Agent loop: evaluating {len(active)} active users")
 
-            # ⚡ Adaptive evaluation: skip low-risk users on some cycles
             evaluated = 0
             skipped = 0
             for user_id in active:
@@ -76,7 +87,7 @@ def run_agent_cycle(app):
                         skipped += 1
                         continue
                 except ImportError:
-                    pass  # No optimization module — evaluate all
+                    pass
 
                 try:
                     _evaluate_user(user_id, app)
@@ -84,11 +95,41 @@ def run_agent_cycle(app):
                 except Exception as e:
                     logger.debug(f"Agent loop skip {user_id}: {e}")
 
+            _CYCLE_TELEMETRY['users_evaluated'] = evaluated
+            _CYCLE_TELEMETRY['users_skipped'] = skipped
+
             if skipped > 0:
                 logger.info(f"Agent loop: evaluated {evaluated}, skipped {skipped} (low-risk adaptive)")
 
+            # v10.33: End-of-cycle telemetry summary
+            ag_calls = _CYCLE_TELEMETRY['agents_called']
+            ag_obs = _CYCLE_TELEMETRY['agents_observations']
+            if ag_calls:
+                top_agents = sorted(ag_calls.items(), key=lambda x: -x[1])[:5]
+                summary = ', '.join(f"{a}:{c}" for a, c in top_agents)
+                total_obs = sum(ag_obs.values())
+                logger.info(f"📊 Cycle telemetry: {evaluated} users × agents=[{summary}] → {total_obs} observations")
+
         except Exception as e:
             logger.error(f"Agent loop cycle error: {e}")
+
+
+# Global per-cycle telemetry (reset each cycle)
+_CYCLE_TELEMETRY = {}
+
+
+def _track_agent(agent_name, generated_obs=False):
+    """Called by agents to record they ran (and optionally generated an observation)."""
+    try:
+        if not _CYCLE_TELEMETRY:
+            return
+        _CYCLE_TELEMETRY['agents_called'][agent_name] = \
+            _CYCLE_TELEMETRY['agents_called'].get(agent_name, 0) + 1
+        if generated_obs:
+            _CYCLE_TELEMETRY['agents_observations'][agent_name] = \
+                _CYCLE_TELEMETRY['agents_observations'].get(agent_name, 0) + 1
+    except Exception:
+        pass
 
 
 # ============================================================================
@@ -1486,6 +1527,7 @@ def _run_advanced_agents(user_id, baselines, observations):
         prediction = predict_risk(user_id)
         risk_score = prediction.get('risk_score', 0)
         risk_level = prediction.get('risk_level', 'low')
+        _gen = False
 
         if risk_level == 'critical' and not _is_in_cooldown(user_id, 'prediction_critical'):
             observations.append({
@@ -1494,6 +1536,7 @@ def _run_advanced_agents(user_id, baselines, observations):
                 "message": f"Prediktivní model detekoval kritické riziko (skóre {risk_score}/100). {prediction.get('prediction', '')}",
                 "details": {"risk_score": risk_score, "actions": prediction.get('recommended_actions', [])}
             })
+            _gen = True
         elif risk_level == 'high' and not _is_in_cooldown(user_id, 'prediction_high'):
             observations.append({
                 "type": "prediction_high",
@@ -1501,6 +1544,8 @@ def _run_advanced_agents(user_id, baselines, observations):
                 "message": f"Predikce ukazuje vysoké riziko (skóre {risk_score}/100). Doporučujeme zvýšený dohled.",
                 "details": {"risk_score": risk_score}
             })
+            _gen = True
+        _track_agent('PredictiveAgent', _gen)
     except Exception as e:
         logger.debug(f"Predictive agent error for {user_id}: {e}")
 
@@ -1509,6 +1554,7 @@ def _run_advanced_agents(user_id, baselines, observations):
         from advanced_agents import SleepAgent
         sleep = SleepAgent.analyze_sleep(user_id)
         SleepAgent.save_sleep_analysis(user_id, sleep)
+        _gen = False
 
         if sleep.get('quality') == 'very_poor' and not _is_in_cooldown(user_id, 'sleep_poor'):
             observations.append({
@@ -1517,6 +1563,8 @@ def _run_advanced_agents(user_id, baselines, observations):
                 "message": f"Poslední noc byl špatný spánek ({sleep.get('motion_events', '?')} pohybových událostí). Jak se cítíte?",
                 "details": sleep
             })
+            _gen = True
+        _track_agent('SleepAgent', _gen)
     except Exception as e:
         logger.debug(f"Sleep agent error for {user_id}: {e}")
 
@@ -1524,6 +1572,7 @@ def _run_advanced_agents(user_id, baselines, observations):
     try:
         from advanced_agents import SocialIsolationAgent
         isolation = SocialIsolationAgent.compute_score(user_id)
+        _gen = False
 
         if isolation.get('level') == 'critical' and not _is_in_cooldown(user_id, 'isolation_critical'):
             observations.append({
@@ -1532,6 +1581,7 @@ def _run_advanced_agents(user_id, baselines, observations):
                 "message": "Senior vykazuje vysokou míru izolace. Doporučujeme sociální aktivitu nebo kontakt s rodinou.",
                 "details": isolation
             })
+            _gen = True
         elif isolation.get('level') == 'high' and not _is_in_cooldown(user_id, 'isolation_high'):
             observations.append({
                 "type": "isolation_high",
@@ -1539,6 +1589,8 @@ def _run_advanced_agents(user_id, baselines, observations):
                 "message": "Všimli jsme si, že jste méně komunikoval/a. Chcete si popovídat nebo zavolat rodině?",
                 "details": isolation
             })
+            _gen = True
+        _track_agent('SocialIsolationAgent', _gen)
     except Exception as e:
         logger.debug(f"Isolation agent error for {user_id}: {e}")
 
@@ -1546,6 +1598,7 @@ def _run_advanced_agents(user_id, baselines, observations):
     try:
         from advanced_agents import MedicationTracker
         compliance = MedicationTracker.get_compliance(user_id, days=7)
+        _gen = False
 
         pct = compliance.get('compliance_pct')
         if pct is not None and pct < 50 and not _is_in_cooldown(user_id, 'medication_low'):
@@ -1555,6 +1608,8 @@ def _run_advanced_agents(user_id, baselines, observations):
                 "message": f"Za posledních 7 dní jste potvrdil/a léky jen v {pct:.0f}% případů. Nezapomínejte na pravidelné užívání.",
                 "details": compliance
             })
+            _gen = True
+        _track_agent('MedicationTracker', _gen)
     except Exception as e:
         logger.debug(f"Medication agent error for {user_id}: {e}")
 
@@ -1562,13 +1617,16 @@ def _run_advanced_agents(user_id, baselines, observations):
     try:
         from advanced_agents import LearningAgent
         LearningAgent.update_thresholds(user_id)
+        _track_agent('LearningAgent', False)
     except Exception as e:
         logger.debug(f"Learning agent error for {user_id}: {e}")
 
     # 5b. Anticipation Engine — predict Ĉ_{t+1}, detect anomalies
     try:
         from anticipation_engine import run_anticipation_cycle
+        obs_before = len(observations)
         run_anticipation_cycle(user_id, observations)
+        _track_agent('AnticipationEngine', len(observations) > obs_before)
     except Exception as e:
         logger.debug(f"Anticipation engine error for {user_id}: {e}")
 
@@ -1578,6 +1636,7 @@ def _run_advanced_agents(user_id, baselines, observations):
         triggers = check_proactive_triggers(user_id, app)
         for trigger in triggers:
             execute_proactive_trigger(trigger, user_id, app)
+        _track_agent('CircadianEngine', bool(triggers))
     except Exception as e:
         logger.debug(f"Circadian triggers error for {user_id}: {e}")
 
@@ -1588,12 +1647,15 @@ def _run_advanced_agents(user_id, baselines, observations):
         learning = db_load_learning(user_id)
         last_weather = learning.get('last_weather_check', '')
         today = datetime.utcnow().strftime('%Y-%m-%d')
+        _gen = False
         if last_weather != today:
             weather = WeatherAgent.get_suggestions()
             if weather.get('suggestions'):
                 learning['weather_suggestions'] = weather['suggestions'][:2]
                 learning['last_weather_check'] = today
                 db_save_learning(user_id, learning)
+                _gen = True
+        _track_agent('WeatherAgent', _gen)
     except Exception as e:
         logger.debug(f"Weather agent error for {user_id}: {e}")
 
@@ -1622,6 +1684,7 @@ def _run_advanced_agents(user_id, baselines, observations):
             # Softer: just inject hint, no formal observation
             create_memory_hint(user_id, risk)
 
+        _track_agent('SurveyEngine', risk['severity'] in ('WARNING', 'URGENT'))
     except Exception as e:
         logger.debug(f"Survey risk engine error for {user_id}: {e}")
 

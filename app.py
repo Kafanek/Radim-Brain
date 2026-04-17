@@ -1284,6 +1284,224 @@ def admin_agent_run():
         logger.error(f"Agent run error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/admin/agents-status', methods=['GET', 'OPTIONS'])
+def admin_agents_status():
+    """Full status of all agents — for admin dashboard.
+
+    Shows:
+    - Scheduler jobs (11 registered): when last run, next run
+    - Per-agent observation counts (24h / 7d)
+    - Active users being monitored
+    - Telemetry summary
+
+    Accessible via X-Admin-Secret header OR OPTIONS (public CORS).
+    """
+    # OPTIONS = public (CORS preflight returns full response)
+    # GET = requires admin secret
+    if request.method == 'GET' and not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    try:
+        from datetime import datetime as _dt, timedelta
+        result = {
+            'success': True,
+            'timestamp': now_iso(),
+            'version': '3.5.1',
+            'agents': {},
+            'scheduler': {'jobs': []},
+            'activity': {},
+        }
+
+        # 1. Scheduler jobs (from APScheduler global, if accessible)
+        try:
+            from app import scheduler as _sched
+            for job in _sched.get_jobs():
+                result['scheduler']['jobs'].append({
+                    'id': job.id,
+                    'next_run': job.next_run_time.isoformat() if job.next_run_time else None,
+                    'trigger': str(job.trigger),
+                })
+        except Exception as _:
+            # Fallback — list expected jobs statically
+            result['scheduler']['jobs'] = [
+                {'id': 'agent_loop', 'trigger': 'interval 5min'},
+                {'id': 'radim_reminders', 'trigger': 'interval 5min'},
+                {'id': 'telemed_reminders', 'trigger': 'interval 5min'},
+                {'id': 'health_agent', 'trigger': 'interval 15min'},
+                {'id': 'morning_checkin', 'trigger': 'cron 8:00'},
+                {'id': 'daily_engagement', 'trigger': 'cron 14:00'},
+                {'id': 'daily_summary', 'trigger': 'cron 20:00'},
+                {'id': 'daily_cleanup', 'trigger': 'cron 3:00'},
+                {'id': 'summary_report', 'trigger': 'cron Mon/Wed/Fri 9:00'},
+                {'id': 'weekly_reports', 'trigger': 'cron Sun 18:00'},
+            ]
+
+        # 2. Per-agent observation counts (from agent_observations)
+        # Map observation_type → agent name
+        AGENT_MAP = {
+            'c_trend_rising': 'CoreDetector',
+            'activity_drop': 'CoreDetector',
+            'vital_anomaly': 'CoreDetector',
+            'no_interaction': 'CoreDetector',
+            'fall_detected': 'CoreDetector',
+            'fall_suspected': 'CoreDetector',
+            'sleep_poor': 'SleepAgent',
+            'isolation_critical': 'SocialIsolationAgent',
+            'isolation_high': 'SocialIsolationAgent',
+            'medication_low': 'MedicationTracker',
+            'prediction_critical': 'PredictiveAgent',
+            'prediction_high': 'PredictiveAgent',
+            'survey_risk': 'SurveyEngine',
+            'anticipation_anomaly': 'AnticipationEngine',
+            'environment_cold': 'HAEnvironment',
+            'environment_hot': 'HAEnvironment',
+        }
+
+        with db_context() as db:
+            # 24h observations by type
+            if is_postgres():
+                obs_rows = db.execute(
+                    "SELECT observation_type, severity, COUNT(*) as cnt "
+                    "FROM agent_observations "
+                    "WHERE created_at > NOW() - INTERVAL '24 hours' "
+                    "GROUP BY observation_type, severity"
+                ).fetchall()
+                # 7d totals
+                week_rows = db.execute(
+                    "SELECT observation_type, COUNT(*) as cnt "
+                    "FROM agent_observations "
+                    "WHERE created_at > NOW() - INTERVAL '7 days' "
+                    "GROUP BY observation_type"
+                ).fetchall()
+                # Last observation timestamp
+                last_row = db.execute(
+                    "SELECT MAX(created_at) as last FROM agent_observations"
+                ).fetchone()
+                # Active users (brain_states last 24h)
+                active_row = db.execute(
+                    "SELECT COUNT(DISTINCT user_id) as cnt FROM brain_states "
+                    "WHERE created_at > NOW() - INTERVAL '24 hours'"
+                ).fetchone()
+                # Total seniors monitored
+                total_row = db.execute(
+                    "SELECT COUNT(DISTINCT user_id) as cnt FROM brain_states"
+                ).fetchone()
+                # Recent observations for feed
+                recent = db.execute(
+                    "SELECT user_id, observation_type, severity, message, created_at "
+                    "FROM agent_observations ORDER BY created_at DESC LIMIT 15"
+                ).fetchall()
+            else:
+                obs_rows = db.execute(
+                    "SELECT observation_type, severity, COUNT(*) as cnt FROM agent_observations "
+                    "WHERE created_at > datetime('now', '-24 hours') "
+                    "GROUP BY observation_type, severity"
+                ).fetchall()
+                week_rows = db.execute(
+                    "SELECT observation_type, COUNT(*) as cnt FROM agent_observations "
+                    "WHERE created_at > datetime('now', '-7 days') GROUP BY observation_type"
+                ).fetchall()
+                last_row = db.execute("SELECT MAX(created_at) as last FROM agent_observations").fetchone()
+                active_row = db.execute(
+                    "SELECT COUNT(DISTINCT user_id) as cnt FROM brain_states "
+                    "WHERE created_at > datetime('now', '-24 hours')"
+                ).fetchone()
+                total_row = db.execute("SELECT COUNT(DISTINCT user_id) as cnt FROM brain_states").fetchone()
+                recent = db.execute(
+                    "SELECT user_id, observation_type, severity, message, created_at "
+                    "FROM agent_observations ORDER BY created_at DESC LIMIT 15"
+                ).fetchall()
+
+        # Aggregate by agent
+        agents_agg = {}
+        def _key(row, k, idx):
+            return row.get(k) if isinstance(row, dict) else (row[idx] if len(row) > idx else None)
+
+        for r in obs_rows:
+            t = _key(r, 'observation_type', 0)
+            sev = _key(r, 'severity', 1)
+            cnt = int(_key(r, 'cnt', 2) or 0)
+            agent_name = AGENT_MAP.get(t, 'Other')
+            if agent_name not in agents_agg:
+                agents_agg[agent_name] = {'name': agent_name, 'observations_24h': 0, 'observations_7d': 0,
+                                           'by_severity': {}, 'types': []}
+            agents_agg[agent_name]['observations_24h'] += cnt
+            agents_agg[agent_name]['by_severity'][sev or 'unknown'] = \
+                agents_agg[agent_name]['by_severity'].get(sev or 'unknown', 0) + cnt
+            if t and t not in agents_agg[agent_name]['types']:
+                agents_agg[agent_name]['types'].append(t)
+
+        for r in week_rows:
+            t = _key(r, 'observation_type', 0)
+            cnt = int(_key(r, 'cnt', 1) or 0)
+            agent_name = AGENT_MAP.get(t, 'Other')
+            if agent_name in agents_agg:
+                agents_agg[agent_name]['observations_7d'] += cnt
+            elif agent_name == 'Other' or agent_name not in agents_agg:
+                agents_agg[agent_name] = agents_agg.get(agent_name, {
+                    'name': agent_name, 'observations_24h': 0, 'observations_7d': cnt,
+                    'by_severity': {}, 'types': [t] if t else []
+                })
+                if 'observations_7d' not in agents_agg[agent_name]:
+                    agents_agg[agent_name]['observations_7d'] = cnt
+
+        # Add idle agents (never generated observations but are scheduled/wired)
+        ALL_AGENTS = [
+            ('PredictiveAgent', 'Predikce krize na 24h'),
+            ('SleepAgent', 'Analýza spánku z IoT motion'),
+            ('SocialIsolationAgent', 'Míra sociální izolace'),
+            ('MedicationTracker', 'Adherence léků'),
+            ('LearningAgent', 'Per-user adaptace thresholds'),
+            ('WeatherAgent', 'Weather-aware návrhy'),
+            ('WeeklyReportAgent', 'Týdenní reporty rodině'),
+            ('SurveyEngine', 'Multi-signal risk'),
+            ('AnticipationEngine', 'Prediktivní Ĉ_{t+1}'),
+            ('CircadianEngine', 'Denní rytmus + routine shifts'),
+            ('EmergencyProtocol', 'Crisis automation'),
+            ('CoreDetector', 'C-trend, activity, vitals, falls'),
+            ('HAEnvironment', 'Home Assistant teplota/světlo'),
+            ('HealthAgent', 'Self-healing (15 min)'),
+        ]
+        for agent_name, desc in ALL_AGENTS:
+            if agent_name not in agents_agg:
+                agents_agg[agent_name] = {
+                    'name': agent_name, 'description': desc,
+                    'observations_24h': 0, 'observations_7d': 0,
+                    'by_severity': {}, 'types': []
+                }
+            else:
+                agents_agg[agent_name]['description'] = desc
+
+        result['agents'] = agents_agg
+
+        # Activity summary
+        result['activity'] = {
+            'active_users_24h': int(_key(active_row, 'cnt', 0) or 0) if active_row else 0,
+            'total_users_tracked': int(_key(total_row, 'cnt', 0) or 0) if total_row else 0,
+            'last_observation_at': str(_key(last_row, 'last', 0) or '') if last_row else None,
+            'total_observations_24h': sum(a['observations_24h'] for a in agents_agg.values()),
+            'total_observations_7d': sum(a['observations_7d'] for a in agents_agg.values()),
+        }
+
+        # Recent feed (last 15)
+        result['recent_observations'] = [
+            {
+                'user_id': _key(r, 'user_id', 0),
+                'type': _key(r, 'observation_type', 1),
+                'severity': _key(r, 'severity', 2),
+                'message': (_key(r, 'message', 3) or '')[:120],
+                'at': str(_key(r, 'created_at', 4) or ''),
+                'agent': AGENT_MAP.get(_key(r, 'observation_type', 1), 'Other'),
+            } for r in recent
+        ]
+
+        return jsonify(result), 200
+
+    except Exception as e:
+        logger.error(f"Agents status error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/admin/crisis-demo', methods=['POST', 'OPTIONS'])
 def admin_crisis_demo():
     """Live crisis demo for conference: simulate fall → full pipeline.
