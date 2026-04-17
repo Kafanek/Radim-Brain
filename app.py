@@ -762,6 +762,16 @@ try:
     except ImportError:
         logger.warning("⚠️ daily summary not available")
 
+    # v10.32: Weekly family reports (Sunday 18:00) — activates WeeklyReportAgent
+    try:
+        from agent_loop import run_weekly_reports
+        scheduler.add_job(lambda: run_weekly_reports(app), 'cron',
+                          day_of_week='sun', hour=18, minute=0,
+                          id='weekly_reports', max_instances=1, misfire_grace_time=3600)
+        logger.info("✅ Weekly reports registered (Sunday 18:00)")
+    except ImportError:
+        logger.warning("⚠️ weekly reports not available")
+
     # 🤖 Health Agent — autonomous monitoring + auto-fix (every 15 min)
     try:
         from radim_health_agent import run_health_check, run_summary_report

@@ -1322,6 +1322,143 @@ def run_daily_summary(app):
             logger.error(f"Daily summary error: {e}")
 
 
+# ============================================================================
+# WEEKLY REPORTS (v10.32 — activate WeeklyReportAgent)
+# ============================================================================
+
+def run_weekly_reports(app):
+    """Generate + send weekly reports for each active senior's family.
+
+    Called by APScheduler cron at Sunday 18:00.
+    Produces rich 7-day summary (interactions, mood trend, observations,
+    sleep quality, medication compliance, social isolation, highlights).
+    """
+    if not _AVAILABLE:
+        return
+
+    with app.app_context():
+        try:
+            from advanced_agents import WeeklyReportAgent
+        except ImportError:
+            logger.warning("advanced_agents not available — skipping weekly reports")
+            return
+
+        try:
+            with db_context() as db:
+                if is_postgres():
+                    rows = db.execute(
+                        "SELECT DISTINCT user_id FROM brain_states "
+                        "WHERE created_at > NOW() - INTERVAL '7 days'"
+                    ).fetchall()
+                else:
+                    rows = db.execute(
+                        "SELECT DISTINCT user_id FROM brain_states "
+                        "WHERE created_at > datetime('now', '-7 days')"
+                    ).fetchall()
+        except Exception as e:
+            logger.warning(f"Weekly reports user list error: {e}")
+            return
+
+        if not rows:
+            logger.info("📊 Weekly reports: no active seniors in last 7 days")
+            return
+
+        sent = 0
+        for row in rows:
+            user_id = row[0] if isinstance(row, (list, tuple)) else row['user_id']
+            if not user_id:
+                continue
+            if str(user_id).startswith('demo_') or str(user_id).startswith('test_'):
+                continue
+            try:
+                report = WeeklyReportAgent.generate_report(user_id, days=7)
+                if report and not report.get('error'):
+                    # Try to email family/caregiver if configured
+                    try:
+                        _send_weekly_report_email(user_id, report, app)
+                        sent += 1
+                    except Exception as e:
+                        logger.debug(f"Weekly report email {user_id}: {e}")
+                    # Also save to learning so chat can reference it
+                    try:
+                        learning = db_load_learning(user_id)
+                        learning['last_weekly_report'] = {
+                            'date': datetime.utcnow().strftime('%Y-%m-%d'),
+                            'summary': report.get('sections', {}).get('summary', ''),
+                        }
+                        db_save_learning(user_id, learning)
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.debug(f"Weekly report for {user_id}: {e}")
+
+        if sent > 0:
+            logger.info(f"📊 Weekly reports: sent {sent} family emails")
+
+
+def _send_weekly_report_email(user_id, report, app):
+    """Email the report to family / primary caregiver if configured."""
+    try:
+        import os, smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+
+        profile = db_load_profile(user_id)
+        recipients = []
+        # Primary caregiver
+        caregiver_id = profile.get('caregiver_id')
+        if caregiver_id:
+            with db_context() as db:
+                r = db.execute(
+                    "SELECT email FROM auth_users WHERE id = ? AND email IS NOT NULL",
+                    (caregiver_id,)
+                ).fetchone()
+                if r:
+                    email = r.get('email') if isinstance(r, dict) else r[0]
+                    if email:
+                        recipients.append(email)
+        # Emergency contacts
+        for ec in (profile.get('emergency_contacts') or []):
+            ce = ec.get('email') if isinstance(ec, dict) else None
+            if ce:
+                recipients.append(ce)
+
+        if not recipients:
+            return
+
+        SMTP_HOST = os.environ.get('SMTP_HOST')
+        SMTP_USER = os.environ.get('SMTP_USER')
+        SMTP_PASS = os.environ.get('SMTP_PASS')
+        SMTP_FROM = os.environ.get('SMTP_FROM', 'radim@radimcare.cz')
+        if not (SMTP_HOST and SMTP_USER and SMTP_PASS):
+            return
+
+        name = report.get('name', 'Senior')
+        sections = report.get('sections', {})
+        body_parts = [f"Týdenní report — {name}", f"Období: {report.get('period')}", ""]
+        for key, val in sections.items():
+            body_parts.append(f"── {key.upper()} ──")
+            if isinstance(val, dict):
+                for k, v in val.items():
+                    body_parts.append(f"  {k}: {v}")
+            else:
+                body_parts.append(f"  {val}")
+            body_parts.append("")
+        body = "\n".join(body_parts)
+
+        for to_email in set(recipients):
+            msg = MIMEMultipart()
+            msg['From'] = SMTP_FROM
+            msg['To'] = to_email
+            msg['Subject'] = f"📊 Radim — týdenní report ({name})"
+            msg.attach(MIMEText(body, 'plain', 'utf-8'))
+            with smtplib.SMTP(SMTP_HOST, int(os.environ.get('SMTP_PORT', 587))) as s:
+                s.starttls()
+                s.login(SMTP_USER, SMTP_PASS)
+                s.sendmail(SMTP_FROM, [to_email], msg.as_string())
+    except Exception as e:
+        logger.debug(f"Weekly email send error: {e}")
+
 
 def _get_user_sensitivity(user_id):
     """Get adaptive sensitivity from Learning Agent (0.5-1.5, default 1.0)."""
