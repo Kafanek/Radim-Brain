@@ -642,6 +642,17 @@ init_tts_proxy_routes(
 app.register_blueprint(tts_proxy_bp)
 logger.info("✅ TTS Proxy routes registered: /api/azure/tts, /api/elevenlabs/tts")
 
+# v10.34: Browser Agent — safe read-only web browsing for seniors + agent tool
+try:
+    from browser_agent_routes import browser_agent_bp
+    from browser_agent import ENABLE_BROWSER_AGENT as _BROWSER_FLAG
+    app.register_blueprint(browser_agent_bp)
+    BROWSER_AGENT_AVAILABLE = True
+    logger.info(f"🌐 Browser Agent routes registered: /api/browser/* (enabled={_BROWSER_FLAG})")
+except ImportError as e:
+    BROWSER_AGENT_AVAILABLE = False
+    logger.warning(f"⚠️ Browser Agent not available: {e}")
+
 # Media & Push + Admin routes registered after helper functions are defined (see below)
 
 # ============================================

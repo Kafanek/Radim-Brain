@@ -50,3 +50,10 @@ yeelight>=0.7.0
 
 # 🎙️ Voice filter is SSML-based (no audio processing deps needed)
 flask-compress==1.15
+
+# 🌐 Browser Agent v1 — safe read-only web browsing (v10.34)
+# trafilatura: state-of-the-art article text extraction
+# beautifulsoup4 + lxml: HTML parsing + link extraction
+trafilatura>=1.6.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0

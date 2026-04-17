@@ -722,12 +722,93 @@ def agent_thresholds(user_id):
 
 
 # ═══════════════════════════════════════════════════════════════════
+# 🌐 BROWSER AGENT — Safe read-only web research tool for other agents
+# v10.34 — proxy around browser_agent module so it shows up here
+# ═══════════════════════════════════════════════════════════════════
+
+class BrowserAgent:
+    """Safe read-only web access for internal AI agents.
+
+    Usage (from radim_orchestrator or any agent):
+        result = BrowserAgent.research("Počasí v Praze", user_id="...")
+        if result['success']:
+            context = result['summary']  # text for AI context injection
+
+    All calls honor ENABLE_BROWSER_AGENT feature flag in browser_agent module.
+    Every call is audit-logged to agent_observations.
+    """
+
+    @staticmethod
+    def open_url(url, user_id=None):
+        """Open a URL — thin wrapper around browser_agent.open_page."""
+        try:
+            from browser_agent import open_page
+            return open_page(url, user_id=user_id)
+        except ImportError:
+            return {'success': False, 'error_code': 'NOT_AVAILABLE',
+                    'error': 'Browser agent module not installed'}
+
+    @staticmethod
+    def research(url, user_id=None, max_chars=2000):
+        """Open URL and return a compact summary suitable for AI context.
+
+        Returns:
+            {success, summary, title, url, links_count} or error dict.
+        """
+        result = BrowserAgent.open_url(url, user_id=user_id)
+        if not result.get('success'):
+            return result
+
+        main = result.get('main_content', '')
+        summary = main[:max_chars]
+        if len(main) > max_chars:
+            # Cut at sentence boundary if possible
+            cut_at = max(summary.rfind('. '), summary.rfind('? '), summary.rfind('! '))
+            if cut_at > max_chars // 2:
+                summary = summary[:cut_at + 1]
+            summary += ' […]'
+
+        return {
+            'success': True,
+            'title': result.get('title', ''),
+            'url': result.get('final_url', result.get('url', '')),
+            'summary': summary,
+            'links_count': len(result.get('links', [])),
+            'session_id': result.get('session_id'),
+            'language': result.get('metadata', {}).get('language', 'cs'),
+        }
+
+    @staticmethod
+    def find(session_id, query):
+        try:
+            from browser_agent import find_on_page
+            return find_on_page(session_id, query)
+        except ImportError:
+            return {'success': False, 'error_code': 'NOT_AVAILABLE'}
+
+    @staticmethod
+    def close(session_id):
+        try:
+            from browser_agent import close_session
+            return close_session(session_id)
+        except ImportError:
+            return {'success': False, 'error_code': 'NOT_AVAILABLE'}
+
+
+# ═══════════════════════════════════════════════════════════════════
 # 📋 AGENT OVERVIEW ENDPOINT
 # ═══════════════════════════════════════════════════════════════════
 
 @agents_bp.route('/api/agents/overview', methods=['GET'])
 def agents_overview():
     """List all agents and their status."""
+    # Browser agent flag
+    try:
+        from browser_agent import ENABLE_BROWSER_AGENT
+        browser_status = 'active' if ENABLE_BROWSER_AGENT else 'disabled'
+    except ImportError:
+        browser_status = 'unavailable'
+
     return jsonify({
         'success': True,
         'agents': [
@@ -737,6 +818,7 @@ def agents_overview():
             {"id": "isolation", "name": "🤝 Social Isolation", "status": "active", "endpoint": "/api/agents/isolation/<user_id>"},
             {"id": "weather", "name": "🌤️ Weather Agent", "status": "active", "endpoint": "/api/agents/weather/suggestions"},
             {"id": "report", "name": "📊 Weekly Report", "status": "active", "endpoint": "/api/agents/report/<user_id>"},
+            {"id": "browser", "name": "🌐 Browser Agent", "status": browser_status, "endpoint": "/api/browser/open"},
             {"id": "emergency", "name": "🚨 Emergency Protocol", "status": "active", "endpoint": "/api/agents/emergency/<user_id>"},
             {"id": "learning", "name": "🧠 Learning Agent", "status": "active", "endpoint": "/api/agents/thresholds/<user_id>"},
             {"id": "agent_loop", "name": "🔄 Agent Loop", "status": "active", "endpoint": "/api/admin/agent-run"},
