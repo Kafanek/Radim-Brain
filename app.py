@@ -1366,6 +1366,13 @@ def admin_agents_status():
             'anticipation_anomaly': 'AnticipationEngine',
             'environment_cold': 'HAEnvironment',
             'environment_hot': 'HAEnvironment',
+            # v10.34: Browser Agent observation types
+            'web_fetch': 'BrowserAgent',
+            'web_click': 'BrowserAgent',
+            'web_find': 'BrowserAgent',
+            'web_blocked': 'BrowserAgent',
+            'web_error': 'BrowserAgent',
+            'web_close': 'BrowserAgent',
         }
 
         with db_context() as db:
@@ -1472,6 +1479,7 @@ def admin_agents_status():
             ('CoreDetector', 'C-trend, activity, vitals, falls'),
             ('HAEnvironment', 'Home Assistant teplota/světlo'),
             ('HealthAgent', 'Self-healing (15 min)'),
+            ('BrowserAgent', 'Bezpečné čtení webu (Wikipedie, Novinky, ČT, Počasí)'),
         ]
         for agent_name, desc in ALL_AGENTS:
             if agent_name not in agents_agg:
