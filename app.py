@@ -653,6 +653,17 @@ except ImportError as e:
     BROWSER_AGENT_AVAILABLE = False
     logger.warning(f"⚠️ Browser Agent not available: {e}")
 
+# v10.36: Safe Web Agent — GDPR-first senior-facing privacy layer over Browser Agent v10.34
+try:
+    from browser_agent_safe_routes import safe_web_bp
+    from browser_agent_safe import ENABLE_SAFE_WEB_AGENT as _SAFE_WEB_FLAG
+    app.register_blueprint(safe_web_bp)
+    SAFE_WEB_AGENT_AVAILABLE = True
+    logger.info(f"🛡️ Safe Web Agent routes registered: /api/safe-web/* (enabled={_SAFE_WEB_FLAG})")
+except ImportError as e:
+    SAFE_WEB_AGENT_AVAILABLE = False
+    logger.warning(f"⚠️ Safe Web Agent not available: {e}")
+
 # Media & Push + Admin routes registered after helper functions are defined (see below)
 
 # ============================================

@@ -95,7 +95,12 @@ def gdpr_export(user_id):
         "iot_devices": [],
         "iot_alerts": [],
         "education_data": {},
-        "audit_log": []
+        "audit_log": [],
+        "safe_web_sessions": {
+            "note": "Safe Web sessions (senior-facing browsing) are in-memory only with 15-min TTL and are never persisted. Only the aggregated audit trail below survives.",
+            "active_session_count": 0,
+            "audit_trail": []
+        }
     }
 
     if not _DB_AVAILABLE:
@@ -176,6 +181,32 @@ def gdpr_export(user_id):
             except Exception as e:
                 logger.debug(f"GDPR export audit: {e}")
 
+            # 9. Safe Web Agent — privacy-minimal audit trail (v10.36)
+            try:
+                for row in db.execute(
+                    "SELECT observation_type, severity, message, details, created_at FROM agent_observations "
+                    "WHERE user_id = ? AND observation_type LIKE 'safe_web_%' ORDER BY created_at DESC LIMIT 500",
+                    (user_id,)
+                ).fetchall():
+                    export_data["safe_web_sessions"]["audit_trail"].append({
+                        "type": row[0], "severity": row[1], "message": row[2],
+                        "details": row[3] if isinstance(row[3], dict) else (json.loads(row[3]) if row[3] else {}),
+                        "timestamp": str(row[4]),
+                    })
+            except Exception as e:
+                logger.debug(f"GDPR export safe-web: {e}")
+
+            # 9b. Active in-memory safe-web sessions for this user (not persisted)
+            try:
+                from browser_agent_safe import _safe_sessions, _safe_lock
+                with _safe_lock:
+                    uid = str(user_id)
+                    export_data["safe_web_sessions"]["active_session_count"] = sum(
+                        1 for s in _safe_sessions.values() if s.get("user_id") == uid
+                    )
+            except Exception:
+                pass
+
     except Exception as e:
         logger.error(f"GDPR export error: {e}")
         return jsonify({"success": False, "error": "Chyba při exportu dat"}), 500
@@ -218,7 +249,9 @@ def gdpr_full_erase(user_id):
         "iot_alerts": 0,
         "iot_alert_rules": 0,
         "education_profiles": 0,
-        "education_progress": 0
+        "education_progress": 0,
+        "safe_web_sessions_inmemory": 0,
+        "safe_web_observations": 0,
     }
 
     try:
@@ -258,9 +291,31 @@ def gdpr_full_erase(user_id):
                 except Exception as e:
                     logger.debug(f"GDPR erase {table}: {e}")
 
+            # 4. Safe Web Agent — drop safe_web audit observations (v10.36)
+            try:
+                cur = db.execute(
+                    "DELETE FROM agent_observations WHERE user_id = ? AND observation_type LIKE 'safe_web_%'",
+                    (user_id,)
+                )
+                deleted["safe_web_observations"] = cur.rowcount if hasattr(cur, 'rowcount') else 0
+            except Exception as e:
+                logger.debug(f"GDPR erase safe_web audit: {e}")
+
     except Exception as e:
         logger.error(f"GDPR full erase error: {e}")
         return jsonify({"success": False, "error": "Chyba při mazání dat"}), 500
+
+    # 5. Safe Web Agent — drop any in-memory sessions for this user (v10.36)
+    try:
+        from browser_agent_safe import _safe_sessions, _safe_lock
+        with _safe_lock:
+            uid = str(user_id)
+            to_drop = [sid for sid, s in _safe_sessions.items() if s.get("user_id") == uid]
+            for sid in to_drop:
+                _safe_sessions.pop(sid, None)
+            deleted["safe_web_sessions_inmemory"] = len(to_drop)
+    except Exception as e:
+        logger.debug(f"GDPR erase safe_web sessions: {e}")
 
     # Audit log — záznam o výmazu (tento záznam se uchovává!)
     audit_log(user_id, "data_delete", "all_user_data_full",

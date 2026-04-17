@@ -964,6 +964,17 @@ def run_daily_cleanup(app):
         except Exception as e:
             logger.debug(f"Subscription cleanup error: {e}")
 
+        # v10.36: Safe Web Agent — cleanup stale in-memory sessions (15-min TTL)
+        try:
+            from browser_agent_safe import cleanup_safe_web_sessions
+            removed = cleanup_safe_web_sessions()
+            if removed:
+                logger.info(f"🧹 Safe Web Agent cleanup: {removed} stale sessions removed")
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"Safe Web cleanup error: {e}")
+
 
 def _cleanup_subscriptions(db=None):
     """Auto-manage expired subscriptions and inactive accounts.
