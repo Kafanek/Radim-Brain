@@ -667,6 +667,16 @@ except ImportError as e:
     SAFE_WEB_AGENT_AVAILABLE = False
     logger.warning(f"⚠️ Safe Web Agent not available: {e}")
 
+# v10.49: Translator — V4 + EN (CZ, SK, PL, HU, EN) for Visegrad Fund conference
+try:
+    from translator_routes import translator_bp
+    app.register_blueprint(translator_bp)
+    TRANSLATOR_AVAILABLE = True
+    logger.info("🌐 Translator routes registered: /api/translate (Gemini → MyMemory)")
+except ImportError as e:
+    TRANSLATOR_AVAILABLE = False
+    logger.warning(f"⚠️ Translator not available: {e}")
+
 # v10.37: In-app notifications + SOS + family account linking
 try:
     from notification_routes import notification_bp
