@@ -38,12 +38,18 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════════
 
 USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+
+USER_AGENT_RADIM = (
     "RadimCare/1.0 (+https://app.radimcare.cz/browser-agent) "
     "Safe-readonly web agent for seniors"
 )
 
-DEFAULT_TIMEOUT = (5, 15)  # (connect, read) seconds
-MAX_RESPONSE_BYTES = 5 * 1024 * 1024  # 5 MB — senior-reading use case
+DEFAULT_TIMEOUT = (5, 15)
+MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 MAX_REDIRECTS = 5
 
 
@@ -64,11 +70,17 @@ def _build_session() -> requests.Session:
     s.mount('https://', adapter)
     s.headers.update({
         'User-Agent': USER_AGENT,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'cs,en-US;q=0.8,en;q=0.5',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'cs-CZ,cs;q=0.9,en;q=0.6',
         'Accept-Encoding': 'gzip, deflate',
         'DNT': '1',
         'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'X-RadimCare-Agent': 'read-only-senior-browser',
     })
     return s
 
