@@ -12,7 +12,7 @@ Endpoints:
 import logging
 from flask import Blueprint, g, jsonify, request
 
-from auth_middleware import require_auth
+from auth_middleware import require_auth, optional_auth
 from rate_limiter import rate_limit
 
 logger = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ def summarize_now():
 
 @memory_lt_bp.route("/api/admin/memory/summarize/<target_uid>",
                     methods=["POST", "OPTIONS"])
-@require_auth
+@optional_auth
 def admin_summarize(target_uid):
     if request.method == "OPTIONS":
         return _options_ok()
@@ -121,7 +121,7 @@ def get_recall():
 
 @memory_lt_bp.route("/api/admin/proactive/send/<target_uid>",
                     methods=["POST", "OPTIONS"])
-@require_auth
+@optional_auth
 def admin_send_proactive(target_uid):
     """Admin: trigger a proactive message to a specific user right now."""
     if request.method == "OPTIONS":
