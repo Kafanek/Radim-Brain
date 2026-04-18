@@ -250,69 +250,83 @@ _PROXY_PREFIX = '/api/browser/proxy?url='
 
 def _rewrite_html_for_iframe(html: str, base_url: str) -> str:
     """Prepare HTML so it renders cleanly inside an iframe:
-      1. Strip meta tags that block framing (XFO, frame-ancestors).
-      2. Inject <base href> so CSS/img/script relative URLs resolve against
+      1. Inject <base href> so CSS/img/script relative URLs resolve against
          the original host (public CDN assets just work).
-      3. Rewrite anchor hrefs to go back through this proxy so navigation
-         stays inside the embedded frame (otherwise clicking a link would
-         navigate the iframe to the target domain, which likely blocks XFO).
+      2. Strip meta tags that block framing (XFO, frame-ancestors).
+      3. Rewrite only <a href> anchor targets to continue through the proxy
+         so in-frame clicks don't get blocked by the next site's XFO.
+
+    Uses BeautifulSoup so we only touch real anchor tags — we do NOT rewrite
+    <base>, <link rel="stylesheet">, <link rel="icon">, <area>, etc.
     """
-    import re as _re
     from urllib.parse import urljoin, quote as _quote
 
-    # 1. Strip meta-level X-Frame-Options / CSP frame-ancestors directives
-    html = _re.sub(
-        r'<meta[^>]+http-equiv=["\']?(?:X-Frame-Options|Content-Security-Policy)[^>]*>',
-        '',
-        html,
-        flags=_re.IGNORECASE,
-    )
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        # If bs4 isn't available, do a minimal safe transform (no anchor rewrite).
+        return _rewrite_html_minimal(html, base_url)
 
-    # 2. Inject <base href> right after <head>
-    if not _re.search(r'<base[\s>]', html, _re.IGNORECASE):
-        base_tag = f'<base href="{base_url}">'
-        if _re.search(r'<head[^>]*>', html, _re.IGNORECASE):
-            html = _re.sub(r'(<head[^>]*>)', r'\1' + base_tag, html,
-                           count=1, flags=_re.IGNORECASE)
-        else:
-            html = base_tag + html
+    try:
+        soup = BeautifulSoup(html, 'lxml')
+    except Exception:
+        soup = BeautifulSoup(html, 'html.parser')
 
-    # 3. Rewrite anchor hrefs through the proxy (so clicks stay in frame).
-    #    We only touch http(s) targets — mailto:, tel:, javascript:, #hash stay as-is.
-    def _rewrite_href(match):
-        quote_char = match.group(1)
-        raw = match.group(2).strip()
+    # 1. Ensure <base href>
+    head = soup.find('head')
+    if head is not None and not soup.find('base'):
+        base_tag = soup.new_tag('base', href=base_url)
+        head.insert(0, base_tag)
+
+    # 2. Strip meta tags that would re-impose framing restrictions
+    for meta in list(soup.find_all('meta')):
+        eq = (meta.get('http-equiv') or '').lower()
+        if eq in ('x-frame-options', 'content-security-policy'):
+            meta.decompose()
+
+    # 3. Rewrite anchor hrefs through the proxy
+    for a in soup.find_all('a'):
+        href = a.get('href')
+        if not href:
+            continue
+        raw = href.strip()
         if not raw:
-            return match.group(0)
-        # Skip anchors, javascript, mailto, tel, etc.
+            continue
         lower = raw.lower()
         if lower.startswith(('#', 'javascript:', 'mailto:', 'tel:', 'sms:', 'data:')):
-            return match.group(0)
+            continue
         try:
             absolute = urljoin(base_url, raw)
         except Exception:
-            return match.group(0)
+            continue
         if not absolute.lower().startswith(('http://', 'https://')):
-            return match.group(0)
-        proxied = _PROXY_PREFIX + _quote(absolute, safe='')
-        return f'href={quote_char}{proxied}{quote_char}'
+            continue
+        a['href'] = _PROXY_PREFIX + _quote(absolute, safe='')
+        # Also drop target="_blank" so links stay in the iframe rather than
+        # opening a new window (senior UX).
+        if a.get('target'):
+            a['target'] = '_self'
 
+    # 4. Force <form> submissions to a new tab (can't proxy POST safely).
+    for form in soup.find_all('form'):
+        form['target'] = '_blank'
+
+    return str(soup)
+
+
+def _rewrite_html_minimal(html: str, base_url: str) -> str:
+    """Fallback when bs4 isn't available — just inject <base> and strip XFO meta."""
+    import re as _re
     html = _re.sub(
-        r'''href\s*=\s*(["'])([^"']*)\1''',
-        _rewrite_href,
-        html,
-        flags=_re.IGNORECASE,
+        r'<meta[^>]+http-equiv=["\']?(?:X-Frame-Options|Content-Security-Policy)[^>]*>',
+        '', html, flags=_re.IGNORECASE,
     )
-
-    # 4. Force all form submissions into new tab (so our frame doesn't break
-    #    on POST redirects that would then hit external XFO).
-    html = _re.sub(
-        r'<form\b',
-        '<form target="_blank"',
-        html,
-        flags=_re.IGNORECASE,
-    )
-
+    if not _re.search(r'<base[\s>]', html, _re.IGNORECASE):
+        base_tag = f'<base href="{base_url}">'
+        if _re.search(r'<head[^>]*>', html, _re.IGNORECASE):
+            html = _re.sub(r'(<head[^>]*>)', r'\1' + base_tag, html, count=1, flags=_re.IGNORECASE)
+        else:
+            html = base_tag + html
     return html
 
 
