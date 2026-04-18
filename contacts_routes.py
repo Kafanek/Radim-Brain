@@ -160,6 +160,7 @@ def create_contact():
                 if row:
                     linked_id = row[0]
 
+            # v10.41: PG needs real booleans — SQLite treats bool as int automatically
             cid = db_insert(
                 db, "contacts",
                 ["senior_id", "name", "relation", "phone", "email",
@@ -168,10 +169,8 @@ def create_contact():
                  "is_emergency"],
                 [sid, name, relation, phone, email, avatar_url, notes,
                  linked_id, sos_priority,
-                 1 if is_primary else 0,
-                 1 if can_call else 0,
-                 1 if can_sms else 0,
-                 1 if is_emergency else 0],
+                 bool(is_primary), bool(can_call),
+                 bool(can_sms), bool(is_emergency)],
             )
     except Exception as e:
         logger.error(f"create_contact: {e}")
@@ -248,7 +247,7 @@ def update_contact(cid):
             except (TypeError, ValueError):
                 v = None
         elif vtype is bool:
-            v = 1 if v else 0
+            v = bool(v)  # v10.41: real boolean for PG (SQLite accepts bool as int)
         updates.append(f"{k} = ?")
         params.append(v)
 
