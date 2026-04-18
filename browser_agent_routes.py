@@ -171,6 +171,107 @@ def route_close(session_id):
     return jsonify(result), 200
 
 
+@browser_agent_bp.route('/api/browser/proxy', methods=['GET', 'OPTIONS'])
+@rate_limit(max_requests=60, window_seconds=60, key_func='ip')
+def route_proxy():
+    """Proxy a whitelisted URL so the senior UI can iframe it.
+
+    Fetches the URL server-side, strips X-Frame-Options / frame-ancestors
+    so the response can be embedded. Injects <base href="..."> so relative
+    assets (images, CSS) resolve against the original host. Senior's iframe
+    sees the real page rendered from our domain.
+    """
+    if request.method == 'OPTIONS':
+        return _options_ok()
+
+    from flask import Response
+    try:
+        from browser_agent_safety import SafetyError, validate_url
+        from browser_agent_fetcher import FetchError, fetch
+    except ImportError as e:
+        return _proxy_error(f'Proxy není dostupný: {e}', 503)
+
+    url = (request.args.get('url') or '').strip()
+    if not url:
+        return _proxy_error('Chybí parametr "url".', 400)
+
+    try:
+        validate_url(url, allow_external=False)
+    except SafetyError as e:
+        return _proxy_error(f'Stránka není povolena: {e.message}', 403)
+
+    try:
+        result = fetch(url, allow_external=False)
+    except SafetyError as e:
+        return _proxy_error(f'Přesměrování zablokováno: {e.message}', 403)
+    except FetchError as e:
+        return _proxy_error(f'Stránku se nepodařilo načíst: {e.message}', 502)
+
+    html = result.get('content', '') or ''
+    final_url = result.get('final_url', url)
+
+    # Minimal rewrites so relative URLs work + no embed-blocking meta tags.
+    html = _rewrite_html_for_iframe(html, final_url)
+
+    resp = Response(html, mimetype='text/html; charset=utf-8')
+    # Strip response-level block flags (the fetcher didn't return them but
+    # Flask/WSGI defaults are clean). Explicit policies:
+    resp.headers['Content-Security-Policy'] = "frame-ancestors *"
+    resp.headers['X-Frame-Options'] = 'ALLOWALL'
+    resp.headers['Cache-Control'] = 'public, max-age=60'
+    # Permissive Referrer-Policy so asset loads from the target work
+    resp.headers['Referrer-Policy'] = 'no-referrer-when-downgrade'
+    return resp
+
+
+def _proxy_error(message: str, status: int):
+    """Return a small human-readable HTML error the iframe can display."""
+    from flask import Response
+    msg = (message or 'Chyba při načítání stránky.').replace('<', '&lt;')
+    body = (
+        '<!doctype html><meta charset="utf-8">'
+        '<title>Nepodařilo se načíst</title>'
+        '<body style="font-family:system-ui,sans-serif;padding:40px;'
+        'color:#2d3748;background:#f8fafa;text-align:center">'
+        '<div style="max-width:500px;margin:60px auto;padding:28px;'
+        'background:#fff;border:1.5px solid #e2e8f0;border-radius:16px">'
+        '<h2 style="margin-top:0;color:#742a2a">⚠️ Stránku se nepodařilo otevřít</h2>'
+        f'<p style="color:#4a5568;line-height:1.5">{msg}</p></div></body>'
+    )
+    r = Response(body, mimetype='text/html; charset=utf-8')
+    r.status_code = status
+    r.headers['Content-Security-Policy'] = "frame-ancestors *"
+    r.headers['X-Frame-Options'] = 'ALLOWALL'
+    return r
+
+
+def _rewrite_html_for_iframe(html: str, base_url: str) -> str:
+    """Inject <base href> so relative URLs resolve, and remove any meta tags
+    that block framing. Does NOT rewrite anchors — follow-link navigation is
+    handled on the frontend by intercepting clicks."""
+    import re as _re
+
+    # 1. Strip meta-level X-Frame-Options / CSP frame-ancestors directives
+    html = _re.sub(
+        r'<meta[^>]+http-equiv=["\']?(?:X-Frame-Options|Content-Security-Policy)[^>]*>',
+        '',
+        html,
+        flags=_re.IGNORECASE,
+    )
+
+    # 2. Inject <base href> right after <head> if no base tag exists
+    if not _re.search(r'<base[\s>]', html, _re.IGNORECASE):
+        base_tag = f'<base href="{base_url}">'
+        # Insert after opening <head>; if no <head>, insert at top
+        if _re.search(r'<head[^>]*>', html, _re.IGNORECASE):
+            html = _re.sub(r'(<head[^>]*>)', r'\1' + base_tag, html,
+                           count=1, flags=_re.IGNORECASE)
+        else:
+            html = base_tag + html
+
+    return html
+
+
 @browser_agent_bp.route('/api/browser/stats', methods=['GET', 'OPTIONS'])
 def route_stats():
     """Public (no auth) — only returns feature flag state + session count."""
