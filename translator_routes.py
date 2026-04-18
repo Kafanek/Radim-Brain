@@ -90,7 +90,7 @@ def translate():
             "error": f'Zdrojový jazyk "{source}" není podporovaný.',
         }), 400
 
-    # If source = target, return as-is (no API call).
+    # If source is EXPLICITLY set == target, short-circuit (user asked for no-op).
     if source != "auto" and source == target:
         return jsonify({
             "success": True,
@@ -101,19 +101,11 @@ def translate():
             "provider": "noop",
         }), 200
 
-    # Auto-detect source if needed (for both API path quality + UX).
+    # Auto-detect source if needed. With auto, we never short-circuit on
+    # detection == target — detection is heuristic and can be wrong. Let
+    # Gemini have the final say (it can also confirm the text is already
+    # in target language and echo it).
     detected_source = source if source != "auto" else _quick_detect(text)
-
-    # Short-circuit if detection matches target
-    if detected_source == target:
-        return jsonify({
-            "success": True,
-            "translated": text,
-            "source": source,
-            "target": target,
-            "detected_source": detected_source,
-            "provider": "noop",
-        }), 200
 
     # 1. Primary: Gemini (best V4 quality, already paid for).
     translated, provider = _translate_gemini(text, detected_source, target)
@@ -155,13 +147,16 @@ def _quick_detect(text: str) -> str:
     t = text.lower()
     chars = set(t)
 
-    # Hungarian is very distinctive (many double-acute vowels)
-    if chars & _HU_CHARS:
-        # Stronger signal: őű distinctively Hungarian
-        if any(c in t for c in "őű"):
-            return "hu"
-        # Could also be CS/SK. Try more Hungarian cues.
-        if re.search(r"\b(hogy|nem|van|egy|ami|és|vagy|csak)\b", t):
+    # Hungarian — strongest signals first
+    if any(c in t for c in "őű"):
+        return "hu"
+    # Common Hungarian words (covers lots of conference chatter)
+    if re.search(r"\b(hogy|nem|van|egy|ami|és|vagy|csak|köszönöm|szépen|igen|jó|kérem)\b", t):
+        return "hu"
+    # Hungarian chars (ö, ü, á, é) without Czech/Slovak/Polish signals
+    if (chars & _HU_CHARS) and not any(c in t for c in "čďěňřšťůž"):
+        # Check if Polish chars present (they take precedence)
+        if not (chars & _PL_CHARS):
             return "hu"
 
     # Polish (unique: ą ę ł ś ź ż)
@@ -194,7 +189,11 @@ def _quick_detect(text: str) -> str:
 # ═══════════════════════════════════════════════════════════════════
 
 def _translate_gemini(text: str, source: str, target: str):
-    """Translate via Gemini 2.0 Flash. Returns (text, provider) or (None, None)."""
+    """Translate via Gemini 2.0 Flash REST API. Returns (text, provider) or (None, None).
+
+    We call the REST endpoint directly (no google-generativeai SDK on Heroku)
+    — same pattern used elsewhere in this codebase.
+    """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return None, None
@@ -212,21 +211,30 @@ def _translate_gemini(text: str, source: str, target: str):
     )
 
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-        resp = model.generate_content(
-            prompt,
-            generation_config={
-                "temperature": 0.1,
-                "max_output_tokens": 2048,
-                "top_p": 0.9,
+        resp = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"gemini-2.0-flash:generateContent?key={api_key}",
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "maxOutputTokens": 2048,
+                    "topP": 0.9,
+                },
             },
+            timeout=15,
         )
-        if not resp or not getattr(resp, "text", None):
+        if resp.status_code != 200:
+            logger.warning(f"Gemini translate HTTP {resp.status_code}: {resp.text[:200]}")
             return None, None
-        out = resp.text.strip()
-        # Strip any lingering quotes/intro that Gemini sometimes adds
+        data = resp.json()
+        candidates = data.get("candidates") or []
+        if not candidates:
+            return None, None
+        parts = (candidates[0].get("content") or {}).get("parts") or []
+        if not parts:
+            return None, None
+        out = (parts[0].get("text") or "").strip()
         out = _strip_wrapping_quotes(out)
         if not out:
             return None, None
