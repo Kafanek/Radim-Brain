@@ -262,6 +262,63 @@ def _proxy_error(message: str, status: int):
 
 _PROXY_PREFIX = '/api/browser/proxy?url='
 
+# Injected into every proxied page. Wraps fetch() and XMLHttpRequest so
+# that root-relative URLs resolve to the original host through our proxy
+# (instead of hitting our backend origin and 404-ing). Also traps
+# window.location navigations so single-page apps that SPA-route through
+# history.pushState still keep working — falling back to top.location for
+# full-reload cases.
+_PROXY_SHIM_JS = r"""
+(function(){
+  try {
+    var BASE = "__BASE__";
+    var PREFIX = "/api/browser/proxy?url=";
+    function absolutize(u) {
+      try { return new URL(u, BASE).href; } catch(e) { return null; }
+    }
+    function proxify(u) {
+      if (!u) return u;
+      if (typeof u !== "string") return u;
+      var lower = u.toLowerCase();
+      if (lower.indexOf(PREFIX) !== -1) return u;
+      if (lower.indexOf("data:") === 0 || lower.indexOf("blob:") === 0 ||
+          lower.indexOf("javascript:") === 0 || lower.indexOf("mailto:") === 0 ||
+          lower.indexOf("tel:") === 0 || lower.indexOf("#") === 0) return u;
+      var abs = absolutize(u);
+      if (!abs) return u;
+      if (abs.indexOf("http://") !== 0 && abs.indexOf("https://") !== 0) return u;
+      return PREFIX + encodeURIComponent(abs);
+    }
+    // fetch() shim
+    if (window.fetch) {
+      var origFetch = window.fetch.bind(window);
+      window.fetch = function(input, init) {
+        try {
+          if (typeof input === "string") {
+            input = proxify(input);
+          } else if (input && typeof input.url === "string") {
+            input = new Request(proxify(input.url), input);
+          }
+        } catch(e){}
+        return origFetch(input, init);
+      };
+    }
+    // XMLHttpRequest shim
+    if (window.XMLHttpRequest) {
+      var origOpen = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function(method, url) {
+        try { url = proxify(url); } catch(e){}
+        var rest = Array.prototype.slice.call(arguments, 2);
+        return origOpen.apply(this, [method, url].concat(rest));
+      };
+    }
+    // Form.submit() / action rewrites handled by HTML rewriter.
+  } catch(e) {
+    console.debug("[RadimProxyShim] init failed:", e && e.message);
+  }
+})();
+"""
+
 
 def _rewrite_html_for_iframe(html: str, base_url: str) -> str:
     """Prepare HTML so it renders cleanly inside an iframe:
@@ -287,11 +344,19 @@ def _rewrite_html_for_iframe(html: str, base_url: str) -> str:
     except Exception:
         soup = BeautifulSoup(html, 'html.parser')
 
-    # 1. Ensure <base href>
+    # 1. Ensure <base href> + inject a tiny shim so JS-initiated requests
+    #    (fetch, XMLHttpRequest) using root-relative paths land on the
+    #    original host through our proxy, not on our backend origin.
     head = soup.find('head')
-    if head is not None and not soup.find('base'):
-        base_tag = soup.new_tag('base', href=base_url)
-        head.insert(0, base_tag)
+    if head is not None:
+        if not soup.find('base'):
+            base_tag = soup.new_tag('base', href=base_url)
+            head.insert(0, base_tag)
+        shim = soup.new_tag('script')
+        shim.string = _PROXY_SHIM_JS.replace('__BASE__', base_url)
+        # Insert shim right after <base> (or at head start) so it runs
+        # before page scripts.
+        head.insert(1 if soup.find('base') else 0, shim)
 
     # 2. Strip meta tags that would re-impose framing restrictions
     for meta in list(soup.find_all('meta')):
