@@ -187,10 +187,18 @@ def auth_register():
         except Exception:
             pass
 
+        # v10.41: Welcome email (non-blocking, best-effort)
+        try:
+            from onboarding_routes import send_welcome_email
+            send_welcome_email(email, name)
+        except Exception as e:
+            logger.debug(f"Welcome email skipped: {e}")
+
         return jsonify({
             "success": True, "token": token,
             "user": {"id": user_id, "email": email, "name": name, "role": "subscriber"},
-            "gdpr_consent": False, "message": "Registrace úspěšná!"
+            "gdpr_consent": False, "message": "Registrace úspěšná!",
+            "onboarding": {"show_wizard": True, "all_steps": ["profile", "family", "festive", "sos_test"]},
         })
 
     except Exception as e:

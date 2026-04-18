@@ -686,6 +686,26 @@ except ImportError as e:
     CONTACTS_AVAILABLE = False
     logger.warning(f"⚠️ Contacts not available: {e}")
 
+# v10.41: Onboarding wizard + welcome email
+try:
+    from onboarding_routes import onboarding_bp
+    app.register_blueprint(onboarding_bp)
+    ONBOARDING_AVAILABLE = True
+    logger.info("🎯 Onboarding routes registered: /api/onboarding/*")
+except ImportError as e:
+    ONBOARDING_AVAILABLE = False
+    logger.warning(f"⚠️ Onboarding not available: {e}")
+
+# v10.41: System status dashboard for admins
+try:
+    from system_status_routes import system_status_bp
+    app.register_blueprint(system_status_bp)
+    SYSTEM_STATUS_AVAILABLE = True
+    logger.info("📊 System status routes registered: /api/system/status")
+except ImportError as e:
+    SYSTEM_STATUS_AVAILABLE = False
+    logger.warning(f"⚠️ System status not available: {e}")
+
 # Media & Push + Admin routes registered after helper functions are defined (see below)
 
 # ============================================
