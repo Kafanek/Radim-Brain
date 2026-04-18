@@ -130,7 +130,7 @@ def _call_gemini_proactive(prompt):
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash-exp")
+        model = genai.GenerativeModel("gemini-2.0-flash")
         resp = model.generate_content(prompt, generation_config={
             "temperature": 0.8, "max_output_tokens": 150,
         })
