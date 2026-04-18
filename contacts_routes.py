@@ -58,11 +58,28 @@ def _normalize_phone(phone):
 
 
 def _row_to_dict(row):
-    (
-        cid, senior_id, name, relation, phone, email, avatar_url, notes,
-        linked_id, sos_priority, is_primary, can_call, can_sms,
-        is_emergency, created_at, updated_at,
-    ) = row
+    """Convert DB row (dict-like on PG, tuple-like on SQLite) to API dict."""
+    # PostgreSQL RealDictCursor returns dict; SQLite returns tuple.
+    if isinstance(row, dict) or hasattr(row, 'keys'):
+        g = lambda k, i: row[k] if k in row else (row[i] if isinstance(row, (list, tuple)) else None)
+    else:
+        g = lambda k, i: row[i]
+    cid = g('id', 0)
+    senior_id = g('senior_id', 1)
+    name = g('name', 2)
+    relation = g('relation', 3)
+    phone = g('phone', 4)
+    email = g('email', 5)
+    avatar_url = g('avatar_url', 6)
+    notes = g('notes', 7)
+    linked_id = g('linked_family_link_id', 8)
+    sos_priority = g('sos_priority', 9)
+    is_primary = g('is_primary', 10)
+    can_call = g('can_call', 11)
+    can_sms = g('can_sms', 12)
+    is_emergency = g('is_emergency', 13)
+    created_at = g('created_at', 14)
+    updated_at = g('updated_at', 15)
     return {
         "id": cid, "name": name, "relation": relation,
         "relation_label": _relation_label(relation),

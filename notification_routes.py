@@ -245,7 +245,7 @@ def sos_ack(sos_id):
             ).fetchone()
             if not row:
                 return jsonify({"success": False, "error": "SOS událost nenalezena."}), 404
-            senior_id, current_ack, resolved_at = row
+            senior_id, current_ack, resolved_at = row[0], row[1], row[2]
             if resolved_at:
                 return jsonify({"success": True, "already_resolved": True,
                                 "message": "Událost už je uzavřená."})
@@ -336,7 +336,7 @@ def sos_resolve(sos_id):
             ).fetchone()
             if not row:
                 return jsonify({"success": False, "error": "Nenalezeno."}), 404
-            senior_id, resolved_at = row
+            senior_id, resolved_at = row[0], row[1]
             if resolved_at:
                 return jsonify({"success": True, "already": True})
 

@@ -385,7 +385,8 @@ def family_accept():
             if not row:
                 return jsonify({"success": False, "error": "Neplatná pozvánka."}), 404
 
-            lid, senior_id, invited_email, expires_at, confirmed_at, revoked_at = row
+            lid = row[0]; senior_id = row[1]; invited_email = row[2]
+            expires_at = row[3]; confirmed_at = row[4]; revoked_at = row[5]
             if revoked_at:
                 return jsonify({"success": False, "error": "Pozvánka byla zrušena."}), 410
             if confirmed_at:
