@@ -245,11 +245,20 @@ def _proxy_error(message: str, status: int):
     return r
 
 
+_PROXY_PREFIX = '/api/browser/proxy?url='
+
+
 def _rewrite_html_for_iframe(html: str, base_url: str) -> str:
-    """Inject <base href> so relative URLs resolve, and remove any meta tags
-    that block framing. Does NOT rewrite anchors — follow-link navigation is
-    handled on the frontend by intercepting clicks."""
+    """Prepare HTML so it renders cleanly inside an iframe:
+      1. Strip meta tags that block framing (XFO, frame-ancestors).
+      2. Inject <base href> so CSS/img/script relative URLs resolve against
+         the original host (public CDN assets just work).
+      3. Rewrite anchor hrefs to go back through this proxy so navigation
+         stays inside the embedded frame (otherwise clicking a link would
+         navigate the iframe to the target domain, which likely blocks XFO).
+    """
     import re as _re
+    from urllib.parse import urljoin, quote as _quote
 
     # 1. Strip meta-level X-Frame-Options / CSP frame-ancestors directives
     html = _re.sub(
@@ -259,15 +268,50 @@ def _rewrite_html_for_iframe(html: str, base_url: str) -> str:
         flags=_re.IGNORECASE,
     )
 
-    # 2. Inject <base href> right after <head> if no base tag exists
+    # 2. Inject <base href> right after <head>
     if not _re.search(r'<base[\s>]', html, _re.IGNORECASE):
         base_tag = f'<base href="{base_url}">'
-        # Insert after opening <head>; if no <head>, insert at top
         if _re.search(r'<head[^>]*>', html, _re.IGNORECASE):
             html = _re.sub(r'(<head[^>]*>)', r'\1' + base_tag, html,
                            count=1, flags=_re.IGNORECASE)
         else:
             html = base_tag + html
+
+    # 3. Rewrite anchor hrefs through the proxy (so clicks stay in frame).
+    #    We only touch http(s) targets — mailto:, tel:, javascript:, #hash stay as-is.
+    def _rewrite_href(match):
+        quote_char = match.group(1)
+        raw = match.group(2).strip()
+        if not raw:
+            return match.group(0)
+        # Skip anchors, javascript, mailto, tel, etc.
+        lower = raw.lower()
+        if lower.startswith(('#', 'javascript:', 'mailto:', 'tel:', 'sms:', 'data:')):
+            return match.group(0)
+        try:
+            absolute = urljoin(base_url, raw)
+        except Exception:
+            return match.group(0)
+        if not absolute.lower().startswith(('http://', 'https://')):
+            return match.group(0)
+        proxied = _PROXY_PREFIX + _quote(absolute, safe='')
+        return f'href={quote_char}{proxied}{quote_char}'
+
+    html = _re.sub(
+        r'''href\s*=\s*(["'])([^"']*)\1''',
+        _rewrite_href,
+        html,
+        flags=_re.IGNORECASE,
+    )
+
+    # 4. Force all form submissions into new tab (so our frame doesn't break
+    #    on POST redirects that would then hit external XFO).
+    html = _re.sub(
+        r'<form\b',
+        '<form target="_blank"',
+        html,
+        flags=_re.IGNORECASE,
+    )
 
     return html
 
