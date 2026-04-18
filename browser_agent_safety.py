@@ -30,20 +30,31 @@ ALLOWED_DOMAINS = frozenset([
     # Zprávy
     'idnes.cz', 'ct24.ceskatelevize.cz', 'ceskatelevize.cz',
     'novinky.cz', 'seznam.cz', 'irozhlas.cz', 'lidovky.cz',
-    'aktualne.cz', 'denik.cz',
+    'aktualne.cz', 'denik.cz', 'blesk.cz', 'tyden.cz',
+    'reflex.cz', 'forum24.cz', 'e15.cz',
     # Informace a encyklopedie
     'wikipedia.org', 'cs.wikipedia.org', 'en.wikipedia.org',
-    # Mapy a doprava
-    'mapy.cz', 'idos.cz', 'idos.idnes.cz', 'cd.cz', 'dpp.cz',
+    # Mapy
+    'mapy.cz', 'en.mapy.cz',
+    # Jízdní řády + doprava
+    'idos.cz', 'idos.idnes.cz', 'jizdnirady.idnes.cz',
+    'cd.cz', 'www.cd.cz', 'pid.cz', 'dpp.cz',
+    'chaps.cz', 'dpmb.cz', 'dpo.cz', 'dpmlj.cz', 'mhd.cz',
     # Počasí
-    'pocasi.idnes.cz', 'meteocentrum.cz', 'in-pocasi.cz',
-    'chmi.cz', 'pocasi.seznam.cz',
+    'pocasi.idnes.cz', 'pocasi.seznam.cz', 'meteocentrum.cz',
+    'in-pocasi.cz', 'chmi.cz', 'portal.chmi.cz',
+    # Zdraví + úřady (safe pro seniory)
+    'nzip.cz', 'szu.cz', 'mzcr.cz',
+    'mpsv.cz', 'cssz.cz', 'ceskaposta.cz', 'mvcr.gov.cz',
+    'financnisprava.cz',
+    # Zdraví (lékárny, pojišťovny — read-only!)
+    'lekarna.cz', 'drmax.cz', 'benu.cz',
+    'vzp.cz', 'ozp.cz', 'vozp.cz',
     # Senior-friendly
     'nasebabicka.cz', 'seniorskydum.cz', 'senior.cz',
-    # Zdraví (oficiální)
-    'nzip.cz', 'szu.cz', 'mzcr.cz',
     # Kultura / volný čas
-    'kinopole.cz', 'csfd.cz',
+    'kinopole.cz', 'csfd.cz', 'databazeknih.cz',
+    'ndm.cz', 'narodni-divadlo.cz', 'filharmonie.cz',
 ])
 
 
