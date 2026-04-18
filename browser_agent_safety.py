@@ -27,15 +27,22 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════════
 
 ALLOWED_DOMAINS = frozenset([
+    # Vyhledávače a obecné portály
+    'google.com', 'google.cz', 'duckduckgo.com', 'seznam.cz',
+    'bing.com', 'centrum.cz', 'atlas.cz', 'volny.cz',
     # Zprávy
     'idnes.cz', 'ct24.ceskatelevize.cz', 'ceskatelevize.cz',
-    'novinky.cz', 'seznam.cz', 'irozhlas.cz', 'lidovky.cz',
+    'novinky.cz', 'irozhlas.cz', 'lidovky.cz',
     'aktualne.cz', 'denik.cz', 'blesk.cz', 'tyden.cz',
-    'reflex.cz', 'forum24.cz', 'e15.cz',
+    'reflex.cz', 'forum24.cz', 'e15.cz', 'hn.cz', 'ihned.cz',
     # Informace a encyklopedie
     'wikipedia.org', 'cs.wikipedia.org', 'en.wikipedia.org',
+    'wikimedia.org', 'upload.wikimedia.org',
+    # Video a audio
+    'youtube.com', 'www.youtube.com', 'm.youtube.com',
+    'ct.cz', 'play.cd.cz', 'mujrozhlas.cz', 'hudba.seznam.cz',
     # Mapy (mapy.cz redirects to mapy.com)
-    'mapy.cz', 'en.mapy.cz', 'mapy.com',
+    'mapy.cz', 'en.mapy.cz', 'mapy.com', 'maps.google.com',
     # Jízdní řády + doprava
     'idos.cz', 'idos.idnes.cz', 'jizdnirady.idnes.cz',
     'cd.cz', 'www.cd.cz', 'pid.cz', 'dpp.cz',
@@ -46,15 +53,23 @@ ALLOWED_DOMAINS = frozenset([
     # Zdraví + úřady (safe pro seniory)
     'nzip.cz', 'szu.cz', 'mzcr.cz',
     'mpsv.cz', 'cssz.cz', 'ceskaposta.cz', 'mvcr.gov.cz',
-    'financnisprava.cz',
+    'financnisprava.cz', 'gov.cz',
     # Zdraví (lékárny, pojišťovny — read-only!)
     'lekarna.cz', 'drmax.cz', 'benu.cz',
     'vzp.cz', 'ozp.cz', 'vozp.cz',
+    # E-shop (pro vyhledávání produktů, nikoliv platby)
+    'alza.cz', 'mall.cz', 'czc.cz', 'heureka.cz',
+    'kosik.cz', 'rohlik.cz', 'tesco.cz',
     # Senior-friendly
     'nasebabicka.cz', 'seniorskydum.cz', 'senior.cz',
     # Kultura / volný čas
     'kinopole.cz', 'csfd.cz', 'databazeknih.cz',
     'ndm.cz', 'narodni-divadlo.cz', 'filharmonie.cz',
+    # Sport (hodně sledované seniory)
+    'sport.cz', 'isport.blesk.cz', 'livesport.cz', 'cst.cz',
+    # Recepty a vaření
+    'toprecepty.cz', 'recepty.cz', 'dobre-recepty.cz',
+    'apetitonline.cz',
 ])
 
 

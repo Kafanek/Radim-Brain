@@ -195,15 +195,18 @@ def route_proxy():
     if not url:
         return _proxy_error('Chybí parametr "url".', 400)
 
+    # Senior may browse any public website — no domain whitelist. We still
+    # enforce real safety: scheme (http/https only), SSRF defense (no local/
+    # private IPs), ports 80/443, and block dangerous file extensions.
     try:
-        validate_url(url, allow_external=False)
+        validate_url(url, allow_external=True)
     except SafetyError as e:
-        return _proxy_error(f'Stránka není povolena: {e.message}', 403)
+        return _proxy_error(f'Neplatná adresa: {e.message}', 400)
 
     try:
-        result = fetch(url, allow_external=False)
+        result = fetch(url, allow_external=True)
     except SafetyError as e:
-        return _proxy_error(f'Přesměrování zablokováno: {e.message}', 403)
+        return _proxy_error(f'Spojení přerušeno: {e.message}', 502)
     except FetchError as e:
         return _proxy_error(f'Stránku se nepodařilo načíst: {e.message}', 502)
 
@@ -225,23 +228,35 @@ def route_proxy():
 
 
 def _proxy_error(message: str, status: int):
-    """Return a small human-readable HTML error the iframe can display."""
+    """Return a small human-readable HTML error the iframe can display.
+
+    NOTE: we intentionally return HTTP 200 here — some browsers render their
+    own "content blocked" page for iframe responses with 4xx/5xx status,
+    hiding the friendly message. 200 with the explanation in the body is
+    what the senior actually sees.
+    """
     from flask import Response
     msg = (message or 'Chyba při načítání stránky.').replace('<', '&lt;')
     body = (
-        '<!doctype html><meta charset="utf-8">'
+        '<!doctype html><html lang="cs"><meta charset="utf-8">'
         '<title>Nepodařilo se načíst</title>'
-        '<body style="font-family:system-ui,sans-serif;padding:40px;'
-        'color:#2d3748;background:#f8fafa;text-align:center">'
-        '<div style="max-width:500px;margin:60px auto;padding:28px;'
-        'background:#fff;border:1.5px solid #e2e8f0;border-radius:16px">'
-        '<h2 style="margin-top:0;color:#742a2a">⚠️ Stránku se nepodařilo otevřít</h2>'
-        f'<p style="color:#4a5568;line-height:1.5">{msg}</p></div></body>'
+        '<body style="font-family:system-ui,-apple-system,sans-serif;padding:40px;'
+        'margin:0;color:#2d3748;background:#f8fafa;text-align:center">'
+        '<div style="max-width:560px;margin:60px auto;padding:32px;'
+        'background:#fff;border:1.5px solid #e2e8f0;border-radius:18px;'
+        'box-shadow:0 4px 16px rgba(0,0,0,0.04)">'
+        '<div style="font-size:3rem;margin-bottom:12px">⚠️</div>'
+        '<h2 style="margin:0 0 10px;color:#2d3748;font-weight:700">Stránku se nepodařilo otevřít</h2>'
+        f'<p style="color:#4a5568;line-height:1.5;margin:0">{msg}</p>'
+        '<p style="color:#a0aec0;line-height:1.5;margin:18px 0 0;font-size:0.9rem">'
+        'Zkuste jinou adresu nebo klikněte 🏠 domů.</p>'
+        '</div></body></html>'
     )
     r = Response(body, mimetype='text/html; charset=utf-8')
-    r.status_code = status
+    r.status_code = 200  # intentional — see docstring
     r.headers['Content-Security-Policy'] = "frame-ancestors *"
     r.headers['X-Frame-Options'] = 'ALLOWALL'
+    r.headers['X-Radim-Proxy-Reason'] = f'error:{status}'
     return r
 
 
