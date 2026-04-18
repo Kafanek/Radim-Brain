@@ -325,7 +325,10 @@ CORS(app,
 @app.after_request
 def add_security_headers(response):
     response.headers['X-Content-Type-Options'] = 'nosniff'
-    response.headers['X-Frame-Options'] = 'DENY'
+    # /api/browser/proxy must be iframe-embeddable — the route sets its own
+    # frame policy (ALLOWALL + frame-ancestors *). Don't override it here.
+    if not request.path.startswith('/api/browser/proxy'):
+        response.headers['X-Frame-Options'] = 'DENY'
     response.headers['X-XSS-Protection'] = '1; mode=block'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
     if request.is_secure:
