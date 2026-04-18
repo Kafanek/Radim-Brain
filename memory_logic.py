@@ -84,7 +84,30 @@ def build_personalized_prompt(user_id: str) -> str:
     if not ctx["has_profile"] and ctx["interaction_count"] == 0:
         return ""  # Nový uživatel - žádná personalizace
 
-    parts = ["\n\n═══════════════════════════════════════════════════════════════"]
+    parts = []
+
+    # v10.45: Long-term memory — injected FIRST so it frames everything else
+    try:
+        from memory_helpers import db_load_profile
+        profile = db_load_profile(str(user_id)) or {}
+        ltc = profile.get("long_term_context")
+        ltc_text = None
+        if isinstance(ltc, dict):
+            ltc_text = ltc.get("text")
+        elif isinstance(ltc, str):
+            ltc_text = ltc
+        if ltc_text and len(ltc_text.strip()) > 20:
+            parts.append("\n\n═══════════════════════════════════════════════════════════════")
+            parts.append("🧠 DLOUHODOBÁ PAMĚŤ O TOMTO UŽIVATELI")
+            parts.append("═══════════════════════════════════════════════════════════════")
+            parts.append("Co už o něm/ní víš z dřívějších konverzací (přirozeně použij, "
+                         "bez toho abys to explicitně citoval):")
+            parts.append("")
+            parts.append(ltc_text.strip())
+    except Exception:
+        pass
+
+    parts.append("\n\n═══════════════════════════════════════════════════════════════")
     parts.append("🇨🇿 ČESKÁ PRAVIDLA KOMUNIKACE")
     parts.append("═══════════════════════════════════════════════════════════════")
     parts.append("Jsi Radim — český AI asistent pro seniory. VŽDY dodržuj tato pravidla:")

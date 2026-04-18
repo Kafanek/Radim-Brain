@@ -706,6 +706,16 @@ except ImportError as e:
     SYSTEM_STATUS_AVAILABLE = False
     logger.warning(f"⚠️ System status not available: {e}")
 
+# v10.45: Long-term memory + proactive recall
+try:
+    from memory_long_term_routes import memory_lt_bp
+    app.register_blueprint(memory_lt_bp)
+    MEMORY_LT_AVAILABLE = True
+    logger.info("🧠 Long-term memory + proactive routes registered: /api/memory/long-term, /api/proactive/recall")
+except ImportError as e:
+    MEMORY_LT_AVAILABLE = False
+    logger.warning(f"⚠️ Long-term memory routes not available: {e}")
+
 # Media & Push + Admin routes registered after helper functions are defined (see below)
 
 # ============================================
@@ -801,6 +811,29 @@ try:
             logger.info("🆘 SOS escalator disabled via SOS_ESCALATION env")
     except ImportError:
         logger.warning("⚠️ sos_escalator not available")
+
+    # v10.45: Weekly long-term memory summarization (Sunday 4:00 AM)
+    try:
+        from memory_summarization import run_weekly_summarization
+        scheduler.add_job(lambda: run_weekly_summarization(app), 'cron',
+                          day_of_week='sun', hour=4, minute=7,
+                          id='memory_weekly_summary',
+                          max_instances=1, misfire_grace_time=3600)
+        logger.info("🧠 Weekly memory summarization registered (Sun 04:07)")
+    except ImportError:
+        logger.warning("⚠️ memory_summarization not available")
+
+    # v10.45: Daily proactive recall — hooked into morning checkin time
+    # Runs at 08:12 (7 min after morning_checkin so meds prompt goes first)
+    try:
+        from proactive_engine import run_daily_recall
+        scheduler.add_job(lambda: run_daily_recall(app), 'cron',
+                          hour=8, minute=12,
+                          id='proactive_recall',
+                          max_instances=1, misfire_grace_time=1800)
+        logger.info("💡 Daily proactive recall registered (08:12)")
+    except ImportError:
+        logger.warning("⚠️ proactive_engine not available")
 
     # v390: Morning check-in — call seniors with medication reminders at 8:00 AM
     try:

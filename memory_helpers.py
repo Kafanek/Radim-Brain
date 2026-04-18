@@ -177,6 +177,15 @@ def db_add_history(user_id: str, role: str, content: str):
     except Exception as e:
         logger.warning(f"DB add history error: {e}")
 
+    # v10.45: trigger long-term memory summarization at 100-message boundary
+    # (async, non-blocking)
+    if role in ('user', 'assistant', 'radim'):
+        try:
+            from memory_summarization import maybe_summarize_on_message
+            maybe_summarize_on_message(user_id)
+        except Exception:
+            pass
+
 
 def db_clear_history(user_id: str):
     """Clear conversation history from DB"""
