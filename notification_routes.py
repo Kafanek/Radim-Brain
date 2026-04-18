@@ -130,6 +130,19 @@ def sos_trigger():
     title = "🆘 SOS — potřebuje pomoc!"
     body = custom_msg or f"{senior_name} stiskl/a tísňové tlačítko. Zavolejte prosím."
 
+    # 0. Create sos_event for escalation tracking
+    sos_event_id = None
+    try:
+        from database import db_context, db_insert
+        with db_context(commit=True) as db:
+            sos_event_id = db_insert(
+                db, "sos_events",
+                ["senior_id", "source", "message", "escalation_stage"],
+                [senior_id, source, body[:240], 0],
+            )
+    except Exception as e:
+        logger.debug(f"sos_events insert: {e}")
+
     # 1. Notify family accounts (in-app — replaces Twilio SMS)
     notif_ids = notify_senior_family(
         senior_id=senior_id,
@@ -141,6 +154,8 @@ def sos_trigger():
             "source": source,
             "senior_name": senior_name,
             "custom_message": custom_msg,
+            "sos_event_id": sos_event_id,
+            "actionable": True,  # marks that Ack button should appear
         },
         include_caregiver=True,
     )
@@ -186,6 +201,7 @@ def sos_trigger():
 
     return jsonify({
         "success": True,
+        "sos_event_id": sos_event_id,
         "senior_id": senior_id,
         "source": source,
         "notified_count": len(notif_ids),
@@ -201,4 +217,265 @@ def sos_trigger():
     })
 
 
-logger.info("🔔 Notification + SOS routes loaded: /api/notifications/*, /api/sos/trigger")
+# ═══════════════════════════════════════════════════════════════════
+# SOS ESCALATION — Ack + Resolve + scheduler engine (v10.40)
+# ═══════════════════════════════════════════════════════════════════
+
+@notification_bp.route("/api/sos/<int:sos_id>/ack", methods=["POST", "OPTIONS"])
+@rate_limit(max_requests=30, window_seconds=60, key_func="user")
+@require_auth
+def sos_ack(sos_id):
+    """Family member taps 'Už řeším' — stops escalation.
+
+    Senior may also ack their own event (false alarm).
+    """
+    if request.method == "OPTIONS":
+        return _options_ok()
+    uid = _current_uid()
+    if not uid:
+        return jsonify({"success": False, "error": "Auth required"}), 401
+
+    try:
+        from database import db_context, is_postgres
+        with db_context(commit=True) as db:
+            row = db.execute(
+                "SELECT senior_id, ack_by_user_id, resolved_at "
+                "FROM sos_events WHERE id = ?",
+                (sos_id,)
+            ).fetchone()
+            if not row:
+                return jsonify({"success": False, "error": "SOS událost nenalezena."}), 404
+            senior_id, current_ack, resolved_at = row
+            if resolved_at:
+                return jsonify({"success": True, "already_resolved": True,
+                                "message": "Událost už je uzavřená."})
+            if current_ack:
+                return jsonify({"success": True, "already_ack": True,
+                                "ack_by_user_id": current_ack,
+                                "message": "Už řeší někdo jiný z rodiny."})
+
+            # Permission: senior themselves, or anyone in their confirmed family links
+            authorized = (str(uid) == str(senior_id))
+            if not authorized:
+                link = db.execute(
+                    "SELECT 1 FROM senior_family_links "
+                    "WHERE senior_id = ? AND family_user_id = ? "
+                    "AND confirmed_at IS NOT NULL AND revoked_at IS NULL",
+                    (str(senior_id), str(uid))
+                ).fetchone()
+                authorized = bool(link)
+            if not authorized:
+                return jsonify({"success": False, "error": "Nemáte oprávnění k této události."}), 403
+
+            if is_postgres():
+                db.execute(
+                    "UPDATE sos_events SET ack_by_user_id = ?, ack_at = NOW() "
+                    "WHERE id = ?", (str(uid), sos_id)
+                )
+            else:
+                db.execute(
+                    "UPDATE sos_events SET ack_by_user_id = ?, ack_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ?", (str(uid), sos_id)
+                )
+
+            # Notify everyone else in the family that someone is on it
+            try:
+                acker_name = (g.auth_user.get("name") or g.auth_user.get("email") or "Někdo z rodiny")
+                notify_senior_family(
+                    senior_id=senior_id, type="sos",
+                    title="✅ SOS — už je u toho",
+                    body=f"{acker_name} řeší situaci. Eskalace se zastavila.",
+                    severity="info",
+                    data={"sos_event_id": sos_id, "ack_update": True,
+                          "ack_by": str(uid)},
+                    include_caregiver=True,
+                )
+            except Exception:
+                pass
+
+            # Also notify the senior themselves
+            try:
+                from notification_helpers import notify
+                if str(senior_id) != str(uid):
+                    notify(to_user_id=senior_id, type="sos",
+                           severity="info",
+                           title="🆘 Rodina reaguje",
+                           body=f"{acker_name} už je na cestě nebo vás hned zavolá.",
+                           from_user_id=uid,
+                           data={"sos_event_id": sos_id, "ack_update": True})
+            except Exception:
+                pass
+
+        return jsonify({
+            "success": True, "sos_event_id": sos_id,
+            "ack_by_user_id": str(uid),
+            "message": "Označeno jako 'řeším'. Eskalace zastavena.",
+        })
+    except Exception as e:
+        logger.error(f"sos_ack: {e}")
+        return jsonify({"success": False, "error": "DB error"}), 500
+
+
+@notification_bp.route("/api/sos/<int:sos_id>/resolve", methods=["POST", "OPTIONS"])
+@rate_limit(max_requests=30, window_seconds=60, key_func="user")
+@require_auth
+def sos_resolve(sos_id):
+    """Mark SOS as fully resolved (false alarm or situation handled)."""
+    if request.method == "OPTIONS":
+        return _options_ok()
+    uid = _current_uid()
+    if not uid:
+        return jsonify({"success": False, "error": "Auth required"}), 401
+
+    try:
+        from database import db_context, is_postgres
+        with db_context(commit=True) as db:
+            row = db.execute(
+                "SELECT senior_id, resolved_at FROM sos_events WHERE id = ?",
+                (sos_id,)
+            ).fetchone()
+            if not row:
+                return jsonify({"success": False, "error": "Nenalezeno."}), 404
+            senior_id, resolved_at = row
+            if resolved_at:
+                return jsonify({"success": True, "already": True})
+
+            # Authorization same as ack
+            authorized = (str(uid) == str(senior_id))
+            if not authorized:
+                link = db.execute(
+                    "SELECT 1 FROM senior_family_links "
+                    "WHERE senior_id = ? AND family_user_id = ? "
+                    "AND confirmed_at IS NOT NULL AND revoked_at IS NULL",
+                    (str(senior_id), str(uid))
+                ).fetchone()
+                authorized = bool(link)
+            if not authorized:
+                return jsonify({"success": False, "error": "Nemáte oprávnění."}), 403
+
+            if is_postgres():
+                db.execute(
+                    "UPDATE sos_events SET resolved_at = NOW(), "
+                    "ack_by_user_id = COALESCE(ack_by_user_id, ?) "
+                    "WHERE id = ?", (str(uid), sos_id)
+                )
+            else:
+                db.execute(
+                    "UPDATE sos_events SET resolved_at = CURRENT_TIMESTAMP, "
+                    "ack_by_user_id = COALESCE(ack_by_user_id, ?) "
+                    "WHERE id = ?", (str(uid), sos_id)
+                )
+
+        return jsonify({"success": True, "sos_event_id": sos_id,
+                        "message": "Událost uzavřena."})
+    except Exception as e:
+        logger.error(f"sos_resolve: {e}")
+        return jsonify({"success": False, "error": "DB error"}), 500
+
+
+@notification_bp.route("/api/sos/active", methods=["GET", "OPTIONS"])
+@rate_limit(max_requests=60, window_seconds=60, key_func="user")
+@require_auth
+def sos_active():
+    """Return active (unresolved) SOS events for the current user.
+
+    Senior: their own unresolved events.
+    Family: unresolved events of their linked seniors.
+    """
+    if request.method == "OPTIONS":
+        return _options_ok()
+    uid = _current_uid()
+    if not uid:
+        return jsonify({"success": False, "error": "Auth required"}), 401
+
+    try:
+        from database import db_context
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT id, senior_id, source, message, "
+                "       ack_by_user_id, ack_at, escalation_stage, created_at "
+                "FROM sos_events "
+                "WHERE resolved_at IS NULL "
+                "AND (senior_id = ? "
+                "  OR senior_id IN (SELECT senior_id FROM senior_family_links "
+                "                   WHERE family_user_id = ? "
+                "                   AND confirmed_at IS NOT NULL "
+                "                   AND revoked_at IS NULL)) "
+                "ORDER BY id DESC LIMIT 50",
+                (str(uid), str(uid))
+            ).fetchall() or []
+        items = [{
+            "id": r[0], "senior_id": r[1], "source": r[2],
+            "message": r[3], "ack_by_user_id": r[4],
+            "ack_at": str(r[5]) if r[5] else None,
+            "escalation_stage": r[6],
+            "created_at": str(r[7]) if r[7] else None,
+        } for r in rows]
+        return jsonify({"success": True, "items": items, "count": len(items)})
+    except Exception as e:
+        logger.error(f"sos_active: {e}")
+        return jsonify({"success": False, "error": "DB error"}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════
+# FESTIVE GREETING — v10.40
+# ═══════════════════════════════════════════════════════════════════
+
+@notification_bp.route("/api/festive-greeting", methods=["GET", "OPTIONS"])
+@rate_limit(max_requests=60, window_seconds=60, key_func="user")
+@require_auth
+def festive_greeting_get():
+    """Build today's festive greeting for the authenticated senior."""
+    if request.method == "OPTIONS":
+        return _options_ok()
+    uid = _current_uid()
+    if not uid:
+        return jsonify({"success": False, "error": "Auth required"}), 401
+    try:
+        from festive_greeting import build_greeting, load_user_template
+        greeting = build_greeting(user_id=uid)
+        template = load_user_template(uid)
+        return jsonify({
+            "success": True,
+            "greeting": greeting,
+            "template": template,
+        })
+    except Exception as e:
+        logger.error(f"festive_greeting_get: {e}")
+        return jsonify({"success": False, "error": "Chyba při sestavení pozdravu."}), 500
+
+
+@notification_bp.route("/api/festive-greeting/template", methods=["PUT", "OPTIONS"])
+@rate_limit(max_requests=20, window_seconds=60, key_func="user")
+@require_auth
+def festive_greeting_template():
+    """Save per-senior greeting template (salutation, addressee, suffix, flags)."""
+    if request.method == "OPTIONS":
+        return _options_ok()
+    uid = _current_uid()
+    if not uid:
+        return jsonify({"success": False, "error": "Auth required"}), 401
+
+    data = request.get_json(silent=True) or {}
+    allowed = ("salutation", "addressee", "suffix", "use_nameday", "use_holiday")
+    template = {k: data[k] for k in allowed if k in data}
+    if not template:
+        return jsonify({"success": False, "error": "Žádná pole nejsou zadaná."}), 400
+
+    try:
+        from festive_greeting import save_user_template, build_greeting
+        ok = save_user_template(uid, template)
+        if not ok:
+            return jsonify({"success": False, "error": "Uložení selhalo."}), 500
+        preview = build_greeting(user_id=uid)
+        return jsonify({
+            "success": True,
+            "message": "Pozdrav uložen.",
+            "preview": preview,
+        })
+    except Exception as e:
+        logger.error(f"festive_greeting_template: {e}")
+        return jsonify({"success": False, "error": "DB error"}), 500
+
+
+logger.info("🔔 Notification + SOS + Festive routes loaded: /api/notifications/*, /api/sos/trigger, /api/sos/<id>/ack, /api/sos/<id>/resolve, /api/sos/active, /api/festive-greeting")

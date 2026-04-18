@@ -770,6 +770,18 @@ try:
     except ImportError:
         logger.warning("⚠️ agent_loop not available — proactive agent disabled")
 
+    # v10.40: SOS escalation engine — every 10 s walks unresolved events through stages
+    try:
+        from sos_escalator import run_escalator_tick, is_enabled as sos_enabled
+        if sos_enabled():
+            scheduler.add_job(lambda: run_escalator_tick(app), 'interval', seconds=10,
+                              id='sos_escalator', max_instances=1, misfire_grace_time=30)
+            logger.info("🆘 SOS escalator registered (every 10 s)")
+        else:
+            logger.info("🆘 SOS escalator disabled via SOS_ESCALATION env")
+    except ImportError:
+        logger.warning("⚠️ sos_escalator not available")
+
     # v390: Morning check-in — call seniors with medication reminders at 8:00 AM
     try:
         from agent_loop import run_morning_checkin

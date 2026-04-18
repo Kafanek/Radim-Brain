@@ -94,6 +94,17 @@ VOICE_PROFILES = {
         "pause_ms": 700,
         "emphasis": True,
     },
+    # v10.40: FESTIVE — sváteční pozdrav, jmeniny, narozeniny
+    # Mírně pomalejší než HARMONY, s teplejším tónem a delší pauzou po jmenu
+    "FESTIVE": {
+        "style": "friendly",
+        "styledegree": "2.0",    # maximální "friendly" styling
+        "rate": "-8%",           # mírně pomaleji než běžný chat
+        "pitch": "+0%",          # Antonínův přirozený tón
+        "volume": "loud",
+        "pause_ms": 600,         # φ * 371 ≈ 600 — teplejší rytmus
+        "emphasis": True,        # zdůrazní slova jako "jmeniny", "krásný"
+    },
     "SINGING": {
         "style": "friendly",
         "styledegree": "2.0",
@@ -275,13 +286,32 @@ def _truncate_for_tts(text, max_chars=MAX_TTS_CHARS):
     return truncated[:max_chars - 1] + "."
 
 
-def _add_pause_variability(pause_ms):
-    """Add slight random variability to pauses for natural speech.
-    ±50ms (small enough to not notice, big enough to sound human).
+def _add_pause_variability(pause_ms, mode="random"):
+    """Add variability to pauses for natural speech rhythm.
+
+    Modes:
+        'random'  → ±50 ms uniform noise (default — chat, info, news)
+        'phi'     → golden-ratio alternation (poetry, festive, narration)
+                    pauses alternate between base*1 and base/φ (≈0.618)
+        'breath'  → ±15% gaussian around base (calm, crisis)
     """
-    import random
-    variation = random.randint(-50, 50)
-    return max(200, pause_ms + variation)  # minimum 200ms
+    import random, math
+    PHI = 1.6180339887
+
+    if mode == "phi":
+        # Alternate longer / shorter by golden ratio → more musical
+        if not hasattr(_add_pause_variability, "_phi_toggle"):
+            _add_pause_variability._phi_toggle = 0
+        _add_pause_variability._phi_toggle += 1
+        if _add_pause_variability._phi_toggle % 2 == 0:
+            return max(200, int(pause_ms * (1 / PHI)))
+        return max(200, int(pause_ms))
+    elif mode == "breath":
+        variation = int(random.gauss(0, pause_ms * 0.15))
+        return max(200, pause_ms + variation)
+    else:  # random
+        variation = random.randint(-50, 50)
+        return max(200, pause_ms + variation)
 
 
 def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=None, rtcf_voice=None):
@@ -375,7 +405,13 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
 
     # v10.20: PER-SENTENCE prosody with individual φ-contour
     # Each sentence gets its own pitch curve → natural intonation
-    pause_ms = _add_pause_variability(profile["pause_ms"])
+    # v10.40: pause variability mode by profile
+    _pause_var_mode = "random"
+    if mode in ("POETRY", "FESTIVE", "NARRATION", "SINGING"):
+        _pause_var_mode = "phi"
+    elif mode in ("CRISIS", "ALERT"):
+        _pause_var_mode = "breath"
+    pause_ms = _add_pause_variability(profile["pause_ms"], mode=_pause_var_mode)
     is_poetry = profile.get("poetry_mode", False)
     contour_type = profile.get("contour")
     # v10.20: Profile-specific energy → learned energy → default
