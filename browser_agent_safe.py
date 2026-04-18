@@ -50,6 +50,7 @@ from browser_agent_safe_config import (
     get_role_permissions,
     detect_sensitive_flags,
     pick_block_reason,
+    build_warning,
     msg,
 )
 
@@ -332,16 +333,23 @@ def open_page(url: str, mode: str = MODE_READ_ONLY,
     # Discard raw_html after detection (privacy — never persist)
     raw_html = None
 
-    # If sensitive flow → block with czech explanation
+    # Hard block: only for truly dangerous content (downloads).
+    # Login / payment / banking / healthcare pages are READABLE but flagged as
+    # warnings — senior can still read the content, UI shows advisory banner.
     block_code, block_msg, block_why = pick_block_reason(flags, reasons)
     if block_code:
         _audit("safe_web_sensitive", inner["final_url"], user_id,
                {"mode": mode, "flags": flags, "kind": block_code})
-        # Note: we do NOT return extracted content on sensitive flow
         return _error(None, "blocked", block_code, block_msg,
                       why_blocked=block_why,
                       recommended_next="Zkuste stránku otevřít v běžném prohlížeči.",
                       flags=flags)
+
+    # Non-blocking warning (banking / healthcare / payment / login)
+    warning = build_warning(flags, reasons)
+    if warning:
+        _audit("safe_web_warning", inner["final_url"], user_id,
+               {"mode": mode, "flags": flags, "level": warning.get("level")})
 
     # Safe to proceed. Build session.
     session_id = _new_session_id()
@@ -359,6 +367,7 @@ def open_page(url: str, mode: str = MODE_READ_ONLY,
         "links": inner.get("links", []),
         "metadata": inner.get("metadata", {}),
         "flags": flags,
+        "warning": warning,
         "created_at": now,
         "last_activity": now,
         "actions_used": 1,
@@ -381,6 +390,7 @@ def open_page(url: str, mode: str = MODE_READ_ONLY,
 def _build_response(state: dict, perms: dict) -> dict:
     """Assemble public response, respecting role permissions."""
     flags = state.get("flags", {})
+    warning = state.get("warning") or {}
     mode = state.get("mode", MODE_READ_ONLY)
 
     # Compose summary (short user-friendly explanation)
@@ -391,12 +401,20 @@ def _build_response(state: dict, perms: dict) -> dict:
     if state.get("title"):
         summary_sentence += f' Otevřel jsem „{state["title"][:80]}".'
 
+    safety_state = "warning" if warning else "safe"
+    why_allowed = (
+        "Stránka neobsahuje citlivé toky (přihlášení, platba, banka, zdravotní záznam)."
+        if not warning else
+        f"Stránku lze přečíst, ale obsahuje {warning.get('reason', 'citlivé prvky')}. "
+        f"{warning.get('advice', '')}"
+    )
+
     response = {
         "success": True,
         "session_id": state["session_id"],
         "mode": mode,
         "status": "ready",
-        "safety_state": "safe",
+        "safety_state": safety_state,
         "title": state.get("title", ""),
         "url": state.get("url", ""),
         "final_url": state.get("final_url", ""),
@@ -411,6 +429,7 @@ def _build_response(state: dict, perms: dict) -> dict:
             for l in state.get("links", [])[:30]
         ],
         "flags": flags,
+        "warning": warning or None,
         "audit": {
             "actions_used": state.get("actions_used", 0),
             "actions_limit": SAFE_MAX_ACTIONS_PER_SESSION,
@@ -422,8 +441,7 @@ def _build_response(state: dict, perms: dict) -> dict:
             "blocked_events": state.get("blocked_events", []),
         },
         "reasoning": {
-            "why_allowed": f"Doména je na seznamu bezpečných zdrojů. "
-                           f"Stránka neobsahuje citlivé toky (přihlášení, platba, banka, zdravotní záznam).",
+            "why_allowed": why_allowed,
             "why_blocked": None,
             "mode_explanation": ALLOWED_MODES[mode]["description"],
         },

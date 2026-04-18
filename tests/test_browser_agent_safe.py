@@ -82,13 +82,36 @@ class TestSensitiveDetection(unittest.TestCase):
         self.assertFalse(r['flags']['contains_sensitive_flow'])
         self.assertFalse(r['flags']['contains_login'])
 
-    def test_pick_block_reason_login(self):
+    def test_pick_block_reason_login_is_soft_warn(self):
+        """Login pages are readable but surfaced as warning (soft block)."""
         flags = {'contains_login': True, 'contains_sensitive_flow': True,
                  'contains_payment': False, 'contains_banking': False,
                  'contains_healthcare': False, 'download_blocked': False}
         code, user_msg, why = self.pick(flags, {'login': 'form action /login'})
-        self.assertIn(code, ('SENSITIVE_PAGE', 'BLOCKED_LOGIN'))
+        self.assertIsNone(code)
+        from browser_agent_safe_config import build_warning
+        warn = build_warning(flags, {'login': 'form action /login'})
+        self.assertEqual(warn.get('level'), 'low')
+        self.assertIn('přihlášení', warn.get('message', '').lower())
+
+    def test_pick_block_reason_download_still_hard(self):
+        """Downloads remain a hard block."""
+        flags = {'contains_login': False, 'contains_payment': False,
+                 'contains_banking': False, 'contains_healthcare': False,
+                 'download_blocked': True}
+        code, user_msg, _ = self.pick(flags, {'download': 'exe extension'})
+        self.assertEqual(code, 'BLOCKED_CONTENT')
         self.assertTrue(user_msg)
+
+    def test_pick_block_reason_banking_soft_warn(self):
+        flags = {'contains_banking': True, 'contains_sensitive_flow': True,
+                 'contains_login': False, 'contains_payment': False,
+                 'contains_healthcare': False, 'download_blocked': False}
+        code, _, _ = self.pick(flags, {'banking': 'domain csob.cz'})
+        self.assertIsNone(code)
+        from browser_agent_safe_config import build_warning
+        warn = build_warning(flags, {'banking': 'csob.cz'})
+        self.assertEqual(warn.get('level'), 'high')
 
     def test_pick_block_reason_nothing(self):
         code, _, _ = self.pick({'contains_sensitive_flow': False}, {})
@@ -243,7 +266,9 @@ class TestOpenPageMocked(unittest.TestCase):
         self.assertNotIn('raw_html', r)
         self.assertNotIn('content', r.get('metadata', {}))
 
-    def test_login_page_blocked(self):
+    def test_login_page_is_readable_with_warning(self):
+        """Login pages are surfaced as warnings, not hard-blocked — user
+        can still read content but is advised not to fill forms."""
         import browser_agent_safe as mod
         with patch('browser_agent.open_page',
                    return_value=_mock_ok('https://example.com/login',
@@ -254,11 +279,26 @@ class TestOpenPageMocked(unittest.TestCase):
                 r = mod.open_page('https://example.com/login',
                                   user_id='u1', role='senior_user',
                                   user_consent_confirmed=True)
-        self.assertFalse(r['success'])
-        self.assertIn(r['error_code'], ('SENSITIVE_PAGE', 'BLOCKED_LOGIN'))
+        self.assertTrue(r['success'])
+        self.assertEqual(r.get('safety_state'), 'warning')
         self.assertTrue(r['flags']['contains_login'])
-        # Senior message present
-        self.assertTrue(len(r['message']) > 10)
+        self.assertIsNotNone(r.get('warning'))
+        self.assertEqual(r['warning']['level'], 'low')
+
+    def test_download_is_hard_blocked(self):
+        """Executable content remains a hard block even in relaxed policy."""
+        import browser_agent_safe as mod
+        with patch('browser_agent.open_page',
+                   return_value=_mock_ok('https://dl.example.com/payload.exe',
+                                         title='Download', content='<p>ok</p>')):
+            with patch('browser_agent_fetcher.fetch',
+                       return_value={'content': '<p>ok</p>',
+                                     'content_type': 'application/octet-stream'}):
+                r = mod.open_page('https://dl.example.com/payload.exe',
+                                  user_id='u1', role='senior_user',
+                                  user_consent_confirmed=True)
+        self.assertFalse(r['success'])
+        self.assertEqual(r['error_code'], 'BLOCKED_CONTENT')
 
     def test_blocked_domain_propagates(self):
         import browser_agent_safe as mod

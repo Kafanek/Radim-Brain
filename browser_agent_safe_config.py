@@ -320,19 +320,21 @@ SENIOR_MESSAGES = {
     "no_search_results": "Výraz „{query}“ jsem na této stránce nenašel.",
     "session_closed":    "Relaci jsem bezpečně uzavřel. Vaše údaje nic neukládá.",
 
-    # Blocks — login / payment / banking / healthcare
-    "blocked_login":     "Tato stránka obsahuje přihlášení. Z bezpečnostních důvodů zde končím. "
-                         "Pokud se chcete přihlásit, udělejte to prosím ve svém běžném prohlížeči.",
-    "blocked_payment":   "Tato stránka obsahuje platbu kartou. Neodesílám žádné platební údaje. "
-                         "Pokud chcete něco zaplatit, využijte prosím svou banku napřímo.",
-    "blocked_banking":   "Jedná se o bankovní stránku. Do bankovnictví se nikdy nepřihlašuji. "
-                         "Otevřete si ji prosím sám/sama v běžném prohlížeči.",
-    "blocked_healthcare": "Tato stránka obsahuje lékařský záznam. Zdravotní údaje neotvírám, "
-                          "abychom chránili vaše soukromí.",
+    # Blocks — only truly dangerous (download)
     "blocked_download":  "Tento odkaz stahuje soubor. V bezpečném režimu soubory nestahuji.",
     "blocked_domain":    "Doména této stránky není na seznamu povolených. Radim otevírá "
                          "jen ověřené české zdroje jako Wikipedii, ČT, novinky nebo počasí.",
     "blocked_form":      "Našel jsem formulář, ale v této verzi jej neodesílám.",
+
+    # Warnings — page is readable but contains sensitive flow
+    "warn_login":        "Tato stránka obsahuje přihlášení. Mohu Vám ji přečíst, "
+                         "ale Radim se nikam nepřihlašuje.",
+    "warn_payment":      "Tato stránka obsahuje platbu. Mohu Vám ji přečíst, "
+                         "ale žádné platební údaje neodesílám.",
+    "warn_banking":      "Jste na bankovní stránce. Mohu Vám obsah přečíst, "
+                         "ale do bankovnictví se nikdy nepřihlašuji.",
+    "warn_healthcare":   "Tato stránka obsahuje zdravotnické informace. Mohu Vám "
+                         "ji přečíst, ale žádné Vaše údaje nikam neukládám.",
 
     # Technical errors
     "timeout":           "Stránka neodpovídá. Zkuste to prosím za chvíli znovu.",
@@ -374,24 +376,57 @@ def msg(key: str, **kwargs) -> str:
 # ═══════════════════════════════════════════════════════════════════
 
 def pick_block_reason(flags: dict, reasons: dict):
-    """Given detected sensitive flags, return (error_code, senior_message,
-    technical_reason) tuple. Priority: banking > healthcare > payment > login > download.
+    """Return (error_code, senior_message, technical_reason) only for HARD
+    blocks — currently just downloads (executable content). Login, payment,
+    banking and healthcare pages are surfaced as WARNINGS via flags so the
+    senior can still read the page; they'll be advised not to fill forms.
 
-    Returns (None, None, None) if no sensitive flag triggered.
+    Returns (None, None, None) for pure "read but be careful" cases.
     """
-    if flags.get("contains_banking"):
-        return ("SENSITIVE_PAGE", msg("blocked_banking"),
-                reasons.get("banking", "banking"))
-    if flags.get("contains_healthcare"):
-        return ("SENSITIVE_PAGE", msg("blocked_healthcare"),
-                reasons.get("healthcare", "healthcare"))
-    if flags.get("contains_payment"):
-        return ("SENSITIVE_PAGE", msg("blocked_payment"),
-                reasons.get("payment", "payment"))
-    if flags.get("contains_login"):
-        return ("SENSITIVE_PAGE", msg("blocked_login"),
-                reasons.get("login", "login"))
     if flags.get("download_blocked"):
         return ("BLOCKED_CONTENT", msg("blocked_download"),
                 reasons.get("download", "download"))
     return (None, None, None)
+
+
+def build_warning(flags: dict, reasons: dict) -> dict:
+    """Produce a non-blocking warning payload when a page is readable but
+    contains a sensitive flow. UI should show the warning prominently but
+    still render the page content.
+
+    Priority (highest-risk first): banking > healthcare > payment > login.
+    Returns {} if no warning needed.
+    """
+    if flags.get("contains_banking"):
+        return {
+            "level": "high",
+            "message": msg("warn_banking"),
+            "reason": reasons.get("banking", "banking"),
+            "advice": "Nikam nevyplňujte přihlašovací údaje. Pro přihlášení "
+                      "použijte prosím běžný prohlížeč.",
+        }
+    if flags.get("contains_healthcare"):
+        return {
+            "level": "high",
+            "message": msg("warn_healthcare"),
+            "reason": reasons.get("healthcare", "healthcare"),
+            "advice": "Zdravotní údaje neuchovávám. Pro přístup do pacientského "
+                      "portálu použijte prosím běžný prohlížeč.",
+        }
+    if flags.get("contains_payment"):
+        return {
+            "level": "medium",
+            "message": msg("warn_payment"),
+            "reason": reasons.get("payment", "payment"),
+            "advice": "Nevyplňujte číslo karty ani platební údaje. "
+                      "Pro platbu použijte prosím běžný prohlížeč.",
+        }
+    if flags.get("contains_login"):
+        return {
+            "level": "low",
+            "message": msg("warn_login"),
+            "reason": reasons.get("login", "login"),
+            "advice": "Radim se nikam nepřihlašuje. Můžete si stránku přečíst, "
+                      "ale pro přihlášení použijte běžný prohlížeč.",
+        }
+    return {}
