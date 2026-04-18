@@ -147,6 +147,12 @@ def notify_senior_family(senior_id, type, title, body=None,
                          severity="alert", data=None, include_caregiver=True):
     """Notify every confirmed family member linked to this senior.
 
+    Respects per-link opt-in flags (v10.38):
+      notify_on_sos      — fired when type == 'sos'
+      notify_on_crisis   — fired when type in {'crisis_alert', 'health_alert'}
+      notify_on_daily    — fired when type in {'daily_summary', 'info'}
+      (other types always notify — family_invite, family_accepted, etc.)
+
     Also notifies memory_profiles.data.caregiver_id (1-to-1 legacy link)
     if include_caregiver=True.
 
@@ -155,17 +161,37 @@ def notify_senior_family(senior_id, type, title, body=None,
     if not senior_id:
         return []
 
+    # Map notification type to opt-in column
+    OPT_IN_MAP = {
+        "sos": "notify_on_sos",
+        "crisis_alert": "notify_on_crisis",
+        "health_alert": "notify_on_crisis",
+        "daily_summary": "notify_on_daily",
+        "info": "notify_on_daily",
+    }
+    opt_column = OPT_IN_MAP.get(type)
+
     targets = set()
 
-    # Resolve confirmed family links
+    # Resolve confirmed family links — honor per-link opt-in
     try:
         with db_context() as db:
-            rows = db.execute(
-                "SELECT family_user_id FROM senior_family_links "
-                "WHERE senior_id = ? AND confirmed_at IS NOT NULL "
-                "AND revoked_at IS NULL AND family_user_id IS NOT NULL",
-                (str(senior_id),)
-            ).fetchall()
+            if opt_column:
+                # Filter by the opt-in column (default TRUE if column missing / null)
+                rows = db.execute(
+                    f"SELECT family_user_id FROM senior_family_links "
+                    f"WHERE senior_id = ? AND confirmed_at IS NOT NULL "
+                    f"AND revoked_at IS NULL AND family_user_id IS NOT NULL "
+                    f"AND COALESCE({opt_column}, TRUE) = TRUE",
+                    (str(senior_id),)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT family_user_id FROM senior_family_links "
+                    "WHERE senior_id = ? AND confirmed_at IS NOT NULL "
+                    "AND revoked_at IS NULL AND family_user_id IS NOT NULL",
+                    (str(senior_id),)
+                ).fetchall()
             for row in rows or []:
                 if row[0]:
                     targets.add(str(row[0]))

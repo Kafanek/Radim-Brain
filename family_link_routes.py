@@ -232,9 +232,13 @@ def family_my_links():
             rows = db.execute(
                 "SELECT id, family_email, family_name, relation, "
                 "       family_user_id, confirmed_at, revoked_at, "
-                "       invite_expires_at, created_at "
+                "       invite_expires_at, created_at, "
+                "       COALESCE(sos_priority, NULL) as sos_priority, "
+                "       COALESCE(notify_on_sos, TRUE) as notify_on_sos, "
+                "       COALESCE(notify_on_crisis, TRUE) as notify_on_crisis, "
+                "       COALESCE(notify_on_daily, FALSE) as notify_on_daily "
                 "FROM senior_family_links WHERE senior_id = ? "
-                "ORDER BY created_at DESC",
+                "ORDER BY COALESCE(sos_priority, 999), created_at DESC",
                 (senior_id,)
             ).fetchall() or []
     except Exception as e:
@@ -250,8 +254,64 @@ def family_my_links():
             "confirmed_at": str(r[5]) if r[5] else None,
             "expires_at": str(r[7]) if r[7] else None,
             "created_at": str(r[8]) if r[8] else None,
+            "sos_priority": r[9],
+            "notify_on_sos": bool(r[10]),
+            "notify_on_crisis": bool(r[11]),
+            "notify_on_daily": bool(r[12]),
         })
     return jsonify({"success": True, "links": links, "count": len(links)})
+
+
+@family_link_bp.route("/api/family/link/<int:link_id>/settings", methods=["PATCH", "OPTIONS"])
+@rate_limit(max_requests=60, window_seconds=60, key_func="user")
+@require_auth
+def family_settings(link_id):
+    """Update SOS priority + opt-in flags for a family link (v10.38)."""
+    if request.method == "OPTIONS":
+        return _options_ok()
+    senior_id = str(g.auth_user.get("id") or g.auth_user.get("user_id") or "")
+    if not senior_id:
+        return jsonify({"success": False, "error": "Auth required"}), 401
+
+    data = request.get_json(silent=True) or {}
+    updates = []
+    params = []
+    if "sos_priority" in data:
+        v = data["sos_priority"]
+        if v is None:
+            updates.append("sos_priority = ?"); params.append(None)
+        else:
+            try:
+                vi = int(v)
+                if 1 <= vi <= 9:
+                    updates.append("sos_priority = ?"); params.append(vi)
+            except (TypeError, ValueError):
+                pass
+    for col in ("notify_on_sos", "notify_on_crisis", "notify_on_daily"):
+        if col in data:
+            updates.append(f"{col} = ?")
+            if is_postgres():
+                params.append(bool(data[col]))
+            else:
+                params.append(1 if data[col] else 0)
+    if not updates:
+        return jsonify({"success": False, "error": "Žádné změny."}), 400
+
+    params.extend([link_id, senior_id])
+    try:
+        with db_context(commit=True) as db:
+            cur = db.execute(
+                f"UPDATE senior_family_links SET {', '.join(updates)} "
+                f"WHERE id = ? AND senior_id = ?",
+                tuple(params)
+            )
+            if not cur.rowcount:
+                return jsonify({"success": False, "error": "Propojení nenalezeno."}), 404
+    except Exception as e:
+        logger.error(f"family_settings: {e}")
+        return jsonify({"success": False, "error": "DB error"}), 500
+
+    return jsonify({"success": True, "message": "Nastavení uloženo."})
 
 
 @family_link_bp.route("/api/family/link/<int:link_id>", methods=["DELETE", "OPTIONS"])

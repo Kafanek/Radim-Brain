@@ -591,6 +591,10 @@ PG_IOT_TABLES = [
             invite_expires_at TIMESTAMP,
             confirmed_at TIMESTAMP,
             revoked_at TIMESTAMP,
+            sos_priority INTEGER,
+            notify_on_sos BOOLEAN DEFAULT TRUE,
+            notify_on_crisis BOOLEAN DEFAULT TRUE,
+            notify_on_daily BOOLEAN DEFAULT FALSE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE (senior_id, family_email)
         )
@@ -599,10 +603,58 @@ PG_IOT_TABLES = [
         "CREATE INDEX IF NOT EXISTS idx_sfl_family ON senior_family_links(family_user_id)",
         "CREATE INDEX IF NOT EXISTS idx_sfl_token ON senior_family_links(invite_token)",
     ]),
+
+    # v10.38 — Senior contacts (phone book) + optional FamilyLink pairing
+    ('''CREATE TABLE IF NOT EXISTS contacts (
+            id SERIAL PRIMARY KEY,
+            senior_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            relation TEXT,
+            phone TEXT,
+            email TEXT,
+            avatar_url TEXT,
+            notes TEXT,
+            linked_family_link_id INTEGER,
+            sos_priority INTEGER,
+            is_primary BOOLEAN DEFAULT FALSE,
+            can_call BOOLEAN DEFAULT TRUE,
+            can_sms BOOLEAN DEFAULT TRUE,
+            is_emergency BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''', [
+        "CREATE INDEX IF NOT EXISTS idx_contacts_senior ON contacts(senior_id)",
+        "CREATE INDEX IF NOT EXISTS idx_contacts_link ON contacts(linked_family_link_id)",
+        "CREATE INDEX IF NOT EXISTS idx_contacts_primary ON contacts(senior_id, is_primary)",
+    ]),
+
+    # v10.38 — SOS events (for escalation tracking + audit)
+    ('''CREATE TABLE IF NOT EXISTS sos_events (
+            id SERIAL PRIMARY KEY,
+            senior_id TEXT NOT NULL,
+            source TEXT,
+            message TEXT,
+            ack_by_user_id TEXT,
+            ack_at TIMESTAMP,
+            escalation_stage INTEGER DEFAULT 0,
+            resolved_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''', [
+        "CREATE INDEX IF NOT EXISTS idx_sos_senior ON sos_events(senior_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_sos_unresolved ON sos_events(resolved_at) WHERE resolved_at IS NULL",
+    ]),
 ]
 
 # PostgreSQL: ALTER TABLE migrations
 PG_MIGRATIONS = [
+    # v10.38 — senior_family_links opt-in flags (idempotent)
+    "ALTER TABLE senior_family_links ADD COLUMN IF NOT EXISTS sos_priority INTEGER",
+    "ALTER TABLE senior_family_links ADD COLUMN IF NOT EXISTS notify_on_sos BOOLEAN DEFAULT TRUE",
+    "ALTER TABLE senior_family_links ADD COLUMN IF NOT EXISTS notify_on_crisis BOOLEAN DEFAULT TRUE",
+    "ALTER TABLE senior_family_links ADD COLUMN IF NOT EXISTS notify_on_daily BOOLEAN DEFAULT FALSE",
+
     "ALTER TABLE telemedicine_consultations ADD COLUMN IF NOT EXISTS title TEXT",
     "ALTER TABLE telemedicine_consultations ADD COLUMN IF NOT EXISTS is_multiparty INTEGER DEFAULT 0",
     # v4.1 — GDPR health data classification + audit
@@ -1159,12 +1211,52 @@ SQLITE_SCHEMA = '''
         invite_expires_at TIMESTAMP,
         confirmed_at TIMESTAMP,
         revoked_at TIMESTAMP,
+        sos_priority INTEGER,
+        notify_on_sos INTEGER DEFAULT 1,
+        notify_on_crisis INTEGER DEFAULT 1,
+        notify_on_daily INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE (senior_id, family_email)
     );
     CREATE INDEX IF NOT EXISTS idx_sfl_senior ON senior_family_links(senior_id);
     CREATE INDEX IF NOT EXISTS idx_sfl_family ON senior_family_links(family_user_id);
     CREATE INDEX IF NOT EXISTS idx_sfl_token ON senior_family_links(invite_token);
+
+    -- v10.38: Senior contacts + SOS events
+    CREATE TABLE IF NOT EXISTS contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        senior_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        relation TEXT,
+        phone TEXT,
+        email TEXT,
+        avatar_url TEXT,
+        notes TEXT,
+        linked_family_link_id INTEGER,
+        sos_priority INTEGER,
+        is_primary INTEGER DEFAULT 0,
+        can_call INTEGER DEFAULT 1,
+        can_sms INTEGER DEFAULT 1,
+        is_emergency INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_contacts_senior ON contacts(senior_id);
+    CREATE INDEX IF NOT EXISTS idx_contacts_link ON contacts(linked_family_link_id);
+    CREATE INDEX IF NOT EXISTS idx_contacts_primary ON contacts(senior_id, is_primary);
+
+    CREATE TABLE IF NOT EXISTS sos_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        senior_id TEXT NOT NULL,
+        source TEXT,
+        message TEXT,
+        ack_by_user_id TEXT,
+        ack_at TIMESTAMP,
+        escalation_stage INTEGER DEFAULT 0,
+        resolved_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_sos_senior ON sos_events(senior_id, created_at);
 '''
 
 # SQLite: ALTER TABLE migrations

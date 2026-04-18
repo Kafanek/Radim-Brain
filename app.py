@@ -676,6 +676,16 @@ except ImportError as e:
     NOTIFICATIONS_AVAILABLE = False
     logger.warning(f"⚠️ Notifications/Family link not available: {e}")
 
+# v10.38: Contacts (phone book) with optional FamilyLink pairing
+try:
+    from contacts_routes import contacts_bp
+    app.register_blueprint(contacts_bp)
+    CONTACTS_AVAILABLE = True
+    logger.info("📞 Contacts routes registered: /api/contacts/*")
+except ImportError as e:
+    CONTACTS_AVAILABLE = False
+    logger.warning(f"⚠️ Contacts not available: {e}")
+
 # Media & Push + Admin routes registered after helper functions are defined (see below)
 
 # ============================================
