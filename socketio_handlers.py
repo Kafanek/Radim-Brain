@@ -36,7 +36,9 @@ def register_socketio_handlers(socketio, users_online, cleanup_fn):
         logger.info(f'Client connected: {request.sid}')
 
     @socketio.on('disconnect')
-    def handle_disconnect():
+    def handle_disconnect(reason=None):
+        # v10.41.4: newer python-socketio passes (sid, reason) — flask-socketio
+        # forwards the reason kwarg. Accept it defensively for forward compat.
         user_id = None
         for uid, sid in list(_users_online.items()):
             if sid == request.sid:
@@ -44,7 +46,9 @@ def register_socketio_handlers(socketio, users_online, cleanup_fn):
                 del _users_online[uid]
                 break
         if user_id:
-            socketio.emit('user_offline', {'userId': user_id, 'timestamp': now_iso()}, broadcast=True)
+            # v10.41.4: emit(..., broadcast=True) deprecated. Default behavior
+            # is already broadcast to namespace when no `to=` is given.
+            socketio.emit('user_offline', {'userId': user_id, 'timestamp': now_iso()})
             db = None
             try:
                 db = get_connection()
@@ -66,7 +70,8 @@ def register_socketio_handlers(socketio, users_online, cleanup_fn):
             _cleanup_fn()
             _users_online[user_id] = request.sid
             join_room(user_id)
-            socketio.emit('user_online', {'userId': user_id, 'timestamp': now_iso()}, broadcast=True)
+            # v10.41.4: broadcast=True deprecated — default is broadcast already
+            socketio.emit('user_online', {'userId': user_id, 'timestamp': now_iso()})
             db = None
             try:
                 db = get_connection()
