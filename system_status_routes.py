@@ -146,20 +146,80 @@ def _check_feature_flags():
 
 
 def _check_tables():
-    """Count key tables for sanity."""
+    """Count key tables for sanity — grouped by subsystem."""
     try:
         from database import db_context
         counts = {}
         with db_context() as db:
-            for tbl in ["auth_users", "memory_profiles", "senior_family_links",
-                        "contacts", "sos_events", "user_notifications",
-                        "agent_observations"]:
+            tbls = [
+                # Auth + users
+                "auth_users", "memory_profiles", "memory_history",
+                # Brain + Ψ pipeline
+                "brain_states", "brain_adaptation", "brain_feedback",
+                # Agent observations + SOS
+                "agent_observations", "sos_events",
+                # Family + contacts + notifications
+                "senior_family_links", "contacts", "user_notifications",
+                "push_subscriptions",
+                # IoT + sensors
+                "iot_devices", "iot_sensor_data", "iot_alerts",
+                # Education + rhythm
+                "education_progress", "rhythm_sessions", "rhythm_states",
+                # Chat
+                "chat_conversations", "chat_messages",
+                # Medical
+                "crisis_events", "medical_alerts",
+                # Telemedicine
+                "telemedicine_consultations",
+                # Audit
+                "audit_log",
+            ]
+            for tbl in tbls:
                 try:
                     row = db.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()
-                    counts[tbl] = int(row[0]) if row else 0
+                    # DictRow has __getitem__(int) via row[0]; fallback to value lookup
+                    if row is None:
+                        counts[tbl] = 0
+                    elif hasattr(row, 'keys'):
+                        # dict-like (PG RealDictCursor) — keys may vary ("count" or numeric)
+                        vals = list(row.values()) if hasattr(row, 'values') else []
+                        counts[tbl] = int(vals[0]) if vals else 0
+                    else:
+                        counts[tbl] = int(row[0])
                 except Exception:
                     counts[tbl] = None
         return counts
+    except Exception as e:
+        return {"error": str(e)[:80]}
+
+
+def _check_recent_activity():
+    """Last-24h activity counters — shows if system is actually used."""
+    try:
+        from database import db_context, is_postgres
+        out = {}
+        with db_context() as db:
+            interval_sql = "NOW() - INTERVAL '24 hours'" if is_postgres() else "datetime('now', '-1 day')"
+            for label, tbl, col in [
+                ("chat_24h", "memory_history", "created_at"),
+                ("brain_24h", "brain_states", "created_at"),
+                ("observations_24h", "agent_observations", "created_at"),
+                ("notifications_24h", "user_notifications", "created_at"),
+                ("sos_24h", "sos_events", "created_at"),
+                ("registrations_24h", "auth_users", "created_at"),
+            ]:
+                try:
+                    row = db.execute(f"SELECT COUNT(*) FROM {tbl} WHERE {col} > {interval_sql}").fetchone()
+                    if row is None:
+                        out[label] = 0
+                    elif hasattr(row, 'values'):
+                        vals = list(row.values())
+                        out[label] = int(vals[0]) if vals else 0
+                    else:
+                        out[label] = int(row[0])
+                except Exception:
+                    out[label] = None
+        return out
     except Exception as e:
         return {"error": str(e)[:80]}
 
@@ -208,6 +268,7 @@ def system_status():
         },
         "feature_flags": _check_feature_flags(),
         "table_counts":  _check_tables(),
+        "activity_24h":  _check_recent_activity(),
     }
 
     # Overall status (worst of all)
