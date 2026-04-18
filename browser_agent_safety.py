@@ -34,8 +34,8 @@ ALLOWED_DOMAINS = frozenset([
     'reflex.cz', 'forum24.cz', 'e15.cz',
     # Informace a encyklopedie
     'wikipedia.org', 'cs.wikipedia.org', 'en.wikipedia.org',
-    # Mapy
-    'mapy.cz', 'en.mapy.cz',
+    # Mapy (mapy.cz redirects to mapy.com)
+    'mapy.cz', 'en.mapy.cz', 'mapy.com',
     # Jízdní řády + doprava
     'idos.cz', 'idos.idnes.cz', 'jizdnirady.idnes.cz',
     'cd.cz', 'www.cd.cz', 'pid.cz', 'dpp.cz',
