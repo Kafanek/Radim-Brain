@@ -141,17 +141,50 @@ EMPHASIS_WORDS = {
     "léky", "lék", "tabletu", "prášek",
 }
 
-# v10.20: Czech pronunciation fixes for Azure cs-CZ-AntoninNeural
-# Applied AFTER xml_escape so SSML tags are preserved
-# Azure mispronounces "ch" /x/ as "č" /tʃ/ in some words
+# v10.20 + v10.54: Czech pronunciation fixes for Azure cs-CZ-AntoninNeural
+# Applied AFTER xml_escape so SSML tags are preserved.
+# Two categories:
+#   A. Native Czech words where Azure mispronounces /x/ as /tʃ/ or ignores /ɲ/
+#   B. Foreign words and brand names that Antonín mangles with Czech phonetics
 _CZECH_PHONEME_FIXES = [
-    # (escaped_word_regex, ipa, display_text)
-    (r'\b[Dd]ýchejte\b', 'diːxɛjtɛ', None),
+    # (pattern, ipa, display_override)  — display_override=None uses matched word
+
+    # ── Native Czech "ch" /x/ fixes (breathing cues for exercises) ──
+    (r'\b[Dd]ýchejte\b',   'diːxɛjtɛ',  None),
     (r'\b[Nn]adechněte\b', 'nadɛxɲɛtɛ', None),
     (r'\b[Vv]ydechněte\b', 'vidɛxɲɛtɛ', None),
-    (r'\b[Dd]ýchat\b', 'diːxat', None),
-    (r'\b[Dd]ýchání\b', 'diːxaɲiː', None),
-    (r'\b[Dd]ýchej\b', 'diːxɛj', None),
+    (r'\b[Dd]ýchat\b',     'diːxat',    None),
+    (r'\b[Dd]ýchání\b',    'diːxaɲiː',  None),
+    (r'\b[Dd]ýchej\b',     'diːxɛj',    None),
+
+    # ── Brands & tech terms (English-origin, common in RADIM context) ──
+    (r'\b[Rr]adim\b',      'radɪm',       'Radim'),
+    (r'\bChatGPT\b',       'tʃɛtdʒiːpiːtiː', 'ChatGPT'),
+    (r'\b[Gg]emini\b',     'ɡɛmɪnaɪ',    'Gemini'),
+    (r'\b[Cc][Oo][Vv][Ii][Dd](-19)?\b', 'kɔvɪt',  'COVID'),
+    (r'\b[Ee]-?mail\b',    'iːmɛjl',     'e-mail'),
+    (r'\b[Ww]i-?[Ff]i\b',  'vajfaj',     'Wi-Fi'),
+    (r'\b[Ii][Pp]hone\b',  'ajfoʊn',     'iPhone'),
+    (r'\b[Ii][Pp]ad\b',    'ajpɛt',      'iPad'),
+    (r'\b[Aa]ndroid\b',    'ɛndrɔjd',    'Android'),
+    (r'\b[Bb]luetooth\b',  'bluːtuːθ',   'Bluetooth'),
+    (r'\b[Yy]ou[Tt]ube\b', 'juːtjuːp',   'YouTube'),
+    (r'\b[Ff]acebook\b',   'fɛjsbʊk',    'Facebook'),
+    (r'\b[Ww]hats[Aa]pp\b', 'vɔtsɛp',    'WhatsApp'),
+    (r'\b[Gg]oogle\b',     'ɡuːɡl',      'Google'),
+    (r'\b[Mm]icrosoft\b',  'majkrosoft', 'Microsoft'),
+    (r'\b[Aa]pple\b',      'ɛpl',        'Apple'),
+    (r'\b[Tt]he\s',        'ðə ',        'the '),    # article in loan phrases
+    (r'\b[Oo][Kk]\b',      'oʊkɛj',      'OK'),
+    (r'\b[Ss][Mm][Ss]\b',  'ɛsɛmɛs',     'SMS'),
+    (r'\b[Pp][Dd][Ff]\b',  'peːdeːef',   'PDF'),
+    (r'\b[Uu][Ss][Aa]\b',  'uːɛsaː',     'USA'),
+    (r'\b[Ee][Uu]\b',      'eːuː',       'EU'),
+
+    # ── V4 / Visegrad conference terms that trip up Azure ──
+    (r'\b[Vv]isegrád(ský|ská|ské|ského|skému|ským|ských)?\b',
+                           'vɪsɛɡraːt', None),
+    (r'\bV4\b',            'veːʃtiːrʒɪ', 'V4'),
 ]
 
 def _fix_czech_pronunciation(text):
