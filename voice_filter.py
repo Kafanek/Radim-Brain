@@ -314,6 +314,36 @@ def _add_pause_variability(pause_ms, mode="random"):
         return max(200, pause_ms + variation)
 
 
+def _lang_from_voice(voice: str) -> str:
+    """Extract xml:lang code from an Azure voice name like 'cs-CZ-AntoninNeural'.
+    Falls back to cs-CZ if the format is unexpected."""
+    try:
+        parts = (voice or "").split("-")
+        if len(parts) >= 2 and len(parts[0]) == 2 and len(parts[1]) == 2:
+            return f"{parts[0].lower()}-{parts[1].upper()}"
+    except Exception:
+        pass
+    return "cs-CZ"
+
+
+def build_simple_ssml(text: str, voice: str) -> str:
+    """Minimal SSML for non-Czech Azure voices (V4+EN translator output).
+
+    No style/prosody tweaks — let the voice speak naturally in its own
+    language. Czech-only Radim-branding (express-as, pronunciation fixes,
+    contour mapping) is not applicable to EN/SK/PL/HU renders.
+    """
+    xml_lang = _lang_from_voice(voice)
+    safe = xml_escape(text)
+    return (
+        f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
+        f'xml:lang="{xml_lang}">'
+        f'<voice name="{voice}">'
+        f'<prosody rate="-5%">{safe}</prosody>'
+        f'</voice></speak>'
+    )
+
+
 def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=None, rtcf_voice=None):
     """Build rich SSML for Radim's voice with mode-adaptive styling.
 
@@ -322,7 +352,20 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
     - Fatigue hysteresis (prevent mode switching instability)
     - Pause variability (±50ms for natural rhythm)
     - Logging: mode, overrides applied, text length
+
+    v10.52: If voice is not Czech (e.g. en-US, sk-SK, pl-PL, hu-HU from the
+    translator module), drop Czech-specific SSML decorations and emit a
+    minimal, language-correct envelope instead. Radim's branding only
+    applies to Czech.
     """
+    # Route non-Czech voices to the simple builder — Czech express-as styles
+    # and pronunciation tweaks aren't valid for other locales and could
+    # either be ignored or cause Azure to reject the request.
+    xml_lang = _lang_from_voice(voice)
+    if not xml_lang.lower().startswith("cs-"):
+        # Still honor length truncation for UX
+        text = _truncate_for_tts(text)
+        return build_simple_ssml(text, voice)
     if mode not in VOICE_PROFILES:
         logger.warning(f"Invalid voice mode '{mode}' — falling back to HARMONY")
     profile = dict(VOICE_PROFILES.get(mode, VOICE_PROFILES["HARMONY"]))
