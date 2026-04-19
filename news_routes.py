@@ -7,6 +7,7 @@
 
 import logging
 import json
+import re
 import threading
 import time
 from datetime import datetime
@@ -157,8 +158,288 @@ def track_read():
     return jsonify({'success': True})
 
 
+# ═══════════════════════════════════════════════════════════════════
+# v10.56: Real RSS feeds from Czech publishers, summarized by Gemini.
+# Replaces AI-generated-from-scratch news (which risked hallucinations).
+# ═══════════════════════════════════════════════════════════════════
+
+RSS_FEEDS = {
+    # Hlavní zprávy (mix)
+    'general': [
+        ('iDNES',         'https://servis.idnes.cz/rss.aspx?c=zpravodaj'),
+        ('ČT24',          'https://ct24.ceskatelevize.cz/rss/hlavni-zpravy'),
+        ('Novinky',       'https://www.novinky.cz/rss'),
+        ('Seznam Zprávy', 'https://www.seznamzpravy.cz/rss'),
+    ],
+    'politics': [
+        ('ČT24',    'https://ct24.ceskatelevize.cz/rss/domaci'),
+        ('iDNES',   'https://servis.idnes.cz/rss.aspx?c=zpravodaj'),
+        ('Novinky', 'https://www.novinky.cz/rss'),
+    ],
+    'health': [
+        ('Novinky zdraví',  'https://www.novinky.cz/rss/zena/zdravi'),
+        ('Seznam Zdraví',   'https://www.seznamzpravy.cz/rss?section=zdravi'),
+    ],
+    'sport': [
+        ('iDNES sport',    'https://servis.idnes.cz/rss.aspx?c=sport'),
+        ('Novinky sport',  'https://www.novinky.cz/rss/sport'),
+    ],
+    'culture': [
+        ('iDNES kultura',   'https://servis.idnes.cz/rss.aspx?c=kultura'),
+        ('ČT24 kultura',    'https://ct24.ceskatelevize.cz/rss/kultura'),
+        ('Novinky kultura', 'https://www.novinky.cz/rss/kultura'),
+    ],
+    'local': [
+        ('Novinky Praha',   'https://www.novinky.cz/rss/domaci/praha'),
+        ('ČT24 domácí',     'https://ct24.ceskatelevize.cz/rss/domaci'),
+    ],
+    'world': [
+        ('ČT24 svět',          'https://ct24.ceskatelevize.cz/rss/svet'),
+        ('Novinky zahraniční', 'https://www.novinky.cz/rss/zahranicni'),
+    ],
+    'economy': [
+        ('iDNES ekonomika',    'https://servis.idnes.cz/rss.aspx?c=ekonomika'),
+        ('ČT24 ekonomika',     'https://ct24.ceskatelevize.cz/rss/ekonomika'),
+        ('Novinky ekonomika',  'https://www.novinky.cz/rss/ekonomika'),
+    ],
+    'science': [
+        ('iDNES technet',   'https://servis.idnes.cz/rss.aspx?c=technet'),
+        ('ČT24 věda',       'https://ct24.ceskatelevize.cz/rss/veda'),
+        ('Novinky věda',    'https://www.novinky.cz/rss/veda-a-skoly'),
+    ],
+    # Bez spolehlivých RSS: tipy — fallback na AI generování.
+}
+
+_RSS_CACHE = {}                 # url → { items, expires_at }
+_RSS_CACHE_LOCK = threading.Lock()
+_RSS_CACHE_TTL = 10 * 60        # 10 min per feed
+
+
+def _fetch_rss(url):
+    """Fetch + parse a single RSS feed. Returns list of dicts or []."""
+    with _RSS_CACHE_LOCK:
+        cached = _RSS_CACHE.get(url)
+        if cached and cached['expires_at'] > time.time():
+            return cached['items']
+
+    try:
+        import requests as req
+        from lxml import etree
+        resp = req.get(url, timeout=8, headers={
+            'User-Agent': 'Mozilla/5.0 (RadimCare News Reader)',
+        })
+        if resp.status_code != 200 or not resp.content:
+            return []
+        root = etree.fromstring(resp.content)
+        NS = {
+            'media':   'http://search.yahoo.com/mrss/',
+            'content': 'http://purl.org/rss/1.0/modules/content/',
+            'atom':    'http://www.w3.org/2005/Atom',
+        }
+        out = []
+        for it in root.findall('.//item')[:15]:
+            title = (it.findtext('title') or '').strip()
+            link = (it.findtext('link') or '').strip()
+            desc = (it.findtext('description') or '').strip()
+            pub  = (it.findtext('pubDate') or '').strip()
+            # Image: try enclosure → media:thumbnail → media:content → og parse later
+            image = None
+            enc = it.find('enclosure')
+            if enc is not None and enc.get('type', '').startswith('image'):
+                image = enc.get('url')
+            if not image:
+                mt = it.find('media:thumbnail', NS)
+                if mt is not None: image = mt.get('url')
+            if not image:
+                mc = it.find('media:content', NS)
+                if mc is not None and mc.get('medium') != 'video':
+                    image = mc.get('url')
+            # Strip HTML from description
+            if desc and '<' in desc:
+                desc = re.sub(r'<[^>]+>', ' ', desc)
+                desc = re.sub(r'\s+', ' ', desc).strip()
+            if not title or not link:
+                continue
+            out.append({
+                'title': title[:200],
+                'link': link,
+                'description': desc[:600],
+                'pubDate': pub,
+                'image': image,
+            })
+        with _RSS_CACHE_LOCK:
+            _RSS_CACHE[url] = {'items': out, 'expires_at': time.time() + _RSS_CACHE_TTL}
+        return out
+    except Exception as e:
+        logger.debug(f'RSS fetch error {url}: {e}')
+        return []
+
+
+def _interleave(lists):
+    """Round-robin merge: first from each, then second from each, etc."""
+    result = []
+    max_len = max((len(l) for l in lists), default=0)
+    for i in range(max_len):
+        for l in lists:
+            if i < len(l):
+                result.append(l[i])
+    return result
+
+
+def _fetch_via_rss(category, count):
+    """Fetch from real Czech RSS sources, summarize via Gemini if available.
+
+    Returns list of article dicts compatible with the frontend schema:
+        { id, title, summary, source, category, link, image, readTime, timestamp }
+    """
+    feeds = RSS_FEEDS.get(category)
+    if not feeds:
+        return None  # caller falls back to AI generation
+
+    # Fetch in parallel (bounded)
+    import concurrent.futures as cf
+    with cf.ThreadPoolExecutor(max_workers=min(4, len(feeds))) as ex:
+        futs = {ex.submit(_fetch_rss, url): (src, url) for src, url in feeds}
+        per_feed = {}
+        for fut in cf.as_completed(futs, timeout=10):
+            src, url = futs[fut]
+            try:
+                items = fut.result() or []
+            except Exception:
+                items = []
+            # Attach source
+            for it in items:
+                it['source'] = src
+            per_feed[src] = items
+
+    # Interleave so we get variety
+    merged = _interleave(list(per_feed.values()))
+    if not merged:
+        return None
+
+    # Dedupe by normalized title prefix
+    seen, deduped = set(), []
+    for it in merged:
+        key = re.sub(r'\s+', ' ', (it['title'] or '').lower())[:60]
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(it)
+        if len(deduped) >= count * 2:  # take some extra, may discard in summarize
+            break
+
+    # Summarize via Gemini (senior-friendly 2-3 sentences per article)
+    articles = _summarize_for_senior(deduped[:count], category)
+    return articles
+
+
+def _summarize_for_senior(items, category):
+    """Batch-summarize RSS items into senior-friendly Czech summaries.
+
+    Uses one Gemini call for the whole batch so latency stays low.
+    Gemini sees the original title + description and writes a 2-3
+    sentence summary adapted for a Czech senior reader. Falls back to
+    the original RSS description if Gemini is unavailable.
+    """
+    import os
+    ts = datetime.utcnow().isoformat()
+    now_iso = datetime.now().isoformat()
+
+    # Always wrap with our final article shape regardless of Gemini success
+    def _wrap(items, summaries):
+        out = []
+        for i, it in enumerate(items):
+            summary = (summaries[i] if i < len(summaries) else None) \
+                      or (it.get('description') or it['title'])
+            out.append({
+                'id':       f"rss-{category}-{i}-{int(time.time())}",
+                'title':    it['title'],
+                'summary':  summary[:320].strip(),
+                'source':   it.get('source', 'Zprávy'),
+                'category': category,
+                'link':     it.get('link'),
+                'image':    it.get('image'),
+                'publishedAt': it.get('pubDate') or now_iso,
+                'readTime': _read_time(summary),
+                'timestamp': ts,
+            })
+        return out
+
+    api_key = os.environ.get('GEMINI_API_KEY')
+    if not api_key or not items:
+        return _wrap(items, [])
+
+    numbered = '\n\n'.join(
+        f"{i+1}. TITULEK: {it['title']}\n   POPIS: {it.get('description','')[:400]}"
+        for i, it in enumerate(items)
+    )
+    prompt = (
+        "Jsi redaktor zpráv pro seniory. U každé ze zpráv níže napiš "
+        "SENIOR-FRIENDLY SHRNUTÍ ve 2 nebo 3 krátkých jasných větách "
+        "(max 220 znaků). Jednoduchá čeština, konkrétní fakta, neutrální nebo "
+        "mírně pozitivní tón. Vrať VÝHRADNĚ tento formát, jedna zpráva per "
+        "řádek: '1. <shrnutí>' přes '{n}. <shrnutí>'. Neuváděj titulek, "
+        "žádné poznámky, žádný markdown.\n\n"
+        f"ZPRÁVY:\n\n{numbered}"
+    )
+    try:
+        import requests as req
+        resp = req.post(
+            f'https://generativelanguage.googleapis.com/v1beta/models/'
+            f'gemini-2.0-flash:generateContent?key={api_key}',
+            json={
+                'contents': [{'parts': [{'text': prompt}]}],
+                'generationConfig': {'temperature': 0.3, 'maxOutputTokens': 1600},
+            },
+            timeout=18,
+        )
+        if resp.status_code != 200:
+            logger.debug(f'Gemini summary HTTP {resp.status_code}')
+            return _wrap(items, [])
+        text = resp.json()['candidates'][0]['content']['parts'][0]['text']
+        # Parse numbered lines back to list in order
+        summaries = {}
+        cur_idx = None
+        cur_buf = []
+        for line in text.strip().split('\n'):
+            m = re.match(r'^\s*(\d+)[\.\)]\s*(.*)$', line)
+            if m:
+                if cur_idx is not None:
+                    summaries[cur_idx] = ' '.join(cur_buf).strip()
+                cur_idx = int(m.group(1)) - 1
+                cur_buf = [m.group(2).strip()]
+            else:
+                if cur_idx is not None and line.strip():
+                    cur_buf.append(line.strip())
+        if cur_idx is not None:
+            summaries[cur_idx] = ' '.join(cur_buf).strip()
+        ordered = [summaries.get(i, '') for i in range(len(items))]
+        return _wrap(items, ordered)
+    except Exception as e:
+        logger.warning(f'Gemini summarize failed: {e}')
+        return _wrap(items, [])
+
+
+def _read_time(summary):
+    """Estimate read time in minutes from summary length.
+    Czech ~180 WPM, rounded up to full minute, min 1 min."""
+    words = len((summary or '').split())
+    return f"{max(1, round(words / 180))} min"
+
+
 def _fetch_with_ai(category, interests, count):
-    """Fetch news using Gemini AI with Czech context."""
+    """Preferred path: real RSS → Gemini summary. Falls back to AI-generated
+    content only when no RSS sources are configured for the category (e.g.
+    'tips') or when all feeds fail."""
+    rss_articles = _fetch_via_rss(category, count)
+    if rss_articles and len(rss_articles) >= 2:
+        return rss_articles
+    logger.info(f'📰 Falling back to AI-generated news for {category}')
+    return _fetch_via_ai(category, interests, count)
+
+
+def _fetch_via_ai(category, interests, count):
+    """Legacy AI-generated path — used only when RSS not available."""
     import os
 
     category_prompts = {
