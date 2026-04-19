@@ -283,4 +283,181 @@ def _translate_mymemory(text: str, source: str, target: str):
         return None, None
 
 
-logger.info("🌐 Translator routes loaded: /api/translate")
+# ═══════════════════════════════════════════════════════════════════
+# OCR — extract text from image + translate (Gemini vision)
+# ═══════════════════════════════════════════════════════════════════
+
+MAX_IMAGE_BYTES = 6 * 1024 * 1024   # 6 MB
+ALLOWED_MIME = frozenset([
+    "image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif",
+])
+
+
+@translator_bp.route("/api/translate/ocr", methods=["POST", "OPTIONS"])
+@rate_limit(max_requests=20, window_seconds=60, key_func="ip")
+def translate_ocr():
+    """Extract text from an image and translate it.
+
+    Accepts either:
+      - multipart/form-data with `image` file field + `target` form field
+      - application/json with {image_base64, mime_type, target}
+
+    Returns: {success, extracted, translated, target, source_detected, provider}.
+    """
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True}), 200
+
+    target = ""
+    image_b64 = None
+    mime = "image/jpeg"
+
+    # 1. Multipart first (camera uploads naturally use this).
+    if request.files.get("image"):
+        f = request.files["image"]
+        mime = (f.mimetype or "image/jpeg").lower()
+        raw = f.read()
+        if len(raw) > MAX_IMAGE_BYTES:
+            return jsonify({
+                "success": False,
+                "error": f"Obrázek je příliš velký (max {MAX_IMAGE_BYTES // (1024*1024)} MB).",
+            }), 400
+        import base64 as _b64
+        image_b64 = _b64.b64encode(raw).decode("ascii")
+        target = (request.form.get("target") or "").strip().lower()
+    else:
+        data = request.get_json(silent=True) or {}
+        image_b64 = (data.get("image_base64") or "").strip()
+        if image_b64.startswith("data:"):
+            # strip data URL prefix
+            try:
+                mime = image_b64.split(";", 1)[0][5:] or mime
+                image_b64 = image_b64.split(",", 1)[1]
+            except Exception:
+                pass
+        else:
+            mime = (data.get("mime_type") or mime).lower()
+        target = (data.get("target") or "").strip().lower()
+
+    if not image_b64:
+        return jsonify({"success": False, "error": 'Chybí obrázek ("image" nebo "image_base64").'}), 400
+    if mime not in ALLOWED_MIME:
+        return jsonify({
+            "success": False,
+            "error": f"Nepodporovaný typ obrázku: {mime}. Použijte JPEG/PNG/WebP/HEIC.",
+        }), 400
+    if target not in LANG_CODES:
+        return jsonify({
+            "success": False,
+            "error": f'Cílový jazyk "{target}" není podporovaný.',
+        }), 400
+
+    extracted, translated, detected, provider = _gemini_ocr_and_translate(
+        image_b64, mime, target,
+    )
+    if extracted is None:
+        return jsonify({
+            "success": False,
+            "error": "Nepodařilo se přečíst obrázek. Zkuste ostřejší foto.",
+        }), 502
+
+    return jsonify({
+        "success": True,
+        "extracted": extracted,
+        "translated": translated,
+        "target": target,
+        "source_detected": detected,
+        "provider": provider,
+    }), 200
+
+
+def _gemini_ocr_and_translate(image_b64: str, mime: str, target: str):
+    """One Gemini call that both extracts text and translates.
+
+    Returns (extracted, translated, detected_source, provider) or
+    (None, None, None, None) on failure.
+    """
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return None, None, None, None
+
+    tgt_name = LANG_NAME.get(target, target)
+
+    prompt = (
+        "You are a visual translator. Read ALL visible text in the image "
+        "(signs, menus, documents, screens, labels). Return output in exactly "
+        "this format, no extra commentary:\n\n"
+        "LANG: <ISO 639-1 code of the detected source language>\n"
+        "ORIGINAL:\n<all extracted text, preserving line breaks>\n\n"
+        f"TRANSLATED ({tgt_name}):\n<full translation into {tgt_name}>\n\n"
+        "If the image contains no readable text, output exactly:\n"
+        "LANG: --\nORIGINAL:\n(žádný text)\n\nTRANSLATED:\n(žádný text)"
+    )
+
+    try:
+        resp = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"gemini-2.0-flash:generateContent?key={api_key}",
+            json={
+                "contents": [{
+                    "parts": [
+                        {"inline_data": {"mime_type": mime, "data": image_b64}},
+                        {"text": prompt},
+                    ],
+                }],
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "maxOutputTokens": 2048,
+                    "topP": 0.9,
+                },
+            },
+            timeout=25,
+        )
+        if resp.status_code != 200:
+            logger.warning(f"Gemini OCR HTTP {resp.status_code}: {resp.text[:200]}")
+            return None, None, None, None
+        data = resp.json()
+        candidates = data.get("candidates") or []
+        if not candidates:
+            return None, None, None, None
+        parts = (candidates[0].get("content") or {}).get("parts") or []
+        if not parts:
+            return None, None, None, None
+        raw = (parts[0].get("text") or "").strip()
+        return _parse_ocr_response(raw) + ("gemini-2.0-flash-vision",)
+    except Exception as e:
+        logger.warning(f"Gemini OCR failed: {e}")
+        return None, None, None, None
+
+
+def _parse_ocr_response(raw: str):
+    """Split Gemini's formatted output into (extracted, translated, detected)."""
+    extracted, translated, detected = "", "", None
+    # Tolerate both '\n\n' and '\n' separators; match on labels case-insensitively.
+    lang_m = re.search(r'^LANG\s*:\s*([a-z-]{2,5}|--)\s*$', raw, re.IGNORECASE | re.MULTILINE)
+    if lang_m:
+        code = lang_m.group(1).lower()
+        detected = None if code == "--" else code.split("-")[0]
+
+    orig_m = re.search(
+        r'ORIGINAL\s*:\s*\n(.*?)(?:\n\s*\n\s*TRANSLATED|$)',
+        raw, re.IGNORECASE | re.DOTALL,
+    )
+    if orig_m:
+        extracted = orig_m.group(1).strip()
+
+    tr_m = re.search(
+        r'TRANSLATED[^:]*:\s*\n(.*?)\s*$',
+        raw, re.IGNORECASE | re.DOTALL,
+    )
+    if tr_m:
+        translated = tr_m.group(1).strip()
+
+    # Fallback: if parsing fails, return the whole raw as both original & translated.
+    if not extracted and not translated:
+        extracted = raw
+        translated = raw
+
+    return extracted, translated, detected
+
+
+logger.info("🌐 Translator routes loaded: /api/translate + /api/translate/ocr")
