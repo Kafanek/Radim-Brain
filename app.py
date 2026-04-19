@@ -857,6 +857,17 @@ try:
     except ImportError:
         logger.warning("⚠️ morning check-in not available")
 
+    # v10.57: Morning news briefing — webpush top 3 stories at 08:05
+    try:
+        from news_briefing_job import run_morning_news_briefing
+        scheduler.add_job(lambda: run_morning_news_briefing(app), 'cron',
+                          hour=8, minute=5,
+                          id='morning_news_briefing',
+                          max_instances=1, misfire_grace_time=1800)
+        logger.info("✅ Morning news briefing registered (daily at 8:05)")
+    except ImportError as e:
+        logger.warning(f"⚠️ news briefing not available: {e}")
+
     # Daily cleanup — old observations + brain_states
     try:
         from agent_loop import run_daily_cleanup
@@ -1378,6 +1389,26 @@ def admin_seed_demo():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # v382: Manual agent loop trigger (full cycle with saves)
+@app.route('/api/admin/news-briefing-test', methods=['POST', 'OPTIONS'])
+def admin_news_briefing_test():
+    """Manually trigger morning news briefing push.
+
+    Same payload/pipeline as the 08:05 cron — webpushes the top 3 general
+    articles to every push_subscriptions row. Returns summary of send result.
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        from news_briefing_job import run_morning_news_briefing
+        result = run_morning_news_briefing(app)
+        return jsonify({'success': True, 'result': result}), 200
+    except Exception as e:
+        logger.error(f"News briefing test error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/admin/agent-run', methods=['POST', 'OPTIONS'])
 def admin_agent_run():
     """Manually trigger one full agent loop cycle."""
