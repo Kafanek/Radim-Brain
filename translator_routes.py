@@ -284,6 +284,183 @@ def _translate_mymemory(text: str, source: str, target: str):
 
 
 # ═══════════════════════════════════════════════════════════════════
+# BATCH — translate many short strings in one Gemini call.
+# Used by the runtime UI-translator (DOM walker) so switching language
+# is one round-trip, not N.
+# ═══════════════════════════════════════════════════════════════════
+
+BATCH_MAX_ITEMS = 200
+BATCH_MAX_TOTAL_CHARS = 25000
+
+
+@translator_bp.route("/api/translate/batch", methods=["POST", "OPTIONS"])
+@rate_limit(max_requests=20, window_seconds=60, key_func="ip")
+def translate_batch():
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True}), 200
+
+    data = request.get_json(silent=True) or {}
+    texts = data.get("texts") or []
+    source = (data.get("source") or "cs").strip().lower()
+    target = (data.get("target") or "").strip().lower()
+
+    if not isinstance(texts, list) or not texts:
+        return jsonify({"success": False, "error": 'Parametr "texts" je prázdný.'}), 400
+    if len(texts) > BATCH_MAX_ITEMS:
+        return jsonify({
+            "success": False,
+            "error": f"Příliš mnoho textů (max {BATCH_MAX_ITEMS}).",
+        }), 400
+    total = sum(len(t or "") for t in texts)
+    if total > BATCH_MAX_TOTAL_CHARS:
+        return jsonify({
+            "success": False,
+            "error": f"Celková délka textů překročila limit ({BATCH_MAX_TOTAL_CHARS} znaků).",
+        }), 400
+    if target not in LANG_CODES:
+        return jsonify({"success": False, "error": f'Jazyk "{target}" není podporovaný.'}), 400
+    if source not in LANG_CODES and source != "auto":
+        return jsonify({"success": False, "error": f'Zdrojový jazyk "{source}" není podporovaný.'}), 400
+
+    # Short-circuit if source == target
+    if source == target:
+        return jsonify({
+            "success": True,
+            "translations": list(texts),
+            "target": target,
+            "provider": "noop",
+        }), 200
+
+    # Filter empty / whitespace-only so Gemini doesn't translate nothing
+    indexed = [(i, (t or "")) for i, t in enumerate(texts)]
+    work = [(i, t.strip()) for i, t in indexed if t and t.strip()]
+    translations = list(texts)  # start with originals (blanks stay blank)
+
+    if not work:
+        return jsonify({
+            "success": True,
+            "translations": translations,
+            "target": target,
+            "provider": "noop",
+        }), 200
+
+    out, provider = _translate_gemini_batch([t for _, t in work], source, target)
+    if out is None or len(out) != len(work):
+        # Gemini failed → fall back to per-item MyMemory (best-effort)
+        for idx, (orig_i, src_text) in enumerate(work):
+            single, _ = _translate_mymemory(src_text, source if source != "auto" else "cs", target)
+            if single:
+                translations[orig_i] = single
+        return jsonify({
+            "success": True,
+            "translations": translations,
+            "target": target,
+            "provider": "mymemory-fallback",
+        }), 200
+
+    for (orig_i, _), translated in zip(work, out):
+        translations[orig_i] = translated
+
+    return jsonify({
+        "success": True,
+        "translations": translations,
+        "target": target,
+        "provider": provider,
+    }), 200
+
+
+def _translate_gemini_batch(texts: list, source: str, target: str):
+    """Translate many short strings in one Gemini call.
+
+    Uses a numbered format so Gemini returns a stable list order.
+    Returns (list[str], provider) or (None, None) on failure.
+    """
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return None, None
+
+    src_name = LANG_NAME.get(source, source) if source != "auto" else "the source language"
+    tgt_name = LANG_NAME.get(target, target)
+
+    numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(texts))
+    prompt = (
+        f"Translate each numbered line from {src_name} to {tgt_name}. "
+        "Return ONLY the translations in the same order, same numbering, "
+        "one per line. Preserve numbering exactly. Do not skip items. "
+        "Do not add commentary. If a line is a proper noun, a brand, or "
+        "cannot be translated meaningfully, keep it unchanged.\n\n"
+        f"{numbered}"
+    )
+
+    try:
+        resp = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"gemini-2.0-flash:generateContent?key={api_key}",
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "maxOutputTokens": 4096,
+                    "topP": 0.9,
+                },
+            },
+            timeout=25,
+        )
+        if resp.status_code != 200:
+            logger.warning(f"Gemini batch HTTP {resp.status_code}: {resp.text[:200]}")
+            return None, None
+        data = resp.json()
+        candidates = data.get("candidates") or []
+        if not candidates:
+            return None, None
+        parts = (candidates[0].get("content") or {}).get("parts") or []
+        raw = (parts[0].get("text") or "").strip() if parts else ""
+        if not raw:
+            return None, None
+        # Parse back numbered lines → list
+        result = _parse_numbered_list(raw, expected_count=len(texts))
+        if not result:
+            return None, None
+        return result, "gemini-2.0-flash-batch"
+    except Exception as e:
+        logger.warning(f"Gemini batch failed: {e}")
+        return None, None
+
+
+def _parse_numbered_list(raw: str, expected_count: int):
+    """Parse '1. text\n2. text\n3. text' into list preserving order.
+
+    Gemini sometimes omits the number on continuation lines of a multi-line
+    translation — we treat unnumbered lines as part of the previous item.
+    """
+    items = {}
+    current_idx = None
+    current_buf = []
+    pat = re.compile(r'^\s*(\d+)[\.\)]\s*(.*)$')
+    for line in raw.split("\n"):
+        m = pat.match(line)
+        if m:
+            if current_idx is not None:
+                items[current_idx] = "\n".join(current_buf).strip()
+            current_idx = int(m.group(1)) - 1
+            current_buf = [m.group(2).strip()]
+        else:
+            if current_idx is not None:
+                current_buf.append(line.rstrip())
+    if current_idx is not None:
+        items[current_idx] = "\n".join(current_buf).strip()
+
+    out = []
+    for i in range(expected_count):
+        out.append(items.get(i, ""))
+    # Sanity: at least half should be non-empty, else parsing failed
+    non_empty = sum(1 for x in out if x)
+    if non_empty < max(1, expected_count // 2):
+        return None
+    return out
+
+
+# ═══════════════════════════════════════════════════════════════════
 # OCR — extract text from image + translate (Gemini vision)
 # ═══════════════════════════════════════════════════════════════════
 
