@@ -7,6 +7,8 @@
 
 import logging
 import json
+import threading
+import time
 from datetime import datetime
 from flask import Blueprint, request, jsonify
 from auth_middleware import optional_auth
@@ -14,6 +16,50 @@ from auth_middleware import optional_auth
 logger = logging.getLogger(__name__)
 
 news_bp = Blueprint('news_api', __name__, url_prefix='/api/news')
+
+# ═══════════════════════════════════════════════════════════════════
+# In-memory short cache per (category, interests_key) — 15 min TTL.
+# Prevents hammering Gemini when multiple seniors refresh. Doesn't
+# starve freshness — TTL is shorter than a typical session.
+# ═══════════════════════════════════════════════════════════════════
+_NEWS_CACHE = {}                       # key → { articles, expires_at, fetched_at }
+_NEWS_CACHE_LOCK = threading.Lock()
+_NEWS_CACHE_TTL = 15 * 60              # seconds
+_NEWS_CACHE_MAX_ENTRIES = 80
+
+
+def _cache_key(category, interests):
+    # Interests normalized so ordering doesn't produce miss
+    safe_interests = ','.join(sorted(i.strip().lower() for i in interests[:5] if i))
+    # Hour bucket so each hour slot gets a new prompt (within TTL of 15 min the
+    # same bucket reuses the cached result — but crossing an hour boundary
+    # guarantees a fresh prompt variation).
+    hour_slot = int(time.time() // 3600)
+    return f"{category}|{safe_interests}|{hour_slot}"
+
+
+def _cache_get(key):
+    with _NEWS_CACHE_LOCK:
+        entry = _NEWS_CACHE.get(key)
+        if not entry:
+            return None
+        if entry['expires_at'] < time.time():
+            _NEWS_CACHE.pop(key, None)
+            return None
+        return entry
+
+
+def _cache_put(key, articles):
+    with _NEWS_CACHE_LOCK:
+        if len(_NEWS_CACHE) >= _NEWS_CACHE_MAX_ENTRIES:
+            # Drop oldest
+            oldest = min(_NEWS_CACHE.items(), key=lambda kv: kv[1]['expires_at'])
+            _NEWS_CACHE.pop(oldest[0], None)
+        _NEWS_CACHE[key] = {
+            'articles': articles,
+            'expires_at': time.time() + _NEWS_CACHE_TTL,
+            'fetched_at': time.time(),
+        }
 
 
 @news_bp.route('/fetch', methods=['POST'])
@@ -33,14 +79,42 @@ def fetch_news():
     category = data.get('category', 'general')
     interests = data.get('interests', [])
     count = min(data.get('count', 5), 8)
+    force_refresh = bool(data.get('force_refresh'))
+
+    # Respect manual refresh — bypass cache when the senior explicitly
+    # re-pulls (pull-to-refresh, reload button).
+    key = _cache_key(category, interests)
+    cached = None if force_refresh else _cache_get(key)
+    if cached:
+        return jsonify({
+            'success': True,
+            'articles': cached['articles'][:count],
+            'category': category,
+            'fetched_at': cached['fetched_at'],
+            'cache': 'hit',
+        })
 
     try:
         articles = _fetch_with_ai(category, interests, count)
-        return jsonify({'success': True, 'articles': articles, 'category': category})
+        _cache_put(key, articles)
+        return jsonify({
+            'success': True,
+            'articles': articles,
+            'category': category,
+            'fetched_at': time.time(),
+            'cache': 'miss',
+        })
     except Exception as e:
         logger.warning(f"📰 News fetch error: {e}")
-        # Fallback to curated tips
-        return jsonify({'success': True, 'articles': _get_fallback(category), 'category': category, 'fallback': True})
+        fallback = _get_fallback(category)
+        return jsonify({
+            'success': True,
+            'articles': fallback,
+            'category': category,
+            'fetched_at': time.time(),
+            'fallback': True,
+            'cache': 'miss',
+        })
 
 
 @news_bp.route('/interests', methods=['GET', 'POST'])
@@ -108,16 +182,31 @@ def _fetch_with_ai(category, interests, count):
     if interests:
         interest_ctx = f" Senior se zajímá o: {', '.join(interests[:5])}. Zaměř se na tato témata."
 
-    prompt = f"""Napiš {count} krátkých zpravodajských článků na téma: {topic}.{interest_ctx}
+    now = datetime.now()
+    today_cs = now.strftime('%-d. %-m. %Y') if hasattr(now, 'strftime') else now.isoformat()
+    # Hour-slot + minute seed → Gemini sees variation across refreshes,
+    # while the server cache dedupes within the 15-min TTL.
+    seed = f"{now.strftime('%H')}:{now.strftime('%M')[0]}0"
+    # Weekday / season context — helps Gemini ground output in reality
+    weekday_cs = [
+        'pondělí', 'úterý', 'středa', 'čtvrtek', 'pátek', 'sobota', 'neděle'
+    ][now.weekday()]
 
-Požadavky:
-- Česky, jednoduché věty (pro seniory)
-- Každý článek: title (max 60 znaků), summary (2-3 věty, max 150 znaků), source (realistický zdroj), category
-- Realistické, aktuální, pozitivní tón kde to jde
-- Formát: JSON pole
+    prompt = f"""Jsi redaktor zpráv pro seniory. Dnes je {weekday_cs} {today_cs}, aktuální čas {seed}.
+Napiš {count} KRÁTKÝCH zpravodajských článků na téma: {topic}.{interest_ctx}
 
-Vrať POUZE JSON pole, nic jiného:
-[{{"title": "...", "summary": "...", "source": "...", "category": "{category}"}}]"""
+Důležité požadavky:
+- Česky, krátké a jasné věty (senior-friendly)
+- Každá zpráva jiná než ta předchozí — různá témata, různé zdroje, různé úhly
+- Zdroje střídej: ČT24, iDNES, Seznam, Novinky, Blesk, ČTK, specializované weby
+- Konkrétní fakta, čísla, data, místa (např. "Sněmovna 15. dubna schválila…")
+- Pozitivní nebo neutrální tón (neděsit)
+- Žádná opakovaná klišé typu "odborníci varují", "experti doporučují"
+
+Formát odpovědi: VÝHRADNĚ JSON pole {count} objektů, nic jiného:
+[{{"title": "<max 70 znaků>", "summary": "<2-3 věty, max 160 znaků, konkrétní>", "source": "<jméno zdroje>", "category": "{category}"}}]
+
+Začni rovnou hranatou závorkou [, neuváděj markdown ani komentáře."""
 
     # Try Gemini first
     gemini_key = os.environ.get('GEMINI_API_KEY')
