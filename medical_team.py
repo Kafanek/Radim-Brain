@@ -1778,6 +1778,228 @@ def _rule_based_symptom_summary(entries, aggregates, days):
     return ' '.join(parts)
 
 
+#############################################################################
+# SPRINT F-3 — Medication adherence (uses existing radim_medication_log)
+#############################################################################
+
+def _normalize_medications(meds):
+    """Accept list of strings or list of dicts, return list of dicts:
+       {name, dose, times:[HH:MM]}. Default times = ['08:00'] if missing.
+    """
+    normalized = []
+    for m in (meds or []):
+        if isinstance(m, str):
+            normalized.append({'name': m.strip(), 'dose': None, 'times': ['08:00']})
+        elif isinstance(m, dict):
+            name = (m.get('name') or '').strip()
+            if not name:
+                continue
+            times = m.get('times') or []
+            if not isinstance(times, list) or not times:
+                times = ['08:00']
+            # Validate HH:MM format
+            clean_times = []
+            for t in times:
+                try:
+                    h, mm = str(t).split(':')
+                    h, mm = int(h), int(mm)
+                    if 0 <= h < 24 and 0 <= mm < 60:
+                        clean_times.append(f"{h:02d}:{mm:02d}")
+                except Exception:
+                    pass
+            if not clean_times:
+                clean_times = ['08:00']
+            normalized.append({
+                'name': name,
+                'dose': m.get('dose') or None,
+                'times': clean_times,
+            })
+    return normalized
+
+
+@medical_bp.route('/api/medical/medications/<senior_id>/today', methods=['GET'])
+@optional_auth
+def medications_today(senior_id):
+    """Today's schedule + logged doses (from radim_medication_log)."""
+    try:
+        with db_context() as db:
+            row = db.execute(
+                "SELECT medications FROM care_plans WHERE senior_id = ?",
+                (senior_id,)
+            ).fetchone()
+            raw = None
+            if row:
+                raw = row[0] if isinstance(row, (list, tuple)) else row.get('medications')
+            try:
+                meds_raw = json.loads(raw) if isinstance(raw, str) else (raw or [])
+            except Exception:
+                meds_raw = []
+
+            meds = _normalize_medications(meds_raw)
+
+            # Today's log (since midnight local)
+            if is_postgres():
+                log_rows = db.execute(
+                    "SELECT medication_name, dosage, taken_at, notes "
+                    "FROM radim_medication_log "
+                    "WHERE user_id = ? AND taken_at::date = CURRENT_DATE "
+                    "ORDER BY taken_at DESC",
+                    (senior_id,)
+                ).fetchall()
+            else:
+                log_rows = db.execute(
+                    "SELECT medication_name, dosage, taken_at, notes "
+                    "FROM radim_medication_log "
+                    "WHERE user_id = ? AND DATE(taken_at) = DATE('now') "
+                    "ORDER BY taken_at DESC",
+                    (senior_id,)
+                ).fetchall()
+
+        logged = []
+        for r in log_rows or []:
+            logged.append({
+                'medication_name': r[0] if isinstance(r, (list, tuple)) else r.get('medication_name'),
+                'dose': r[1] if isinstance(r, (list, tuple)) else r.get('dosage'),
+                'taken_at': str(r[2] if isinstance(r, (list, tuple)) else r.get('taken_at') or ''),
+                'notes': r[3] if isinstance(r, (list, tuple)) else r.get('notes'),
+            })
+
+        # Build per-dose slots (name + time) and mark taken if logged_at near time
+        schedule = []
+        for m in meds:
+            for t in m['times']:
+                slot_key = f"{m['name']}|{t}"
+                was_taken = any(
+                    (l.get('medication_name') or '').lower() == m['name'].lower() and
+                    (l.get('notes') or '').startswith(f"slot:{t}")
+                    for l in logged
+                )
+                schedule.append({
+                    'key': slot_key,
+                    'name': m['name'],
+                    'dose': m['dose'],
+                    'time': t,
+                    'taken': was_taken,
+                })
+
+        # Sort by time
+        schedule.sort(key=lambda x: x['time'])
+
+        return jsonify({
+            'success': True,
+            'schedule': schedule,
+            'logged': logged,
+            'count': len(schedule),
+            'taken_count': sum(1 for s in schedule if s['taken']),
+        })
+    except Exception as e:
+        logger.error(f"medications_today error: {e}")
+        return jsonify({'success': True, 'schedule': [], 'logged': [], 'count': 0, 'taken_count': 0})
+
+
+@medical_bp.route('/api/medical/medications/<senior_id>/log', methods=['POST'])
+@optional_auth
+def log_medication(senior_id):
+    """Mark a medication dose as taken."""
+    data = request.get_json() or {}
+    name = (data.get('medication_name') or '').strip()
+    dose = data.get('dose') or ''
+    time_slot = data.get('time_slot') or ''
+    note = (data.get('note') or '')[:200]
+    if not name:
+        return jsonify({'success': False, 'error': 'medication_name required'}), 400
+
+    # Encode the scheduled time_slot into notes for correlation
+    notes_field = f"slot:{time_slot}" + (f" | {note}" if note else '') if time_slot else note
+
+    try:
+        with db_context(commit=True) as db:
+            db.execute(
+                "INSERT INTO radim_medication_log (user_id, medication_name, dosage, notes) "
+                "VALUES (?, ?, ?, ?)",
+                (senior_id, name, dose, notes_field)
+            )
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"log_medication error: {e}")
+        return jsonify({'success': False, 'error': str(e)[:100]}), 500
+
+
+@medical_bp.route('/api/medical/medications/<senior_id>/adherence', methods=['GET'])
+@optional_auth
+def medications_adherence(senior_id):
+    """Per-day adherence for the last N days."""
+    days = max(1, min(request.args.get('days', 7, type=int), 30))
+
+    try:
+        with db_context() as db:
+            row = db.execute(
+                "SELECT medications FROM care_plans WHERE senior_id = ?",
+                (senior_id,)
+            ).fetchone()
+            raw = None
+            if row:
+                raw = row[0] if isinstance(row, (list, tuple)) else row.get('medications')
+            try:
+                meds_raw = json.loads(raw) if isinstance(raw, str) else (raw or [])
+            except Exception:
+                meds_raw = []
+            meds = _normalize_medications(meds_raw)
+            expected_per_day = sum(len(m['times']) for m in meds)
+
+            # Count logs per day
+            if is_postgres():
+                log_rows = db.execute(
+                    "SELECT taken_at::date AS day, COUNT(*) AS n "
+                    "FROM radim_medication_log "
+                    "WHERE user_id = ? AND taken_at > CURRENT_DATE - INTERVAL '%d days' "
+                    "GROUP BY day ORDER BY day" % days,
+                    (senior_id,)
+                ).fetchall()
+            else:
+                log_rows = db.execute(
+                    "SELECT DATE(taken_at) AS day, COUNT(*) AS n "
+                    "FROM radim_medication_log "
+                    "WHERE user_id = ? AND taken_at > datetime('now', '-%d days') "
+                    "GROUP BY day ORDER BY day" % days,
+                    (senior_id,)
+                ).fetchall()
+
+        by_day = {}
+        for r in log_rows or []:
+            day = r[0] if isinstance(r, (list, tuple)) else r.get('day')
+            n = r[1] if isinstance(r, (list, tuple)) else r.get('n')
+            by_day[str(day)] = int(n)
+
+        from datetime import date, timedelta as _td
+        today = date.today()
+        daily = []
+        for i in range(days - 1, -1, -1):
+            d = today - _td(days=i)
+            d_str = d.strftime('%Y-%m-%d')
+            taken = by_day.get(d_str, 0)
+            daily.append({
+                'date': d_str,
+                'taken': taken,
+                'expected': expected_per_day,
+                'pct': round((taken / expected_per_day) * 100) if expected_per_day else 0,
+            })
+
+        total_taken = sum(d['taken'] for d in daily)
+        total_expected = expected_per_day * days
+        return jsonify({
+            'success': True,
+            'daily': daily,
+            'expected_per_day': expected_per_day,
+            'total_taken': total_taken,
+            'total_expected': total_expected,
+            'adherence_pct': round((total_taken / total_expected) * 100) if total_expected else 0,
+        })
+    except Exception as e:
+        logger.error(f"medications_adherence error: {e}")
+        return jsonify({'success': True, 'daily': [], 'expected_per_day': 0, 'total_taken': 0, 'adherence_pct': 0})
+
+
 def appointment_reminder_cron():
     """Runs every 10 min. Sends push 24h and 1h before upcoming appointments."""
     try:

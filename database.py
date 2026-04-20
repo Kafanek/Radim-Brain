@@ -106,6 +106,76 @@ class DictRow(dict):
         return super().__getitem__(key)
 
 
+# SQLite wrapper: DDL translator (SERIAL → INTEGER AUTOINCREMENT, JSONB → TEXT,
+# INTERVAL 'N days' → datetime literal). Applied only when sqlite backend is used.
+import re as _sqlite_re
+_SERIAL_RE = _sqlite_re.compile(r'\bSERIAL\s+PRIMARY\s+KEY\b', _sqlite_re.IGNORECASE)
+_JSONB_RE = _sqlite_re.compile(r'\bJSONB\b', _sqlite_re.IGNORECASE)
+_INTERVAL_RE = _sqlite_re.compile(
+    r"CURRENT_TIMESTAMP\s*-\s*INTERVAL\s+'(\d+)\s*(day|days|hour|hours)'",
+    _sqlite_re.IGNORECASE,
+)
+_INTERVAL_DATE_RE = _sqlite_re.compile(
+    r"CURRENT_DATE\s*-\s*INTERVAL\s+'(\d+)\s*(day|days)'",
+    _sqlite_re.IGNORECASE,
+)
+
+
+def _translate_sqlite_sql(sql):
+    if not isinstance(sql, str):
+        return sql
+    s = sql
+    s = _SERIAL_RE.sub('INTEGER PRIMARY KEY AUTOINCREMENT', s)
+    s = _JSONB_RE.sub('TEXT', s)
+
+    def _iv_repl(m):
+        n, unit = m.group(1), m.group(2).lower()
+        if unit.startswith('day'):
+            return f"datetime('now', '-{n} days')"
+        return f"datetime('now', '-{n} hours')"
+
+    def _iv_date_repl(m):
+        n = m.group(1)
+        return f"date('now', '-{n} days')"
+
+    s = _INTERVAL_RE.sub(_iv_repl, s)
+    s = _INTERVAL_DATE_RE.sub(_iv_date_repl, s)
+    return s
+
+
+class _SqliteCompatCursor:
+    """Wrap sqlite3 cursor: translate PG-isms before execute."""
+    def __init__(self, cur):
+        self._cur = cur
+
+    def execute(self, sql, *args, **kw):
+        return self._cur.execute(_translate_sqlite_sql(sql), *args, **kw)
+
+    def executemany(self, sql, *args, **kw):
+        return self._cur.executemany(_translate_sqlite_sql(sql), *args, **kw)
+
+    def __getattr__(self, name):
+        return getattr(self._cur, name)
+
+
+class _SqliteCompatConnection:
+    """Wrap sqlite3 Connection so CREATE TABLE/SELECT use PG syntax."""
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql, *args, **kw):
+        return self._conn.execute(_translate_sqlite_sql(sql), *args, **kw)
+
+    def executescript(self, sql):
+        return self._conn.executescript(_translate_sqlite_sql(sql))
+
+    def cursor(self, *a, **kw):
+        return _SqliteCompatCursor(self._conn.cursor(*a, **kw))
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
 # ============================================
 # POSTGRES CURSOR WRAPPER
 # ============================================
@@ -294,8 +364,17 @@ def get_connection():
                 raise
     else:
         conn = sqlite3.connect(DATABASE_PATH)
-        conn.row_factory = sqlite3.Row
-        return conn
+
+        # Use DictRow (dict subclass supporting both int and str access +
+        # .get()) so endpoints written for PG DictRow also work on SQLite.
+        def _dict_row_factory(cursor, row):
+            return DictRow({col[0]: row[i] for i, col in enumerate(cursor.description)})
+        conn.row_factory = _dict_row_factory
+
+        # Translate PG-specific DDL so SQLite-backed tests exercise the same
+        # schema scripts the prod PG deployment uses (SERIAL auto-increment,
+        # JSONB → TEXT, etc.). Production is unaffected.
+        return _SqliteCompatConnection(conn)
 
 
 def get_db_for_flask(g_obj):
