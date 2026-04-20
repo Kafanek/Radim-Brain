@@ -616,6 +616,13 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Stories routes: {e}")
 
+try:
+    from notes_routes import notes_bp
+    app.register_blueprint(notes_bp)
+    logger.info("✅ Notes routes registered: /api/notes/*")
+except Exception as e:
+    logger.warning(f"⚠️ Notes routes: {e}")
+
 # FHIR Adapter (HL7 FHIR R4 export)
 try:
     from fhir_adapter import fhir_bp
