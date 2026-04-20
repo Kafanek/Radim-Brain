@@ -43,11 +43,66 @@ SEVERITIES = ("info", "warning", "alert", "crisis")
 # LOW-LEVEL — create one notification + push via SocketIO
 # ═══════════════════════════════════════════════════════════════════
 
+def _load_notif_prefs(user_id):
+    """Load user's notification preferences (muted types + DND window).
+
+    Returns dict: {muted_types: [...], dnd_until: iso_or_None}.
+    Gracefully returns empty defaults if table missing or user has none.
+    """
+    try:
+        with db_context() as db:
+            row = db.execute(
+                "SELECT muted_types, dnd_until FROM user_notification_prefs "
+                "WHERE user_id = ?",
+                (str(user_id),)
+            ).fetchone()
+        if not row:
+            return {"muted_types": [], "dnd_until": None}
+        muted_raw = row[0] if isinstance(row, (list, tuple)) else row.get("muted_types")
+        dnd = row[1] if isinstance(row, (list, tuple)) else row.get("dnd_until")
+        try:
+            muted = json.loads(muted_raw) if isinstance(muted_raw, str) else (muted_raw or [])
+        except Exception:
+            muted = []
+        return {"muted_types": muted or [], "dnd_until": str(dnd) if dnd else None}
+    except Exception:
+        # Table likely missing — return defaults silently
+        return {"muted_types": [], "dnd_until": None}
+
+
+def _should_suppress_push(user_id, type, severity):
+    """Sprint C: respect user's DND + per-type mutes for WebPush delivery.
+
+    SOS + crisis severity always bypass suppression (safety-critical).
+    Does NOT suppress in-app DB insert or SocketIO emit — those remain
+    available when user opens the app.
+    """
+    if type == "sos":
+        return False
+    if severity == "crisis":
+        return False
+    prefs = _load_notif_prefs(user_id)
+    # DND window
+    dnd = prefs.get("dnd_until")
+    if dnd:
+        try:
+            until = datetime.fromisoformat(dnd.replace("Z", "+00:00"))
+            if until.replace(tzinfo=None) > datetime.utcnow():
+                return True
+        except Exception:
+            pass
+    # Per-type mute
+    if type in (prefs.get("muted_types") or []):
+        return True
+    return False
+
+
 def notify(to_user_id, type, title, body=None, from_user_id=None,
            severity="info", data=None):
     """Create notification + push live via SocketIO `user_{id}` room.
 
     Returns notification id (int) or None on failure.
+    Sprint C: respects user_notification_prefs — SOS and crisis bypass mute.
     """
     if not to_user_id or not title or not type:
         logger.warning("notify(): missing required field")
@@ -71,7 +126,10 @@ def notify(to_user_id, type, title, body=None, from_user_id=None,
         logger.error(f"notify DB insert failed: {e}")
         return None
 
-    # Push live via SocketIO (best-effort, non-fatal)
+    suppressed = _should_suppress_push(to_user_id, type, severity)
+
+    # Always push SocketIO — client respects DND to avoid flash/chime but can
+    # see the notification in the bell panel on demand.
     try:
         from socketio_handlers import socketio
         if socketio:
@@ -89,13 +147,18 @@ def notify(to_user_id, type, title, body=None, from_user_id=None,
     except Exception as e:
         logger.debug(f"SocketIO push skipped: {e}")
 
-    # WebPush (if user has subscription registered)
-    try:
-        _webpush_if_subscribed(to_user_id, title, body or "", severity, type)
-    except Exception as e:
-        logger.debug(f"WebPush skipped: {e}")
+    # WebPush — SKIPPED when user muted or DND active (sleeping senior
+    # should not be woken by non-critical push).
+    if not suppressed:
+        try:
+            _webpush_if_subscribed(to_user_id, title, body or "", severity, type)
+        except Exception as e:
+            logger.debug(f"WebPush skipped: {e}")
 
-    logger.info(f"🔔 notify → user={to_user_id} type={type} sev={severity} id={nid}")
+    logger.info(
+        f"🔔 notify → user={to_user_id} type={type} sev={severity} id={nid}"
+        f"{' SUPPRESSED_PUSH' if suppressed else ''}"
+    )
     return nid
 
 

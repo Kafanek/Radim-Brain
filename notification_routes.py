@@ -83,6 +83,121 @@ def read_route(nid):
     return jsonify({"success": True, "updated": ok, "unread_count": unread_count(uid)})
 
 
+@notification_bp.route("/api/notifications/preferences", methods=["GET", "PUT", "OPTIONS"])
+@rate_limit(max_requests=30, window_seconds=60, key_func="user")
+@require_auth
+def notification_prefs():
+    """Sprint C: per-user notification preferences (DND + type mutes).
+
+    Body on PUT: { muted_types: [string], dnd_until: ISO8601|null }
+    SOS and crisis severity ignore these (safety-critical).
+    """
+    if request.method == "OPTIONS":
+        return _options_ok()
+
+    from database import db_context, is_postgres
+    import json as _json
+
+    uid = _current_uid()
+    if not uid:
+        return jsonify({"success": False, "error": "unauthorized"}), 401
+
+    # Ensure table exists
+    try:
+        with db_context(commit=True) as db:
+            if is_postgres():
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS user_notification_prefs ("
+                    "  user_id TEXT PRIMARY KEY,"
+                    "  muted_types JSONB DEFAULT '[]',"
+                    "  dnd_until TIMESTAMP,"
+                    "  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                    ")"
+                )
+            else:
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS user_notification_prefs ("
+                    "  user_id TEXT PRIMARY KEY,"
+                    "  muted_types TEXT DEFAULT '[]',"
+                    "  dnd_until TIMESTAMP,"
+                    "  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                    ")"
+                )
+    except Exception as e:
+        logger.debug(f"notif prefs schema: {e}")
+
+    if request.method == "GET":
+        try:
+            with db_context() as db:
+                row = db.execute(
+                    "SELECT muted_types, dnd_until FROM user_notification_prefs WHERE user_id = ?",
+                    (uid,)
+                ).fetchone()
+            if not row:
+                return jsonify({"success": True, "muted_types": [], "dnd_until": None})
+            muted_raw = row[0] if isinstance(row, (list, tuple)) else row.get("muted_types")
+            dnd = row[1] if isinstance(row, (list, tuple)) else row.get("dnd_until")
+            try:
+                muted = _json.loads(muted_raw) if isinstance(muted_raw, str) else (muted_raw or [])
+            except Exception:
+                muted = []
+            return jsonify({
+                "success": True,
+                "muted_types": muted,
+                "dnd_until": str(dnd) if dnd else None,
+            })
+        except Exception as e:
+            logger.error(f"prefs GET error: {e}")
+            return jsonify({"success": True, "muted_types": [], "dnd_until": None})
+
+    # PUT
+    data = request.get_json() or {}
+    muted = data.get("muted_types") or []
+    if not isinstance(muted, list):
+        return jsonify({"success": False, "error": "muted_types must be array"}), 400
+    # Sanitize: only strings, max 20 entries, each ≤64 chars
+    muted = [str(t)[:64] for t in muted if isinstance(t, str)][:20]
+    # Filter out SOS/crisis types — they can never be muted server-side
+    muted = [t for t in muted if t not in ("sos", "crisis_alert")]
+
+    dnd_until = data.get("dnd_until")
+    if dnd_until:
+        try:
+            # Validate ISO8601
+            from datetime import datetime as _dt
+            _dt.fromisoformat(dnd_until.replace("Z", "+00:00"))
+        except Exception:
+            return jsonify({"success": False, "error": "invalid dnd_until format"}), 400
+
+    try:
+        with db_context(commit=True) as db:
+            if is_postgres():
+                db.execute(
+                    "INSERT INTO user_notification_prefs (user_id, muted_types, dnd_until, updated_at) "
+                    "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT (user_id) DO UPDATE SET "
+                    "muted_types = EXCLUDED.muted_types, "
+                    "dnd_until = EXCLUDED.dnd_until, "
+                    "updated_at = CURRENT_TIMESTAMP",
+                    (uid, _json.dumps(muted), dnd_until)
+                )
+            else:
+                db.execute(
+                    "INSERT OR REPLACE INTO user_notification_prefs "
+                    "(user_id, muted_types, dnd_until, updated_at) "
+                    "VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+                    (uid, _json.dumps(muted), dnd_until)
+                )
+        return jsonify({
+            "success": True,
+            "muted_types": muted,
+            "dnd_until": dnd_until,
+        })
+    except Exception as e:
+        logger.error(f"prefs PUT error: {e}")
+        return jsonify({"success": False, "error": str(e)[:100]}), 500
+
+
 @notification_bp.route("/api/notifications/read-all", methods=["POST", "OPTIONS"])
 @rate_limit(max_requests=20, window_seconds=60, key_func="user")
 @require_auth
