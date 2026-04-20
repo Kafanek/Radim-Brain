@@ -841,6 +841,15 @@ try:
         logger.info("✅ Medical Sprint F cron jobs registered (appt reminders 10-min, symptom trends 8:30)")
     except Exception as e:
         logger.warning(f"⚠️ Medical Sprint F cron registration failed: {e}")
+
+    # v10.70: Calendar Sprint C — 24h and 1h event reminders
+    try:
+        from calendar_routes import calendar_reminder_cron
+        scheduler.add_job(calendar_reminder_cron, 'interval', minutes=10,
+                          id='calendar_reminders', max_instances=1, misfire_grace_time=120)
+        logger.info("✅ Calendar reminders registered (every 10 min, 24h+1h before events)")
+    except Exception as e:
+        logger.warning(f"⚠️ Calendar reminder cron registration failed: {e}")
     # Proactive agent loop — autonomous senior monitoring
     try:
         from agent_loop import run_agent_cycle
