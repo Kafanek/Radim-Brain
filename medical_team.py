@@ -300,6 +300,7 @@ def get_team(senior_id):
                 'specialty': r[3] if isinstance(r, (list, tuple)) else r.get('specialty'),
                 'name': r[4] if isinstance(r, (list, tuple)) else r.get('name'),
                 'email': r[5] if isinstance(r, (list, tuple)) else r.get('email'),
+                'phone': r[6] if isinstance(r, (list, tuple)) else r.get('phone'),
                 'active': r[7] if isinstance(r, (list, tuple)) else r.get('active'),
             })
 

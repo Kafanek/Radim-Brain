@@ -450,7 +450,7 @@ def _is_in_cooldown(user_id, observation_type):
 
 
 def _save_observation(user_id, obs):
-    """Insert into agent_observations + audit_log."""
+    """Insert into agent_observations + audit_log. WebPush on WARNING+."""
     try:
         with db_context(commit=True) as db:
             db.execute(
@@ -461,6 +461,25 @@ def _save_observation(user_id, obs):
             )
         audit_log(user_id, "agent_observation", "agent_loop",
                   f"[{obs['severity']}] {obs['type']}: {obs['message']}")
+
+        # v10.59: Push observation to subscribed devices (Sprint D D6)
+        sev_up = (obs.get("severity") or "").upper()
+        if sev_up in ("WARNING", "ALERT", "CRISIS"):
+            try:
+                from notification_helpers import notify
+                sev_map = {"WARNING": "warning", "ALERT": "alert", "CRISIS": "crisis"}
+                icon_map = {"WARNING": "⚠️", "ALERT": "🔴", "CRISIS": "🚨"}
+                title = f"{icon_map.get(sev_up, '🔔')} {sev_up.capitalize()}"
+                notify(
+                    to_user_id=user_id,
+                    type="health_alert",
+                    title=title,
+                    body=obs["message"][:140],
+                    severity=sev_map.get(sev_up, "info"),
+                    data={"observation_type": obs["type"]},
+                )
+            except Exception as push_err:
+                logger.debug(f"observation push failed (non-blocking): {push_err}")
     except Exception as e:
         logger.debug(f"save_observation error: {e}")
 
