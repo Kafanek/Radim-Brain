@@ -454,6 +454,205 @@ def _rule_based_patient_summary(complaint, findings, recommendations):
 
 
 # ============================================
+# SPRINT C — Quality rating + Family observer + Care plan sync
+# ============================================
+
+@telemedicine_bp.route('/api/telemedicine/consultation/<int:consultation_id>/rating', methods=['POST'])
+@require_auth
+def telemed_rating(consultation_id):
+    """Patient rates a completed consultation (1-5 ⭐) with optional comment.
+
+    Activates the telemedicine_quality_log table (previously unused).
+    """
+    user_id = _get_user_id()
+    data = request.get_json() or {}
+    try:
+        stars = int(data.get('stars', 0))
+    except (ValueError, TypeError):
+        stars = 0
+    if not (1 <= stars <= 5):
+        return jsonify({'success': False, 'error': 'stars must be 1-5'}), 400
+    comment = (data.get('comment') or '')[:500]
+
+    try:
+        with db_context(commit=True) as db:
+            # Scope check: only patient or participant can rate
+            row = db.execute(
+                "SELECT student_id, status FROM telemedicine_consultations WHERE id = ?",
+                (consultation_id,)
+            ).fetchone()
+            if not row:
+                return jsonify({'success': False, 'error': 'Consultation not found'}), 404
+            student_id = row[0] if isinstance(row, (list, tuple)) else row.get('student_id')
+            status = row[1] if isinstance(row, (list, tuple)) else row.get('status')
+            if str(student_id) != str(user_id) and not _is_participant(consultation_id, user_id):
+                return jsonify({'success': False, 'error': 'Forbidden'}), 403
+            if status not in ('completed', 'archived'):
+                return jsonify({'success': False, 'error': 'Konzultace ještě není dokončená'}), 400
+
+            # Dedup: user can only rate once per consultation
+            import json as _json
+            existing = db.execute(
+                "SELECT id FROM telemedicine_quality_log "
+                "WHERE consultation_id = ? AND metric_type = ? AND details LIKE ?",
+                (consultation_id, 'patient_rating', '%"user_id": "' + str(user_id) + '"%')
+            ).fetchone()
+            details = _json.dumps({
+                'user_id': str(user_id), 'comment': comment,
+                'rated_at': __import__('datetime').datetime.utcnow().isoformat(),
+            })
+            if existing:
+                db.execute(
+                    "UPDATE telemedicine_quality_log SET metric_value = ?, details = ? "
+                    "WHERE id = ?",
+                    (float(stars), details, existing[0] if isinstance(existing, (list, tuple)) else existing.get('id'))
+                )
+            else:
+                db.execute(
+                    "INSERT INTO telemedicine_quality_log "
+                    "(consultation_id, metric_type, metric_value, details) "
+                    "VALUES (?, ?, ?, ?)",
+                    (consultation_id, 'patient_rating', float(stars), details)
+                )
+        try:
+            log_event(consultation_id=consultation_id,
+                      event_type='quality_rated', actor_user_id=user_id,
+                      reason=f'{stars}★',
+                      metadata={'stars': stars, 'comment_len': len(comment)})
+        except Exception:
+            pass
+        return jsonify({'success': True, 'stars': stars})
+    except Exception as e:
+        logger.error(f"rating error: {e}")
+        return jsonify({'success': False, 'error': str(e)[:100]}), 500
+
+
+@telemedicine_bp.route('/api/telemedicine/consultation/<int:consultation_id>/invite-family', methods=['POST'])
+@require_auth
+def telemed_invite_family(consultation_id):
+    """Patient invites a family member as read-only observer (caregiver_proxy role).
+
+    Body: { family_user_id: string, name: string (optional) }
+    Sets can_view_clinical=false, can_edit_notes=false, generates join_token.
+    """
+    user_id = _get_user_id()
+    data = request.get_json() or {}
+    family_user_id = (data.get('family_user_id') or '').strip()
+    family_name = (data.get('name') or '')[:200]
+    if not family_user_id:
+        return jsonify({'success': False, 'error': 'family_user_id required'}), 400
+
+    try:
+        with db_context(commit=True) as db:
+            # Scope check: only the patient may invite their family
+            row = db.execute(
+                "SELECT student_id, status, is_multiparty "
+                "FROM telemedicine_consultations WHERE id = ?",
+                (consultation_id,)
+            ).fetchone()
+            if not row:
+                return jsonify({'success': False, 'error': 'Consultation not found'}), 404
+            student_id = row[0] if isinstance(row, (list, tuple)) else row.get('student_id')
+            if str(student_id) != str(user_id):
+                return jsonify({'success': False, 'error': 'Pouze pacient může pozvat rodinu'}), 403
+
+            # Promote to multiparty if not already
+            db.execute(
+                "UPDATE telemedicine_consultations SET is_multiparty = 1 WHERE id = ?",
+                (consultation_id,)
+            )
+
+            # Generate join token (30-min TTL set inside helper)
+            join_token = None
+            try:
+                join_token = generate_join_token(consultation_id, family_user_id)
+            except Exception:
+                pass
+
+            # Insert participant record (read-only, caregiver_proxy)
+            db.execute(
+                "INSERT INTO telemedicine_participants "
+                "(consultation_id, user_id, role, specialty, status, "
+                " can_view_clinical, can_edit_notes, join_token) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (consultation_id, family_user_id, 'caregiver_proxy', 'family',
+                 'invited', False, False, join_token or '')
+            )
+
+        try:
+            log_event(consultation_id=consultation_id,
+                      event_type='participant_invited',
+                      actor_user_id=user_id,
+                      reason=f'family observer {family_name or family_user_id}',
+                      metadata={'role': 'caregiver_proxy', 'read_only': True})
+        except Exception:
+            pass
+
+        # Best-effort push to invited family member
+        try:
+            from notification_helpers import notify as _notify
+            _notify(to_user_id=family_user_id, type='family_invite',
+                    title='👨‍👩‍👧 Pozvánka k telekonzultaci',
+                    body=f'Byli jste pozváni k účasti na konzultaci jako pozorovatel (#{consultation_id})',
+                    severity='info',
+                    data={'consultation_id': consultation_id, 'role': 'caregiver_proxy'})
+        except Exception:
+            pass
+
+        return jsonify({'success': True, 'consultation_id': consultation_id,
+                        'role': 'caregiver_proxy', 'read_only': True})
+    except Exception as e:
+        logger.error(f"invite-family error: {e}")
+        return jsonify({'success': False, 'error': str(e)[:100]}), 500
+
+
+def sync_consultation_to_care_plan(consultation_id):
+    """After a consultation is completed, append recommendations to care_plan.notes.
+
+    Called from the teacher /complete endpoint (best-effort, non-blocking).
+    """
+    try:
+        with db_context(commit=True) as db:
+            c = db.execute(
+                "SELECT student_id, findings, recommendations, scheduled_date "
+                "FROM telemedicine_consultations WHERE id = ?",
+                (consultation_id,)
+            ).fetchone()
+            if not c:
+                return
+            def _v(r, i, k): return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+            sid = _v(c, 0, 'student_id')
+            findings = _v(c, 1, 'findings') or ''
+            recs = _v(c, 2, 'recommendations') or ''
+            when = _v(c, 3, 'scheduled_date') or ''
+            if not (findings or recs):
+                return
+
+            entry = f"\n\n[Telekonzultace {when} (#{consultation_id})]\n"
+            if findings:
+                entry += f"Zjištění: {findings}\n"
+            if recs:
+                entry += f"Doporučení: {recs}"
+
+            # Append to care_plan.notes (create row if missing)
+            existing = db.execute(
+                "SELECT notes FROM care_plans WHERE senior_id = ?", (sid,)
+            ).fetchone()
+            if existing:
+                current_notes = _v(existing, 0, 'notes') or ''
+                db.execute(
+                    "UPDATE care_plans SET notes = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE senior_id = ?",
+                    (current_notes + entry, sid)
+                )
+            # If care plan doesn't exist yet, silently skip (will be created
+            # next time user views care plan; entry will be lost — acceptable
+            # tradeoff to avoid creating stub plans).
+    except Exception as e:
+        logger.debug(f"sync_to_care_plan skipped (non-fatal): {e}")
+
+
+# ============================================
 # HEALTH CHECK
 # ============================================
 

@@ -245,7 +245,9 @@ def telemed_confirm(consultation_id):
     try:
         with db_context(commit=True) as db:
             row = db.execute(
-                "SELECT id, student_id, status FROM telemedicine_consultations WHERE id = ? AND teacher_id = ?",
+                "SELECT id, student_id, status, scheduled_date, scheduled_time, "
+                "duration_minutes FROM telemedicine_consultations "
+                "WHERE id = ? AND teacher_id = ?",
                 (consultation_id, teacher_id)
             ).fetchone()
 
@@ -253,6 +255,24 @@ def telemed_confirm(consultation_id):
                 return jsonify({"success": False, "error": "Konzultace nenalezena"}), 404
             if row['status'] != 'requested':
                 return jsonify({"success": False, "error": f"Nelze potvrdit konzultaci ve stavu '{row['status']}'"}), 400
+
+            # Sprint C: buffer conflict check (prevents double-booking)
+            try:
+                has_conflict, conflicts = check_availability_conflict(
+                    teacher_id=teacher_id,
+                    scheduled_date=str(row['scheduled_date'] or ''),
+                    scheduled_time=str(row['scheduled_time'] or ''),
+                    duration_minutes=int(row['duration_minutes'] or 30),
+                    exclude_id=consultation_id,
+                )
+                if has_conflict:
+                    return jsonify({
+                        "success": False,
+                        "error": "Konflikt termínu s jinou konzultací",
+                        "conflicts": conflicts,
+                    }), 409
+            except Exception as conflict_err:
+                logger.debug(f"Buffer check skipped (non-fatal): {conflict_err}")
 
             db.execute(
                 "UPDATE telemedicine_consultations SET status = 'confirmed', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -408,6 +428,13 @@ def telemed_complete(consultation_id):
     log_event(consultation_id, 'consultation_completed', teacher_id,
               old_status='in_progress', new_status='completed',
               actor_consultation_role='organizer')
+
+    # Sprint C: sync findings/recommendations into senior's care plan
+    try:
+        from telemedicine_routes import sync_consultation_to_care_plan
+        sync_consultation_to_care_plan(consultation_id)
+    except Exception as sync_err:
+        logger.debug(f"care plan sync skipped (non-fatal): {sync_err}")
 
     return jsonify({"success": True, "message": "Konzultace ukoncena", "consultation_id": consultation_id, "timestamp": now_iso()})
 

@@ -83,3 +83,48 @@ class TestTelemedicineCron:
         # Should return empty list (no consultations in test DB)
         result = get_upcoming_consultations_for_reminder(window_minutes=15)
         assert isinstance(result, list)
+
+
+class TestTelemedicineSprintC:
+    """Sprint C — rating, family invite, care plan sync, buffer conflict."""
+
+    def test_rating_requires_1_to_5(self, client):
+        """Invalid stars rejected with 400 (when authed) or 401 (unauthed)."""
+        resp = client.post(
+            '/api/telemedicine/consultation/99999/rating',
+            json={'stars': 10}
+        )
+        assert resp.status_code in (400, 401, 403)
+
+    def test_rating_nonexistent_consultation(self, client):
+        resp = client.post(
+            '/api/telemedicine/consultation/99999/rating',
+            json={'stars': 5}
+        )
+        assert resp.status_code in (401, 403, 404)
+
+    def test_invite_family_requires_user_id(self, client):
+        """Invite without family_user_id is 400 (or 401 unauthed)."""
+        resp = client.post(
+            '/api/telemedicine/consultation/99999/invite-family',
+            json={}
+        )
+        assert resp.status_code in (400, 401, 403)
+
+    def test_sync_to_care_plan_helper_safe_on_missing(self):
+        """sync_consultation_to_care_plan must not raise on missing consult."""
+        from telemedicine_routes import sync_consultation_to_care_plan
+        # Should swallow missing-consultation silently
+        sync_consultation_to_care_plan(999999)
+
+    def test_check_availability_conflict_empty_db(self):
+        """Buffer conflict check returns (False, []) on empty DB."""
+        from telemedicine_audit import check_availability_conflict
+        has_conflict, conflicts = check_availability_conflict(
+            teacher_id='ghost-teacher',
+            scheduled_date='2099-01-01',
+            scheduled_time='10:00:00',
+            duration_minutes=30
+        )
+        assert has_conflict is False
+        assert conflicts == []

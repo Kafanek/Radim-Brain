@@ -1608,7 +1608,40 @@ def medical_appointments(senior_id):
                         "VALUES (?, ?, ?, ?, ?, ?, ?)",
                         (appt_id, senior_id, with_member, when_at, mode, reason, created_by)
                     )
-            return jsonify({'success': True, 'id': appt_id})
+
+            # Sprint C: when mode=video, mirror to telemedicine_consultations
+            # so the Telemedicine module picks it up with full workflow
+            # (confirm/join/notes/complete). Non-blocking.
+            telemed_id = None
+            if mode == 'video' and when_at:
+                try:
+                    tm_date = when_at.strftime('%Y-%m-%d') if hasattr(when_at, 'strftime') else str(when_at)[:10]
+                    tm_time = when_at.strftime('%H:%M:%S') if hasattr(when_at, 'strftime') else str(when_at)[11:19]
+                    # Look up the team member's user_id for teacher_id
+                    teacher_row = db.execute(
+                        "SELECT user_id FROM medical_team "
+                        "WHERE senior_id = ? AND name = ? AND active = true LIMIT 1",
+                        (senior_id, with_member)
+                    ).fetchone()
+                    teacher_id = None
+                    if teacher_row:
+                        teacher_id = teacher_row[0] if isinstance(teacher_row, (list, tuple)) else teacher_row.get('user_id')
+                    if teacher_id:
+                        # Insert consultation linked via appointment id in title
+                        cursor = db.execute(
+                            "INSERT INTO telemedicine_consultations "
+                            "(teacher_id, student_id, scheduled_date, scheduled_time, "
+                            " consultation_type, complaint, title, status) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                            (teacher_id, senior_id, tm_date, tm_time, 'video',
+                             reason, f'Schůzka #{appt_id}', 'requested')
+                        )
+                        telemed_id = cursor.lastrowid if hasattr(cursor, 'lastrowid') else None
+                        logger.info(f"🔗 Linked medical appt {appt_id} → telemed consult {telemed_id}")
+                except Exception as link_err:
+                    logger.debug(f"telemed link skipped (non-fatal): {link_err}")
+
+            return jsonify({'success': True, 'id': appt_id, 'telemed_id': telemed_id})
         except Exception as e:
             logger.error(f"Appointment POST error: {e}")
             return jsonify({'success': False, 'error': str(e)[:100]}), 500
