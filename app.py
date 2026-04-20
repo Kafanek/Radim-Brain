@@ -602,6 +602,13 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Care Plan routes: {e}")
 
+try:
+    from help_routes import help_bp
+    app.register_blueprint(help_bp)
+    logger.info("✅ Help routes registered: /api/help/*")
+except Exception as e:
+    logger.warning(f"⚠️ Help routes: {e}")
+
 # FHIR Adapter (HL7 FHIR R4 export)
 try:
     from fhir_adapter import fhir_bp
