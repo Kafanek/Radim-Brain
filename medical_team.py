@@ -1655,6 +1655,129 @@ def cancel_appointment(senior_id, appt_id):
         return jsonify({'success': False, 'error': str(e)[:100]}), 500
 
 
+@medical_bp.route('/api/medical/symptoms/<senior_id>/summary', methods=['POST'])
+@optional_auth
+def symptoms_summary(senior_id):
+    """Gemini-powered weekly summary of symptom check-ins for the doctor.
+
+    Returns a 3-5 sentence Czech summary safe to paste into a medical record.
+    """
+    import os
+    days = request.args.get('days', 7, type=int)
+    days = max(1, min(days, 30))
+
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT pain, mood, sleep, appetite, energy, note, created_at "
+                "FROM medical_symptoms WHERE senior_id = ? "
+                "AND created_at > CURRENT_TIMESTAMP - INTERVAL '%d days' "
+                "ORDER BY created_at DESC" % days
+                if is_postgres() else
+                "SELECT pain, mood, sleep, appetite, energy, note, created_at "
+                "FROM medical_symptoms WHERE senior_id = ? "
+                "AND created_at > datetime('now', '-%d days') "
+                "ORDER BY created_at DESC" % days,
+                (senior_id,)
+            ).fetchall()
+    except Exception as e:
+        logger.error(f"symptoms_summary DB error: {e}")
+        return jsonify({'success': False, 'error': 'db_error'}), 500
+
+    if not rows or len(rows) < 2:
+        return jsonify({
+            'success': True,
+            'summary': 'Zatím je málo check-inů pro smysluplné shrnutí. Zkuste to za několik dní.',
+            'source': 'fallback',
+            'count': len(rows) if rows else 0,
+        })
+
+    def _v(r, i): return r[i] if isinstance(r, (list, tuple)) else list(r.values())[i]
+    entries = []
+    for r in rows[:days]:
+        entries.append({
+            'date': str(_v(r, 6) or '')[:10],
+            'pain': _v(r, 0), 'mood': _v(r, 1), 'sleep': _v(r, 2),
+            'appetite': _v(r, 3), 'energy': _v(r, 4),
+            'note': (_v(r, 5) or '')[:200],
+        })
+
+    def _avg(k):
+        vals = [e[k] for e in entries if e.get(k) is not None]
+        return round(sum(vals) / len(vals), 1) if vals else None
+
+    aggregates = {k: _avg(k) for k in ('pain', 'mood', 'sleep', 'appetite', 'energy')}
+
+    api_key = os.environ.get('GEMINI_API_KEY')
+    if not api_key:
+        summary = _rule_based_symptom_summary(entries, aggregates, days)
+        return jsonify({'success': True, 'summary': summary, 'source': 'rule_based', 'count': len(entries)})
+
+    prompt = (
+        "Jsi lékařský asistent. Pacient (senior) vyplnil denní check-in za posledních "
+        f"{days} dní. Napiš stručné shrnutí pro ošetřujícího lékaře v češtině, "
+        "3-5 vět. Ukaž klíčové trendy (bolest, nálada, spánek, chuť, energie). "
+        "Zmiň konkrétní změny či výkyvy. Buď věcný, neměl bys diagnostikovat. "
+        "Pokud uživatel napsal poznámku, zmiň relevantní část. "
+        "Pokud je vše stabilní, zmiň i to. Škála 0-10 (0 nejhorší, 10 nejlepší; "
+        "u bolesti obráceně — 0 žádná, 10 silná).\n\n"
+        f"DATA ({len(entries)} záznamů, nejnovější první):\n"
+    )
+    for e in entries:
+        prompt += (
+            f"- {e['date']}: bolest={e['pain']}, nálada={e['mood']}, "
+            f"spánek={e['sleep']}, chuť={e['appetite']}, energie={e['energy']}"
+        )
+        if e['note']:
+            prompt += f" | pozn.: {e['note']}"
+        prompt += "\n"
+
+    try:
+        import requests as req
+        resp = req.post(
+            f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}',
+            json={
+                'contents': [{'parts': [{'text': prompt}]}],
+                'generationConfig': {'temperature': 0.3, 'maxOutputTokens': 600},
+            },
+            timeout=15,
+        )
+        if resp.ok:
+            data = resp.json()
+            text = (data.get('candidates', [{}])[0]
+                      .get('content', {})
+                      .get('parts', [{}])[0]
+                      .get('text', '')).strip()
+            if text:
+                return jsonify({'success': True, 'summary': text, 'source': 'gemini', 'count': len(entries)})
+    except Exception as e:
+        logger.debug(f"gemini summary error: {e}")
+
+    summary = _rule_based_symptom_summary(entries, aggregates, days)
+    return jsonify({'success': True, 'summary': summary, 'source': 'rule_based_fallback', 'count': len(entries)})
+
+
+def _rule_based_symptom_summary(entries, aggregates, days):
+    """Deterministic Czech summary if Gemini unavailable."""
+    n = len(entries)
+    parts = [f"Pacient vyplnil {n} check-inů za posledních {days} dní."]
+    labels = [('pain', 'bolest'), ('mood', 'nálada'), ('sleep', 'spánek'),
+              ('appetite', 'chuť'), ('energy', 'energie')]
+    for k, label in labels:
+        a = aggregates.get(k)
+        if a is not None:
+            parts.append(f"Průměr {label}: {a}/10.")
+    if aggregates.get('pain') is not None and aggregates['pain'] >= 7:
+        parts.append("⚠️ Průměrná bolest vysoká — doporučeno posouzení.")
+    if aggregates.get('mood') is not None and aggregates['mood'] <= 3:
+        parts.append("⚠️ Nízká průměrná nálada — zvážit psychosociální podporu.")
+    notes = [e['note'] for e in entries if e.get('note')]
+    if notes:
+        snippet = notes[0][:100]
+        parts.append('Poznámek pacienta: ' + str(len(notes)) + '. Poslední: „' + snippet + '".')
+    return ' '.join(parts)
+
+
 def appointment_reminder_cron():
     """Runs every 10 min. Sends push 24h and 1h before upcoming appointments."""
     try:
