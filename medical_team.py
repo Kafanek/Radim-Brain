@@ -537,6 +537,77 @@ def get_alerts(senior_id):
         return jsonify({'success': True, 'alerts': [], 'count': 0})
 
 
+@medical_bp.route('/api/medical/observations/<senior_id>', methods=['GET'])
+@optional_auth
+def get_observations(senior_id):
+    """List recent agent_observations (brain engine proactive detections)."""
+    limit = request.args.get('limit', 15, type=int)
+    only_unack = request.args.get('unack', '0') in ('1', 'true', 'yes')
+
+    try:
+        with db_context() as db:
+            if only_unack:
+                rows = db.execute(
+                    "SELECT id, observation_type, severity, message, details, "
+                    "action_taken, acknowledged_at, created_at "
+                    "FROM agent_observations WHERE user_id = ? AND acknowledged_at IS NULL "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (senior_id, limit)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT id, observation_type, severity, message, details, "
+                    "action_taken, acknowledged_at, created_at "
+                    "FROM agent_observations WHERE user_id = ? "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (senior_id, limit)
+                ).fetchall()
+
+        def _val(r, i, key):
+            return r[i] if isinstance(r, (list, tuple)) else r.get(key)
+
+        observations = []
+        for r in rows:
+            observations.append({
+                'id': _val(r, 0, 'id'),
+                'type': _val(r, 1, 'observation_type'),
+                'severity': _val(r, 2, 'severity'),
+                'message': _val(r, 3, 'message'),
+                'details': _val(r, 4, 'details') or {},
+                'action_taken': _val(r, 5, 'action_taken'),
+                'acknowledged': bool(_val(r, 6, 'acknowledged_at')),
+                'created_at': str(_val(r, 7, 'created_at') or ''),
+            })
+        return jsonify({
+            'success': True,
+            'observations': observations,
+            'count': len(observations),
+        })
+    except Exception as e:
+        # Table may not exist yet on fresh DBs — return empty, not error
+        return jsonify({'success': True, 'observations': [], 'count': 0})
+
+
+@medical_bp.route('/api/medical/observations/<senior_id>/acknowledge', methods=['POST'])
+@optional_auth
+def acknowledge_observation(senior_id):
+    """Mark an observation as acknowledged by the caregiver/senior."""
+    data = request.get_json() or {}
+    obs_id = data.get('id')
+    if not obs_id:
+        return jsonify({'success': False, 'error': 'missing id'}), 400
+    try:
+        with db_context(commit=True) as db:
+            db.execute(
+                "UPDATE agent_observations SET acknowledged_at = CURRENT_TIMESTAMP "
+                "WHERE id = ? AND user_id = ?",
+                (obs_id, senior_id)
+            )
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @medical_bp.route('/api/medical/dashboard/<senior_id>', methods=['GET'])
 @optional_auth
 def medical_dashboard(senior_id):
