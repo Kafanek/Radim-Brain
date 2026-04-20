@@ -119,6 +119,7 @@ _INTERVAL_DATE_RE = _sqlite_re.compile(
     r"CURRENT_DATE\s*-\s*INTERVAL\s+'(\d+)\s*(day|days)'",
     _sqlite_re.IGNORECASE,
 )
+_NOW_RE = _sqlite_re.compile(r"\bNOW\(\)", _sqlite_re.IGNORECASE)
 
 
 def _translate_sqlite_sql(sql):
@@ -140,6 +141,7 @@ def _translate_sqlite_sql(sql):
 
     s = _INTERVAL_RE.sub(_iv_repl, s)
     s = _INTERVAL_DATE_RE.sub(_iv_date_repl, s)
+    s = _NOW_RE.sub("CURRENT_TIMESTAMP", s)
     return s
 
 
