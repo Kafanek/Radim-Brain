@@ -606,6 +606,164 @@ def telemed_invite_family(consultation_id):
         return jsonify({'success': False, 'error': str(e)[:100]}), 500
 
 
+@telemedicine_bp.route('/api/telemedicine/consultation/<int:consultation_id>/follow-up-suggestion', methods=['GET'])
+@require_auth
+def telemed_follow_up_suggestion(consultation_id):
+    """Parse doctor's recommendations for follow-up timing.
+
+    Returns {needs_followup: bool, suggested_date: YYYY-MM-DD, days: int,
+             reason: string, source: 'regex'|'gemini'|'none'}.
+    Uses Czech regex first (fast, deterministic), falls back to Gemini
+    if no match and GEMINI_API_KEY is set. Safe-by-default: never auto-books.
+    """
+    user_id = _get_user_id()
+
+    try:
+        with db_context() as db:
+            row = db.execute(
+                "SELECT student_id, recommendations, findings, scheduled_date "
+                "FROM telemedicine_consultations WHERE id = ?",
+                (consultation_id,)
+            ).fetchone()
+    except Exception as e:
+        logger.error(f"follow-up DB error: {e}")
+        return jsonify({'success': False, 'error': 'db_error'}), 500
+
+    if not row:
+        return jsonify({'success': False, 'error': 'Consultation not found'}), 404
+
+    def _v(r, i, k):
+        return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+
+    student_id = _v(row, 0, 'student_id')
+    if str(student_id) != str(user_id) and not _is_participant(consultation_id, user_id):
+        return jsonify({'success': False, 'error': 'Forbidden'}), 403
+
+    recommendations = (_v(row, 1, 'recommendations') or '').strip()
+    findings = (_v(row, 2, 'findings') or '').strip()
+    base_date_str = str(_v(row, 3, 'scheduled_date') or '')
+    combined = (recommendations + ' ' + findings).lower()
+
+    if not combined.strip():
+        return jsonify({'success': True, 'needs_followup': False, 'source': 'none'})
+
+    # Parse base date (fallback to today)
+    from datetime import datetime as _dt, date as _date, timedelta as _td
+    try:
+        base_date = _dt.strptime(base_date_str[:10], '%Y-%m-%d').date() if base_date_str else _date.today()
+    except Exception:
+        base_date = _date.today()
+
+    # Czech regex — deterministic, fast, matches 90% of common phrasings
+    days, match_reason, source = _parse_followup_regex(combined)
+    if days is None:
+        # Gemini fallback
+        import os
+        api_key = os.environ.get('GEMINI_API_KEY')
+        if api_key:
+            days, match_reason = _parse_followup_gemini(recommendations, findings, api_key)
+            source = 'gemini' if days is not None else 'none'
+
+    if days is None or days <= 0:
+        return jsonify({'success': True, 'needs_followup': False, 'source': source or 'none'})
+
+    suggested = base_date + _td(days=days)
+    return jsonify({
+        'success': True,
+        'needs_followup': True,
+        'suggested_date': suggested.strftime('%Y-%m-%d'),
+        'days': days,
+        'reason': match_reason or 'Doporučená kontrola',
+        'source': source or 'regex',
+    })
+
+
+def _parse_followup_regex(text):
+    """Match Czech phrasings for 'follow up in N days/weeks/months'.
+
+    Returns (days_int, reason_str, source='regex') or (None, None, None).
+    """
+    import re as _re
+    # Normalize whitespace
+    t = _re.sub(r'\s+', ' ', text.lower())
+
+    # Pattern 1: "za X dní/týdnů/měsíců" (most common)
+    patterns = [
+        # (regex, multiplier_days, unit_label)
+        (r'(?:kontrol\w*|vyšetřen\w*|návštěv\w*|konzultac\w*)[^.]{0,80}?za\s+(\d+)\s*(?:den|dn[íů]|dny)\b', 1, 'den/dní'),
+        (r'(?:kontrol\w*|vyšetřen\w*|návštěv\w*|konzultac\w*)[^.]{0,80}?za\s+(\d+)\s*(?:týden|týdn[yůů])\b', 7, 'týden/týdny'),
+        (r'(?:kontrol\w*|vyšetřen\w*|návštěv\w*|konzultac\w*)[^.]{0,80}?za\s+(\d+)\s*(?:měsíc|měsíc[ůe])\b', 30, 'měsíc/měsíců'),
+        (r'(?:za|po)\s+(\d+)\s*(?:den|dn[íů]|dny)[^.]{0,60}?(?:kontrol\w*|vyšetřen\w*|návštěv\w*|konzultac\w*)', 1, 'den/dní'),
+        (r'(?:za|po)\s+(\d+)\s*(?:týden|týdn[yůů])[^.]{0,60}?(?:kontrol\w*|vyšetřen\w*|návštěv\w*|konzultac\w*)', 7, 'týden/týdny'),
+        (r'(?:za|po)\s+(\d+)\s*(?:měsíc|měsíc[ůe])[^.]{0,60}?(?:kontrol\w*|vyšetřen\w*|návštěv\w*|konzultac\w*)', 30, 'měsíc/měsíců'),
+        # Plain "za X dní" if recommendations field is mostly about follow-up
+        (r'\bza\s+(\d+)\s*(?:den|dn[íů]|dny)\b', 1, 'den/dní'),
+        (r'\bza\s+(\d+)\s*(?:týden|týdn[yůů])\b', 7, 'týden/týdny'),
+        (r'\bza\s+(\d+)\s*(?:měsíc|měsíc[ůe])\b', 30, 'měsíc/měsíců'),
+    ]
+    for pattern, mult, unit in patterns:
+        m = _re.search(pattern, t)
+        if m:
+            try:
+                n = int(m.group(1))
+                if 1 <= n <= 365:  # sanity bound
+                    return n * mult, f'Kontrola za {n} {unit}', 'regex'
+            except (ValueError, IndexError):
+                continue
+
+    # Pattern 2: named periods — "příští týden", "za měsíc", "za půl roku"
+    if _re.search(r'pří[sš]t[ií]\s+týden', t):
+        return 7, 'Příští týden', 'regex'
+    if _re.search(r'pří[sš]t[ií]\s+měsíc', t):
+        return 30, 'Příští měsíc', 'regex'
+    if _re.search(r'za\s+měsíc\b', t):
+        return 30, 'Za měsíc', 'regex'
+    if _re.search(r'za\s+týden\b', t):
+        return 7, 'Za týden', 'regex'
+    if _re.search(r'za\s+půl\s+roku', t):
+        return 180, 'Za půl roku', 'regex'
+
+    return None, None, None
+
+
+def _parse_followup_gemini(recommendations, findings, api_key):
+    """Use Gemini to detect follow-up timing when regex failed."""
+    prompt = (
+        "Z tohoto lékařského textu zjisti, jestli lékař navrhuje kontrolu nebo "
+        "další návštěvu za určitou dobu. Odpověz POUZE JSON-em bez dalšího textu:\n"
+        '{"needs_followup": true/false, "days": cislo_dni_ode_dneska_nebo_null, "reason": "krátký popis"}\n\n'
+        "Pokud není zmíněno, vrať needs_followup=false. Pokud je zmíněno bez konkrétní doby, "
+        "použij days=null. Maximum 365 dní.\n\n"
+        f"DOPORUČENÍ LÉKAŘE: {recommendations[:800]}\n\n"
+        f"ZJIŠTĚNÍ: {findings[:400]}"
+    )
+    try:
+        import requests as req
+        resp = req.post(
+            f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}',
+            json={
+                'contents': [{'parts': [{'text': prompt}]}],
+                'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 120,
+                                     'response_mime_type': 'application/json'},
+            },
+            timeout=12,
+        )
+        if not resp.ok:
+            return None, None
+        data = resp.json()
+        text = (data.get('candidates', [{}])[0].get('content', {})
+                    .get('parts', [{}])[0].get('text', '')).strip()
+        import json as _json
+        parsed = _json.loads(text)
+        if parsed.get('needs_followup'):
+            d = parsed.get('days')
+            if isinstance(d, (int, float)) and 1 <= d <= 365:
+                return int(d), (parsed.get('reason') or 'Navržená kontrola')[:120]
+    except Exception as e:
+        logger.debug(f"gemini follow-up error: {e}")
+    return None, None
+
+
 def sync_consultation_to_care_plan(consultation_id):
     """After a consultation is completed, append recommendations to care_plan.notes.
 

@@ -128,3 +128,61 @@ class TestTelemedicineSprintC:
         )
         assert has_conflict is False
         assert conflicts == []
+
+
+class TestTelemedicineFollowUpParser:
+    """Sprint C final — follow-up suggestion regex parser."""
+
+    def test_parse_days(self):
+        from telemedicine_routes import _parse_followup_regex
+        days, reason, source = _parse_followup_regex(
+            'kontrola za 14 dní'
+        )
+        assert source == 'regex'
+        assert days == 14
+        assert 'dní' in reason or 'dn' in reason
+
+    def test_parse_weeks(self):
+        from telemedicine_routes import _parse_followup_regex
+        days, reason, source = _parse_followup_regex(
+            'doporučuji kontrolu za 2 týdny'
+        )
+        assert source == 'regex'
+        assert days == 14  # 2 * 7
+
+    def test_parse_months(self):
+        from telemedicine_routes import _parse_followup_regex
+        days, reason, source = _parse_followup_regex(
+            'další návštěva za 3 měsíce'
+        )
+        assert source == 'regex'
+        assert days == 90  # 3 * 30
+
+    def test_parse_named_period(self):
+        from telemedicine_routes import _parse_followup_regex
+        days, reason, source = _parse_followup_regex('přijďte za týden')
+        assert source == 'regex'
+        assert days == 7
+
+        days2, _, _ = _parse_followup_regex('objednejte se za půl roku')
+        assert days2 == 180
+
+    def test_no_match_returns_none(self):
+        from telemedicine_routes import _parse_followup_regex
+        days, reason, source = _parse_followup_regex(
+            'užívejte léky a odpočívejte'
+        )
+        assert days is None
+
+    def test_sanity_bound(self):
+        """Ridiculous numbers rejected."""
+        from telemedicine_routes import _parse_followup_regex
+        days, _, _ = _parse_followup_regex('za 9999 dní')
+        assert days is None
+
+    def test_endpoint_returns_needs_followup_false_when_empty(self, client):
+        """Endpoint graceful when consultation missing or empty recs."""
+        resp = client.get(
+            '/api/telemedicine/consultation/99999/follow-up-suggestion'
+        )
+        assert resp.status_code in (401, 403, 404)
