@@ -804,6 +804,17 @@ try:
     scheduler = BackgroundScheduler(daemon=True)
     scheduler.add_job(_check_reminders, 'interval', minutes=5, id='radim_reminders')
     scheduler.add_job(_check_consultation_reminders, 'interval', minutes=5, id='telemed_reminders')
+
+    # v10.60: Sprint F — medical appointment reminders (every 10 min) + daily symptom trend check
+    try:
+        from medical_team import appointment_reminder_cron, symptom_trend_alert_cron
+        scheduler.add_job(appointment_reminder_cron, 'interval', minutes=10,
+                          id='appointment_reminders', max_instances=1, misfire_grace_time=120)
+        scheduler.add_job(symptom_trend_alert_cron, 'cron', hour=8, minute=30,
+                          id='symptom_trend_alerts', misfire_grace_time=3600)
+        logger.info("✅ Medical Sprint F cron jobs registered (appt reminders 10-min, symptom trends 8:30)")
+    except Exception as e:
+        logger.warning(f"⚠️ Medical Sprint F cron registration failed: {e}")
     # Proactive agent loop — autonomous senior monitoring
     try:
         from agent_loop import run_agent_cycle

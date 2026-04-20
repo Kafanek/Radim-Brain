@@ -21,11 +21,11 @@ Features:
 
 import logging
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, g
 
 from auth_middleware import require_auth, optional_auth
-from database import db_context, db_insert
+from database import db_context, db_insert, is_postgres
 
 logger = logging.getLogger(__name__)
 
@@ -257,6 +257,40 @@ MEDICAL_SCHEMA = """
     );
 
     CREATE INDEX IF NOT EXISTS idx_medalert_senior ON medical_alerts(senior_id);
+
+    -- Sprint F: daily symptom check-in persistence
+    CREATE TABLE IF NOT EXISTS medical_symptoms (
+        id SERIAL PRIMARY KEY,
+        senior_id TEXT NOT NULL,
+        pain SMALLINT,
+        mood SMALLINT,
+        sleep SMALLINT,
+        appetite SMALLINT,
+        energy SMALLINT,
+        note TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_medsymptoms_senior_date
+        ON medical_symptoms(senior_id, created_at DESC);
+
+    -- Sprint F: telemedicine appointment persistence (replaces localStorage)
+    CREATE TABLE IF NOT EXISTS medical_appointments (
+        id TEXT PRIMARY KEY,
+        senior_id TEXT NOT NULL,
+        with_member TEXT,
+        when_at TIMESTAMP,
+        mode TEXT DEFAULT 'video',
+        reason TEXT,
+        reminder_24h_sent BOOLEAN DEFAULT FALSE,
+        reminder_1h_sent BOOLEAN DEFAULT FALSE,
+        cancelled_at TIMESTAMP,
+        created_by TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_medappts_senior_when
+        ON medical_appointments(senior_id, when_at);
+    CREATE INDEX IF NOT EXISTS idx_medappts_reminder
+        ON medical_appointments(when_at, reminder_24h_sent, reminder_1h_sent);
 """
 
 
@@ -1422,4 +1456,330 @@ def medical_video_call(senior_id):
     })
 
 
-logger.info("🏥 Medical Team v4.1 loaded — audit, alerts, clinical notes, care plan, video call")
+#############################################################################
+# SPRINT F — Team member edit/delete, symptoms, appointments
+#############################################################################
+
+@medical_bp.route('/api/medical/team/<senior_id>/<int:member_id>', methods=['PATCH'])
+@optional_auth
+def update_team_member(senior_id, member_id):
+    """Update name/email/phone/role on an existing team member."""
+    _init_medical_schema()
+    data = request.get_json() or {}
+    allowed = {'name', 'email', 'phone', 'role'}
+    updates = {k: v for k, v in data.items() if k in allowed}
+    if not updates:
+        return jsonify({'success': False, 'error': 'No updatable fields'}), 400
+    if 'role' in updates and updates['role'] not in MEDICAL_ROLES:
+        return jsonify({'success': False, 'error': 'Invalid role'}), 400
+
+    try:
+        set_clause = ', '.join([f"{k} = ?" for k in updates.keys()])
+        params = list(updates.values()) + [member_id, senior_id]
+        with db_context(commit=True) as db:
+            db.execute(
+                f"UPDATE medical_team SET {set_clause} "
+                f"WHERE id = ? AND senior_id = ?",
+                tuple(params)
+            )
+        return jsonify({'success': True, 'updated': list(updates.keys())})
+    except Exception as e:
+        logger.error(f"Update member error: {e}")
+        return jsonify({'success': False, 'error': str(e)[:100]}), 500
+
+
+@medical_bp.route('/api/medical/team/<senior_id>/<int:member_id>', methods=['DELETE'])
+@optional_auth
+def delete_team_member(senior_id, member_id):
+    """Soft-delete: mark active=false."""
+    _init_medical_schema()
+    try:
+        with db_context(commit=True) as db:
+            db.execute(
+                "UPDATE medical_team SET active = false "
+                "WHERE id = ? AND senior_id = ?",
+                (member_id, senior_id)
+            )
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"Delete member error: {e}")
+        return jsonify({'success': False, 'error': str(e)[:100]}), 500
+
+
+@medical_bp.route('/api/medical/symptoms/<senior_id>', methods=['GET', 'POST'])
+@optional_auth
+def medical_symptoms(senior_id):
+    """Daily symptom check-in: 5 scores (0-10) + free-text note."""
+    _init_medical_schema()
+
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        def _clamp(x):
+            try: return max(0, min(10, int(x)))
+            except: return None
+        entry = {
+            'pain': _clamp(data.get('pain')),
+            'mood': _clamp(data.get('mood')),
+            'sleep': _clamp(data.get('sleep')),
+            'appetite': _clamp(data.get('appetite')),
+            'energy': _clamp(data.get('energy')),
+            'note': (data.get('note') or '')[:500],
+        }
+        try:
+            with db_context(commit=True) as db:
+                db.execute(
+                    "INSERT INTO medical_symptoms "
+                    "(senior_id, pain, mood, sleep, appetite, energy, note) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (senior_id, entry['pain'], entry['mood'], entry['sleep'],
+                     entry['appetite'], entry['energy'], entry['note'])
+                )
+            return jsonify({'success': True})
+        except Exception as e:
+            logger.error(f"Symptoms POST error: {e}")
+            return jsonify({'success': False, 'error': str(e)[:100]}), 500
+
+    # GET — last 30 entries, newest first
+    limit = request.args.get('limit', 30, type=int)
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT id, pain, mood, sleep, appetite, energy, note, created_at "
+                "FROM medical_symptoms WHERE senior_id = ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (senior_id, limit)
+            ).fetchall()
+        def _v(r, i, k): return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+        symptoms = [{
+            'id': _v(r, 0, 'id'),
+            'pain': _v(r, 1, 'pain'),
+            'mood': _v(r, 2, 'mood'),
+            'sleep': _v(r, 3, 'sleep'),
+            'appetite': _v(r, 4, 'appetite'),
+            'energy': _v(r, 5, 'energy'),
+            'note': _v(r, 6, 'note') or '',
+            'date': str(_v(r, 7, 'created_at') or ''),
+        } for r in rows]
+        return jsonify({'success': True, 'symptoms': symptoms, 'count': len(symptoms)})
+    except Exception as e:
+        return jsonify({'success': True, 'symptoms': [], 'count': 0})
+
+
+@medical_bp.route('/api/medical/appointments/<senior_id>', methods=['GET', 'POST'])
+@optional_auth
+def medical_appointments(senior_id):
+    """Telemedicine appointments. GET lists; POST inserts/upserts by id."""
+    _init_medical_schema()
+
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        appt_id = data.get('id') or f"appt-{int(datetime.utcnow().timestamp()*1000):x}"
+        with_member = (data.get('with') or '')[:200]
+        when_str = data.get('when') or ''
+        mode = data.get('mode', 'video')
+        if mode not in ('video', 'phone', 'in-person'):
+            mode = 'video'
+        reason = (data.get('reason') or '')[:500]
+        created_by = (data.get('created_by') or '')[:200]
+
+        try:
+            # Normalize to ISO timestamp
+            when_at = datetime.fromisoformat(when_str.replace('Z', '+00:00')) if when_str else None
+        except Exception:
+            when_at = None
+
+        try:
+            with db_context(commit=True) as db:
+                # Upsert by id
+                if is_postgres():
+                    db.execute(
+                        "INSERT INTO medical_appointments "
+                        "(id, senior_id, with_member, when_at, mode, reason, created_by) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                        "ON CONFLICT (id) DO UPDATE SET "
+                        "with_member = EXCLUDED.with_member, when_at = EXCLUDED.when_at, "
+                        "mode = EXCLUDED.mode, reason = EXCLUDED.reason",
+                        (appt_id, senior_id, with_member, when_at, mode, reason, created_by)
+                    )
+                else:
+                    db.execute(
+                        "INSERT OR REPLACE INTO medical_appointments "
+                        "(id, senior_id, with_member, when_at, mode, reason, created_by) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (appt_id, senior_id, with_member, when_at, mode, reason, created_by)
+                    )
+            return jsonify({'success': True, 'id': appt_id})
+        except Exception as e:
+            logger.error(f"Appointment POST error: {e}")
+            return jsonify({'success': False, 'error': str(e)[:100]}), 500
+
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT id, with_member, when_at, mode, reason, "
+                "reminder_24h_sent, reminder_1h_sent, cancelled_at "
+                "FROM medical_appointments "
+                "WHERE senior_id = ? AND cancelled_at IS NULL "
+                "ORDER BY when_at",
+                (senior_id,)
+            ).fetchall()
+        def _v(r, i, k): return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+        appts = [{
+            'id': _v(r, 0, 'id'),
+            'with': _v(r, 1, 'with_member'),
+            'when': str(_v(r, 2, 'when_at') or ''),
+            'mode': _v(r, 3, 'mode'),
+            'reason': _v(r, 4, 'reason') or '',
+            'reminder_24h_sent': bool(_v(r, 5, 'reminder_24h_sent')),
+            'reminder_1h_sent': bool(_v(r, 6, 'reminder_1h_sent')),
+        } for r in rows]
+        return jsonify({'success': True, 'appointments': appts, 'count': len(appts)})
+    except Exception as e:
+        return jsonify({'success': True, 'appointments': [], 'count': 0})
+
+
+@medical_bp.route('/api/medical/appointments/<senior_id>/<appt_id>', methods=['DELETE'])
+@optional_auth
+def cancel_appointment(senior_id, appt_id):
+    """Soft-cancel an appointment."""
+    _init_medical_schema()
+    try:
+        with db_context(commit=True) as db:
+            db.execute(
+                "UPDATE medical_appointments SET cancelled_at = CURRENT_TIMESTAMP "
+                "WHERE id = ? AND senior_id = ?",
+                (appt_id, senior_id)
+            )
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)[:100]}), 500
+
+
+def appointment_reminder_cron():
+    """Runs every 10 min. Sends push 24h and 1h before upcoming appointments."""
+    try:
+        from notification_helpers import notify
+    except Exception:
+        return
+
+    now = datetime.utcnow()
+    t_24h_lo = now + timedelta(hours=23, minutes=55)
+    t_24h_hi = now + timedelta(hours=24, minutes=5)
+    t_1h_lo  = now + timedelta(minutes=55)
+    t_1h_hi  = now + timedelta(minutes=65)
+
+    try:
+        with db_context(commit=True) as db:
+            # 24h window
+            rows_24h = db.execute(
+                "SELECT id, senior_id, with_member, when_at, mode FROM medical_appointments "
+                "WHERE cancelled_at IS NULL AND reminder_24h_sent = FALSE "
+                "AND when_at BETWEEN ? AND ?",
+                (t_24h_lo, t_24h_hi)
+            ).fetchall()
+            rows_1h = db.execute(
+                "SELECT id, senior_id, with_member, when_at, mode FROM medical_appointments "
+                "WHERE cancelled_at IS NULL AND reminder_1h_sent = FALSE "
+                "AND when_at BETWEEN ? AND ?",
+                (t_1h_lo, t_1h_hi)
+            ).fetchall()
+
+            def _v(r, i): return r[i] if isinstance(r, (list, tuple)) else list(r.values())[i]
+            mode_icon = {'video': '📹', 'phone': '📞', 'in-person': '🏥'}
+
+            for r in rows_24h or []:
+                aid, sid, who, when_at, mode = _v(r, 0), _v(r, 1), _v(r, 2), _v(r, 3), _v(r, 4)
+                try:
+                    notify(
+                        to_user_id=sid, type='reminder',
+                        title=f"{mode_icon.get(mode, '📅')} Zítra máte schůzku",
+                        body=f"S {who or 'členem týmu'} — {when_at}",
+                        severity='info'
+                    )
+                    db.execute(
+                        "UPDATE medical_appointments SET reminder_24h_sent = TRUE WHERE id = ?",
+                        (aid,)
+                    )
+                except Exception as e:
+                    logger.debug(f"appt 24h reminder failed: {e}")
+
+            for r in rows_1h or []:
+                aid, sid, who, when_at, mode = _v(r, 0), _v(r, 1), _v(r, 2), _v(r, 3), _v(r, 4)
+                try:
+                    notify(
+                        to_user_id=sid, type='reminder',
+                        title=f"{mode_icon.get(mode, '📅')} Za hodinu schůzka",
+                        body=f"S {who or 'členem týmu'} — {when_at}",
+                        severity='warning'
+                    )
+                    db.execute(
+                        "UPDATE medical_appointments SET reminder_1h_sent = TRUE WHERE id = ?",
+                        (aid,)
+                    )
+                except Exception as e:
+                    logger.debug(f"appt 1h reminder failed: {e}")
+    except Exception as e:
+        logger.debug(f"appointment_reminder_cron error: {e}")
+
+
+def symptom_trend_alert_cron():
+    """Runs daily. Creates medical_alert when pain>=7 or mood<=3 for 3 consecutive days."""
+    try:
+        with db_context(commit=True) as db:
+            rows = db.execute(
+                "SELECT DISTINCT senior_id FROM medical_symptoms "
+                "WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '5 days'"
+                if is_postgres() else
+                "SELECT DISTINCT senior_id FROM medical_symptoms "
+                "WHERE created_at > datetime('now', '-5 days')"
+            ).fetchall()
+            senior_ids = [r[0] if isinstance(r, (list, tuple)) else r.get('senior_id') for r in rows]
+
+            for sid in senior_ids:
+                recent = db.execute(
+                    "SELECT pain, mood, created_at FROM medical_symptoms "
+                    "WHERE senior_id = ? ORDER BY created_at DESC LIMIT 3",
+                    (sid,)
+                ).fetchall()
+                if len(recent) < 3:
+                    continue
+                pains = [(r[0] if isinstance(r, (list, tuple)) else r.get('pain')) or 0 for r in recent]
+                moods = [(r[1] if isinstance(r, (list, tuple)) else r.get('mood')) or 10 for r in recent]
+
+                high_pain = all(p >= 7 for p in pains)
+                low_mood = all(m <= 3 for m in moods)
+                if not (high_pain or low_mood):
+                    continue
+
+                alert_type = 'symptom_pain_trend' if high_pain else 'symptom_mood_trend'
+                # Dedup: skip if same alert exists from last 24h
+                exists = db.execute(
+                    "SELECT 1 FROM medical_alerts WHERE senior_id = ? AND alert_type = ? "
+                    "AND created_at > CURRENT_TIMESTAMP - INTERVAL '24 hours'"
+                    if is_postgres() else
+                    "SELECT 1 FROM medical_alerts WHERE senior_id = ? AND alert_type = ? "
+                    "AND created_at > datetime('now', '-24 hours')",
+                    (sid, alert_type)
+                ).fetchone()
+                if exists:
+                    continue
+
+                msg = (f"Pacient hlásí bolest ≥7/10 tři dny v řadě ({pains[2]}, {pains[1]}, {pains[0]})"
+                       if high_pain else
+                       f"Pacient hlásí sníženou náladu (≤3/10) tři dny v řadě ({moods[2]}, {moods[1]}, {moods[0]})")
+                db.execute(
+                    "INSERT INTO medical_alerts (senior_id, alert_type, severity, message) "
+                    "VALUES (?, ?, ?, ?)",
+                    (sid, alert_type, 'warning', msg)
+                )
+                try:
+                    from notification_helpers import notify
+                    notify(to_user_id=sid, type='health_alert',
+                           title='⚠️ Trend v check-inu', body=msg, severity='warning')
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.debug(f"symptom_trend_alert_cron error: {e}")
+
+
+logger.info("🏥 Medical Team v5.0 loaded — Sprint F: symptoms, appointments, edit/delete, reminders")
