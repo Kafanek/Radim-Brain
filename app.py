@@ -788,14 +788,33 @@ try:
                     'scheduled_time': str(c.get('scheduled_time', '')),
                     'message': f'Konzultace začíná za {mins} minut'
                 }
-                # Notify both parties
+                # Notify both parties — SocketIO (live app) + WebPush (backgrounded)
                 socketio.emit('telemedicine_reminder', reminder_data, room=f'user_{teacher_id}')
                 socketio.emit('telemedicine_reminder', reminder_data, room=f'user_{student_id}')
                 # Multi-party: also notify additional participants
-                for pid in c.get('participant_ids', []):
+                participant_ids = c.get('participant_ids', [])
+                for pid in participant_ids:
                     if pid != teacher_id and pid != student_id:
                         socketio.emit('telemedicine_reminder', reminder_data, room=f'user_{pid}')
-                logger.info(f"🏥 Telemed reminder: consultation #{cid} in {mins} min → teacher {teacher_id}, student {student_id}, +{len(c.get('participant_ids', []))} participants")
+
+                # v10.64 Sprint A+B: WebPush pipeline via notify()
+                try:
+                    from notification_helpers import notify as _notify
+                    title = f"📹 Konzultace za {mins} min"
+                    body = f"Vaše telekonzultace brzy začíná (#{cid})."
+                    for to_uid in [teacher_id, student_id] + list(participant_ids):
+                        if to_uid and to_uid not in (teacher_id,) if to_uid != teacher_id else True:
+                            pass  # noop — keep all
+                    for to_uid in set([teacher_id, student_id] + list(participant_ids)):
+                        if not to_uid:
+                            continue
+                        _notify(to_user_id=to_uid, type='reminder',
+                                title=title, body=body, severity='warning',
+                                data={'consultation_id': cid, 'minutes_until': mins})
+                except Exception as push_err:
+                    logger.debug(f"Telemed push skipped (non-fatal): {push_err}")
+
+                logger.info(f"🏥 Telemed reminder: consultation #{cid} in {mins} min → teacher {teacher_id}, student {student_id}, +{len(participant_ids)} participants")
             if upcoming:
                 logger.info(f"🏥 Telemed scheduler: {len(upcoming)} reminders sent")
         except Exception as e:

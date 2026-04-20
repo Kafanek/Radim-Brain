@@ -289,6 +289,171 @@ def telemed_join(consultation_id):
 
 
 # ============================================
+# SPRINT A+B — Consent + Patient-friendly summary
+# ============================================
+
+@telemedicine_bp.route('/api/telemedicine/consultation/<int:consultation_id>/consent', methods=['POST'])
+@require_auth
+def telemed_consent(consultation_id):
+    """Patient records recording/processing consent before joining.
+
+    Body: { consent: true, consent_version: "2.0", accepted_at: ISO8601 }
+    Writes audit event + updates consent_version on consultation row.
+    """
+    user_id = _get_user_id()
+    data = request.get_json() or {}
+    consent = bool(data.get('consent', False))
+    version = str(data.get('consent_version') or '1.0')[:32]
+
+    try:
+        with db_context(commit=True) as db:
+            # Participant-scoped: patient must own this consultation
+            row = db.execute(
+                "SELECT student_id, teacher_id FROM telemedicine_consultations WHERE id = ?",
+                (consultation_id,)
+            ).fetchone()
+            if not row:
+                return jsonify({'success': False, 'error': 'Consultation not found'}), 404
+            student_id = row[0] if isinstance(row, (list, tuple)) else row.get('student_id')
+            if str(student_id) != str(user_id):
+                # Allow participants too
+                if not _is_participant(consultation_id, user_id):
+                    return jsonify({'success': False, 'error': 'Forbidden'}), 403
+
+            # Mark consent
+            if consent:
+                db.execute(
+                    "UPDATE telemedicine_consultations SET consent_version = ? WHERE id = ?",
+                    (version, consultation_id)
+                )
+            try:
+                log_event(consultation_id=consultation_id,
+                          event_type='consent_recorded' if consent else 'consent_declined',
+                          actor_user_id=user_id,
+                          reason=f'consent={consent} v{version}',
+                          metadata={'consent': consent, 'version': version})
+            except Exception:
+                pass
+
+        return jsonify({'success': True, 'consent': consent, 'version': version})
+    except Exception as e:
+        logger.error(f"consent error: {e}")
+        return jsonify({'success': False, 'error': str(e)[:100]}), 500
+
+
+@telemedicine_bp.route('/api/telemedicine/consultation/<int:consultation_id>/patient-summary', methods=['POST'])
+@require_auth
+def telemed_patient_summary(consultation_id):
+    """Patient-friendly 3-step next-action summary for a completed consultation.
+
+    Uses Gemini to translate complaint/findings/recommendations into
+    3 simple steps a senior can follow. Falls back to rule-based if no key.
+    """
+    user_id = _get_user_id()
+
+    try:
+        with db_context() as db:
+            row = db.execute(
+                "SELECT student_id, teacher_id, complaint, findings, recommendations, "
+                "title, status, notes "
+                "FROM telemedicine_consultations WHERE id = ?",
+                (consultation_id,)
+            ).fetchone()
+    except Exception as e:
+        logger.error(f"patient-summary DB error: {e}")
+        return jsonify({'success': False, 'error': 'db_error'}), 500
+
+    if not row:
+        return jsonify({'success': False, 'error': 'Consultation not found'}), 404
+
+    def _v(r, i, k):
+        return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+
+    student_id = _v(row, 0, 'student_id')
+    if str(student_id) != str(user_id) and not _is_participant(consultation_id, user_id):
+        return jsonify({'success': False, 'error': 'Forbidden'}), 403
+
+    complaint = _v(row, 2, 'complaint') or ''
+    findings = _v(row, 3, 'findings') or ''
+    recommendations = _v(row, 4, 'recommendations') or ''
+    status = _v(row, 6, 'status') or ''
+
+    if status not in ('completed', 'archived'):
+        return jsonify({
+            'success': True, 'summary': '',
+            'hint': 'Shrnutí bude k dispozici až po dokončení konzultace.'
+        })
+
+    api_key = os.environ.get('GEMINI_API_KEY')
+    if not api_key:
+        return jsonify({
+            'success': True,
+            'summary': _rule_based_patient_summary(complaint, findings, recommendations),
+            'source': 'rule_based'
+        })
+
+    prompt = (
+        "Jsi lékařský asistent. Přelož doporučení lékaře do 3 krátkých, jasných kroků "
+        "v češtině, kterým snadno porozumí senior. Každý krok začíná slovesem. "
+        "Pokud je něco nejasného, vynech. Maximálně 3 kroky. "
+        "Neurčuj diagnózu ani nepřekračuj doporučení lékaře — jen je přepiš lidsky.\n\n"
+        f"Co pacient hlásil: {complaint or '—'}\n"
+        f"Co lékař zjistil: {findings or '—'}\n"
+        f"Doporučení lékaře: {recommendations or '—'}\n\n"
+        "Odpověz v tomto formátu (bez dalšího textu):\n"
+        "1. [první krok]\n2. [druhý krok]\n3. [třetí krok]"
+    )
+
+    try:
+        import requests as req
+        resp = req.post(
+            f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}',
+            json={
+                'contents': [{'parts': [{'text': prompt}]}],
+                'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 300},
+            },
+            timeout=15,
+        )
+        if resp.ok:
+            data = resp.json()
+            text = (data.get('candidates', [{}])[0]
+                      .get('content', {})
+                      .get('parts', [{}])[0]
+                      .get('text', '')).strip()
+            if text:
+                return jsonify({'success': True, 'summary': text, 'source': 'gemini'})
+    except Exception as e:
+        logger.debug(f"gemini patient-summary error: {e}")
+
+    return jsonify({
+        'success': True,
+        'summary': _rule_based_patient_summary(complaint, findings, recommendations),
+        'source': 'rule_based_fallback'
+    })
+
+
+def _rule_based_patient_summary(complaint, findings, recommendations):
+    """Deterministic Czech fallback summary."""
+    steps = []
+    if recommendations:
+        # Split on sentence boundaries, take first 3
+        import re as _re
+        parts = _re.split(r'[.!?]\s+|\n+', recommendations.strip())
+        for p in parts:
+            p = p.strip()
+            if p and len(p) > 3:
+                steps.append(p)
+            if len(steps) >= 3:
+                break
+    if not steps and findings:
+        steps.append(f"Lékař zjistil: {findings.strip()[:100]}")
+    if not steps:
+        steps.append("Pokud se vaše obtíže zhorší, kontaktujte tým.")
+    numbered = '\n'.join(f"{i+1}. {s}" for i, s in enumerate(steps[:3]))
+    return numbered
+
+
+# ============================================
 # HEALTH CHECK
 # ============================================
 
