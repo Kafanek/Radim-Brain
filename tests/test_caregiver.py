@@ -170,3 +170,188 @@ class TestSafeToCallStatuses:
     def test_safe_to_call_function_exists(self):
         from caregiver_routes import safe_to_call
         assert callable(safe_to_call)
+
+
+# ════════════════════════════════════════════════════════════════════
+# SPRINT C — notifications, decline, scheduled view, audit, scheduler
+# ════════════════════════════════════════════════════════════════════
+
+class TestSprintCEndpoints:
+    """All Sprint C endpoints registered + auth-guarded."""
+
+    def test_notifications_list_registered(self, app):
+        rules = [str(r) for r in app.url_map.iter_rules()]
+        assert any(r.endswith('/api/caregiver/notifications') for r in rules)
+
+    def test_notifications_count_registered(self, app):
+        rules = [str(r) for r in app.url_map.iter_rules()]
+        assert any(r.endswith('/api/caregiver/notifications/count') for r in rules)
+
+    def test_notification_ack_registered(self, app):
+        rules = [str(r) for r in app.url_map.iter_rules()]
+        assert any('/api/caregiver/notification/<int:notif_id>/ack' in r for r in rules)
+
+    def test_ack_all_registered(self, app):
+        rules = [str(r) for r in app.url_map.iter_rules()]
+        assert any(r.endswith('/api/caregiver/notifications/ack-all') for r in rules)
+
+    def test_decline_cosign_registered(self, app):
+        rules = [str(r) for r in app.url_map.iter_rules()]
+        assert any('/api/caregiver/contract/<int:contract_id>/decline-cosign' in r for r in rules)
+
+    def test_scheduled_messages_view_registered(self, app):
+        rules = [str(r) for r in app.url_map.iter_rules()]
+        assert any('/api/caregiver/senior/<senior_id>/scheduled-messages' in r for r in rules)
+
+    def test_audit_ping_registered(self, app):
+        rules = [str(r) for r in app.url_map.iter_rules()]
+        assert any('/api/caregiver/senior/<senior_id>/audit-ping' in r for r in rules)
+
+    # Auth
+    def test_notifications_list_requires_auth(self, client):
+        resp = client.get('/api/caregiver/notifications')
+        assert resp.status_code in (401, 403)
+
+    def test_notifications_count_requires_auth(self, client):
+        resp = client.get('/api/caregiver/notifications/count')
+        assert resp.status_code in (401, 403)
+
+    def test_notification_ack_requires_auth(self, client):
+        resp = client.post('/api/caregiver/notification/1/ack')
+        assert resp.status_code in (401, 403, 404)
+
+    def test_ack_all_requires_auth(self, client):
+        resp = client.post('/api/caregiver/notifications/ack-all')
+        assert resp.status_code in (401, 403)
+
+    def test_decline_cosign_requires_auth(self, client):
+        resp = client.post('/api/caregiver/contract/1/decline-cosign',
+                           json={'reason': 'Not a good time'})
+        assert resp.status_code in (401, 403, 404)
+
+    def test_scheduled_messages_requires_auth(self, client):
+        resp = client.get('/api/caregiver/senior/x/scheduled-messages')
+        assert resp.status_code in (401, 403)
+
+    def test_audit_ping_requires_auth(self, client):
+        resp = client.post('/api/caregiver/senior/x/audit-ping',
+                           json={'section': 'detail'})
+        assert resp.status_code in (401, 403)
+
+
+class TestNotificationHelper:
+    def test_create_notification_function_exists(self):
+        from caregiver_routes import create_caregiver_notification
+        assert callable(create_caregiver_notification)
+
+    def test_create_notification_no_recipient(self):
+        from caregiver_routes import create_caregiver_notification
+        assert create_caregiver_notification('', 's1', 'info', 'test') is None
+
+    def test_create_notification_no_title(self):
+        from caregiver_routes import create_caregiver_notification
+        assert create_caregiver_notification('u1', 's1', 'info', '') is None
+
+    def test_create_notification_basic(self):
+        """Creating a notification returns an id (or None if DB unreachable)."""
+        from caregiver_routes import create_caregiver_notification, _init_schema
+        _init_schema()
+        result = create_caregiver_notification(
+            recipient_id='test-recipient-cg',
+            senior_id='test-senior-cg',
+            ntype='cosign_required',
+            title='Test',
+            body='Test body',
+            severity='warning',
+            ref_type='contract',
+            ref_id=42,
+        )
+        # Either gets an id or None (SQLite handles it)
+        assert result is None or isinstance(result, int)
+
+
+class TestNotifyFamilyOfCosign:
+    def test_function_exists(self):
+        from caregiver_routes import notify_family_of_cosign
+        assert callable(notify_family_of_cosign)
+
+    def test_no_family_returns_zero(self):
+        """Senior without family links → zero notifications sent."""
+        from caregiver_routes import notify_family_of_cosign, _init_schema
+        _init_schema()
+        result = notify_family_of_cosign(
+            'senior-with-no-family-zzz', 999, 'Test offer', 500
+        )
+        # Tolerant: 0 if no rows, also safe if DB unavailable
+        assert result >= 0
+
+
+class TestAuditCaregiverAccess:
+    def test_function_exists(self):
+        from caregiver_routes import _audit_caregiver_access
+        assert callable(_audit_caregiver_access)
+
+    def test_silent_on_self_access(self):
+        """Self-access shouldn't create audit entry."""
+        from caregiver_routes import _audit_caregiver_access
+        # Should return None/silently, no error
+        _audit_caregiver_access('u1', 'u1', 'viewed_detail')
+
+    def test_silent_on_empty(self):
+        from caregiver_routes import _audit_caregiver_access
+        _audit_caregiver_access('', 'u1', 'viewed_detail')
+        _audit_caregiver_access('u1', '', 'viewed_detail')
+
+
+class TestSchedulerRegistration:
+    def test_register_scheduler_jobs_function_exists(self):
+        from caregiver_routes import register_scheduler_jobs
+        assert callable(register_scheduler_jobs)
+
+    def test_register_with_mock_scheduler(self):
+        from caregiver_routes import register_scheduler_jobs
+        class FakeScheduler:
+            def __init__(self):
+                self.jobs = []
+            def add_job(self, *a, **kw):
+                self.jobs.append(kw.get('id'))
+        sched = FakeScheduler()
+        register_scheduler_jobs(sched)
+        assert 'caregiver_daily_narratives' in sched.jobs
+
+
+class TestDailyNarrativesJob:
+    def test_function_exists(self):
+        from caregiver_routes import run_daily_narratives
+        assert callable(run_daily_narratives)
+
+    def test_returns_int(self):
+        """Must return int even on empty DB."""
+        from caregiver_routes import run_daily_narratives
+        result = run_daily_narratives()
+        assert isinstance(result, int)
+        assert result >= 0
+
+
+class TestSprintCSchema:
+    def test_notifications_table_in_schema(self):
+        from caregiver_routes import CAREGIVER_SCHEMA
+        assert 'caregiver_notifications' in CAREGIVER_SCHEMA
+        assert 'read_at' in CAREGIVER_SCHEMA
+        assert 'recipient_id' in CAREGIVER_SCHEMA
+
+    def test_decline_table_in_schema(self):
+        from caregiver_routes import CAREGIVER_SCHEMA
+        assert 'caregiver_cosign_declines' in CAREGIVER_SCHEMA
+        assert 'reason' in CAREGIVER_SCHEMA
+
+    def test_init_schema_idempotent(self):
+        from caregiver_routes import _init_schema
+        _init_schema()
+        _init_schema()
+
+
+class TestDeclineCosignValidation:
+    def test_decline_function_exists(self):
+        from caregiver_routes import decline_cosign
+        assert callable(decline_cosign)

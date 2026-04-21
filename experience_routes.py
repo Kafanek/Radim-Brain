@@ -1624,6 +1624,14 @@ def accept_offer(cid):
     _audit(uid, 'contract_signed', 'contract', contract_id,
            f'offer={offer_id} contribution={cid} cosign={brake_active}')
 
+    # Notify family if cosign required (best-effort)
+    if brake_active:
+        try:
+            from caregiver_routes import notify_family_of_cosign
+            notify_family_of_cosign(uid, contract_id, 'Smlouva v Odkazu', senior_price)
+        except Exception as e:
+            logger.debug(f"notify family cosign: {e}")
+
     response_msg = f'Smlouva podepsána. Na váš účet {senior_price} Kč. Máte 72 hodin na rozmyšlenou.'
     if brake_active:
         response_msg = ('Smlouva předpřipravena — čeká na spolupodepsání rodinou. ' + (brake_reason or ''))

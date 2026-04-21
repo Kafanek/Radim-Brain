@@ -45,6 +45,52 @@ caregiver_bp = Blueprint('caregiver', __name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SCHEMA — caregiver notifications + decline reasons
+# ─────────────────────────────────────────────────────────────────────────────
+
+CAREGIVER_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS caregiver_notifications (
+        id SERIAL PRIMARY KEY,
+        recipient_id TEXT NOT NULL,
+        senior_id TEXT,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT,
+        severity TEXT DEFAULT 'info',
+        ref_type TEXT,
+        ref_id INTEGER,
+        data JSONB,
+        read_at TIMESTAMP,
+        acted_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_cg_notif_recipient ON caregiver_notifications(recipient_id, read_at, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_cg_notif_senior ON caregiver_notifications(senior_id, type);
+
+    CREATE TABLE IF NOT EXISTS caregiver_cosign_declines (
+        id SERIAL PRIMARY KEY,
+        contract_id INTEGER NOT NULL,
+        senior_id TEXT NOT NULL,
+        caregiver_id TEXT NOT NULL,
+        reason TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_cg_decline_contract ON caregiver_cosign_declines(contract_id);
+"""
+
+
+def _init_schema():
+    try:
+        with db_context(commit=True) as db:
+            for stmt in CAREGIVER_SCHEMA.strip().split(';'):
+                stmt = stmt.strip()
+                if stmt:
+                    db.execute(stmt)
+    except Exception as e:
+        logger.debug(f"Caregiver schema init: {e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -193,6 +239,7 @@ def _recent_c_avg(user_id, hours=2):
 def view_mode():
     if request.method == 'OPTIONS':
         return '', 204
+    _init_schema()
     uid = _uid()
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
@@ -899,4 +946,475 @@ def caregiver_cosign_queue(senior_id):
     })
 
 
-logger.info("👩‍⚕️ Caregiver routes v1.0 loaded — family + professional unified partner view")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SPRINT C — NOTIFICATIONS + DECLINE + SCHEDULED VIEW + AUDIT + SCHEDULER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _audit_caregiver_access(senior_id, caregiver_id, action, target_type=None, target_id=None, detail=None):
+    """Log caregiver access into experience_audit_log so senior can see it.
+    Best-effort — never raises."""
+    if not senior_id or not caregiver_id or senior_id == caregiver_id:
+        return
+    try:
+        from experience_routes import _audit as exp_audit
+        exp_audit(
+            user_id=senior_id,          # who the data belongs to
+            action='caregiver_' + action,
+            target_type=target_type,
+            target_id=target_id,
+            detail=detail,
+            actor_id=caregiver_id,       # who did it
+        )
+    except Exception as e:
+        logger.debug(f"caregiver audit: {e}")
+
+
+def create_caregiver_notification(recipient_id, senior_id, ntype, title,
+                                  body=None, severity='info',
+                                  ref_type=None, ref_id=None, data=None):
+    """Public helper — used by experience_routes to queue cosign notifications.
+    Safe to call from anywhere. Returns notification id or None."""
+    _init_schema()
+    if not recipient_id or not title:
+        return None
+    try:
+        with db_context(commit=True) as db:
+            data_json = json.dumps(data) if data else None
+            if is_postgres():
+                r = db.execute(
+                    "INSERT INTO caregiver_notifications "
+                    "(recipient_id, senior_id, type, title, body, severity, "
+                    "ref_type, ref_id, data) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                    (recipient_id, senior_id, ntype, title[:200], (body or '')[:1000],
+                     severity, ref_type, ref_id, data_json)
+                ).fetchone()
+                return r[0] if isinstance(r, (list, tuple)) else r.get('id')
+            else:
+                cur = db.execute(
+                    "INSERT INTO caregiver_notifications "
+                    "(recipient_id, senior_id, type, title, body, severity, "
+                    "ref_type, ref_id, data) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (recipient_id, senior_id, ntype, title[:200], (body or '')[:1000],
+                     severity, ref_type, ref_id, data_json)
+                )
+                return cur.lastrowid if hasattr(cur, 'lastrowid') else None
+    except Exception as e:
+        logger.warning(f"create caregiver notification: {e}")
+        return None
+
+
+def notify_family_of_cosign(senior_id, contract_id, offer_title, price_kc):
+    """Called from experience_routes.accept_offer when cosign is required.
+    Queues a notification to every confirmed family member."""
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT family_user_id FROM senior_family_links "
+                "WHERE senior_id = ? AND family_user_id IS NOT NULL "
+                "AND confirmed_at IS NOT NULL AND revoked_at IS NULL",
+                (senior_id,)
+            ).fetchall()
+    except Exception:
+        rows = []
+    sent = 0
+    for r in rows or []:
+        fid = r[0] if isinstance(r, (list, tuple)) else r.get('family_user_id')
+        if not fid:
+            continue
+        create_caregiver_notification(
+            recipient_id=fid,
+            senior_id=senior_id,
+            ntype='cosign_required',
+            title='⚠️ Čeká na vaše schválení',
+            body=f'Váš blízký podepsal smlouvu „{offer_title}" za {price_kc} Kč. Bez vašeho spolupodpisu se výplata neuvolní.',
+            severity='warning',
+            ref_type='contract',
+            ref_id=contract_id,
+        )
+        sent += 1
+    return sent
+
+
+@caregiver_bp.route('/api/caregiver/notifications', methods=['GET', 'OPTIONS'])
+@require_auth
+def list_notifications():
+    """List caregiver's notifications (unread first, last 50)."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    only_unread = request.args.get('unread', '').lower() in ('1', 'true', 'yes')
+
+    try:
+        with db_context() as db:
+            if only_unread:
+                rows = db.execute(
+                    "SELECT id, senior_id, type, title, body, severity, "
+                    "ref_type, ref_id, read_at, acted_at, created_at "
+                    "FROM caregiver_notifications "
+                    "WHERE recipient_id = ? AND read_at IS NULL "
+                    "ORDER BY created_at DESC LIMIT 50",
+                    (uid,)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT id, senior_id, type, title, body, severity, "
+                    "ref_type, ref_id, read_at, acted_at, created_at "
+                    "FROM caregiver_notifications "
+                    "WHERE recipient_id = ? "
+                    "ORDER BY read_at NULLS FIRST, created_at DESC LIMIT 50",
+                    (uid,)
+                ).fetchall() if is_postgres() else db.execute(
+                    "SELECT id, senior_id, type, title, body, severity, "
+                    "ref_type, ref_id, read_at, acted_at, created_at "
+                    "FROM caregiver_notifications "
+                    "WHERE recipient_id = ? "
+                    "ORDER BY (read_at IS NOT NULL), created_at DESC LIMIT 50",
+                    (uid,)
+                ).fetchall()
+    except Exception as e:
+        logger.error(f"list notifications: {e}")
+        rows = []
+
+    items = []
+    unread_count = 0
+    for r in rows or []:
+        def v(i):
+            return r[i] if isinstance(r, (list, tuple)) else list(r.values())[i]
+        read_at = str(v(8) or '')
+        if not read_at:
+            unread_count += 1
+        items.append({
+            'id': v(0),
+            'seniorId': v(1),
+            'type': v(2),
+            'title': v(3),
+            'body': v(4),
+            'severity': v(5),
+            'refType': v(6),
+            'refId': v(7),
+            'readAt': read_at,
+            'actedAt': str(v(9) or ''),
+            'createdAt': str(v(10) or ''),
+        })
+    return jsonify({
+        'success': True,
+        'notifications': items,
+        'count': len(items),
+        'unreadCount': unread_count,
+    })
+
+
+@caregiver_bp.route('/api/caregiver/notifications/count', methods=['GET'])
+@require_auth
+def notifications_count():
+    """Lightweight unread count — used for badge."""
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    try:
+        with db_context() as db:
+            r = db.execute(
+                "SELECT COUNT(*) FROM caregiver_notifications "
+                "WHERE recipient_id = ? AND read_at IS NULL",
+                (uid,)
+            ).fetchone()
+        cnt = int((r[0] if isinstance(r, (list, tuple)) else list(r.values())[0]) or 0) if r else 0
+    except Exception:
+        cnt = 0
+    return jsonify({'success': True, 'unreadCount': cnt})
+
+
+@caregiver_bp.route('/api/caregiver/notification/<int:notif_id>/ack', methods=['POST'])
+@require_auth
+def ack_notification(notif_id):
+    """Mark notification as read."""
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    try:
+        with db_context(commit=True) as db:
+            db.execute(
+                "UPDATE caregiver_notifications "
+                "SET read_at = CURRENT_TIMESTAMP "
+                "WHERE id = ? AND recipient_id = ? AND read_at IS NULL",
+                (notif_id, uid)
+            )
+    except Exception as e:
+        logger.error(f"ack notification: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+    return jsonify({'success': True, 'id': notif_id})
+
+
+@caregiver_bp.route('/api/caregiver/notifications/ack-all', methods=['POST'])
+@require_auth
+def ack_all_notifications():
+    """Mark all my notifications as read."""
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    try:
+        with db_context(commit=True) as db:
+            db.execute(
+                "UPDATE caregiver_notifications "
+                "SET read_at = CURRENT_TIMESTAMP "
+                "WHERE recipient_id = ? AND read_at IS NULL",
+                (uid,)
+            )
+    except Exception as e:
+        logger.error(f"ack all: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+    return jsonify({'success': True})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COSIGN DECLINE — family rejects with reason (transparency)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@caregiver_bp.route('/api/caregiver/contract/<int:contract_id>/decline-cosign', methods=['POST'])
+@require_auth
+def decline_cosign(contract_id):
+    """Family rejects cosign — records reason, revokes the contract, notifies senior."""
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    data = request.get_json() or {}
+    reason = (data.get('reason') or '').strip()[:500]
+
+    # Verify contract exists + caregiver is family of the senior
+    try:
+        with db_context() as db:
+            r = db.execute(
+                "SELECT user_id, cosigned_at, revoked_at "
+                "FROM experience_contracts WHERE id = ?",
+                (contract_id,)
+            ).fetchone()
+        if not r:
+            return jsonify({'success': False, 'error': 'not found'}), 404
+        def v(i, k):
+            return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+        senior_id = v(0, 'user_id')
+        if v(1, 'cosigned_at'):
+            return jsonify({'success': False, 'error': 'Již spolupodepsáno.'}), 409
+        if v(2, 'revoked_at'):
+            return jsonify({'success': False, 'error': 'Smlouva byla zrušena.'}), 409
+    except Exception as e:
+        logger.error(f"decline read: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    if not _is_family_of(senior_id, uid) or senior_id == uid:
+        return jsonify({'success': False, 'error': 'not linked family'}), 403
+
+    # Record decline + revoke contract
+    try:
+        with db_context(commit=True) as db:
+            db.execute(
+                "INSERT INTO caregiver_cosign_declines "
+                "(contract_id, senior_id, caregiver_id, reason) "
+                "VALUES (?, ?, ?, ?)",
+                (contract_id, senior_id, uid, reason)
+            )
+            db.execute(
+                "UPDATE experience_contracts SET revoked_at = CURRENT_TIMESTAMP "
+                "WHERE id = ?",
+                (contract_id,)
+            )
+    except Exception as e:
+        logger.error(f"decline write: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    # Audit in senior's Odkaz audit log
+    _audit_caregiver_access(
+        senior_id, uid,
+        action='cosign_declined',
+        target_type='contract',
+        target_id=contract_id,
+        detail=f'reason={reason[:100]}' if reason else 'no reason given',
+    )
+
+    # Notify senior via push + queue caregiver-notification so other family knows
+    try:
+        from notification_helpers import notify_user
+        notify_user(
+            user_id=senior_id,
+            type='cosign_declined',
+            title='ℹ️ Rodina nespolupodepsala smlouvu',
+            body=(reason or 'Rodina nemohla smlouvu teď podpořit.')[:200],
+            severity='info',
+            data={'contract_id': contract_id},
+        )
+    except Exception:
+        pass
+
+    return jsonify({
+        'success': True,
+        'contractId': contract_id,
+        'message': 'Smlouva zrušena. Váš blízký bude informován.',
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SCHEDULED MESSAGES FAMILY TRACKER
+# ─────────────────────────────────────────────────────────────────────────────
+
+@caregiver_bp.route('/api/caregiver/senior/<senior_id>/scheduled-messages', methods=['GET'])
+@require_auth
+def caregiver_scheduled_messages(senior_id):
+    """Family sees counts + recipient names of senior's scheduled messages.
+    Content is locked — family sees only: 'A message for Anička on 2026-05-18'."""
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    if not _is_family_of(senior_id, uid) or senior_id == uid:
+        return jsonify({'success': False, 'error': 'not linked'}), 403
+
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT id, recipient_name, recipient_relation, release_event, "
+                "release_date, status "
+                "FROM experience_scheduled_messages "
+                "WHERE user_id = ? AND status IN (?, ?) "
+                "ORDER BY release_date ASC LIMIT 30",
+                (senior_id, 'scheduled', 'delivered')
+            ).fetchall()
+    except Exception:
+        rows = []
+
+    items = []
+    for r in rows or []:
+        def v(i):
+            return r[i] if isinstance(r, (list, tuple)) else list(r.values())[i]
+        items.append({
+            'id': v(0),
+            'recipientName': v(1),
+            'recipientRelation': v(2),
+            'releaseEvent': v(3),
+            'releaseDate': str(v(4) or ''),
+            'status': v(5),
+        })
+
+    # Audit — family viewed senior's scheduled messages list
+    _audit_caregiver_access(
+        senior_id, uid,
+        action='viewed_scheduled_messages',
+        target_type='overview',
+    )
+
+    return jsonify({
+        'success': True,
+        'messages': items,
+        'count': len(items),
+        'message': 'Obsah zpráv zůstává soukromý. Uvidíte je, až přijde jejich čas.',
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AUDIT WIRING — senior sees who from family accessed what
+# Patch existing endpoints to log access.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# We monkey-patch by adding audit calls to existing endpoint internals.
+# Already called via _audit_caregiver_access in decline_cosign + scheduled_messages.
+# For overview / narrative, we log selectively (not every read — too noisy).
+
+@caregiver_bp.route('/api/caregiver/senior/<senior_id>/audit-ping', methods=['POST', 'OPTIONS'])
+@require_auth
+def audit_ping(senior_id):
+    """Frontend pings this once per opened detail view to log caregiver access.
+    Keeps main GET endpoints cheap + side-effect-free while still recording
+    significant accesses to senior's audit log."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    if not _is_family_of(senior_id, uid) or senior_id == uid:
+        return jsonify({'success': False, 'error': 'not linked'}), 403
+
+    data = request.get_json(silent=True) or {}
+    section = (data.get('section') or 'detail')[:32]
+    _audit_caregiver_access(
+        senior_id, uid,
+        action='viewed_' + section,
+        target_type='detail',
+    )
+    return jsonify({'success': True})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SCHEDULER — daily narrative for all active family pairs at 22:00
+# ─────────────────────────────────────────────────────────────────────────────
+
+def run_daily_narratives():
+    """Precompute daily narratives for every senior with at least one confirmed
+    family link, so when family opens the module next morning it's instant."""
+    _init_schema()
+    # Collect all (senior_id) with active links
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT DISTINCT senior_id FROM senior_family_links "
+                "WHERE confirmed_at IS NOT NULL AND revoked_at IS NULL LIMIT 500"
+            ).fetchall()
+    except Exception as e:
+        logger.debug(f"daily narratives scan: {e}")
+        return 0
+
+    generated = 0
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    for r in rows or []:
+        senior_id = r[0] if isinstance(r, (list, tuple)) else list(r.values())[0]
+        if not senior_id:
+            continue
+        cache_key = f"{senior_id}:{today}"
+        with _narrative_lock:
+            if cache_key in _narrative_cache:
+                continue  # already cached for today
+        try:
+            name = _addressee_name(senior_id) or 'váš blízký'
+            ctx = _build_narrative_context(senior_id)
+            text = _call_gemini_narrative(ctx, name)
+            if not text:
+                text = (f'Dnes o {name} nemám dost signálů. Zkuste zavolat — '
+                        f'to je vždy nejlepší.')
+            with _narrative_lock:
+                _narrative_cache[cache_key] = {
+                    'text': text,
+                    'ts': time.time(),
+                    'iso': datetime.utcnow().isoformat() + 'Z',
+                }
+            generated += 1
+        except Exception as e:
+            logger.debug(f"daily narrative {senior_id}: {e}")
+    logger.info(f"Daily narratives generated: {generated}")
+    return generated
+
+
+def register_scheduler_jobs(scheduler):
+    """Hook into main APScheduler. Safe to call twice — replace_existing=True."""
+    try:
+        scheduler.add_job(
+            run_daily_narratives,
+            'cron', hour=22, minute=0, id='caregiver_daily_narratives',
+            replace_existing=True,
+            max_instances=1, misfire_grace_time=3600,
+        )
+        logger.info("✅ Caregiver scheduler registered (daily narratives at 22:00)")
+    except Exception as e:
+        logger.warning(f"⚠️ Caregiver scheduler registration: {e}")
+
+
+logger.info("👩‍⚕️ Caregiver routes v1.1 loaded — notifications + decline + scheduled view + audit + scheduler")

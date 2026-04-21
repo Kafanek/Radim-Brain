@@ -1001,6 +1001,15 @@ try:
     except Exception as e:
         logger.warning(f"⚠️ Experience scheduler registration failed: {e}")
 
+    # Pečovatel — daily narrative precompute at 22:00
+    try:
+        from caregiver_routes import register_scheduler_jobs as register_cg_jobs
+        register_cg_jobs(scheduler)
+    except ImportError:
+        logger.warning("⚠️ caregiver_routes scheduler not available")
+    except Exception as e:
+        logger.warning(f"⚠️ Caregiver scheduler registration failed: {e}")
+
     # v10.45: Daily proactive recall — hooked into morning checkin time
     # Runs at 08:12 (7 min after morning_checkin so meds prompt goes first)
     try:
