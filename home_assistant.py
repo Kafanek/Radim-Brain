@@ -1000,7 +1000,98 @@ def devices():
 
 ha_bp = Blueprint('home_assistant', __name__)
 
+
+# ═══════════════════════════════════════════════════════════════════
+# 🔒 SECURITY — auth, action whitelist, rate limiter (Sprint A)
+# ═══════════════════════════════════════════════════════════════════
+# CRITICAL: before this module went through Sprint A, none of the
+# /api/ha/* endpoints required auth. That meant anyone on the internet
+# could POST /api/ha/action {"action":"unlock","entity_id":"lock.front_door"}
+# and unlock a senior's front door. Below is the fix.
+
+from auth_middleware import require_auth as _require_auth
+
+# Actions allowed without an extra confirm=true flag
+_SAFE_ACTIONS = frozenset({
+    'light_on', 'light_off', 'light_toggle',
+    'switch_on', 'switch_off', 'switch_toggle',
+    'climate_set', 'climate_temperature',
+    'media_play', 'media_pause', 'media_stop', 'media_volume',
+    'fan_on', 'fan_off',
+    'cover_close',       # closing is safe; opening may expose the home
+    'lock',              # locking is always safe
+    'scene_activate',
+    'refresh', 'noop',
+})
+
+# Actions that MUST include confirm=true in the POST body
+_CONFIRM_REQUIRED_ACTIONS = frozenset({
+    'unlock',                         # opening the front door
+    'cover_open',                     # external gates, shutters on ground floor
+    'alarm_disarm',
+    'garage_open',
+})
+
+# Actions fully blocked from the senior frontend (e.g. direct device
+# control bypasses the whitelist — must go through the HA state
+# machine where HA itself enforces per-device policy).
+_BLOCKED_ACTIONS = frozenset({
+    'ha.service_call_raw',            # arbitrary HA service invocation
+    'raw_shell',                      # must never be exposed
+})
+
+
+def _is_action_allowed(action):
+    """Returns (ok, needs_confirm, reason). Pure function — easy to test."""
+    if not action or not isinstance(action, str):
+        return False, False, 'empty action'
+    a = action.strip().lower()
+    if a in _BLOCKED_ACTIONS:
+        return False, False, 'action blocked by policy'
+    if a in _SAFE_ACTIONS:
+        return True, False, ''
+    if a in _CONFIRM_REQUIRED_ACTIONS:
+        return True, True, ''
+    # Unknown action — default to deny. Better safe than sorry for seniors.
+    return False, False, 'unknown action'
+
+
+# ── Rate limiter: per-user sliding window ────────────────────────
+# Home automation commands are destructive (unlock doors!). We cap
+# at 1 action every 2 seconds per senior to prevent spam/abuse.
+_RATE_WINDOW_SECONDS = 2.0
+_RATE_LAST_ACTION = {}  # uid -> last epoch seconds
+_RATE_LOCK = threading.Lock()
+
+
+def _rate_limit_check(uid):
+    """Returns True if within rate limit, False if too fast."""
+    if not uid:
+        return True
+    now = time.time()
+    with _RATE_LOCK:
+        last = _RATE_LAST_ACTION.get(uid, 0.0)
+        if now - last < _RATE_WINDOW_SECONDS:
+            return False
+        _RATE_LAST_ACTION[uid] = now
+        # Trim the dict if it grows too big (cheap GC)
+        if len(_RATE_LAST_ACTION) > 1000:
+            cutoff = now - 300
+            stale = [k for k, v in _RATE_LAST_ACTION.items() if v < cutoff]
+            for k in stale:
+                _RATE_LAST_ACTION.pop(k, None)
+    return True
+
+
+def _current_uid():
+    """Extract authenticated user id from Flask g (set by require_auth)."""
+    from flask import g as _g
+    au = getattr(_g, 'auth_user', None) or {}
+    return str(au.get('id') or au.get('user_id') or '')
+
+
 @ha_bp.route('/api/ha/status', methods=['GET'])
+@_require_auth
 def ha_status():
     """Check HA connection and get home status."""
     client = ha()
@@ -1011,6 +1102,7 @@ def ha_status():
     return jsonify(conn)
 
 @ha_bp.route('/api/ha/devices', methods=['GET'])
+@_require_auth
 def ha_devices():
     """Get all devices, optionally grouped by room or type."""
     client = ha()
@@ -1021,6 +1113,7 @@ def ha_devices():
         return jsonify({'success': True, 'devices': client.get_devices_by_type()})
 
 @ha_bp.route('/api/ha/device/<entity_id>', methods=['GET'])
+@_require_auth
 def ha_device_state(entity_id):
     """Get single device state."""
     client = ha()
@@ -1030,21 +1123,64 @@ def ha_device_state(entity_id):
     return jsonify({'success': False, 'error': 'Device not found'}), 404
 
 @ha_bp.route('/api/ha/action', methods=['POST'])
+@_require_auth
 def ha_action():
     """Execute a device action.
 
-    Body: {"action": "light_on", "entity_id": "light.living_room", "params": {"brightness": 80}}
-    Or: {"action": "light_on", "room": "living_room"} — auto-find entity
-    """
-    data = request.json or {}
-    action = data.get('action', '')
-    params = data.get('params', {})
+    Body: {"action": "light_on", "entity_id": "light.living_room",
+           "params": {"brightness": 80}, "confirm": true/false}
+    Or:   {"action": "light_on", "room": "living_room"} — auto-find entity
 
+    Security (Sprint A):
+    - auth required (see @_require_auth)
+    - action whitelist enforced via _is_action_allowed()
+    - dangerous actions (unlock, alarm_disarm, cover_open) require
+      confirm=true in body — prevents accidental clicks
+    - rate-limited to 1 action per 2 seconds per user
+    """
+    uid = _current_uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    data = request.json or {}
+    action = (data.get('action') or '').strip()
+
+    # 1. Whitelist check
+    ok, needs_confirm, reason = _is_action_allowed(action)
+    if not ok:
+        logger.warning(f"HA action blocked: user={uid[:8]} action={action!r} reason={reason}")
+        return jsonify({
+            'success': False,
+            'error': 'action_not_allowed',
+            'action': action,
+            'reason': reason,
+        }), 400
+
+    # 2. Confirm check for dangerous actions
+    if needs_confirm and not data.get('confirm'):
+        logger.info(f"HA action needs confirm: user={uid[:8]} action={action}")
+        return jsonify({
+            'success': False,
+            'error': 'confirmation_required',
+            'action': action,
+            'message': 'Tato akce vyžaduje výslovné potvrzení. Odešlete confirm=true.',
+        }), 428  # 428 Precondition Required
+
+    # 3. Rate limit
+    if not _rate_limit_check(uid):
+        logger.info(f"HA action rate-limited: user={uid[:8]} action={action}")
+        return jsonify({
+            'success': False,
+            'error': 'rate_limited',
+            'retry_after_seconds': _RATE_WINDOW_SECONDS,
+        }), 429
+
+    # 4. Build params + execute
+    params = data.get('params', {}) or {}
     if data.get('entity_id'):
         params['entity_id'] = data['entity_id']
     if data.get('room'):
         params['room'] = data['room']
-        # Guess device type from action
         if 'light' in action:
             params['device_type'] = 'light'
         elif 'climate' in action or 'temperature' in action:
@@ -1056,11 +1192,22 @@ def ha_action():
         elif 'switch' in action:
             params['device_type'] = 'switch'
 
+    # Audit trail — any command touching the physical home goes in the log
+    logger.info(
+        f"HA action: user={uid[:8]} action={action} "
+        f"entity={params.get('entity_id', '?')} room={params.get('room', '?')}"
+    )
+
     client = ha()
-    result = client.execute_agent_action(action, params)
+    try:
+        result = client.execute_agent_action(action, params)
+    except Exception as e:
+        logger.error(f"HA action execution error: {e}")
+        return jsonify({'success': False, 'error': str(e)[:120]}), 500
     return jsonify(result)
 
 @ha_bp.route('/api/ha/sensors', methods=['GET'])
+@_require_auth
 def ha_sensors():
     """Get sensor summary (temperature, humidity, motion, etc.)."""
     client = ha()
@@ -1068,6 +1215,7 @@ def ha_sensors():
     return jsonify({'success': True, 'sensors': sensors})
 
 @ha_bp.route('/api/ha/rooms', methods=['GET'])
+@_require_auth
 def ha_rooms():
     """Get room list with device counts."""
     client = ha()
@@ -1083,9 +1231,23 @@ def ha_rooms():
 
 @ha_bp.route('/api/ha/webhook', methods=['POST'])
 def ha_webhook():
-    """Receive events from HA automations (HA → Radim)."""
+    """Receive events from HA automations (HA → Radim).
+
+    Auth: X-HA-Secret header must match HA_WEBHOOK_SECRET env var.
+    Fail-closed: if HA_WEBHOOK_SECRET is not configured on the server,
+    the webhook REJECTS every request. This prevents the "I forgot to
+    set the env var" footgun where the webhook accidentally becomes
+    public to anyone who finds the URL.
+    """
+    if not HA_WEBHOOK_SECRET:
+        return jsonify({
+            'error': 'webhook_disabled',
+            'detail': 'HA_WEBHOOK_SECRET not configured on the server',
+        }), 503
     secret = request.headers.get('X-HA-Secret', '')
-    if HA_WEBHOOK_SECRET and secret != HA_WEBHOOK_SECRET:
+    # Constant-time compare to avoid timing side channels
+    import hmac
+    if not hmac.compare_digest(secret, HA_WEBHOOK_SECRET):
         return jsonify({'error': 'Unauthorized'}), 401
 
     data = request.json or {}
@@ -1111,6 +1273,7 @@ def ha_webhook():
 # ─── MQTT ENDPOINTS ───
 
 @ha_bp.route('/api/ha/mqtt/sensors', methods=['GET'])
+@_require_auth
 def ha_mqtt_sensors():
     """Get MQTT sensor data."""
     client = ha()
@@ -1126,6 +1289,7 @@ def ha_mqtt_sensors():
 
 
 @ha_bp.route('/api/ha/mqtt/publish', methods=['POST'])
+@_require_auth
 def ha_mqtt_publish():
     """Publish MQTT message (e.g., Zigbee2MQTT command)."""
     data = request.json or {}
@@ -1144,6 +1308,7 @@ def ha_mqtt_publish():
 # ─── DIRECT DEVICE ENDPOINTS ───
 
 @ha_bp.route('/api/ha/direct/discover', methods=['GET'])
+@_require_auth
 def ha_direct_discover():
     """Discover direct devices (Kasa, Yeelight)."""
     dm = devices()
@@ -1161,8 +1326,26 @@ def ha_direct_discover():
 
 
 @ha_bp.route('/api/ha/direct/kasa', methods=['POST'])
+@_require_auth
 def ha_direct_kasa():
-    """Control Kasa device directly."""
+    """Control Kasa device directly.
+
+    Admin-only: direct LAN control bypasses the HA state machine that
+    normally enforces per-device policy. Gate behind an admin role.
+    """
+    uid = _current_uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    from flask import g
+    au = getattr(g, 'auth_user', None) or {}
+    if not (au.get('is_admin') or au.get('role') == 'admin'):
+        return jsonify({
+            'success': False,
+            'error': 'direct device control is admin-only; use /api/ha/action instead',
+        }), 403
+    if not _rate_limit_check(uid):
+        return jsonify({'success': False, 'error': 'rate_limited'}), 429
+
     data = request.json or {}
     ip = data.get('ip', '')
     action = data.get('action', 'toggle')
@@ -1174,8 +1357,22 @@ def ha_direct_kasa():
 
 
 @ha_bp.route('/api/ha/direct/yeelight', methods=['POST'])
+@_require_auth
 def ha_direct_yeelight():
-    """Control Yeelight bulb directly."""
+    """Control Yeelight bulb directly. Admin-only (see Kasa note)."""
+    uid = _current_uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    from flask import g
+    au = getattr(g, 'auth_user', None) or {}
+    if not (au.get('is_admin') or au.get('role') == 'admin'):
+        return jsonify({
+            'success': False,
+            'error': 'direct device control is admin-only; use /api/ha/action instead',
+        }), 403
+    if not _rate_limit_check(uid):
+        return jsonify({'success': False, 'error': 'rate_limited'}), 429
+
     data = request.json or {}
     ip = data.get('ip', '')
     action = data.get('action', 'toggle')
@@ -1188,6 +1385,7 @@ def ha_direct_yeelight():
 
 
 @ha_bp.route('/api/ha/libraries', methods=['GET'])
+@_require_auth
 def ha_libraries():
     """Show available smart home libraries and their status."""
     return jsonify({
