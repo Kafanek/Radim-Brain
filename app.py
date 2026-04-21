@@ -623,6 +623,13 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Notes routes: {e}")
 
+try:
+    from education_progress_routes import education_progress_bp
+    app.register_blueprint(education_progress_bp)
+    logger.info("✅ Education progress routes registered: /api/education/progress|stats|quiz-result|family|certificate")
+except Exception as e:
+    logger.warning(f"⚠️ Education progress routes: {e}")
+
 # FHIR Adapter (HL7 FHIR R4 export)
 try:
     from fhir_adapter import fhir_bp
