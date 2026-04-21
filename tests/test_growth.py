@@ -246,3 +246,99 @@ class TestFamilyGuard:
     def test_self_counts_as_family(self):
         from growth_routes import _is_family_of
         assert _is_family_of('u-1', 'u-1') is True
+
+
+class TestDayDetail:
+    """GET /api/growth/day/<YYYY-MM-DD> — calendar retrospective endpoint."""
+
+    def test_day_detail_requires_auth(self, client):
+        resp = client.get('/api/growth/day/2026-04-21')
+        assert resp.status_code in (401, 403)
+
+    def test_day_detail_rejects_bad_format(self, client):
+        """Expect 400 (bad format) or 401 (auth first)."""
+        resp = client.get('/api/growth/day/not-a-date')
+        assert resp.status_code in (400, 401, 403)
+
+    def test_day_detail_rejects_missing_zero_pad(self, client):
+        """Month/day need leading zeros."""
+        resp = client.get('/api/growth/day/2026-4-5')
+        assert resp.status_code in (400, 401, 403)
+
+    def test_day_detail_accepts_valid_format(self, client):
+        """Valid format passes regex — auth gate still fires."""
+        resp = client.get('/api/growth/day/2026-04-21')
+        # Unauthenticated → 401/403, NOT 400 from regex
+        assert resp.status_code in (401, 403)
+
+    def test_day_detail_endpoint_registered(self, app):
+        rules = [str(r) for r in app.url_map.iter_rules()]
+        assert any('/api/growth/day/' in r for r in rules)
+
+
+class TestDayLineGenerator:
+    """_radim_day_line — the human-friendly summary used in retrospective view."""
+
+    def test_no_activity_no_mood(self):
+        from growth_routes import _radim_day_line
+        line = _radim_day_line(None, 0, [], [], [])
+        assert isinstance(line, str) and len(line) > 5
+
+    def test_good_mood_with_chat(self):
+        from growth_routes import _radim_day_line
+        line = _radim_day_line('good', 5, [], [], [])
+        assert 'Klidný' in line or 'klidný' in line
+
+    def test_heavy_mood_mentioned(self):
+        from growth_routes import _radim_day_line
+        line = _radim_day_line('heavy', 3, [], [], [])
+        assert 'těžší' in line.lower() or 'těžký' in line.lower()
+
+    def test_photo_caption_inlined(self):
+        from growth_routes import _radim_day_line
+        photos = [{'id': 1, 'caption': 'Vnučka Anička'}]
+        line = _radim_day_line('good', 2, photos, [], [])
+        assert 'Anička' in line or 'fotku' in line.lower()
+
+    def test_event_mentioned(self):
+        from growth_routes import _radim_day_line
+        events = [{'id': 1, 'title': 'Doktor Novák', 'time': '14:00'}]
+        line = _radim_day_line('soso', 1, [], [], events)
+        assert 'Doktor' in line
+
+    def test_line_length_capped(self):
+        from growth_routes import _radim_day_line
+        huge = [{'id': i, 'caption': 'X' * 100} for i in range(10)]
+        line = _radim_day_line('good', 99, huge, [], [])
+        assert len(line) <= 300
+
+
+class TestCaregiverTrendDetail:
+    def test_requires_auth(self, client):
+        resp = client.get('/api/growth/trend-detail/some-senior')
+        assert resp.status_code in (401, 403)
+
+    def test_endpoint_registered(self, app):
+        rules = [str(r) for r in app.url_map.iter_rules()]
+        assert any('/api/growth/trend-detail/' in r for r in rules)
+
+
+class TestDateRegex:
+    """Sanity check the date gate _DATE_RE."""
+
+    def test_valid_formats(self):
+        from growth_routes import _DATE_RE
+        assert _DATE_RE.match('2026-04-21')
+        assert _DATE_RE.match('1999-12-31')
+        assert _DATE_RE.match('2024-01-01')
+
+    def test_invalid_formats(self):
+        from growth_routes import _DATE_RE
+        assert not _DATE_RE.match('2026-4-21')
+        assert not _DATE_RE.match('2026/04/21')
+        assert not _DATE_RE.match('2026-04-21T10:00')
+        assert not _DATE_RE.match('not-a-date')
+        assert not _DATE_RE.match('')
+        # SQL injection attempts
+        assert not _DATE_RE.match("2026-04-21' OR '1'='1")
+        assert not _DATE_RE.match('2026-04-21; DROP TABLE users')

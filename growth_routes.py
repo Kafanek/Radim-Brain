@@ -959,4 +959,287 @@ def caregiver_report(senior_id):
     })
 
 
-logger.info("🌱 Growth routes v1.0 loaded — relationship + memories + mood + narrative + caregiver view")
+# ─────────────────────────────────────────────────────────────────────────────
+# DAY DETAIL — for calendar retrospective view (senior-facing)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_DATE_RE = __import__('re').compile(r'^\d{4}-\d{2}-\d{2}$')
+
+
+def _day_mood(user_id, date_str):
+    """Single-day mood from brain_states. Returns (mood, c_avg, samples)."""
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT C FROM brain_states "
+                "WHERE user_id = ? AND C IS NOT NULL "
+                "AND CAST(created_at AS TEXT) LIKE ?",
+                (user_id, date_str + '%')
+            ).fetchall()
+    except Exception:
+        rows = []
+    if not rows:
+        return (None, None, 0)
+    cs = []
+    for r in rows:
+        c = r[0] if isinstance(r, (list, tuple)) else r.get('C') or r.get('c')
+        if c is not None:
+            try:
+                cs.append(float(c))
+            except Exception:
+                pass
+    if not cs:
+        return (None, None, 0)
+    c_avg = sum(cs) / len(cs)
+    if c_avg >= 0.55:
+        mood = 'good'
+    elif c_avg >= 0.38:
+        mood = 'soso'
+    else:
+        mood = 'heavy'
+    return (mood, round(c_avg, 3), len(cs))
+
+
+def _day_interactions(user_id, date_str):
+    """Count user messages in memory_history on this date."""
+    try:
+        with db_context() as db:
+            row = db.execute(
+                "SELECT COUNT(*) FROM memory_history "
+                "WHERE user_id = ? AND role = ? "
+                "AND CAST(created_at AS TEXT) LIKE ?",
+                (user_id, 'user', date_str + '%')
+            ).fetchone()
+        if row:
+            return int((row[0] if isinstance(row, (list, tuple)) else list(row.values())[0]) or 0)
+    except Exception:
+        pass
+    return 0
+
+
+def _day_photos(user_id, date_str):
+    """Gallery photos uploaded on this date."""
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT id, caption FROM gallery_photos "
+                "WHERE user_id = ? AND CAST(created_at AS TEXT) LIKE ? "
+                "ORDER BY created_at ASC LIMIT 6",
+                (user_id, date_str + '%')
+            ).fetchall()
+        out = []
+        for r in rows or []:
+            def v(i, k):
+                return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+            out.append({'id': v(0, 'id'), 'caption': v(1, 'caption') or ''})
+        return out
+    except Exception:
+        return []
+
+
+def _day_notes(user_id, date_str):
+    """Notes written on this date."""
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT id, text, pinned, important FROM user_notes "
+                "WHERE user_id = ? AND CAST(created_at AS TEXT) LIKE ? "
+                "ORDER BY created_at ASC LIMIT 6",
+                (user_id, date_str + '%')
+            ).fetchall()
+        out = []
+        for r in rows or []:
+            def v(i, k):
+                return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+            out.append({
+                'id': v(0, 'id'),
+                'text': (v(1, 'text') or '')[:200],
+                'pinned': bool(v(2, 'pinned')),
+                'important': bool(v(3, 'important')),
+            })
+        return out
+    except Exception:
+        return []
+
+
+def _day_events(user_id, date_str):
+    """Calendar events on this date."""
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT id, title, time FROM calendar_events "
+                "WHERE user_id = ? AND date = ? "
+                "ORDER BY time ASC LIMIT 6",
+                (user_id, date_str)
+            ).fetchall()
+        out = []
+        for r in rows or []:
+            def v(i, k):
+                return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+            out.append({
+                'id': v(0, 'id'),
+                'title': v(1, 'title') or '',
+                'time': v(2, 'time') or '',
+            })
+        return out
+    except Exception:
+        return []
+
+
+def _radim_day_line(mood, interactions, photos, notes, events):
+    """1-2 sentence warm Czech summary of the day."""
+    parts = []
+    if mood == 'good':
+        parts.append('Klidný den.')
+    elif mood == 'soso':
+        parts.append('Den jako každý jiný.')
+    elif mood == 'heavy':
+        parts.append('Trošku těžší den.')
+    else:
+        parts.append('Tento den si moc nepamatuji.')
+    if interactions >= 10:
+        parts.append(f'Povídali jsme si hodně — {interactions} zpráv.')
+    elif interactions >= 3:
+        parts.append(f'Povídali jsme si — {interactions} zpráv.')
+    elif interactions >= 1:
+        parts.append(f'Prohodili jsme pár slov.')
+    if photos:
+        first_cap = (photos[0].get('caption') or '').strip()
+        if first_cap:
+            parts.append(f'Uložili jsme fotku: „{first_cap[:60]}".')
+        else:
+            parts.append(f'Přibyla {len(photos)} {"fotka" if len(photos) == 1 else "fotky"}.')
+    if events:
+        parts.append(f'Na programu bylo: {events[0]["title"]}.')
+    return ' '.join(parts)[:300]
+
+
+@growth_bp.route('/api/growth/day/<date_str>', methods=['GET', 'OPTIONS'])
+@require_auth
+def day_detail(date_str):
+    """Retrospective day detail for Calendar module past-day click.
+
+    Returns: { mood, interactions, photos[], notes[], events[], radimLine }
+    Refuses future dates (senior shouldn't see fake mood data for tomorrow).
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    if not _DATE_RE.match(date_str or ''):
+        return jsonify({'success': False, 'error': 'Bad date format (YYYY-MM-DD)'}), 400
+
+    try:
+        requested = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except Exception:
+        return jsonify({'success': False, 'error': 'Invalid date'}), 400
+
+    today = datetime.utcnow().date()
+    if requested > today:
+        # Future date — just return events (no mood)
+        events = _day_events(uid, date_str)
+        return jsonify({
+            'success': True,
+            'date': date_str,
+            'isFuture': True,
+            'mood': None,
+            'interactions': 0,
+            'photos': [],
+            'notes': [],
+            'events': events,
+            'radimLine': None,
+        })
+
+    mood, c_avg, samples = _day_mood(uid, date_str)
+    interactions = _day_interactions(uid, date_str)
+    photos = _day_photos(uid, date_str)
+    notes = _day_notes(uid, date_str)
+    events = _day_events(uid, date_str)
+    line = _radim_day_line(mood, interactions, photos, notes, events)
+
+    return jsonify({
+        'success': True,
+        'date': date_str,
+        'isFuture': False,
+        'isToday': requested == today,
+        'mood': mood,
+        'cAvg': c_avg,
+        'samples': samples,
+        'interactions': interactions,
+        'photos': photos,
+        'notes': notes,
+        'events': events,
+        'radimLine': line,
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CAREGIVER — diagnostic trend detail (replaces removed senior Trend module)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@growth_bp.route('/api/growth/trend-detail/<senior_id>', methods=['GET', 'OPTIONS'])
+@require_auth
+def caregiver_trend_detail(senior_id):
+    """Numeric diagnostic trend for caregiver / family dashboard.
+    Mirrors the old /api/brain/trend/<user_id> output shape but with ACL."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    if not _is_family_of(senior_id, uid):
+        return jsonify({'success': False, 'error': 'not linked'}), 403
+
+    try:
+        days = max(7, min(90, int(request.args.get('days', 14))))
+    except Exception:
+        days = 14
+
+    # Reuse mood trend + enrich with numeric C
+    trend = _mood_trend(senior_id, days=days)
+    if not trend:
+        return jsonify({
+            'success': True, 'senior': senior_id, 'days': days,
+            'trend': [], 'direction': 'insufficient',
+            'summary': _mood_summary_sentence([]),
+        })
+
+    # Simple direction analysis
+    if len(trend) >= 6:
+        half = len(trend) // 2
+        first = sum(t['c'] for t in trend[:half]) / max(1, half)
+        last = sum(t['c'] for t in trend[half:]) / max(1, len(trend) - half)
+        delta = last - first
+        if delta > 0.05:
+            direction = 'improving'
+        elif delta < -0.05:
+            direction = 'declining'
+        else:
+            direction = 'stable'
+    else:
+        direction = 'stable'
+
+    avg_c = sum(t['c'] for t in trend) / len(trend)
+    good_days = sum(1 for t in trend if t['mood'] == 'good')
+    heavy_days = sum(1 for t in trend if t['mood'] == 'heavy')
+
+    return jsonify({
+        'success': True,
+        'senior': senior_id,
+        'days': days,
+        'trend': trend,
+        'direction': direction,
+        'summary': _mood_summary_sentence(trend),
+        'stats': {
+            'avgC': round(avg_c, 3),
+            'goodDays': good_days,
+            'heavyDays': heavy_days,
+            'totalDays': len(trend),
+        },
+    })
+
+
+logger.info("🌱 Growth routes v1.1 loaded — relationship + memories + mood + narrative + day-detail + caregiver view")
