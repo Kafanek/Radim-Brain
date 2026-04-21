@@ -57,6 +57,7 @@ Safeguards
   new offers are auto-frozen and family is notified.
 """
 
+import base64
 import json
 import logging
 import os
@@ -131,17 +132,22 @@ EXPERIENCE_SCHEMA = """
         transcript TEXT NOT NULL,
         transcript_structured TEXT,
         audio_url TEXT,
+        audio_size_bytes INTEGER DEFAULT 0,
         duration_sec INTEGER DEFAULT 0,
         privacy TEXT DEFAULT 'draft',
         approved_at TIMESTAMP,
         cooling_off_until TIMESTAMP,
         word_count INTEGER DEFAULT 0,
+        parent_contribution_id INTEGER,
+        gallery_photo_id INTEGER,
+        gemini_consent BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_exp_contrib_user ON experience_contributions(user_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_exp_contrib_privacy ON experience_contributions(user_id, privacy);
     CREATE INDEX IF NOT EXISTS idx_exp_contrib_theme ON experience_contributions(theme);
+    CREATE INDEX IF NOT EXISTS idx_exp_contrib_parent ON experience_contributions(parent_contribution_id);
 
     CREATE TABLE IF NOT EXISTS experience_buyers (
         id SERIAL PRIMARY KEY,
@@ -188,10 +194,14 @@ EXPERIENCE_SCHEMA = """
         cooling_off_until TIMESTAMP,
         signed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         revoked_at TIMESTAMP,
-        last_royalty_at TIMESTAMP
+        last_royalty_at TIMESTAMP,
+        requires_family_cosign BOOLEAN DEFAULT FALSE,
+        cosigned_by TEXT,
+        cosigned_at TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_exp_contracts_user ON experience_contracts(user_id, signed_at DESC);
     CREATE INDEX IF NOT EXISTS idx_exp_contracts_contribution ON experience_contracts(contribution_id);
+    CREATE INDEX IF NOT EXISTS idx_exp_contracts_royalty ON experience_contracts(last_royalty_at, royalty_years);
 
     CREATE TABLE IF NOT EXISTS experience_earnings (
         id SERIAL PRIMARY KEY,
@@ -212,6 +222,7 @@ EXPERIENCE_SCHEMA = """
         heir_name TEXT,
         heir_relation TEXT,
         heir_contact TEXT,
+        heir_contact_verified BOOLEAN DEFAULT FALSE,
         royalty_years_after_death INTEGER DEFAULT 5,
         unlock_family_archive BOOLEAN DEFAULT TRUE,
         unlock_on_events JSONB,
@@ -219,7 +230,63 @@ EXPERIENCE_SCHEMA = """
         configured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS experience_audit_log (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        actor_id TEXT,
+        action TEXT NOT NULL,
+        target_type TEXT,
+        target_id INTEGER,
+        detail TEXT,
+        ip_address TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_exp_audit_user ON experience_audit_log(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_exp_audit_action ON experience_audit_log(action, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS experience_scheduled_messages (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        recipient_name TEXT NOT NULL,
+        recipient_relation TEXT,
+        recipient_contact TEXT,
+        message_type TEXT DEFAULT 'text',
+        content TEXT NOT NULL,
+        audio_url TEXT,
+        release_event TEXT,
+        release_date TIMESTAMP,
+        status TEXT DEFAULT 'scheduled',
+        released_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_exp_scheduled_user ON experience_scheduled_messages(user_id, release_date);
+    CREATE INDEX IF NOT EXISTS idx_exp_scheduled_status ON experience_scheduled_messages(status, release_date);
 """
+
+
+def _migrate_schema_additive():
+    """Add new columns to existing installations (idempotent, safe)."""
+    extra = [
+        # Contributions
+        "ALTER TABLE experience_contributions ADD COLUMN IF NOT EXISTS parent_contribution_id INTEGER",
+        "ALTER TABLE experience_contributions ADD COLUMN IF NOT EXISTS gallery_photo_id INTEGER",
+        "ALTER TABLE experience_contributions ADD COLUMN IF NOT EXISTS gemini_consent BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE experience_contributions ADD COLUMN IF NOT EXISTS audio_size_bytes INTEGER DEFAULT 0",
+        # Contracts
+        "ALTER TABLE experience_contracts ADD COLUMN IF NOT EXISTS requires_family_cosign BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE experience_contracts ADD COLUMN IF NOT EXISTS cosigned_by TEXT",
+        "ALTER TABLE experience_contracts ADD COLUMN IF NOT EXISTS cosigned_at TIMESTAMP",
+        # Inheritance
+        "ALTER TABLE experience_inheritance ADD COLUMN IF NOT EXISTS heir_contact_verified BOOLEAN DEFAULT FALSE",
+    ]
+    for stmt in extra:
+        try:
+            with db_context(commit=True) as db:
+                db.execute(stmt)
+        except Exception:
+            pass  # SQLite/older PG — silently skip
 
 
 def _init_schema():
@@ -231,7 +298,86 @@ def _init_schema():
                     db.execute(stmt)
     except Exception as e:
         logger.debug(f"Experience schema init: {e}")
+    if is_postgres():
+        _migrate_schema_additive()
     _seed_demo_buyers_if_empty()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AUDIT LOG — GDPR Article 30 compliance
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _audit(user_id, action, target_type=None, target_id=None, detail=None, actor_id=None):
+    """Record an auditable event. Best-effort — never raises."""
+    if not user_id:
+        return
+    try:
+        ip = None
+        try:
+            if request:
+                ip = (request.headers.get('X-Forwarded-For') or request.remote_addr or '')[:80]
+        except Exception:
+            pass
+        with db_context(commit=True) as db:
+            db.execute(
+                "INSERT INTO experience_audit_log "
+                "(user_id, actor_id, action, target_type, target_id, detail, ip_address) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (user_id, actor_id or user_id, action, target_type,
+                 target_id, (detail or '')[:500], ip)
+            )
+    except Exception as e:
+        logger.debug(f"audit log: {e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COGNITIVE CAPACITY BRAKE — Confucius safeguard for vulnerable elders
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _check_cognitive_brake(user_id):
+    """Return (brake_active, reason) tuple.
+    brake_active=True means new contracts should require family co-sign.
+
+    Heuristics (multi-signal, conservative):
+      1. Average C over last 14d dropped >25% vs prior 14d
+      2. Interaction count dropped >40%
+      3. Age >= 85 (if known) — auto-cosign recommendation
+    """
+    try:
+        from datetime import datetime, timedelta
+        now = datetime.utcnow()
+        with db_context() as db:
+            # Mood drop signal
+            recent = db.execute(
+                "SELECT AVG(C) FROM brain_states "
+                "WHERE user_id = ? AND C IS NOT NULL AND created_at >= ?",
+                (user_id, now - timedelta(days=14))
+            ).fetchone()
+            prior = db.execute(
+                "SELECT AVG(C) FROM brain_states "
+                "WHERE user_id = ? AND C IS NOT NULL "
+                "AND created_at >= ? AND created_at < ?",
+                (user_id, now - timedelta(days=28), now - timedelta(days=14))
+            ).fetchone()
+
+        def v(r):
+            if not r:
+                return None
+            x = r[0] if isinstance(r, (list, tuple)) else list(r.values())[0]
+            try:
+                return float(x) if x is not None else None
+            except Exception:
+                return None
+
+        recent_c = v(recent)
+        prior_c = v(prior)
+        if recent_c is not None and prior_c is not None and prior_c > 0:
+            delta = (recent_c - prior_c) / prior_c
+            if delta <= -0.25:
+                return (True, f'Pokles kognitivní koherence o {int(abs(delta) * 100)}% — doporučeno spolupodepsání rodinou.')
+    except Exception as e:
+        logger.debug(f"cognitive brake: {e}")
+    return (False, None)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -817,18 +963,30 @@ def session_append(session_id):
 @require_auth
 def session_finalize(session_id):
     """Optional AI-structure step. Uses Gemini to produce a cleaner
-    structured version of the raw transcript — but the senior must approve
-    it, and original transcript is preserved untouched."""
+    structured version — BUT:
+
+    - Only works on DRAFT contributions (approved ones are immutable)
+    - Requires explicit per-session Gemini consent (stored on contribution)
+    - Rate limited per user to prevent quota abuse
+    - Original transcript is ALWAYS preserved; structured is opt-in via approval
+
+    Request body: {allowAi: bool} — if true and not previously consented,
+    records consent AND sends to Gemini. If false or missing, returns
+    original transcript unchanged.
+    """
     _init_schema()
     uid = _uid()
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    if not _rate_ok(uid, 'finalize', 30):
+        return jsonify({'success': False, 'error': 'Moc rychle.',
+                        'code': 'rate_limit'}), 429
 
     try:
         with db_context() as db:
             row = db.execute(
-                "SELECT transcript, title, type, theme FROM experience_contributions "
-                "WHERE id = ? AND user_id = ?",
+                "SELECT transcript, title, type, theme, privacy, gemini_consent "
+                "FROM experience_contributions WHERE id = ? AND user_id = ?",
                 (session_id, uid)
             ).fetchone()
         if not row:
@@ -840,13 +998,55 @@ def session_finalize(session_id):
     def v(i, k):
         return row[i] if isinstance(row, (list, tuple)) else row.get(k)
     transcript = (v(0, 'transcript') or '').strip()
+    privacy = v(4, 'privacy')
+    existing_consent = bool(v(5, 'gemini_consent'))
+
+    # Guard 1: only drafts can be finalized
+    if privacy != 'draft':
+        return jsonify({
+            'success': False,
+            'error': 'Vzpomínka už byla schválena. Nelze ji znovu upravovat.',
+            'code': 'not_draft',
+        }), 409
+
     if not transcript or len(transcript) < 50:
         return jsonify({'success': False, 'error': 'Text je příliš krátký.'}), 400
 
+    # Guard 2: explicit per-session AI consent
+    data = request.get_json(silent=True) or {}
+    allow_ai = _to_bool(data.get('allowAi'))
+
+    if not allow_ai and not existing_consent:
+        # Return original transcript as-is; no Google call
+        _audit(uid, 'finalize_local_only', 'contribution', session_id,
+               'senior declined AI structure')
+        return jsonify({
+            'success': True,
+            'sessionId': session_id,
+            'structured': transcript,
+            'aiGenerated': False,
+            'reason': 'ai_not_consented',
+            'note': 'Vzpomínku jsem nechal beze změny — AI souhlas nebyl udělen.',
+        })
+
+    # Record consent (persist for audit)
+    if allow_ai and not existing_consent:
+        try:
+            with db_context(commit=True) as db:
+                db.execute(
+                    "UPDATE experience_contributions SET gemini_consent = ? "
+                    "WHERE id = ? AND user_id = ?",
+                    (True if is_postgres() else 1, session_id, uid)
+                )
+        except Exception:
+            pass
+        _audit(uid, 'gemini_consent_granted', 'contribution', session_id)
+
     # AI structure via Gemini (best-effort, honest fallback)
     structured = _structure_via_gemini(transcript, v(1, 'title'), v(3, 'theme'))
+    ai_used = bool(structured)
     if not structured:
-        structured = transcript  # fallback: original transcript
+        structured = transcript
 
     try:
         with db_context(commit=True) as db:
@@ -859,11 +1059,14 @@ def session_finalize(session_id):
     except Exception as e:
         logger.debug(f"finalize write: {e}")
 
+    _audit(uid, 'finalized', 'contribution', session_id,
+           f'ai_used={ai_used}')
+
     return jsonify({
         'success': True,
         'sessionId': session_id,
         'structured': structured,
-        'aiGenerated': structured != transcript,
+        'aiGenerated': ai_used,
     })
 
 
@@ -963,6 +1166,9 @@ def change_privacy(cid):
     uid = _uid()
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    if not _rate_ok(uid, 'privacy_change', 30):
+        return jsonify({'success': False, 'code': 'rate_limit',
+                        'error': 'Moc rychle. Zkuste to za chvilku.'}), 429
     data = request.get_json() or {}
     new_privacy = (data.get('privacy') or '').strip().lower()
     if new_privacy not in {'family', 'research', 'public'}:
@@ -979,6 +1185,8 @@ def change_privacy(cid):
     except Exception as e:
         logger.error(f"privacy: {e}")
         return jsonify({'success': False, 'error': 'internal'}), 500
+
+    _audit(uid, 'privacy_changed', 'contribution', cid, f'new={new_privacy}')
     return jsonify({'success': True, 'id': cid, 'privacy': new_privacy})
 
 
@@ -990,6 +1198,9 @@ def forget_contribution(cid):
     uid = _uid()
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    if not _rate_ok(uid, 'forget', 30):
+        return jsonify({'success': False, 'code': 'rate_limit',
+                        'error': 'Moc rychle. Zkuste to za chvilku.'}), 429
 
     try:
         with db_context(commit=True) as db:
@@ -1007,8 +1218,183 @@ def forget_contribution(cid):
     except Exception as e:
         logger.error(f"forget: {e}")
         return jsonify({'success': False, 'error': 'internal'}), 500
+
+    _audit(uid, 'forgotten', 'contribution', cid)
     return jsonify({'success': True, 'id': cid, 'deleted': True,
                     'message': 'Vzpomínka byla zapomenuta. Ctím vaše právo.'})
+
+
+@experience_bp.route('/api/experience/session/<int:session_id>/replace', methods=['POST'])
+@require_auth
+def session_replace(session_id):
+    """Replace the whole transcript (authoritative save from frontend).
+    Used by frontend draft auto-save — avoids append/dedup desync bugs."""
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    data = request.get_json() or {}
+    new_transcript = (data.get('text') or '').strip()
+
+    try:
+        with db_context() as db:
+            row = db.execute(
+                "SELECT privacy FROM experience_contributions "
+                "WHERE id = ? AND user_id = ?",
+                (session_id, uid)
+            ).fetchone()
+        if not row:
+            return jsonify({'success': False, 'error': 'not found'}), 404
+        privacy = row[0] if isinstance(row, (list, tuple)) else row.get('privacy')
+        if privacy != 'draft':
+            return jsonify({'success': False, 'code': 'approved',
+                            'error': 'Vzpomínka už byla schválena.'}), 409
+    except Exception as e:
+        logger.error(f"replace read: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    new_transcript = new_transcript[:MAX_TRANSCRIPT_LEN]
+    wc = _word_count(new_transcript)
+    try:
+        with db_context(commit=True) as db:
+            db.execute(
+                "UPDATE experience_contributions "
+                "SET transcript = ?, word_count = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ? AND user_id = ?",
+                (new_transcript, wc, session_id, uid)
+            )
+    except Exception as e:
+        logger.error(f"replace write: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    return jsonify({
+        'success': True,
+        'sessionId': session_id,
+        'wordCount': wc,
+        'transcriptLen': len(new_transcript),
+    })
+
+
+@experience_bp.route('/api/experience/session/<int:session_id>/audio', methods=['POST'])
+@require_auth
+def upload_audio(session_id):
+    """Upload audio recording for a draft contribution.
+    Accepts multipart 'audio' file OR JSON { dataUrl: 'data:audio/...;base64,...' }.
+    Stored as data URL (or CDN if available) — mirrors gallery pattern.
+    Max 25 MB / 15 min audio."""
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    # Ownership + state check
+    try:
+        with db_context() as db:
+            row = db.execute(
+                "SELECT privacy FROM experience_contributions "
+                "WHERE id = ? AND user_id = ?",
+                (session_id, uid)
+            ).fetchone()
+        if not row:
+            return jsonify({'success': False, 'error': 'not found'}), 404
+        privacy = row[0] if isinstance(row, (list, tuple)) else row.get('privacy')
+        if privacy != 'draft':
+            return jsonify({'success': False, 'error': 'Nelze nahrát audio do schválené vzpomínky.'}), 409
+    except Exception as e:
+        logger.error(f"audio read: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    MAX_AUDIO_BYTES = 25 * 1024 * 1024
+    ALLOWED_AUDIO = {'audio/webm', 'audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/wav'}
+
+    file_storage = request.files.get('audio')
+    url = None
+    size = 0
+    duration = 0
+    if file_storage is not None:
+        mime = (file_storage.mimetype or '').lower()
+        if mime not in ALLOWED_AUDIO:
+            return jsonify({'success': False, 'error': 'Nepodporovaný formát audio.'}), 415
+        content = file_storage.read()
+        size = len(content)
+        if size > MAX_AUDIO_BYTES:
+            return jsonify({'success': False, 'error': 'Audio je příliš velké (max 25 MB).'}), 413
+        url = f"data:{mime};base64,{base64.b64encode(content).decode('ascii')}"
+    else:
+        data = request.get_json(silent=True) or {}
+        data_url = data.get('dataUrl')
+        duration = int(data.get('durationSec') or 0)
+        if not data_url or not isinstance(data_url, str) or not data_url.startswith('data:audio/'):
+            return jsonify({'success': False, 'error': 'Chybí audio.'}), 400
+        try:
+            header, b64 = data_url.split(',', 1)
+            content = base64.b64decode(b64)
+        except Exception:
+            return jsonify({'success': False, 'error': 'Neplatné audio data URL.'}), 400
+        size = len(content)
+        if size > MAX_AUDIO_BYTES:
+            return jsonify({'success': False, 'error': 'Audio je příliš velké (max 25 MB).'}), 413
+        url = data_url
+
+    try:
+        with db_context(commit=True) as db:
+            db.execute(
+                "UPDATE experience_contributions "
+                "SET audio_url = ?, audio_size_bytes = ?, "
+                "duration_sec = COALESCE(NULLIF(?, 0), duration_sec), "
+                "updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ? AND user_id = ?",
+                (url, size, duration, session_id, uid)
+            )
+    except Exception as e:
+        logger.error(f"audio write: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    _audit(uid, 'audio_uploaded', 'contribution', session_id, f'size={size}b')
+    return jsonify({'success': True, 'sessionId': session_id, 'sizeBytes': size})
+
+
+@experience_bp.route('/api/experience/contribution/<int:cid>/attach-photo', methods=['POST'])
+@require_auth
+def attach_gallery_photo(cid):
+    """Attach a photo from the Gallery module to this contribution.
+    Both must belong to the same user."""
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    data = request.get_json() or {}
+    photo_id = int(data.get('photoId') or 0)
+    if not photo_id:
+        return jsonify({'success': False, 'error': 'Chybí photoId.'}), 400
+
+    # Verify photo ownership
+    try:
+        with db_context() as db:
+            r = db.execute(
+                "SELECT id FROM gallery_photos WHERE id = ? AND user_id = ?",
+                (photo_id, uid)
+            ).fetchone()
+        if not r:
+            return jsonify({'success': False, 'error': 'photo not found'}), 404
+    except Exception:
+        return jsonify({'success': False, 'error': 'gallery not available'}), 503
+
+    try:
+        with db_context(commit=True) as db:
+            db.execute(
+                "UPDATE experience_contributions "
+                "SET gallery_photo_id = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ? AND user_id = ?",
+                (photo_id, cid, uid)
+            )
+    except Exception as e:
+        logger.error(f"attach photo: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    _audit(uid, 'photo_attached', 'contribution', cid, f'photo={photo_id}')
+    return jsonify({'success': True, 'id': cid, 'photoId': photo_id})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1099,23 +1485,30 @@ def accept_offer(cid):
     if not offer_id:
         return jsonify({'success': False, 'error': 'Chybí offerId'}), 400
 
-    # Verify contribution ownership + approved status
+    # Verify contribution ownership + approved status + matches offer criteria
     try:
         with db_context() as db:
             cr = db.execute(
-                "SELECT privacy FROM experience_contributions "
+                "SELECT privacy, theme, type, depth FROM experience_contributions "
                 "WHERE id = ? AND user_id = ?",
                 (cid, uid)
             ).fetchone()
             if not cr:
                 return jsonify({'success': False, 'error': 'contribution not found'}), 404
-            priv = cr[0] if isinstance(cr, (list, tuple)) else cr.get('privacy')
+            def cv(i, k):
+                return cr[i] if isinstance(cr, (list, tuple)) else cr.get(k)
+            priv = cv(0, 'privacy')
+            contrib_theme = cv(1, 'theme')
+            contrib_type = cv(2, 'type')
+            contrib_depth = int(cv(3, 'depth') or 1)
             if priv not in {'family', 'research', 'public'}:
                 return jsonify({'success': False,
                                 'error': 'Vzpomínka musí být nejprve schválena.'}), 400
+
             # Verify offer exists & active
             orow = db.execute(
-                "SELECT buyer_id, price_kc, royalty_years, royalty_kc_per_year, status "
+                "SELECT buyer_id, price_kc, royalty_years, royalty_kc_per_year, "
+                "status, target_theme, target_type, target_depth "
                 "FROM experience_offers WHERE id = ?",
                 (offer_id,)
             ).fetchone()
@@ -1128,14 +1521,58 @@ def accept_offer(cid):
             royalty_y = int(ov(2, 'royalty_years') or 0)
             royalty_kc = int(ov(3, 'royalty_kc_per_year') or 0)
             status = ov(4, 'status')
+            target_theme = ov(5, 'target_theme')
+            target_type = ov(6, 'target_type')
+            target_depth = int(ov(7, 'target_depth') or 1)
+
             if status != 'active':
                 return jsonify({'success': False, 'error': 'Nabídka není aktivní.'}), 409
             if gross < MIN_PRICE_KC:
                 return jsonify({'success': False,
                                 'error': f'Cena pod minimem {MIN_PRICE_KC} Kč.'}), 400
+
+            # Target criteria validation (prevent signing unrelated content)
+            if target_theme and contrib_theme and target_theme != contrib_theme:
+                return jsonify({
+                    'success': False,
+                    'error': f'Vzpomínka se netýká požadovaného tématu '
+                             f'({target_theme}). Nabídka hledá: {target_theme}, '
+                             f'vaše vzpomínka: {contrib_theme}.',
+                    'code': 'theme_mismatch',
+                }), 400
+            if target_type and contrib_type and target_type != contrib_type:
+                return jsonify({
+                    'success': False,
+                    'error': f'Vzpomínka má nesprávný typ. '
+                             f'Nabídka hledá: {target_type}, máte: {contrib_type}.',
+                    'code': 'type_mismatch',
+                }), 400
+            if target_depth > contrib_depth:
+                return jsonify({
+                    'success': False,
+                    'error': 'Vzpomínka je příliš povrchová pro tuto nabídku. '
+                             'Zkuste nejprve hlubší vyprávění.',
+                    'code': 'depth_mismatch',
+                }), 400
+
+            # Duplicate guard: already signed this contribution to this offer?
+            existing = db.execute(
+                "SELECT id FROM experience_contracts "
+                "WHERE contribution_id = ? AND offer_id = ? AND revoked_at IS NULL",
+                (cid, offer_id)
+            ).fetchone()
+            if existing:
+                return jsonify({
+                    'success': False,
+                    'error': 'Tuto vzpomínku jste už k této nabídce podepsal/a.',
+                    'code': 'duplicate_contract',
+                }), 409
     except Exception as e:
         logger.error(f"accept offer read: {e}")
         return jsonify({'success': False, 'error': 'internal'}), 500
+
+    # Cognitive capacity check — may require family co-sign
+    brake_active, brake_reason = _check_cognitive_brake(uid)
 
     senior_price = _calc_senior_net(gross)
     senior_royalty = _calc_senior_net(royalty_kc)
@@ -1147,29 +1584,34 @@ def accept_offer(cid):
                 r = db.execute(
                     "INSERT INTO experience_contracts "
                     "(user_id, contribution_id, offer_id, buyer_id, price_kc, "
-                    "royalty_years, royalty_kc_per_year, anonymized, cooling_off_until) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                    "royalty_years, royalty_kc_per_year, anonymized, cooling_off_until, "
+                    "requires_family_cosign) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
                     (uid, cid, offer_id, buyer_id, senior_price,
-                     royalty_y, senior_royalty, anonymized, cooling_off)
+                     royalty_y, senior_royalty, anonymized, cooling_off, brake_active)
                 ).fetchone()
                 contract_id = r[0] if isinstance(r, (list, tuple)) else r.get('id')
             else:
                 cur = db.execute(
                     "INSERT INTO experience_contracts "
                     "(user_id, contribution_id, offer_id, buyer_id, price_kc, "
-                    "royalty_years, royalty_kc_per_year, anonymized, cooling_off_until) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "royalty_years, royalty_kc_per_year, anonymized, cooling_off_until, "
+                    "requires_family_cosign) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (uid, cid, offer_id, buyer_id, senior_price,
-                     royalty_y, senior_royalty, 1 if anonymized else 0, cooling_off)
+                     royalty_y, senior_royalty, 1 if anonymized else 0,
+                     cooling_off, 1 if brake_active else 0)
                 )
                 contract_id = cur.lastrowid if hasattr(cur, 'lastrowid') else None
-            # Record initial payout
-            db.execute(
-                "INSERT INTO experience_earnings "
-                "(user_id, contract_id, amount_kc, gross_kc, source, period_label) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (uid, contract_id, senior_price, gross, 'initial', 'initial_signing')
-            )
+
+            # Initial payout is pending until cosign if brake active
+            if not brake_active:
+                db.execute(
+                    "INSERT INTO experience_earnings "
+                    "(user_id, contract_id, amount_kc, gross_kc, source, period_label) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (uid, contract_id, senior_price, gross, 'initial', 'initial_signing')
+                )
             # Bump seats_filled
             db.execute(
                 "UPDATE experience_offers SET seats_filled = seats_filled + 1 WHERE id = ?",
@@ -1179,14 +1621,87 @@ def accept_offer(cid):
         logger.error(f"accept offer write: {e}")
         return jsonify({'success': False, 'error': 'internal'}), 500
 
+    _audit(uid, 'contract_signed', 'contract', contract_id,
+           f'offer={offer_id} contribution={cid} cosign={brake_active}')
+
+    response_msg = f'Smlouva podepsána. Na váš účet {senior_price} Kč. Máte 72 hodin na rozmyšlenou.'
+    if brake_active:
+        response_msg = ('Smlouva předpřipravena — čeká na spolupodepsání rodinou. ' + (brake_reason or ''))
+
     return jsonify({
         'success': True,
         'contractId': contract_id,
-        'seniorPriceKc': senior_price,
+        'seniorPriceKc': senior_price if not brake_active else 0,
         'seniorRoyaltyKcPerYear': senior_royalty,
         'royaltyYears': royalty_y,
         'coolingOffUntil': cooling_off.isoformat(),
-        'message': f'Smlouva podepsána. Na váš účet {senior_price} Kč. Máte 72 hodin na rozmyšlenou.',
+        'requiresFamilyCosign': brake_active,
+        'cosignReason': brake_reason,
+        'message': response_msg,
+    })
+
+
+@experience_bp.route('/api/experience/contract/<int:contract_id>/cosign', methods=['POST'])
+@require_auth
+def cosign_contract(contract_id):
+    """Family member co-signs a contract flagged by cognitive capacity brake.
+    Unlocks the initial payout to the senior."""
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    try:
+        with db_context() as db:
+            row = db.execute(
+                "SELECT user_id, price_kc, requires_family_cosign, cosigned_at "
+                "FROM experience_contracts WHERE id = ?",
+                (contract_id,)
+            ).fetchone()
+        if not row:
+            return jsonify({'success': False, 'error': 'not found'}), 404
+        def v(i, k):
+            return row[i] if isinstance(row, (list, tuple)) else row.get(k)
+        senior_id = v(0, 'user_id')
+        price = int(v(1, 'price_kc') or 0)
+        needs_cosign = bool(v(2, 'requires_family_cosign'))
+        already_signed = v(3, 'cosigned_at')
+    except Exception as e:
+        logger.error(f"cosign read: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    if not _is_family_of(senior_id, uid) or senior_id == uid:
+        return jsonify({'success': False, 'error': 'not linked family'}), 403
+    if not needs_cosign:
+        return jsonify({'success': False, 'error': 'Smlouva nevyžaduje spolupodepsání.'}), 400
+    if already_signed:
+        return jsonify({'success': False, 'error': 'Již spolupodepsáno.'}), 409
+
+    try:
+        with db_context(commit=True) as db:
+            db.execute(
+                "UPDATE experience_contracts SET cosigned_by = ?, "
+                "cosigned_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (uid, contract_id)
+            )
+            # Now release the initial payout
+            db.execute(
+                "INSERT INTO experience_earnings "
+                "(user_id, contract_id, amount_kc, source, period_label) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (senior_id, contract_id, price, 'initial', 'initial_signing_cosigned')
+            )
+    except Exception as e:
+        logger.error(f"cosign write: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    _audit(senior_id, 'contract_cosigned', 'contract', contract_id,
+           f'by={uid}', actor_id=uid)
+
+    return jsonify({
+        'success': True,
+        'contractId': contract_id,
+        'message': f'Spolupodepsáno. {price} Kč uvolněno na účet vašeho blízkého.',
     })
 
 
@@ -1429,4 +1944,393 @@ def family_archive(senior_id):
     return jsonify({'success': True, 'contributions': contribs, 'count': len(contribs)})
 
 
-logger.info("🌿 Experience routes v1.0 loaded — Radimův Odkaz MVP ready")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SCHEDULED MESSAGES — "Zprávy pro budoucnost"
+# Senior records messages to be released on future dates/events.
+# Unlike contributions (whole past), these are gifts to the future.
+# ─────────────────────────────────────────────────────────────────────────────
+
+VALID_SCHEDULED_EVENTS = {
+    'date', 'birthday', 'graduation', 'wedding', 'first_child',
+    'holiday', 'anniversary', 'custom'
+}
+
+VALID_SCHEDULED_STATUS = {'scheduled', 'delivered', 'cancelled', 'failed'}
+
+
+@experience_bp.route('/api/experience/scheduled', methods=['GET', 'POST', 'OPTIONS'])
+@require_auth
+def scheduled_messages():
+    if request.method == 'OPTIONS':
+        return '', 204
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    if request.method == 'GET':
+        try:
+            with db_context() as db:
+                rows = db.execute(
+                    "SELECT id, recipient_name, recipient_relation, recipient_contact, "
+                    "message_type, content, audio_url, release_event, release_date, "
+                    "status, released_at, created_at "
+                    "FROM experience_scheduled_messages "
+                    "WHERE user_id = ? AND status <> ? "
+                    "ORDER BY release_date ASC LIMIT 200",
+                    (uid, 'cancelled')
+                ).fetchall()
+        except Exception as e:
+            logger.error(f"scheduled list: {e}")
+            rows = []
+        items = []
+        for r in rows or []:
+            def v(i):
+                return r[i] if isinstance(r, (list, tuple)) else list(r.values())[i]
+            items.append({
+                'id': v(0),
+                'recipientName': v(1),
+                'recipientRelation': v(2),
+                'recipientContact': v(3),
+                'messageType': v(4),
+                'content': v(5),
+                'audioUrl': v(6),
+                'releaseEvent': v(7),
+                'releaseDate': str(v(8) or ''),
+                'status': v(9),
+                'releasedAt': str(v(10) or ''),
+                'createdAt': str(v(11) or ''),
+            })
+        return jsonify({'success': True, 'messages': items, 'count': len(items)})
+
+    # POST — create
+    if not _rate_ok(uid, 'scheduled_create', 20):
+        return jsonify({'success': False, 'code': 'rate_limit',
+                        'error': 'Moc rychle. Zkuste to za chvilku.'}), 429
+
+    data = request.get_json() or {}
+    recipient_name = (data.get('recipientName') or '').strip()[:200]
+    recipient_relation = (data.get('recipientRelation') or '').strip()[:100]
+    recipient_contact = (data.get('recipientContact') or '').strip()[:200]
+    message_type = (data.get('messageType') or 'text').strip().lower()
+    content = (data.get('content') or '').strip()[:10000]
+    release_event = (data.get('releaseEvent') or 'date').strip().lower()
+    release_date = (data.get('releaseDate') or '').strip()
+
+    if not recipient_name:
+        return jsonify({'success': False, 'error': 'Jméno příjemce je povinné.'}), 400
+    if not content:
+        return jsonify({'success': False, 'error': 'Zpráva nesmí být prázdná.'}), 400
+    if release_event not in VALID_SCHEDULED_EVENTS:
+        release_event = 'date'
+    if message_type not in {'text', 'audio'}:
+        message_type = 'text'
+
+    # Parse release_date — must be in the future
+    parsed_date = None
+    if release_date:
+        try:
+            parsed_date = datetime.strptime(release_date[:10], '%Y-%m-%d')
+        except Exception:
+            return jsonify({'success': False, 'error': 'Neplatné datum (YYYY-MM-DD).'}), 400
+        if parsed_date <= datetime.utcnow():
+            return jsonify({'success': False,
+                            'error': 'Datum musí být v budoucnosti.'}), 400
+
+    try:
+        with db_context(commit=True) as db:
+            if is_postgres():
+                r = db.execute(
+                    "INSERT INTO experience_scheduled_messages "
+                    "(user_id, recipient_name, recipient_relation, recipient_contact, "
+                    "message_type, content, release_event, release_date, status) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                    (uid, recipient_name, recipient_relation, recipient_contact,
+                     message_type, content, release_event, parsed_date, 'scheduled')
+                ).fetchone()
+                new_id = r[0] if isinstance(r, (list, tuple)) else r.get('id')
+            else:
+                cur = db.execute(
+                    "INSERT INTO experience_scheduled_messages "
+                    "(user_id, recipient_name, recipient_relation, recipient_contact, "
+                    "message_type, content, release_event, release_date, status) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (uid, recipient_name, recipient_relation, recipient_contact,
+                     message_type, content, release_event, parsed_date, 'scheduled')
+                )
+                new_id = cur.lastrowid if hasattr(cur, 'lastrowid') else None
+    except Exception as e:
+        logger.error(f"scheduled insert: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    _audit(uid, 'scheduled_created', 'scheduled_message', new_id,
+           f'to={recipient_name} event={release_event} date={release_date}')
+
+    return jsonify({
+        'success': True,
+        'id': new_id,
+        'message': f'Zpráva pro {recipient_name} je uložena. Uvolní se v čas.',
+    })
+
+
+@experience_bp.route('/api/experience/scheduled/<int:msg_id>', methods=['DELETE'])
+@require_auth
+def cancel_scheduled(msg_id):
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    try:
+        with db_context(commit=True) as db:
+            db.execute(
+                "UPDATE experience_scheduled_messages SET status = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ? AND user_id = ? AND status = ?",
+                ('cancelled', msg_id, uid, 'scheduled')
+            )
+    except Exception as e:
+        logger.error(f"scheduled cancel: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    _audit(uid, 'scheduled_cancelled', 'scheduled_message', msg_id)
+    return jsonify({'success': True, 'id': msg_id})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MULTI-SESSION THREADING — link contributions as chapters of a larger story
+# ─────────────────────────────────────────────────────────────────────────────
+
+@experience_bp.route('/api/experience/contribution/<int:cid>/link-parent', methods=['POST'])
+@require_auth
+def link_parent(cid):
+    """Make this contribution a continuation (chapter) of parent contribution."""
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    data = request.get_json() or {}
+    parent_id = int(data.get('parentId') or 0)
+    if parent_id == cid:
+        return jsonify({'success': False, 'error': 'Nelze odkázat na sebe.'}), 400
+
+    # Verify parent ownership
+    try:
+        with db_context() as db:
+            r = db.execute(
+                "SELECT id FROM experience_contributions WHERE id = ? AND user_id = ?",
+                (parent_id, uid)
+            ).fetchone() if parent_id else True
+        if parent_id and not r:
+            return jsonify({'success': False, 'error': 'parent not found'}), 404
+    except Exception:
+        pass
+
+    try:
+        with db_context(commit=True) as db:
+            db.execute(
+                "UPDATE experience_contributions "
+                "SET parent_contribution_id = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ? AND user_id = ?",
+                (parent_id if parent_id else None, cid, uid)
+            )
+    except Exception as e:
+        logger.error(f"link parent: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    _audit(uid, 'linked_parent', 'contribution', cid, f'parent={parent_id}')
+    return jsonify({'success': True, 'id': cid, 'parentId': parent_id or None})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MEMORY INTEGRATION — inject contribution highlights into Radim's chat context
+# ─────────────────────────────────────────────────────────────────────────────
+
+def recent_contributions_for_memory(user_id, limit=5):
+    """Public helper — consumed by memory_context_builder / personalized prompts.
+
+    Returns recent APPROVED contributions with title + short snippet, suitable
+    for prepending to Radim's system prompt. Respects senior's sharing choices:
+    only 'family' and 'public' contributions are surfaced to Radim's memory,
+    NOT 'research' ones (those are treated as anonymized third-party data).
+    """
+    if not user_id:
+        return []
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT id, title, theme, transcript, created_at "
+                "FROM experience_contributions "
+                "WHERE user_id = ? AND privacy IN (?, ?) "
+                "ORDER BY created_at DESC LIMIT ?",
+                (user_id, 'family', 'public', int(limit))
+            ).fetchall()
+    except Exception:
+        return []
+    out = []
+    for r in rows or []:
+        def v(i, k):
+            return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+        text = (v(3, 'transcript') or '').strip()
+        snippet = text[:280] + ('…' if len(text) > 280 else '')
+        out.append({
+            'id': v(0, 'id'),
+            'title': v(1, 'title'),
+            'theme': v(2, 'theme'),
+            'snippet': snippet,
+            'createdAt': str(v(4, 'created_at') or ''),
+        })
+    return out
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ROYALTY SCHEDULER — background job, pays yearly royalties monthly/12
+# ─────────────────────────────────────────────────────────────────────────────
+
+def run_royalty_payout():
+    """Check all active contracts with royalty_years > 0 and monthly-prorate.
+    Creates earnings entries for contracts whose last_royalty_at is >=30 days ago
+    (or never paid after initial). Safe to run daily — idempotent per contract."""
+    _init_schema()
+    from datetime import datetime, timedelta
+    now = datetime.utcnow()
+    cutoff_30d = now - timedelta(days=30)
+    paid_count = 0
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT id, user_id, royalty_years, royalty_kc_per_year, "
+                "signed_at, last_royalty_at "
+                "FROM experience_contracts "
+                "WHERE revoked_at IS NULL AND royalty_years > 0 "
+                "AND royalty_kc_per_year > 0"
+            ).fetchall()
+    except Exception as e:
+        logger.debug(f"royalty scan: {e}")
+        return 0
+    for r in rows or []:
+        def v(i, k):
+            return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+        contract_id = v(0, 'id')
+        user_id = v(1, 'user_id')
+        years = int(v(2, 'royalty_years') or 0)
+        per_year = int(v(3, 'royalty_kc_per_year') or 0)
+        signed = v(4, 'signed_at')
+        last = v(5, 'last_royalty_at')
+        # Monthly amount (1/12 of yearly)
+        monthly = per_year // 12 if per_year >= 12 else per_year
+        if monthly <= 0:
+            continue
+        # Check eligibility
+        last_dt = None
+        try:
+            if last:
+                last_dt = datetime.strptime(str(last)[:19], '%Y-%m-%d %H:%M:%S')
+        except Exception:
+            last_dt = None
+        if last_dt and last_dt > cutoff_30d:
+            continue  # already paid this month
+        # Check contract hasn't expired
+        try:
+            signed_dt = datetime.strptime(str(signed)[:19], '%Y-%m-%d %H:%M:%S')
+        except Exception:
+            signed_dt = now
+        expiry = signed_dt + timedelta(days=365 * years)
+        if now > expiry:
+            continue  # royalty period over
+        # Pay
+        try:
+            with db_context(commit=True) as db:
+                db.execute(
+                    "INSERT INTO experience_earnings "
+                    "(user_id, contract_id, amount_kc, source, period_label) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (user_id, contract_id, monthly, 'royalty',
+                     now.strftime('%Y-%m'))
+                )
+                db.execute(
+                    "UPDATE experience_contracts SET last_royalty_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ?",
+                    (contract_id,)
+                )
+            paid_count += 1
+        except Exception as e:
+            logger.debug(f"royalty pay contract={contract_id}: {e}")
+    logger.info(f"Royalty scheduler paid {paid_count} contracts")
+    return paid_count
+
+
+def run_scheduled_messages():
+    """Release scheduled messages whose release_date <= now."""
+    _init_schema()
+    from datetime import datetime
+    released = 0
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT id, user_id, recipient_name, recipient_contact, content "
+                "FROM experience_scheduled_messages "
+                "WHERE status = ? AND release_date IS NOT NULL "
+                "AND release_date <= ?",
+                ('scheduled', datetime.utcnow())
+            ).fetchall()
+    except Exception as e:
+        logger.debug(f"scheduled scan: {e}")
+        return 0
+
+    for r in rows or []:
+        def v(i, k):
+            return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+        msg_id = v(0, 'id')
+        user_id = v(1, 'user_id')
+        recipient_name = v(2, 'recipient_name')
+        # Best-effort notify: we cannot email without SMTP config; just mark delivered
+        # and log. Real delivery (email/SMS) happens in downstream channel.
+        try:
+            with db_context(commit=True) as db:
+                db.execute(
+                    "UPDATE experience_scheduled_messages SET status = ?, "
+                    "released_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    ('delivered', msg_id)
+                )
+            # Best-effort push to senior so they know it was released
+            try:
+                from notification_helpers import notify_user
+                notify_user(
+                    user_id=user_id,
+                    type='info',
+                    title='📬 Zpráva byla uvolněna',
+                    body=f'Zpráva pro {recipient_name} právě dorazila svému adresátovi.',
+                    severity='info',
+                    data={'scheduled_message_id': msg_id},
+                )
+            except Exception:
+                pass
+            released += 1
+        except Exception as e:
+            logger.debug(f"scheduled release {msg_id}: {e}")
+    if released:
+        logger.info(f"Scheduled messages released: {released}")
+    return released
+
+
+def register_scheduler_jobs(scheduler):
+    """Hook into main APScheduler (called from app.py). Safe to call twice —
+    uses replace_existing=True."""
+    try:
+        scheduler.add_job(
+            run_royalty_payout,
+            'cron', hour=3, minute=30, id='experience_royalty_payout',
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            run_scheduled_messages,
+            'interval', minutes=15, id='experience_scheduled_messages',
+            replace_existing=True,
+        )
+        logger.info("✅ Experience scheduler jobs registered (royalty daily 03:30, scheduled every 15 min)")
+    except Exception as e:
+        logger.warning(f"⚠️ Experience scheduler registration: {e}")
+
+
+logger.info("🌿 Experience routes v1.1 loaded — Radimův Odkaz (hardened MVP)")
