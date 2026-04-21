@@ -2314,6 +2314,497 @@ def run_scheduled_messages():
     return released
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# DIGNITY LOCK — gentle defer when senior appears distressed
+# ─────────────────────────────────────────────────────────────────────────────
+
+@experience_bp.route('/api/experience/dignity-check', methods=['GET', 'OPTIONS'])
+@require_auth
+def dignity_check():
+    """Check if senior should be gently deferred from session right now.
+    Uses last 2 hours of brain_states.C — if C avg < 0.32, suggest waiting."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    try:
+        with db_context() as db:
+            row = db.execute(
+                "SELECT AVG(C), COUNT(*) FROM brain_states "
+                "WHERE user_id = ? AND C IS NOT NULL "
+                "AND created_at >= ?",
+                (uid, datetime.utcnow() - timedelta(hours=2))
+            ).fetchone()
+    except Exception:
+        row = None
+
+    defer = False
+    reason = None
+    c_avg = None
+    if row:
+        def v(i):
+            return row[i] if isinstance(row, (list, tuple)) else list(row.values())[i]
+        try:
+            c_avg = float(v(0) or 0.5)
+        except Exception:
+            c_avg = 0.5
+        samples = int(v(1) or 0)
+        if samples >= 3 and c_avg < 0.32:
+            defer = True
+            reason = ('Cítím, že vám dnes není dobře. '
+                      'Vzpomínky počkají. Až budete chtít, vrátíme se k tomu.')
+
+    return jsonify({
+        'success': True,
+        'defer': defer,
+        'reason': reason,
+        'cAvg': c_avg,
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RESTORE (undo forget) — 72h safety net on deleted contributions
+# ─────────────────────────────────────────────────────────────────────────────
+
+@experience_bp.route('/api/experience/contribution/<int:cid>/restore', methods=['POST'])
+@require_auth
+def restore_contribution(cid):
+    """Restore a soft-deleted contribution within 72h window.
+    privacy='deleted' → 'family' (safest default)."""
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    try:
+        with db_context() as db:
+            r = db.execute(
+                "SELECT privacy, updated_at FROM experience_contributions "
+                "WHERE id = ? AND user_id = ?",
+                (cid, uid)
+            ).fetchone()
+        if not r:
+            return jsonify({'success': False, 'error': 'not found'}), 404
+        def v(i, k):
+            return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+        if v(0, 'privacy') != 'deleted':
+            return jsonify({'success': False, 'error': 'Vzpomínka není smazaná.'}), 409
+        # 72h window check
+        try:
+            updated_str = str(v(1, 'updated_at') or '')[:19]
+            updated = datetime.strptime(updated_str, '%Y-%m-%d %H:%M:%S')
+            if datetime.utcnow() - updated > timedelta(hours=72):
+                return jsonify({'success': False,
+                                'error': 'Uplynulo 72 hodin — vzpomínku už nelze vrátit.',
+                                'code': 'window_expired'}), 410
+        except Exception:
+            pass
+    except Exception as e:
+        logger.error(f"restore read: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    try:
+        with db_context(commit=True) as db:
+            db.execute(
+                "UPDATE experience_contributions "
+                "SET privacy = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ? AND user_id = ?",
+                ('family', cid, uid)
+            )
+    except Exception as e:
+        logger.error(f"restore write: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    _audit(uid, 'restored', 'contribution', cid)
+    return jsonify({'success': True, 'id': cid,
+                    'message': 'Vzpomínka vrácena. Zařadil jsem ji zpět k vašim.'})
+
+
+@experience_bp.route('/api/experience/trash', methods=['GET'])
+@require_auth
+def list_trash():
+    """Recent deletions within 72h window — recoverable."""
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    cutoff = datetime.utcnow() - timedelta(hours=72)
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                f"SELECT {_SELECT_CONTRIB} FROM experience_contributions "
+                "WHERE user_id = ? AND privacy = ? AND updated_at >= ? "
+                "ORDER BY updated_at DESC LIMIT 50",
+                (uid, 'deleted', cutoff)
+            ).fetchall()
+    except Exception:
+        rows = []
+    items = [_contrib_row(r) for r in rows or []]
+    return jsonify({'success': True, 'items': items, 'count': len(items)})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AUDIT LOG VIEW (senior sees who accessed what — GDPR čl. 15)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@experience_bp.route('/api/experience/audit-log', methods=['GET'])
+@require_auth
+def view_audit_log():
+    """Senior's GDPR audit log — last 100 events on their data."""
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT id, actor_id, action, target_type, target_id, "
+                "detail, ip_address, created_at "
+                "FROM experience_audit_log WHERE user_id = ? "
+                "ORDER BY created_at DESC LIMIT 100",
+                (uid,)
+            ).fetchall()
+    except Exception:
+        rows = []
+    out = []
+    for r in rows or []:
+        def v(i):
+            return r[i] if isinstance(r, (list, tuple)) else list(r.values())[i]
+        out.append({
+            'id': v(0),
+            'actorId': v(1),
+            'actorIsSelf': v(1) == uid,
+            'action': v(2),
+            'targetType': v(3),
+            'targetId': v(4),
+            'detail': v(5),
+            'createdAt': str(v(7) or ''),
+        })
+    return jsonify({'success': True, 'entries': out, 'count': len(out)})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COSIGN QUEUE (family view)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@experience_bp.route('/api/experience/cosign-queue/<senior_id>', methods=['GET'])
+@require_auth
+def cosign_queue(senior_id):
+    """List contracts flagged for family co-sign — family view."""
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    if not _is_family_of(senior_id, uid) or senior_id == uid:
+        return jsonify({'success': False, 'error': 'not linked'}), 403
+
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT c.id, c.price_kc, c.signed_at, c.cooling_off_until, "
+                "c.cosigned_at, o.title, b.name "
+                "FROM experience_contracts c "
+                "LEFT JOIN experience_offers o ON o.id = c.offer_id "
+                "LEFT JOIN experience_buyers b ON b.id = c.buyer_id "
+                "WHERE c.user_id = ? AND c.requires_family_cosign = ? "
+                "AND c.revoked_at IS NULL "
+                "ORDER BY c.signed_at DESC LIMIT 50",
+                (senior_id, True if is_postgres() else 1)
+            ).fetchall()
+    except Exception:
+        rows = []
+    items = []
+    for r in rows or []:
+        def v(i):
+            return r[i] if isinstance(r, (list, tuple)) else list(r.values())[i]
+        items.append({
+            'id': v(0),
+            'priceKc': v(1),
+            'signedAt': str(v(2) or ''),
+            'coolingOffUntil': str(v(3) or ''),
+            'cosignedAt': str(v(4) or ''),
+            'offerTitle': v(5),
+            'buyerName': v(6),
+            'pending': not v(4),
+        })
+    return jsonify({'success': True, 'contracts': items,
+                    'pendingCount': sum(1 for x in items if x['pending'])})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INTELLIGENT NEXT-STEP SUGGESTIONS (Gemini-based)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@experience_bp.route('/api/experience/suggest-next', methods=['GET'])
+@require_auth
+def suggest_next():
+    """Radim suggests next meaningful step based on recent history.
+    Heuristic + optional Gemini enrichment."""
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    # Fetch recent approved contributions
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT title, theme, depth, created_at FROM experience_contributions "
+                "WHERE user_id = ? AND privacy IN (?, ?, ?) "
+                "ORDER BY created_at DESC LIMIT 10",
+                (uid, 'family', 'research', 'public')
+            ).fetchall()
+    except Exception:
+        rows = []
+
+    # Theme counting
+    theme_counts = defaultdict(int)
+    latest_theme = None
+    latest_title = None
+    for r in rows or []:
+        def v(i):
+            return r[i] if isinstance(r, (list, tuple)) else list(r.values())[i]
+        theme_counts[v(1)] += 1
+        if not latest_theme:
+            latest_theme = v(1)
+            latest_title = v(0)
+
+    # Build suggestion
+    if not rows:
+        return jsonify({
+            'success': True,
+            'suggestion': {
+                'kind': 'first',
+                'prompt': 'Rád bych vás slyšel. Začneme rodinnou vzpomínkou?',
+                'theme': 'family',
+                'depth': 1,
+            },
+        })
+
+    # If 3+ in one theme, suggest different theme
+    used_themes = sorted(theme_counts.items(), key=lambda x: -x[1])
+    dominant = used_themes[0][0] if used_themes else 'family'
+    if theme_counts[dominant] >= 3:
+        alternatives = [t for t in ['family', 'historical', 'skill', 'wisdom', 'witness']
+                        if t != dominant and theme_counts.get(t, 0) < 2]
+        if alternatives:
+            target = alternatives[0]
+            prompts = RADIM_PROMPTS.get(target, {}).get(1, [])
+            suggestion_text = (
+                f'Mnoho jste mi dala o rodině. Chcete zkusit něco jiného? '
+                f'Mám pro vás otázku.'
+            )
+            return jsonify({
+                'success': True,
+                'suggestion': {
+                    'kind': 'new_theme',
+                    'prompt': suggestion_text,
+                    'theme': target,
+                    'depth': 1,
+                    'alternativeQuestion': prompts[0] if prompts else None,
+                },
+            })
+
+    # If 3+ in one theme AT depth 1, offer depth 2
+    if theme_counts[latest_theme] >= 2:
+        prompts_d2 = RADIM_PROMPTS.get(latest_theme, {}).get(2, [])
+        if prompts_d2:
+            return jsonify({
+                'success': True,
+                'suggestion': {
+                    'kind': 'deeper',
+                    'prompt': (f'Známe se dost. Chcete jít hlouběji '
+                               f'v tématu {latest_theme}?'),
+                    'theme': latest_theme,
+                    'depth': 2,
+                    'alternativeQuestion': prompts_d2[0],
+                },
+            })
+
+    # Default — continuation in same theme, same depth
+    prompts = RADIM_PROMPTS.get(latest_theme, {}).get(1, [])
+    return jsonify({
+        'success': True,
+        'suggestion': {
+            'kind': 'continue',
+            'prompt': f'Minule jste mluvila o „{latest_title}". Pokračujeme?',
+            'theme': latest_theme,
+            'depth': 1,
+            'alternativeQuestion': prompts[0] if prompts else None,
+        },
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GDPR — Article 20 (portability) + Article 17 (erasure)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@experience_bp.route('/api/experience/export-all', methods=['GET'])
+@require_auth
+def export_all():
+    """GDPR Article 20 — machine-readable export of ALL senior's data in module."""
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    bundle = {
+        'exportedAt': datetime.utcnow().isoformat() + 'Z',
+        'userId': uid,
+        'schemaVersion': '1.1',
+    }
+
+    try:
+        with db_context() as db:
+            # Contributions
+            rows = db.execute(
+                f"SELECT {_SELECT_CONTRIB} FROM experience_contributions "
+                "WHERE user_id = ? ORDER BY created_at ASC",
+                (uid,)
+            ).fetchall()
+            bundle['contributions'] = [_contrib_row(r) for r in rows or []]
+            # Contracts
+            rows = db.execute(
+                "SELECT id, contribution_id, offer_id, buyer_id, price_kc, "
+                "royalty_years, royalty_kc_per_year, anonymized, "
+                "signed_at, revoked_at, cosigned_by, cosigned_at "
+                "FROM experience_contracts WHERE user_id = ? "
+                "ORDER BY signed_at ASC",
+                (uid,)
+            ).fetchall()
+            bundle['contracts'] = []
+            for r in rows or []:
+                def v(i):
+                    return r[i] if isinstance(r, (list, tuple)) else list(r.values())[i]
+                bundle['contracts'].append({
+                    'id': v(0), 'contributionId': v(1), 'offerId': v(2),
+                    'buyerId': v(3), 'priceKc': v(4),
+                    'royaltyYears': v(5), 'royaltyKcPerYear': v(6),
+                    'anonymized': bool(v(7)),
+                    'signedAt': str(v(8) or ''),
+                    'revokedAt': str(v(9) or ''),
+                    'cosignedBy': v(10), 'cosignedAt': str(v(11) or ''),
+                })
+            # Earnings
+            rows = db.execute(
+                "SELECT id, contract_id, amount_kc, gross_kc, source, "
+                "period_label, paid_at, created_at "
+                "FROM experience_earnings WHERE user_id = ? ORDER BY created_at ASC",
+                (uid,)
+            ).fetchall()
+            bundle['earnings'] = []
+            for r in rows or []:
+                def v(i):
+                    return r[i] if isinstance(r, (list, tuple)) else list(r.values())[i]
+                bundle['earnings'].append({
+                    'id': v(0), 'contractId': v(1), 'amountKc': v(2),
+                    'grossKc': v(3), 'source': v(4),
+                    'periodLabel': v(5), 'paidAt': str(v(6) or ''),
+                    'createdAt': str(v(7) or ''),
+                })
+            # Inheritance
+            r = db.execute(
+                "SELECT heir_name, heir_relation, heir_contact, "
+                "heir_contact_verified, royalty_years_after_death, "
+                "unlock_family_archive, public_memorial "
+                "FROM experience_inheritance WHERE user_id = ?",
+                (uid,)
+            ).fetchone()
+            if r:
+                def v(i, k):
+                    return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+                bundle['inheritance'] = {
+                    'heirName': v(0, 'heir_name'),
+                    'heirRelation': v(1, 'heir_relation'),
+                    'heirContact': v(2, 'heir_contact'),
+                    'heirContactVerified': bool(v(3, 'heir_contact_verified')),
+                    'royaltyYearsAfterDeath': v(4, 'royalty_years_after_death'),
+                    'unlockFamilyArchive': bool(v(5, 'unlock_family_archive')),
+                    'publicMemorial': bool(v(6, 'public_memorial')),
+                }
+            # Scheduled
+            rows = db.execute(
+                "SELECT id, recipient_name, recipient_relation, "
+                "message_type, content, release_event, release_date, "
+                "status, released_at, created_at "
+                "FROM experience_scheduled_messages WHERE user_id = ? "
+                "ORDER BY release_date ASC",
+                (uid,)
+            ).fetchall()
+            bundle['scheduledMessages'] = []
+            for r in rows or []:
+                def v(i):
+                    return r[i] if isinstance(r, (list, tuple)) else list(r.values())[i]
+                bundle['scheduledMessages'].append({
+                    'id': v(0), 'recipientName': v(1), 'recipientRelation': v(2),
+                    'messageType': v(3), 'content': v(4),
+                    'releaseEvent': v(5), 'releaseDate': str(v(6) or ''),
+                    'status': v(7), 'releasedAt': str(v(8) or ''),
+                    'createdAt': str(v(9) or ''),
+                })
+    except Exception as e:
+        logger.error(f"export-all: {e}")
+
+    _audit(uid, 'gdpr_export', 'all', None, 'Article 20 — data portability')
+    return jsonify({'success': True, 'export': bundle})
+
+
+@experience_bp.route('/api/experience/erase-all', methods=['POST'])
+@require_auth
+def erase_all():
+    """GDPR Article 17 — right to erasure. Requires explicit confirmation token.
+    Soft-deletes contributions, revokes contracts, clears inheritance+scheduled.
+    Audit log is preserved as legal record.
+    """
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    data = request.get_json() or {}
+    confirm = (data.get('confirm') or '').strip().upper()
+    if confirm != 'SMAZAT VSE':
+        return jsonify({
+            'success': False,
+            'error': 'Pro úplné smazání zadejte potvrzovací text "SMAZAT VSE".',
+            'code': 'confirmation_required',
+        }), 400
+
+    try:
+        with db_context(commit=True) as db:
+            db.execute(
+                "UPDATE experience_contributions SET privacy = ?, "
+                "updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND privacy <> ?",
+                ('deleted', uid, 'deleted')
+            )
+            db.execute(
+                "UPDATE experience_contracts SET revoked_at = CURRENT_TIMESTAMP "
+                "WHERE user_id = ? AND revoked_at IS NULL",
+                (uid,)
+            )
+            db.execute(
+                "DELETE FROM experience_inheritance WHERE user_id = ?",
+                (uid,)
+            )
+            db.execute(
+                "UPDATE experience_scheduled_messages SET status = ? "
+                "WHERE user_id = ? AND status = ?",
+                ('cancelled', uid, 'scheduled')
+            )
+    except Exception as e:
+        logger.error(f"erase-all: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    _audit(uid, 'gdpr_erasure', 'all', None, 'Article 17 — right to erasure')
+    return jsonify({
+        'success': True,
+        'message': 'Vaše údaje byly smazány. Auditní záznam zůstal jako právní doklad.',
+    })
+
+
 def register_scheduler_jobs(scheduler):
     """Hook into main APScheduler (called from app.py). Safe to call twice —
     uses replace_existing=True."""
