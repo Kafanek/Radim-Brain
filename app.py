@@ -630,6 +630,13 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Education progress routes: {e}")
 
+try:
+    from library_progress_routes import library_progress_bp
+    app.register_blueprint(library_progress_bp)
+    logger.info("✅ Library progress routes registered: /api/library/progress|bookmark|favorite|family|continue-reading")
+except Exception as e:
+    logger.warning(f"⚠️ Library progress routes: {e}")
+
 # FHIR Adapter (HL7 FHIR R4 export)
 try:
     from fhir_adapter import fhir_bp
