@@ -401,4 +401,103 @@ def quick_dial():
     return jsonify({'success': True, 'items': items, 'count': len(items)})
 
 
-logger.info("📞 Calls routes v1.0 loaded — safe-to-call + log + end + history + quick-dial")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sprint D — ICE servers + telemetry (stability)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Default ICE configuration:
+#   - Google public STUN (free, always available)
+#   - Cloudflare STUN (secondary)
+#   - Metered OpenRelay TURN (free public, rate-limited — good for MVP)
+#
+# For production, set ENV vars:
+#   TURN_URL       — e.g. turn:turn.radimcare.cz:3478
+#   TURN_USER      — username
+#   TURN_PASSWORD  — password
+#   (or METERED_API_KEY for dynamic TURN creds from metered.ca)
+#
+# Metered.ca free tier: 500 MB/month — enough for ~8 hrs of video.
+# Self-hosted coturn: ~€6/mo on Hetzner CX22 — unlimited.
+
+_DEFAULT_STUN = [
+    'stun:stun.l.google.com:19302',
+    'stun:stun1.l.google.com:19302',
+    'stun:stun.cloudflare.com:3478',
+]
+
+# OpenRelay public TURN — works without signup; rate-limited for abuse
+_OPENRELAY_TURN = [
+    {'urls': 'turn:openrelay.metered.ca:80',
+     'username': 'openrelayproject', 'credential': 'openrelayproject'},
+    {'urls': 'turn:openrelay.metered.ca:443',
+     'username': 'openrelayproject', 'credential': 'openrelayproject'},
+    {'urls': 'turns:openrelay.metered.ca:443?transport=tcp',
+     'username': 'openrelayproject', 'credential': 'openrelayproject'},
+]
+
+
+@calls_bp.route('/api/calls/ice-servers', methods=['GET', 'OPTIONS'])
+@require_auth
+def ice_servers():
+    """Return ICE server list for WebRTC RTCPeerConnection config.
+    STUN + TURN with credentials. TURN from env or fallback to OpenRelay."""
+    import os as _os
+    if request.method == 'OPTIONS':
+        return '', 204
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    servers = [{'urls': s} for s in _DEFAULT_STUN]
+
+    # Priority 1: explicit TURN credentials via env vars
+    turn_url = _os.environ.get('TURN_URL', '').strip()
+    turn_user = _os.environ.get('TURN_USER', '').strip()
+    turn_pwd = _os.environ.get('TURN_PASSWORD', '').strip()
+    if turn_url and turn_user and turn_pwd:
+        servers.append({
+            'urls': turn_url,
+            'username': turn_user,
+            'credential': turn_pwd,
+        })
+        source = 'self-hosted'
+    else:
+        # Priority 2: OpenRelay public TURN (no signup needed)
+        servers.extend(_OPENRELAY_TURN)
+        source = 'openrelay-public'
+
+    return jsonify({
+        'success': True,
+        'iceServers': servers,
+        'iceTransportPolicy': 'all',
+        'source': source,
+    })
+
+
+@calls_bp.route('/api/calls/telemetry', methods=['POST', 'OPTIONS'])
+@require_auth
+def telemetry():
+    """Frontend posts connection quality stats for debugging / aggregate.
+    Not persisted by default — just logs at INFO when quality degrades."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    data = request.get_json() or {}
+    call_id = data.get('callId')
+    quality = (data.get('quality') or 'unknown')[:32]
+    bitrate_kbps = int(data.get('bitrateKbps') or 0)
+    packet_loss = float(data.get('packetLoss') or 0)
+    rtt_ms = int(data.get('rttMs') or 0)
+    event = (data.get('event') or 'sample')[:32]
+
+    if quality in ('poor', 'very_poor', 'lost'):
+        logger.info(f"📹 call-telemetry uid={uid} call={call_id} "
+                    f"quality={quality} br={bitrate_kbps}kbps "
+                    f"loss={packet_loss:.2%} rtt={rtt_ms}ms event={event}")
+    return jsonify({'success': True})
+
+
+logger.info("📞 Calls routes v1.1 loaded — safe-to-call + log + end + history + quick-dial + ice-servers + telemetry")
