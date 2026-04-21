@@ -665,6 +665,13 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Email inbox routes: {e}")
 
+try:
+    from ha_scenes_routes import ha_scenes_bp
+    app.register_blueprint(ha_scenes_bp)
+    logger.info("✅ HA scenes+emergency+family routes registered: /api/ha/scenes|emergency|family/*")
+except Exception as e:
+    logger.warning(f"⚠️ HA scenes routes: {e}")
+
 # FHIR Adapter (HL7 FHIR R4 export)
 try:
     from fhir_adapter import fhir_bp
