@@ -644,6 +644,13 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Internet routes: {e}")
 
+try:
+    from translator_progress_routes import translator_progress_bp
+    app.register_blueprint(translator_progress_bp)
+    logger.info("✅ Translator progress routes registered: /api/translator/history|favorite|favorites|family")
+except Exception as e:
+    logger.warning(f"⚠️ Translator progress routes: {e}")
+
 # FHIR Adapter (HL7 FHIR R4 export)
 try:
     from fhir_adapter import fhir_bp
