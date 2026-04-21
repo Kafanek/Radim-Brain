@@ -945,6 +945,25 @@ try:
     except ImportError:
         logger.warning("⚠️ memory_summarization not available")
 
+    # HA P2 — abnormal night activity detection (every 15 min; self-skips
+    # outside 23:00–05:00) + daily maintenance check at 09:30
+    try:
+        from ha_background_jobs import run_night_activity_check, run_maintenance_check
+        scheduler.add_job(
+            lambda: run_night_activity_check(app), 'interval', minutes=15,
+            id='ha_night_activity', max_instances=1, misfire_grace_time=300
+        )
+        scheduler.add_job(
+            lambda: run_maintenance_check(app), 'cron',
+            hour=9, minute=30, id='ha_maintenance',
+            max_instances=1, misfire_grace_time=1800
+        )
+        logger.info("🏠 HA background jobs registered (night: every 15m, maintenance: daily 09:30)")
+    except ImportError:
+        logger.warning("⚠️ ha_background_jobs not available")
+    except Exception as e:
+        logger.warning(f"⚠️ HA background jobs registration failed: {e}")
+
     # v10.45: Daily proactive recall — hooked into morning checkin time
     # Runs at 08:12 (7 min after morning_checkin so meds prompt goes first)
     try:
