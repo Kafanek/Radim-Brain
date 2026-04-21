@@ -276,4 +276,108 @@ def register_socketio_handlers(socketio, users_online, cleanup_fn):
                 'date': __import__('datetime').datetime.utcnow().isoformat() + 'Z',
             }, room=f'medical_{senior_id}', include_self=True)
 
-    logger.info("✅ SocketIO handlers registered (17 events — incl medical)")
+
+    # ═══════════════════════════════════════════════════════════════════
+    # 📹 NATIVE VIDEO CALL SIGNALING (WebRTC P2P)
+    # No iframe, no Jitsi — direct browser-to-browser media via our signaling.
+    # Every event validated; target user room = their user_id (set via 'join').
+    # ═══════════════════════════════════════════════════════════════════
+
+    def _caller_uid():
+        """Best-effort lookup of caller's user_id from sid in _users_online."""
+        for uid, sid in _users_online.items():
+            if sid == request.sid:
+                return uid
+        return None
+
+    @socketio.on('webrtc:invite')
+    def handle_webrtc_invite(data):
+        """Caller invites target to a 1-on-1 video call.
+        data: { to: <user_id>, callType: 'video'|'audio', callerName }
+        Forwards 'webrtc:incoming' to target's user room."""
+        caller_uid = _caller_uid()
+        target_uid = str(data.get('to') or '')
+        if not caller_uid or not target_uid:
+            return
+        payload = {
+            'from': caller_uid,
+            'callerName': str(data.get('callerName') or 'Někdo')[:80],
+            'callType': 'audio' if data.get('callType') == 'audio' else 'video',
+            'roomCode': str(data.get('roomCode') or ''),
+        }
+        socketio.emit('webrtc:incoming', payload, room=target_uid)
+
+    @socketio.on('webrtc:accept')
+    def handle_webrtc_accept(data):
+        """Target accepts the call.
+        data: { to: <caller_user_id>, roomCode }
+        Forwards 'webrtc:accepted' back to caller so they can start offer."""
+        callee_uid = _caller_uid()
+        caller_uid = str(data.get('to') or '')
+        if not callee_uid or not caller_uid:
+            return
+        socketio.emit('webrtc:accepted', {
+            'from': callee_uid,
+            'roomCode': str(data.get('roomCode') or ''),
+        }, room=caller_uid)
+
+    @socketio.on('webrtc:reject')
+    def handle_webrtc_reject(data):
+        """Target rejects. Forwards 'webrtc:rejected' to caller."""
+        callee_uid = _caller_uid()
+        caller_uid = str(data.get('to') or '')
+        if not callee_uid or not caller_uid:
+            return
+        socketio.emit('webrtc:rejected', {
+            'from': callee_uid,
+            'reason': str(data.get('reason') or 'rejected')[:40],
+        }, room=caller_uid)
+
+    @socketio.on('webrtc:offer')
+    def handle_webrtc_offer(data):
+        """SDP offer from caller to target. Opaque pass-through."""
+        sender_uid = _caller_uid()
+        target_uid = str(data.get('to') or '')
+        if not sender_uid or not target_uid:
+            return
+        socketio.emit('webrtc:offer', {
+            'from': sender_uid,
+            'sdp': data.get('sdp'),
+        }, room=target_uid)
+
+    @socketio.on('webrtc:answer')
+    def handle_webrtc_answer(data):
+        """SDP answer back to caller. Opaque pass-through."""
+        sender_uid = _caller_uid()
+        target_uid = str(data.get('to') or '')
+        if not sender_uid or not target_uid:
+            return
+        socketio.emit('webrtc:answer', {
+            'from': sender_uid,
+            'sdp': data.get('sdp'),
+        }, room=target_uid)
+
+    @socketio.on('webrtc:ice')
+    def handle_webrtc_ice(data):
+        """Exchange ICE candidates. Opaque pass-through."""
+        sender_uid = _caller_uid()
+        target_uid = str(data.get('to') or '')
+        if not sender_uid or not target_uid:
+            return
+        socketio.emit('webrtc:ice', {
+            'from': sender_uid,
+            'candidate': data.get('candidate'),
+        }, room=target_uid)
+
+    @socketio.on('webrtc:hangup')
+    def handle_webrtc_hangup(data):
+        """Either side hangs up."""
+        sender_uid = _caller_uid()
+        target_uid = str(data.get('to') or '')
+        if not sender_uid or not target_uid:
+            return
+        socketio.emit('webrtc:hangup', {
+            'from': sender_uid,
+        }, room=target_uid)
+
+    logger.info("✅ SocketIO handlers registered (24 events — incl medical + WebRTC P2P signaling)")
