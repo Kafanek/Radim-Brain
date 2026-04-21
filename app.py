@@ -651,6 +651,20 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Translator progress routes: {e}")
 
+try:
+    from email_security_routes import email_security_bp
+    app.register_blueprint(email_security_bp)
+    logger.info("✅ Email security routes registered: /api/email/scan|flag-family|block|blocklist")
+except Exception as e:
+    logger.warning(f"⚠️ Email security routes: {e}")
+
+try:
+    from email_inbox_routes import email_inbox_bp
+    app.register_blueprint(email_inbox_bp)
+    logger.info("✅ Email inbox routes registered: /api/email/account|inbox|message|mark-read")
+except Exception as e:
+    logger.warning(f"⚠️ Email inbox routes: {e}")
+
 # FHIR Adapter (HL7 FHIR R4 export)
 try:
     from fhir_adapter import fhir_bp
