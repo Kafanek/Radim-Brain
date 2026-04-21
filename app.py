@@ -638,6 +638,13 @@ except Exception as e:
     logger.warning(f"⚠️ Growth routes: {e}")
 
 try:
+    from experience_routes import experience_bp
+    app.register_blueprint(experience_bp)
+    logger.info("✅ Experience routes registered: /api/experience/* — Radimův Odkaz")
+except Exception as e:
+    logger.warning(f"⚠️ Experience routes: {e}")
+
+try:
     from education_progress_routes import education_progress_bp
     app.register_blueprint(education_progress_bp)
     logger.info("✅ Education progress routes registered: /api/education/progress|stats|quiz-result|family|certificate")
