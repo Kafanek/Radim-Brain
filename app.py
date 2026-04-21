@@ -637,6 +637,13 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Library progress routes: {e}")
 
+try:
+    from internet_routes import internet_bp
+    app.register_blueprint(internet_bp)
+    logger.info("✅ Internet routes registered: /api/internet/favorite|favorites|history|search|translate|family")
+except Exception as e:
+    logger.warning(f"⚠️ Internet routes: {e}")
+
 # FHIR Adapter (HL7 FHIR R4 export)
 try:
     from fhir_adapter import fhir_bp
