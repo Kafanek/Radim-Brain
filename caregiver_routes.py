@@ -842,9 +842,49 @@ def senior_overview(senior_id):
 # SENIORS LIST (professional or family_multi)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _is_real_senior(user_id):
+    """Heuristic: a 'real senior' has EITHER
+       - role='senior' in users table, OR
+       - an addressee name in their profile (preferred_name), OR
+       - at least 3 real interactions in memory_history
+       This filters test users, admin accounts, and empty placeholder rows.
+    """
+    if not user_id:
+        return False
+    # Role check
+    try:
+        with db_context() as db:
+            r = db.execute(
+                "SELECT role FROM users WHERE id = ?",
+                (user_id,)
+            ).fetchone()
+        if r:
+            role = r[0] if isinstance(r, (list, tuple)) else list(r.values())[0]
+            if role == 'senior':
+                return True
+    except Exception:
+        pass
+    # Name in profile
+    if _addressee_name(user_id):
+        return True
+    # Real interaction count
+    try:
+        with db_context() as db:
+            r = db.execute(
+                "SELECT COUNT(*) FROM memory_history "
+                "WHERE user_id = ? AND role = ?",
+                (user_id, 'user')
+            ).fetchone()
+        cnt = int((r[0] if isinstance(r, (list, tuple)) else list(r.values())[0]) or 0) if r else 0
+        return cnt >= 3
+    except Exception:
+        return False
+
+
 @caregiver_bp.route('/api/caregiver/seniors', methods=['GET'])
 @require_auth
 def caregiver_seniors():
+    _init_schema()
     uid = _uid()
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
@@ -855,13 +895,25 @@ def caregiver_seniors():
     if role in ('caregiver', 'teacher', 'administrator', 'admin'):
         try:
             with db_context() as db:
+                # Preferred: users with role='senior'
                 rows = db.execute(
-                    "SELECT DISTINCT user_id FROM memory_profiles LIMIT 200"
+                    "SELECT id FROM users WHERE role = ? LIMIT 200",
+                    ('senior',)
                 ).fetchall()
-            for r in rows or []:
-                sid = r[0] if isinstance(r, (list, tuple)) else list(r.values())[0]
-                if sid:
-                    senior_ids.append(sid)
+                for r in rows or []:
+                    sid = r[0] if isinstance(r, (list, tuple)) else list(r.values())[0]
+                    if sid:
+                        senior_ids.append(sid)
+
+                # Fallback: from memory_profiles, filtered
+                if not senior_ids:
+                    rows = db.execute(
+                        "SELECT DISTINCT user_id FROM memory_profiles LIMIT 200"
+                    ).fetchall()
+                    for r in rows or []:
+                        sid = r[0] if isinstance(r, (list, tuple)) else list(r.values())[0]
+                        if sid and _is_real_senior(sid):
+                            senior_ids.append(sid)
         except Exception:
             pass
     else:
@@ -870,9 +922,22 @@ def caregiver_seniors():
 
     out = []
     for sid in senior_ids[:50]:
-        name = _addressee_name(sid) or 'Senior'
+        name = _addressee_name(sid)
+        if not name:
+            # Skip seniors without even a name — clearly placeholder/test rows
+            # (except explicit linked family — show them anyway for family view)
+            if role in ('caregiver', 'teacher', 'administrator', 'admin'):
+                continue
+            name = 'Senior'
+
         last_ts, min_ago = _last_interaction(sid)
         c_avg, samples = _recent_c_avg(sid, hours=24)
+
+        # Require some signal: either a name OR recent activity OR samples
+        if not _addressee_name(sid) and min_ago is None and samples == 0:
+            if role in ('caregiver', 'teacher', 'administrator', 'admin'):
+                continue  # professional view hides ghost rows
+
         if c_avg is None:
             mood = 'unknown'
         elif c_avg >= 0.55:
@@ -881,16 +946,18 @@ def caregiver_seniors():
             mood = 'soso'
         else:
             mood = 'heavy'
+
         out.append({
             'seniorId': sid,
             'name': name,
             'minutesSinceLastInteraction': min_ago,
             'mood': mood,
             'cAvg24h': round(c_avg, 3) if c_avg is not None else None,
+            'hasRealData': bool(_addressee_name(sid)) or samples > 0,
         })
 
-    # Sort: heavy mood first (needs attention)
-    mood_rank = {'heavy': 0, 'soso': 1, 'unknown': 2, 'good': 3}
+    # Sort: heavy mood first (needs attention), then by recency
+    mood_rank = {'heavy': 0, 'soso': 1, 'unknown': 3, 'good': 2}
     out.sort(key=lambda s: (mood_rank.get(s['mood'], 5),
                             s['minutesSinceLastInteraction'] or 99999))
 
