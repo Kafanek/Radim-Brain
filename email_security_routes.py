@@ -374,6 +374,27 @@ def flag_family():
     except Exception as e:
         logger.debug(f"flag_family push: {e}")
 
+    # Phase 4 — inject into Radim's long-term memory so the chat bot can
+    # reference this encounter ("včera jste dostal podezřelý email,
+    # už to rodina vyřešila?"). Best-effort.
+    try:
+        from memory_helpers import db_load_learning, db_save_learning
+        learning = db_load_learning(uid) or {}
+        history = learning.get('email_scam_history') or []
+        history.append({
+            'at': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+            'from_email': from_email[:100],
+            'from_name': from_name[:100],
+            'subject': subject[:120],
+            'reasons': (reasons[:4] if isinstance(reasons, list) else [])[:4],
+        })
+        # Keep last 20 to bound memory growth
+        learning['email_scam_history'] = history[-20:]
+        learning['last_email_scam_at'] = history[-1]['at']
+        db_save_learning(uid, learning)
+    except Exception as e:
+        logger.debug(f"flag_family memory injection: {e}")
+
     return jsonify({'success': True, 'notified': notified})
 
 
