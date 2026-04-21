@@ -652,6 +652,13 @@ except Exception as e:
     logger.warning(f"⚠️ Caregiver routes: {e}")
 
 try:
+    from calls_routes import calls_bp
+    app.register_blueprint(calls_bp)
+    logger.info("✅ Calls routes registered: /api/calls/* — log + history + safe-to-call + quick-dial")
+except Exception as e:
+    logger.warning(f"⚠️ Calls routes: {e}")
+
+try:
     from education_progress_routes import education_progress_bp
     app.register_blueprint(education_progress_bp)
     logger.info("✅ Education progress routes registered: /api/education/progress|stats|quiz-result|family|certificate")
