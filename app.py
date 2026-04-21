@@ -631,6 +631,13 @@ except Exception as e:
     logger.warning(f"⚠️ Gallery routes: {e}")
 
 try:
+    from growth_routes import growth_bp
+    app.register_blueprint(growth_bp)
+    logger.info("✅ Growth routes registered: /api/growth/* (relationship|memories|mood|moments|narrative|intents|skillmap)")
+except Exception as e:
+    logger.warning(f"⚠️ Growth routes: {e}")
+
+try:
     from education_progress_routes import education_progress_bp
     app.register_blueprint(education_progress_bp)
     logger.info("✅ Education progress routes registered: /api/education/progress|stats|quiz-result|family|certificate")
