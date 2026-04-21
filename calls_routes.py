@@ -500,4 +500,203 @@ def telemetry():
     return jsonify({'success': True})
 
 
-logger.info("📞 Calls routes v1.1 loaded — safe-to-call + log + end + history + quick-dial + ice-servers + telemetry")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sprint E2 — recording upload + transcript save (persistence)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MAX_RECORDING_BYTES = 50 * 1024 * 1024   # 50 MB (ca. 15-20 min at 300 kbps)
+_MAX_TRANSCRIPT_LEN = 20000               # ~3000 words
+
+
+@calls_bp.route('/api/calls/<int:call_id>/recording', methods=['POST', 'OPTIONS'])
+@require_auth
+def upload_recording(call_id):
+    """Upload recorded call as a contribution in Radimův Odkaz OR as a
+    gallery photo (depending on target).
+
+    Body accepts either:
+      - multipart form with 'recording' file + 'target' ('odkaz'|'gallery')
+      - JSON with 'dataUrl' + 'target'
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    # Verify call ownership
+    try:
+        with db_context() as db:
+            r = db.execute(
+                "SELECT contact_name FROM call_log WHERE id = ? AND user_id = ?",
+                (call_id, uid)
+            ).fetchone()
+        if not r:
+            return jsonify({'success': False, 'error': 'not found'}), 404
+        contact_name = r[0] if isinstance(r, (list, tuple)) else r.get('contact_name')
+    except Exception:
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    target = (request.form.get('target') or
+              (request.get_json(silent=True) or {}).get('target') or 'odkaz').strip().lower()
+
+    # Parse payload
+    file_bytes = None
+    mime = 'video/webm'
+    if 'recording' in request.files:
+        f = request.files['recording']
+        file_bytes = f.read()
+        mime = f.mimetype or 'video/webm'
+    else:
+        data = request.get_json(silent=True) or {}
+        data_url = data.get('dataUrl')
+        if data_url and isinstance(data_url, str) and data_url.startswith('data:'):
+            import base64
+            try:
+                header, b64 = data_url.split(',', 1)
+                mime = header.split(';')[0].replace('data:', '') or 'video/webm'
+                file_bytes = base64.b64decode(b64)
+            except Exception:
+                return jsonify({'success': False, 'error': 'invalid dataUrl'}), 400
+
+    if not file_bytes:
+        return jsonify({'success': False, 'error': 'no recording provided'}), 400
+    if len(file_bytes) > _MAX_RECORDING_BYTES:
+        return jsonify({'success': False,
+                        'error': f'Nahrávka je větší než {_MAX_RECORDING_BYTES // (1024*1024)} MB'}), 413
+
+    # Store as data URL (mirrors gallery pattern). TODO: cloud storage later.
+    import base64 as _b64
+    data_url = f"data:{mime};base64,{_b64.b64encode(file_bytes).decode('ascii')}"
+    size = len(file_bytes)
+
+    new_id = None
+    if target == 'gallery':
+        # Save into gallery_photos as a video item
+        try:
+            with db_context(commit=True) as db:
+                if is_postgres():
+                    row = db.execute(
+                        "INSERT INTO gallery_photos "
+                        "(user_id, url, caption, album, filename, mime, size_bytes, shared_with_family) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                        (uid, data_url, f'Hovor s {contact_name}', 'calls',
+                         f'call-{call_id}.webm', mime, size, False)
+                    ).fetchone()
+                    new_id = row[0] if isinstance(row, (list, tuple)) else row.get('id')
+                else:
+                    cur = db.execute(
+                        "INSERT INTO gallery_photos "
+                        "(user_id, url, caption, album, filename, mime, size_bytes, shared_with_family) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (uid, data_url, f'Hovor s {contact_name}', 'calls',
+                         f'call-{call_id}.webm', mime, size, 0)
+                    )
+                    new_id = cur.lastrowid if hasattr(cur, 'lastrowid') else None
+        except Exception as e:
+            logger.error(f"recording upload gallery: {e}")
+            return jsonify({'success': False, 'error': 'internal'}), 500
+    else:
+        # Save as Radimův Odkaz contribution (draft, senior will approve)
+        try:
+            with db_context(commit=True) as db:
+                title = f'Hovor s {contact_name}'[:200]
+                transcript = f'(Nahrávka hovoru — {size // 1024} kB, {mime})'
+                if is_postgres():
+                    row = db.execute(
+                        "INSERT INTO experience_contributions "
+                        "(user_id, type, title, theme, depth, transcript, "
+                        "audio_url, audio_size_bytes, privacy) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                        (uid, 'witness', title, 'family', 1, transcript,
+                         data_url, size, 'draft')
+                    ).fetchone()
+                    new_id = row[0] if isinstance(row, (list, tuple)) else row.get('id')
+                else:
+                    cur = db.execute(
+                        "INSERT INTO experience_contributions "
+                        "(user_id, type, title, theme, depth, transcript, "
+                        "audio_url, audio_size_bytes, privacy) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (uid, 'witness', title, 'family', 1, transcript,
+                         data_url, size, 'draft')
+                    )
+                    new_id = cur.lastrowid if hasattr(cur, 'lastrowid') else None
+        except Exception as e:
+            logger.error(f"recording upload odkaz: {e}")
+            return jsonify({'success': False, 'error': 'internal'}), 500
+
+    _audit(uid, 'recording_saved', call_id, f'target={target} size={size}')
+    return jsonify({
+        'success': True,
+        'callId': call_id,
+        'target': target,
+        'id': new_id,
+        'sizeBytes': size,
+    })
+
+
+@calls_bp.route('/api/calls/<int:call_id>/transcript', methods=['POST', 'OPTIONS'])
+@require_auth
+def save_transcript(call_id):
+    """Save auto-captured live transcript to user_notes with #call:<name> tag."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    data = request.get_json() or {}
+    text = (data.get('text') or '').strip()[:_MAX_TRANSCRIPT_LEN]
+    if len(text) < 20:
+        return jsonify({'success': False, 'error': 'Přepis je příliš krátký.'}), 400
+
+    # Verify call ownership
+    contact_name = 'Kontakt'
+    try:
+        with db_context() as db:
+            r = db.execute(
+                "SELECT contact_name FROM call_log WHERE id = ? AND user_id = ?",
+                (call_id, uid)
+            ).fetchone()
+        if r:
+            contact_name = r[0] if isinstance(r, (list, tuple)) else r.get('contact_name')
+    except Exception:
+        pass
+
+    tag_safe = ''.join(c for c in (contact_name or '').lower()
+                       if c.isalnum() or c == '_')[:40]
+    note_text = (
+        f'📞 Přepis hovoru s {contact_name}\n\n'
+        f'{text}\n\n'
+        f'#call_{tag_safe} #hovor'
+    )
+
+    try:
+        with db_context(commit=True) as db:
+            if is_postgres():
+                row = db.execute(
+                    "INSERT INTO user_notes "
+                    "(user_id, text, category) VALUES (?, ?, ?) RETURNING id",
+                    (uid, note_text[:10000], 'call')
+                ).fetchone()
+                note_id = row[0] if isinstance(row, (list, tuple)) else row.get('id')
+            else:
+                cur = db.execute(
+                    "INSERT INTO user_notes "
+                    "(user_id, text, category) VALUES (?, ?, ?)",
+                    (uid, note_text[:10000], 'call')
+                )
+                note_id = cur.lastrowid if hasattr(cur, 'lastrowid') else None
+    except Exception as e:
+        logger.error(f"transcript save: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    _audit(uid, 'transcript_saved', call_id, f'note={note_id} chars={len(text)}')
+    return jsonify({'success': True, 'callId': call_id, 'noteId': note_id})
+
+
+logger.info("📞 Calls routes v1.2 loaded — ice-servers + telemetry + recording + transcript")

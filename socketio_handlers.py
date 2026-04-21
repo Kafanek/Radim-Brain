@@ -294,7 +294,11 @@ def register_socketio_handlers(socketio, users_online, cleanup_fn):
     def handle_webrtc_invite(data):
         """Caller invites target to a 1-on-1 video call.
         data: { to: <user_id>, callType: 'video'|'audio', callerName }
-        Forwards 'webrtc:incoming' to target's user room."""
+        Forwards 'webrtc:incoming' to target's user room.
+
+        Sprint E3: if target is OFFLINE (not in _users_online), send push
+        notification so the app wakes up + shows incoming call UI.
+        """
         caller_uid = _caller_uid()
         target_uid = str(data.get('to') or '')
         if not caller_uid or not target_uid:
@@ -306,6 +310,28 @@ def register_socketio_handlers(socketio, users_online, cleanup_fn):
             'roomCode': str(data.get('roomCode') or ''),
         }
         socketio.emit('webrtc:incoming', payload, room=target_uid)
+
+        # Sprint E3: push notification fallback when target offline
+        if target_uid not in _users_online:
+            try:
+                from notification_helpers import notify
+                call_kind = '📹 Video hovor' if payload['callType'] == 'video' else '📞 Hlasový hovor'
+                notify(
+                    to_user_id=target_uid,
+                    type='incoming_call',
+                    title=f"{call_kind} od {payload['callerName']}",
+                    body='Klepněte pro přijetí.',
+                    from_user_id=caller_uid,
+                    severity='alert',
+                    data={
+                        'callerId': caller_uid,
+                        'callerName': payload['callerName'],
+                        'callType': payload['callType'],
+                        'action': 'incoming_call',
+                    },
+                )
+            except Exception as e:
+                logger.debug(f"push notify on webrtc:invite: {e}")
 
     @socketio.on('webrtc:accept')
     def handle_webrtc_accept(data):

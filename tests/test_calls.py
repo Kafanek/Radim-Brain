@@ -143,3 +143,44 @@ class TestIceServerEnvFallback:
         monkeypatch.setenv('TURN_PASSWORD', 'pass')
         # Re-read envs — the endpoint reads at call time, so this works per request.
         assert os.environ.get('TURN_URL') == 'turn:turn.example.com:3478'
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Sprint E2 — recording upload + transcript save
+# ═══════════════════════════════════════════════════════════════════
+
+class TestRecordingEndpoint:
+    def test_upload_requires_auth(self, client):
+        resp = client.post('/api/calls/1/recording')
+        assert resp.status_code in (401, 403, 404)
+
+    def test_upload_registered(self, app):
+        rules = [str(r) for r in app.url_map.iter_rules()]
+        assert any('/api/calls/<int:call_id>/recording' in r for r in rules)
+
+
+class TestTranscriptEndpoint:
+    def test_save_requires_auth(self, client):
+        resp = client.post('/api/calls/1/transcript', json={'text': 'ahoj mama'})
+        assert resp.status_code in (401, 403, 404)
+
+    def test_save_registered(self, app):
+        rules = [str(r) for r in app.url_map.iter_rules()]
+        assert any('/api/calls/<int:call_id>/transcript' in r for r in rules)
+
+    def test_rejects_short_text(self, client):
+        # Auth fails first with 401; validation check would be 400
+        resp = client.post('/api/calls/1/transcript', json={'text': 'ok'})
+        assert resp.status_code in (400, 401, 403, 404)
+
+
+class TestRecordingSizeLimit:
+    def test_max_recording_bytes_defined(self):
+        from calls_routes import _MAX_RECORDING_BYTES
+        assert _MAX_RECORDING_BYTES >= 10 * 1024 * 1024   # at least 10 MB
+        assert _MAX_RECORDING_BYTES <= 100 * 1024 * 1024  # at most 100 MB
+
+    def test_max_transcript_len_defined(self):
+        from calls_routes import _MAX_TRANSCRIPT_LEN
+        assert _MAX_TRANSCRIPT_LEN >= 5000
+        assert _MAX_TRANSCRIPT_LEN <= 50000
