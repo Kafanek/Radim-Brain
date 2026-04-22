@@ -527,6 +527,14 @@ try:
 except Exception as _e:
     logger.warning(f"⚠ ai_assist_routes not loaded: {_e}")
 
+# Sprint P — production hardening (audit log, GDPR export, health stats)
+try:
+    from chat_hardening_routes import chat_hardening_bp
+    app.register_blueprint(chat_hardening_bp)
+    logger.info("✅ Chat hardening routes registered: /api/chat/audit, /export, /health")
+except Exception as _e:
+    logger.warning(f"⚠ chat_hardening_routes not loaded: {_e}")
+
 # Survey Routes (Dotazníky za odměnu)
 try:
     from survey_routes import survey_bp

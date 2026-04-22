@@ -472,6 +472,15 @@ def delete_message(message_id):
             'deletedBy': user_id,
         }, room=conv_id)
 
+        # Sprint P: audit
+        try:
+            from chat_hardening_routes import _log_audit
+            _log_audit(user_id=user_id, action='message_deleted',
+                       target_type='message', target_id=message_id,
+                       metadata={'conversationId': conv_id})
+        except Exception:
+            pass
+
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"delete_message error: {e}")
@@ -506,6 +515,14 @@ def star_message(message_id):
         db.execute('UPDATE chat_messages SET metadata = ? WHERE id = ?',
                    (json.dumps(meta), message_id))
         db.commit()
+        # Sprint P: audit
+        try:
+            from chat_hardening_routes import _log_audit
+            _log_audit(user_id=user_id,
+                       action='message_starred' if starred else 'message_unstarred',
+                       target_type='message', target_id=message_id)
+        except Exception:
+            pass
         return jsonify({'success': True, 'starred': starred, 'starred_by': starred_by})
     except Exception as e:
         logger.error(f"star_message error: {e}")
