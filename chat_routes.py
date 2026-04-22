@@ -426,6 +426,92 @@ def add_reaction(message_id):
         return jsonify({'success': False, 'error': 'Interni chyba serveru'}), 500
 
 
+# v10.99 — Sprint M: delete message (soft-delete = replace with tombstone)
+@chat_bp.route('/api/chat/messages/<message_id>', methods=['DELETE'])
+@optional_auth
+def delete_message(message_id):
+    """Soft-delete: replaces content with tombstone marker, preserves the
+    bubble in chronology. WhatsApp-style "Tato zpráva byla odstraněna"."""
+    try:
+        data = request.get_json() or {}
+        user_id = data.get('userId')
+        if not user_id:
+            return jsonify({'success': False, 'error': 'Chybi userId'}), 400
+
+        # IDOR: only sender can delete their own messages
+        idor = _check_idor(user_id)
+        if idor:
+            return idor
+
+        db = get_db()
+        cursor = db.execute(
+            'SELECT sender_id, conversation_id FROM chat_messages WHERE id = ?',
+            (message_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'success': False, 'error': 'Message not found'}), 404
+        if str(row['sender_id']) != str(user_id):
+            return jsonify({'success': False, 'error': 'Nelze smazat zprávu jiného uživatele'}), 403
+
+        conv_id = row['conversation_id']
+        tombstone_meta = json.dumps({'deleted': True, 'deleted_at': now_iso(),
+                                     'deleted_by': user_id})
+        db.execute('''
+            UPDATE chat_messages
+               SET type = 'system', content = '🗑 Tato zpráva byla odstraněna',
+                   metadata = ?, status = 'deleted'
+             WHERE id = ?
+        ''', (tombstone_meta, message_id))
+        db.commit()
+
+        socketio, *_ = _get_app_helpers()
+        socketio.emit('message_deleted', {
+            'messageId': message_id,
+            'conversationId': conv_id,
+            'deletedBy': user_id,
+        }, room=conv_id)
+
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"delete_message error: {e}")
+        return jsonify({'success': False, 'error': 'Interni chyba serveru'}), 500
+
+
+# v10.99 — Sprint M: star/unstar message (per-user, stored in metadata)
+@chat_bp.route('/api/chat/messages/<message_id>/star', methods=['POST'])
+@optional_auth
+def star_message(message_id):
+    """Toggle a star on a message — per-user list stored in message.metadata.starred_by[]."""
+    try:
+        data = request.get_json() or {}
+        user_id = data.get('userId')
+        if not user_id:
+            return jsonify({'success': False, 'error': 'Chybi userId'}), 400
+
+        db = get_db()
+        cursor = db.execute('SELECT metadata FROM chat_messages WHERE id = ?', (message_id,))
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'success': False, 'error': 'Message not found'}), 404
+        meta = json.loads(row['metadata']) if row['metadata'] else {}
+        starred_by = list(meta.get('starred_by', []))
+        if user_id in starred_by:
+            starred_by.remove(user_id)
+            starred = False
+        else:
+            starred_by.append(user_id)
+            starred = True
+        meta['starred_by'] = starred_by
+        db.execute('UPDATE chat_messages SET metadata = ? WHERE id = ?',
+                   (json.dumps(meta), message_id))
+        db.commit()
+        return jsonify({'success': True, 'starred': starred, 'starred_by': starred_by})
+    except Exception as e:
+        logger.error(f"star_message error: {e}")
+        return jsonify({'success': False, 'error': 'Interni chyba serveru'}), 500
+
+
 # ============================================
 # REST API - CONTACTS
 # ============================================
