@@ -519,6 +519,14 @@ from chat_routes import chat_bp
 app.register_blueprint(chat_bp)
 logger.info("✅ Chat routes registered: /api/chat/*")
 
+# Sprint L — AI assist endpoints (suggest_replies, translate, summarize, extract_event)
+try:
+    from ai_assist_routes import ai_assist_bp
+    app.register_blueprint(ai_assist_bp)
+    logger.info("✅ AI assist routes registered: /api/ai/assist")
+except Exception as _e:
+    logger.warning(f"⚠ ai_assist_routes not loaded: {_e}")
+
 # Survey Routes (Dotazníky za odměnu)
 try:
     from survey_routes import survey_bp
