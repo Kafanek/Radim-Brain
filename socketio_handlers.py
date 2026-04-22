@@ -361,15 +361,19 @@ def register_socketio_handlers(socketio, users_online, cleanup_fn):
 
     @socketio.on('webrtc:offer')
     def handle_webrtc_offer(data):
-        """SDP offer from caller to target. Opaque pass-through."""
+        """SDP offer from caller to target. Opaque pass-through.
+        Sprint H: roomId field preserved for group-call mesh signaling."""
         sender_uid = _caller_uid()
         target_uid = str(data.get('to') or '')
         if not sender_uid or not target_uid:
             return
-        socketio.emit('webrtc:offer', {
+        payload = {
             'from': sender_uid,
             'sdp': data.get('sdp'),
-        }, room=target_uid)
+        }
+        if data.get('roomId'):
+            payload['roomId'] = str(data.get('roomId'))[:64]
+        socketio.emit('webrtc:offer', payload, room=target_uid)
 
     @socketio.on('webrtc:answer')
     def handle_webrtc_answer(data):
@@ -378,10 +382,13 @@ def register_socketio_handlers(socketio, users_online, cleanup_fn):
         target_uid = str(data.get('to') or '')
         if not sender_uid or not target_uid:
             return
-        socketio.emit('webrtc:answer', {
+        payload = {
             'from': sender_uid,
             'sdp': data.get('sdp'),
-        }, room=target_uid)
+        }
+        if data.get('roomId'):
+            payload['roomId'] = str(data.get('roomId'))[:64]
+        socketio.emit('webrtc:answer', payload, room=target_uid)
 
     @socketio.on('webrtc:ice')
     def handle_webrtc_ice(data):
@@ -390,10 +397,13 @@ def register_socketio_handlers(socketio, users_online, cleanup_fn):
         target_uid = str(data.get('to') or '')
         if not sender_uid or not target_uid:
             return
-        socketio.emit('webrtc:ice', {
+        payload = {
             'from': sender_uid,
             'candidate': data.get('candidate'),
-        }, room=target_uid)
+        }
+        if data.get('roomId'):
+            payload['roomId'] = str(data.get('roomId'))[:64]
+        socketio.emit('webrtc:ice', payload, room=target_uid)
 
     @socketio.on('webrtc:hangup')
     def handle_webrtc_hangup(data):
@@ -419,4 +429,112 @@ def register_socketio_handlers(socketio, users_online, cleanup_fn):
             'emoji': emoji,
         }, room=target_uid)
 
-    logger.info("✅ SocketIO handlers registered (25 events — incl medical + WebRTC P2P signaling + reactions)")
+    # ═══════════════════════════════════════════════════════════════════
+    # Sprint H — Group calls (P2P mesh signaling)
+    #   group:invite  → caller invites N targets, each gets group:incoming
+    #   group:accept  → callee joins, existing members get group:member-joined
+    #   group:reject  → callee declined, caller gets group:rejected
+    #   group:leave   → member leaves, others get group:member-left
+    # Up to 6 participants recommended (mesh bandwidth scales ~O(N^2)).
+    # ═══════════════════════════════════════════════════════════════════
+
+    @socketio.on('group:invite')
+    def handle_group_invite(data):
+        """Caller invites multiple users to a group room."""
+        caller_uid = _caller_uid()
+        room_id = str(data.get('roomId') or '')[:64]
+        targets = data.get('targets') or []
+        caller_name = str(data.get('callerName') or 'Někdo')[:80]
+        call_type = 'audio' if data.get('callType') == 'audio' else 'video'
+        if not caller_uid or not room_id or not isinstance(targets, list):
+            return
+        # Cap at 6 to match client mesh limit
+        targets = [str(t) for t in targets if t][:6]
+        if not targets:
+            return
+        try:
+            join_room(room_id)
+        except Exception:
+            pass
+        # Send invite to every target's user room
+        for t in targets:
+            socketio.emit('group:incoming', {
+                'roomId': room_id,
+                'from': caller_uid,
+                'callerName': caller_name,
+                'callType': call_type,
+                'members': [caller_uid],  # only caller present initially
+            }, room=t)
+            # Push fallback if offline (reuse existing push plumbing)
+            if t not in _users_online:
+                try:
+                    from notification_helpers import notify
+                    notify(
+                        to_user_id=t,
+                        type='incoming_call',
+                        title=f'👨‍👩‍👧 Skupinový hovor od {caller_name}',
+                        body='Klepněte pro přijetí.',
+                        from_user_id=caller_uid,
+                        severity='alert',
+                        data={
+                            'callerId': caller_uid,
+                            'callerName': caller_name,
+                            'callType': call_type,
+                            'roomId': room_id,
+                            'action': 'incoming_group_call',
+                        },
+                    )
+                except Exception as e:
+                    logger.debug(f'push notify group:invite: {e}')
+
+    @socketio.on('group:accept')
+    def handle_group_accept(data):
+        """Callee joins the group room — existing members get group:member-joined
+        so each initiates an SDP offer to the newcomer."""
+        callee_uid = _caller_uid()
+        room_id = str(data.get('roomId') or '')[:64]
+        callee_name = str(data.get('senderName') or '')[:80]
+        if not callee_uid or not room_id:
+            return
+        # Tell existing members someone joined (they will send offers TO us)
+        socketio.emit('group:member-joined', {
+            'roomId': room_id,
+            'uid': callee_uid,
+            'name': callee_name,
+        }, room=room_id)
+        # Join AFTER the broadcast so we don't get our own joined event
+        try:
+            join_room(room_id)
+        except Exception:
+            pass
+
+    @socketio.on('group:reject')
+    def handle_group_reject(data):
+        """Callee declines the group invite. Caller notified."""
+        callee_uid = _caller_uid()
+        room_id = str(data.get('roomId') or '')[:64]
+        caller_uid = str(data.get('to') or '')
+        if not callee_uid or not caller_uid:
+            return
+        socketio.emit('group:rejected', {
+            'roomId': room_id,
+            'from': callee_uid,
+        }, room=caller_uid)
+
+    @socketio.on('group:leave')
+    def handle_group_leave(data):
+        """Member leaves the group. Others notified."""
+        member_uid = _caller_uid()
+        room_id = str(data.get('roomId') or '')[:64]
+        if not member_uid or not room_id:
+            return
+        socketio.emit('group:member-left', {
+            'roomId': room_id,
+            'uid': member_uid,
+        }, room=room_id)
+        try:
+            leave_room(room_id)
+        except Exception:
+            pass
+
+    logger.info("✅ SocketIO handlers registered (29 events — WebRTC P2P + group mesh + reactions)")
