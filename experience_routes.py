@@ -904,6 +904,65 @@ def session_start():
     })
 
 
+# Sprint O — quick memory: save a single chat message as draft contribution
+@experience_bp.route('/api/experience/from-message', methods=['POST', 'OPTIONS'])
+@require_auth
+def quick_memory_from_message():
+    """Save a single text snippet (e.g. chat message) as a draft contribution.
+    Body: {text, title?, source: 'chat'|'voice'|...}"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    if _count_active_contributions(uid) >= MAX_CONTRIBUTIONS_PER_SENIOR:
+        return jsonify({'success': False,
+                        'error': f'Máte už {MAX_CONTRIBUTIONS_PER_SENIOR} vzpomínek.',
+                        'code': 'quota'}), 413
+
+    data = request.get_json() or {}
+    text = (data.get('text') or '').strip()
+    if not text:
+        return jsonify({'success': False, 'error': 'Chybí text'}), 400
+    if len(text) > 5000:
+        text = text[:5000]
+    title = (data.get('title') or text.split('.')[0])[:MAX_TITLE_LEN].strip() or 'Vzpomínka'
+    source = (data.get('source') or 'chat').strip()[:30]
+    theme = (data.get('theme') or 'family').strip().lower()
+    if theme not in VALID_THEMES:
+        theme = 'family'
+
+    try:
+        with db_context(commit=True) as db:
+            if is_postgres():
+                r = db.execute(
+                    "INSERT INTO experience_contributions "
+                    "(user_id, type, title, theme, depth, transcript, privacy) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                    (uid, 'story', title, theme, 1, text, 'draft')
+                ).fetchone()
+                new_id = r[0] if isinstance(r, (list, tuple)) else r.get('id')
+            else:
+                cur = db.execute(
+                    "INSERT INTO experience_contributions "
+                    "(user_id, type, title, theme, depth, transcript, privacy) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (uid, 'story', title, theme, 1, text, 'draft')
+                )
+                new_id = cur.lastrowid if hasattr(cur, 'lastrowid') else None
+    except Exception as e:
+        logger.error(f"quick_memory_from_message: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    return jsonify({
+        'success': True,
+        'contributionId': new_id,
+        'title': title,
+        'source': source,
+    })
+
+
 @experience_bp.route('/api/experience/session/<int:session_id>/append', methods=['POST'])
 @require_auth
 def session_append(session_id):
