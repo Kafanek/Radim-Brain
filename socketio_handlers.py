@@ -406,4 +406,17 @@ def register_socketio_handlers(socketio, users_online, cleanup_fn):
             'from': sender_uid,
         }, room=target_uid)
 
-    logger.info("✅ SocketIO handlers registered (24 events — incl medical + WebRTC P2P signaling)")
+    @socketio.on('webrtc:reaction')
+    def handle_webrtc_reaction(data):
+        """Sprint G — quick emoji reactions during call."""
+        sender_uid = _caller_uid()
+        target_uid = str(data.get('to') or '')
+        emoji = str(data.get('emoji') or '')[:8]
+        if not sender_uid or not target_uid or not emoji:
+            return
+        socketio.emit('webrtc:reaction', {
+            'from': sender_uid,
+            'emoji': emoji,
+        }, room=target_uid)
+
+    logger.info("✅ SocketIO handlers registered (25 events — incl medical + WebRTC P2P signaling + reactions)")
