@@ -151,7 +151,8 @@ def notify(to_user_id, type, title, body=None, from_user_id=None,
     # should not be woken by non-critical push).
     if not suppressed:
         try:
-            _webpush_if_subscribed(to_user_id, title, body or "", severity, type)
+            _webpush_if_subscribed(to_user_id, title, body or "", severity, type,
+                                   extra_data=data or {})
         except Exception as e:
             logger.debug(f"WebPush skipped: {e}")
 
@@ -162,8 +163,10 @@ def notify(to_user_id, type, title, body=None, from_user_id=None,
     return nid
 
 
-def _webpush_if_subscribed(user_id, title, body, severity, type):
-    """Send WebPush to subscribed devices for this user_id."""
+def _webpush_if_subscribed(user_id, title, body, severity, type, extra_data=None):
+    """Send WebPush to subscribed devices for this user_id.
+    Sprint I.2: extra_data forwards action + ids so SW click handler
+    can deep-link to the right module (e.g. /?module=komunikace&openConv=…)."""
     try:
         from pywebpush import webpush, WebPushException
     except ImportError:
@@ -183,9 +186,23 @@ def _webpush_if_subscribed(user_id, title, body, severity, type):
     except Exception:
         return
 
+    # Derive deep-link URL from action
+    url = "/?notifications=1"
+    try:
+        action = (extra_data or {}).get("action")
+        if action == "open_conversation" and (extra_data or {}).get("conversationId"):
+            url = f"/?module=komunikace&openConv={extra_data['conversationId']}"
+        elif action == "incoming_call" and (extra_data or {}).get("callerId"):
+            url = f"/?action=incoming_call&callerId={extra_data['callerId']}"
+        elif action == "incoming_group_call" and (extra_data or {}).get("roomId"):
+            url = f"/?action=incoming_group_call&roomId={extra_data['roomId']}"
+    except Exception:
+        pass
+
     payload = json.dumps({
         "title": title, "body": body[:140], "severity": severity, "type": type,
-        "url": "/?notifications=1",
+        "url": url,
+        "data": extra_data or {},
     }, ensure_ascii=False)
 
     for row in rows or []:

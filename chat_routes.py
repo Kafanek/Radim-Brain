@@ -246,6 +246,47 @@ def send_message():
         if message['type'] == 'voice':
             update_daily_stats('voice_messages')
 
+        # Sprint I.2: push notification to OTHER human participants
+        # (Radim AI branch below handles AI-response pushes separately)
+        try:
+            cursor = db.execute(
+                'SELECT participants FROM chat_conversations WHERE id = ?',
+                (conversation_id,)
+            )
+            conv_row = cursor.fetchone()
+            if conv_row:
+                all_parts = json.loads(conv_row['participants'])
+                other_humans = [p for p in all_parts
+                                if p and p != sender_id and p != 'radim']
+                if other_humans:
+                    sender_name = str(data.get('senderName') or '')[:80] or 'Kontakt'
+                    preview = content[:100] if message['type'] == 'text' else (
+                        '🎤 Hlasová zpráva' if message['type'] == 'voice' else
+                        '📷 Obrázek' if message['type'] == 'image' else
+                        'Nová zpráva'
+                    )
+                    try:
+                        from notification_helpers import notify as _notify
+                        for other_uid in other_humans:
+                            _notify(
+                                to_user_id=other_uid,
+                                type='new_message',
+                                title=f'💬 {sender_name}',
+                                body=preview,
+                                from_user_id=sender_id,
+                                severity='info',
+                                data={
+                                    'conversationId': conversation_id,
+                                    'messageId': message['id'],
+                                    'senderId': sender_id,
+                                    'action': 'open_conversation',
+                                },
+                            )
+                    except Exception as e:
+                        logger.debug(f'push on chat_message failed: {e}')
+        except Exception as e:
+            logger.debug(f'push fanout skipped: {e}')
+
         # === RADIM AI ODPOVED ===
         # Pokud je zprava pro Radima (obsahuje 'radim' v participants)
         cursor = db.execute('SELECT participants FROM chat_conversations WHERE id = ?', (conversation_id,))
