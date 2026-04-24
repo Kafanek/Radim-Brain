@@ -171,6 +171,65 @@ except ImportError:
     logger.warning("⚠️ Email routes not available")
 
 # ============================================
+# SPRINT R: SENTRY ERROR TRACKING (init BEFORE Flask app)
+# ============================================
+# Only activates if SENTRY_DSN env var is set on Heroku — zero risk otherwise.
+SENTRY_DSN = os.environ.get("SENTRY_DSN", "").strip()
+if SENTRY_DSN:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.flask import FlaskIntegration
+        from sentry_sdk.integrations.logging import LoggingIntegration
+
+        sentry_sdk.init(
+            dsn=SENTRY_DSN,
+            integrations=[
+                FlaskIntegration(),
+                LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+            ],
+            # Keep sample rate low to stay in free tier; bump during debug.
+            traces_sample_rate=float(os.environ.get("SENTRY_TRACES_RATE", "0.05")),
+            profiles_sample_rate=0.0,  # profiling off by default (cost)
+            environment=os.environ.get("SENTRY_ENV", "production"),
+            release=os.environ.get("SENTRY_RELEASE", "radim-brain@10.103"),
+            send_default_pii=False,  # GDPR: don't auto-send PII
+            before_send=lambda event, hint: _sentry_strip_pii(event),
+        )
+        logger.info(f"🛡️  Sentry initialized (env={os.environ.get('SENTRY_ENV', 'production')})")
+    except ImportError:
+        logger.warning("⚠️ sentry-sdk not installed — skipping Sentry init")
+    except Exception as _sentry_e:
+        logger.warning(f"⚠️ Sentry init failed (non-fatal): {_sentry_e}")
+else:
+    logger.info("ℹ️  SENTRY_DSN not set — error tracking disabled")
+
+
+def _sentry_strip_pii(event):
+    """GDPR-safe: remove IBAN, phone, email, tokens from Sentry events."""
+    try:
+        import re
+        def scrub(obj):
+            if isinstance(obj, str):
+                # IBAN (CZ + most EU formats): 2 letters + 13-32 alnum
+                obj = re.sub(r'[A-Z]{2}\d{2}[A-Z0-9]{11,30}', '[IBAN]', obj)
+                # Phone-like sequences
+                obj = re.sub(r'\+?\d{9,15}', '[PHONE]', obj)
+                # Emails
+                obj = re.sub(r'[\w.\-]+@[\w.\-]+\.\w+', '[EMAIL]', obj)
+                # JWT tokens
+                obj = re.sub(r'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', '[JWT]', obj)
+                return obj
+            if isinstance(obj, dict):
+                return {k: scrub(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [scrub(v) for v in obj]
+            return obj
+        return scrub(event)
+    except Exception:
+        return event
+
+
+# ============================================
 # FLASK APP SETUP
 # ============================================
 app = Flask(__name__)

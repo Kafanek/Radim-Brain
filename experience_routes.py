@@ -3444,6 +3444,92 @@ def rewards_list():
     })
 
 
+# ── ADMIN: list all rewards (ops dashboard) ───────────────────────────
+@experience_bp.route('/api/experience/admin/rewards',
+                     methods=['GET', 'OPTIONS'])
+def admin_rewards_list():
+    """Ops list of all rewards across all seniors.
+    Query: ?status=pending|approved|paid|failed|all (default: pending+approved)
+    Protected by X-Admin-Secret header."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    admin_secret = os.environ.get('ADMIN_SECRET')
+    if not admin_secret or request.headers.get('X-Admin-Secret') != admin_secret:
+        return jsonify({'success': False, 'error': 'forbidden'}), 403
+
+    _init_schema()
+    status_filter = (request.args.get('status') or 'actionable').lower()
+
+    try:
+        with db_context() as db:
+            if status_filter == 'all':
+                where = ''
+                params = ()
+            elif status_filter in ('pending', 'approved', 'paid', 'failed'):
+                where = 'WHERE r.status = ?'
+                params = (status_filter,)
+            else:  # 'actionable' = default — pending + approved (ops action needed)
+                where = "WHERE r.status IN (?, ?)"
+                params = ('pending', 'approved')
+
+            rows = db.execute(
+                f"SELECT r.id, r.user_id, r.contribution_id, r.amount_kc, r.tier, "
+                f"       r.word_count, r.status, r.bank_iban_last4, r.bank_ref, "
+                f"       r.approved_at, r.paid_at, r.created_at, r.admin_note, "
+                f"       c.title, b.account_holder, b.iban, b.bank_name "
+                f"FROM experience_rewards r "
+                f"LEFT JOIN experience_contributions c ON c.id = r.contribution_id "
+                f"LEFT JOIN experience_bank_info b ON b.user_id = r.user_id "
+                f"{where} "
+                f"ORDER BY CASE r.status "
+                f"  WHEN 'pending' THEN 1 WHEN 'approved' THEN 2 "
+                f"  WHEN 'failed' THEN 3 WHEN 'paid' THEN 4 ELSE 5 END, "
+                f"r.created_at DESC LIMIT 500",
+                params
+            ).fetchall()
+    except Exception as e:
+        logger.error(f"admin rewards list: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    def rv(r, i, k):
+        return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+
+    rewards = []
+    totals = {'pending': 0, 'approved': 0, 'paid': 0, 'failed': 0}
+    for r in rows or []:
+        status = rv(r, 6, 'status') or 'pending'
+        amount = int(rv(r, 3, 'amount_kc') or 0)
+        if status in totals:
+            totals[status] += amount
+        rewards.append({
+            'id': rv(r, 0, 'id'),
+            'userId': rv(r, 1, 'user_id'),
+            'contributionId': rv(r, 2, 'contribution_id'),
+            'amountKc': amount,
+            'tier': rv(r, 4, 'tier'),
+            'wordCount': rv(r, 5, 'word_count') or 0,
+            'status': status,
+            'bankIbanLast4': rv(r, 7, 'bank_iban_last4') or '',
+            'bankRef': rv(r, 8, 'bank_ref') or '',
+            'approvedAt': str(rv(r, 9, 'approved_at') or ''),
+            'paidAt': str(rv(r, 10, 'paid_at') or ''),
+            'createdAt': str(rv(r, 11, 'created_at') or ''),
+            'adminNote': rv(r, 12, 'admin_note') or '',
+            'title': rv(r, 13, 'title') or '(bez názvu)',
+            'accountHolder': rv(r, 14, 'account_holder') or '',
+            'iban': rv(r, 15, 'iban') or '',
+            'bankName': rv(r, 16, 'bank_name') or '',
+        })
+
+    return jsonify({
+        'success': True,
+        'rewards': rewards,
+        'count': len(rewards),
+        'totals': totals,
+        'filter': status_filter,
+    })
+
+
 # ── ADMIN: approve + mark paid (used by ops, not seniors) ─────────────
 @experience_bp.route('/api/experience/admin/reward/<int:rid>/approve',
                      methods=['POST', 'OPTIONS'])

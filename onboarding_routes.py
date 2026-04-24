@@ -26,6 +26,8 @@ from email.mime.text import MIMEText
 
 from flask import Blueprint, g, jsonify, request
 
+from database import db_context
+
 from auth_middleware import require_auth
 from rate_limiter import rate_limit
 
@@ -288,4 +290,168 @@ def onboarding_resend_welcome():
     })
 
 
-logger.info("🎯 Onboarding routes loaded: /api/onboarding/status, /step, /skip, /welcome-email")
+# ═══════════════════════════════════════════════════════════════════════
+# SPRINT R — PILOT ONBOARDING (separate from generic onboarding)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Pilot-specific onboarding tracks:
+#   - Phone number (for Twilio fallback on iOS without ATHS)
+#   - Privacy policy + T&Cs acceptance (GDPR audit record)
+#   - Voice test completion + ATHS acknowledgement (UX health signal)
+#
+# Table: user_pilot_onboarding
+#   user_id | phone | privacy_accepted_at | terms_accepted_at |
+#   voice_tested | aths_acknowledged | completed_at
+
+def _init_pilot_schema():
+    """Lazy-create table — idempotent."""
+    try:
+        with db_context(commit=True) as db:
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS user_pilot_onboarding (
+                    user_id TEXT PRIMARY KEY,
+                    phone TEXT,
+                    privacy_accepted_at TIMESTAMP,
+                    terms_accepted_at TIMESTAMP,
+                    voice_tested BOOLEAN DEFAULT FALSE,
+                    aths_acknowledged BOOLEAN DEFAULT FALSE,
+                    completed_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+    except Exception as e:
+        logger.debug(f"pilot onboarding schema: {e}")
+
+
+@onboarding_bp.route("/api/onboarding/pilot/complete", methods=["POST", "OPTIONS"])
+@rate_limit(max_requests=10, window_seconds=60, key_func="user")
+@require_auth
+def pilot_onboarding_complete():
+    """Record pilot onboarding completion (phone + consents).
+    Legally this is the timestamp + audit trail for GDPR Art 7(1)
+    (proof that consent was given)."""
+    if request.method == "OPTIONS":
+        return _options_ok()
+    _init_pilot_schema()
+
+    uid = _current_uid()
+    if not uid:
+        return jsonify({"success": False, "error": "Auth required"}), 401
+
+    data = request.get_json() or {}
+    phone_raw = (data.get("phone") or "").strip()
+    phone = "".join(c for c in phone_raw if c.isdigit() or c == "+")[:20]
+    privacy_accepted = bool(data.get("privacyAccepted"))
+    terms_accepted = bool(data.get("termsAccepted"))
+    voice_tested = bool(data.get("voiceTested"))
+    aths_ack = bool(data.get("athsAcknowledged"))
+
+    if not privacy_accepted or not terms_accepted:
+        return jsonify({
+            "success": False,
+            "error": "Pro dokončení pilotu je nutné přijmout oba dokumenty.",
+            "code": "consents_required",
+        }), 400
+
+    now = datetime.utcnow()
+    is_pg = False
+    try:
+        from database import is_postgres
+        is_pg = is_postgres()
+    except Exception:
+        pass
+
+    try:
+        with db_context(commit=True) as db:
+            existing = db.execute(
+                "SELECT user_id FROM user_pilot_onboarding WHERE user_id = ?",
+                (uid,)
+            ).fetchone()
+
+            bool_vt = voice_tested if is_pg else (1 if voice_tested else 0)
+            bool_aa = aths_ack if is_pg else (1 if aths_ack else 0)
+
+            if existing:
+                db.execute("""
+                    UPDATE user_pilot_onboarding
+                    SET phone = ?, privacy_accepted_at = ?, terms_accepted_at = ?,
+                        voice_tested = ?, aths_acknowledged = ?, completed_at = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = ?
+                """, (phone, now, now, bool_vt, bool_aa, now, uid))
+            else:
+                db.execute("""
+                    INSERT INTO user_pilot_onboarding
+                    (user_id, phone, privacy_accepted_at, terms_accepted_at,
+                     voice_tested, aths_acknowledged, completed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (uid, phone, now, now, bool_vt, bool_aa, now))
+
+            # Mirror phone into user_profiles if that table exists
+            try:
+                db.execute(
+                    "UPDATE user_profiles SET phone = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE user_id = ?",
+                    (phone, uid)
+                )
+            except Exception:
+                pass  # table may not exist yet
+    except Exception as e:
+        logger.error(f"pilot onboarding write: {e}")
+        return jsonify({"success": False, "error": "internal"}), 500
+
+    logger.info(f"🌱 Pilot onboarding completed for {uid[:8]} (phone={bool(phone)})")
+
+    return jsonify({
+        "success": True,
+        "message": "Děkujeme — pilot je připravený.",
+        "completedAt": now.isoformat(),
+    })
+
+
+@onboarding_bp.route("/api/onboarding/pilot/status", methods=["GET", "OPTIONS"])
+@rate_limit(max_requests=60, window_seconds=60, key_func="user")
+@require_auth
+def pilot_onboarding_status():
+    if request.method == "OPTIONS":
+        return _options_ok()
+    _init_pilot_schema()
+
+    uid = _current_uid()
+    if not uid:
+        return jsonify({"success": False, "error": "Auth required"}), 401
+
+    try:
+        with db_context() as db:
+            row = db.execute("""
+                SELECT phone, privacy_accepted_at, terms_accepted_at,
+                       voice_tested, aths_acknowledged, completed_at
+                FROM user_pilot_onboarding WHERE user_id = ?
+            """, (uid,)).fetchone()
+    except Exception:
+        row = None
+
+    if not row:
+        return jsonify({
+            "success": True, "completed": False, "data": None,
+        })
+
+    def v(i, k):
+        return row[i] if isinstance(row, (list, tuple)) else row.get(k)
+
+    return jsonify({
+        "success": True,
+        "completed": bool(v(5, "completed_at")),
+        "data": {
+            "phone": v(0, "phone") or "",
+            "privacyAcceptedAt": str(v(1, "privacy_accepted_at") or ""),
+            "termsAcceptedAt": str(v(2, "terms_accepted_at") or ""),
+            "voiceTested": bool(v(3, "voice_tested")),
+            "athsAcknowledged": bool(v(4, "aths_acknowledged")),
+            "completedAt": str(v(5, "completed_at") or ""),
+        },
+    })
+
+
+logger.info("🎯 Onboarding routes loaded: /api/onboarding/status, /step, /skip, /welcome-email, /pilot/complete, /pilot/status")
