@@ -368,6 +368,132 @@ def contact_call(cid):
     })
 
 
+@contacts_bp.route("/api/contacts/<int:cid>/ring-phone", methods=["POST", "OPTIONS"])
+@rate_limit(max_requests=10, window_seconds=60, key_func="user")
+@require_auth
+def contact_ring_phone(cid):
+    """Sprint S: Ring the SENIOR's phone via Twilio outbound call.
+
+    Use case: family member / caregiver in the app clicks '📞 Zavolat na telefon'
+    on a contact card. Twilio calls the senior's own mobile, and when they pick up,
+    Radim says the connector message ('volá vás [jméno], zvedám hovor').
+
+    Body: { message?: string }  — optional custom connector greeting.
+
+    This is the reliable fallback when web push notifications don't deliver
+    (iOS without ATHS, device offline, etc.).
+    """
+    if request.method == "OPTIONS":
+        return _options_ok()
+    sid = _current_senior_id()
+    if not sid:
+        return jsonify({"success": False, "error": "Auth required"}), 401
+
+    try:
+        with db_context() as db:
+            # Look up the SENIOR's phone (not the contact's) — we call THE SENIOR
+            # on behalf of the caller, so Radim announces who's calling.
+            senior_row = db.execute(
+                "SELECT phone FROM user_pilot_onboarding WHERE user_id = ?",
+                (sid,)
+            ).fetchone()
+            contact_row = db.execute(
+                "SELECT name, relationship FROM contacts "
+                "WHERE id = ? AND senior_id = ?",
+                (cid, sid)
+            ).fetchone()
+    except Exception as e:
+        logger.error(f"ring-phone read: {e}")
+        return jsonify({"success": False, "error": "DB error"}), 500
+
+    if not senior_row:
+        return jsonify({
+            "success": False,
+            "error": "Telefonní číslo seniora není nastaveno. Dokončete onboarding.",
+            "code": "phone_missing",
+        }), 400
+    if not contact_row:
+        return jsonify({"success": False, "error": "Kontakt nenalezen."}), 404
+
+    def rv(r, i, k):
+        return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+
+    senior_phone = rv(senior_row, 0, "phone") or ""
+    contact_name = rv(contact_row, 0, "name") or "někdo z rodiny"
+    relationship = rv(contact_row, 1, "relationship") or ""
+
+    # Normalize to E.164 (Czech default if no +)
+    if senior_phone and not senior_phone.startswith("+"):
+        digits = "".join(c for c in senior_phone if c.isdigit())
+        if len(digits) == 9:
+            senior_phone = "+420" + digits
+        elif digits.startswith("420") and len(digits) == 12:
+            senior_phone = "+" + digits
+        else:
+            return jsonify({
+                "success": False,
+                "error": f"Neplatný formát telefonu: {senior_phone}",
+                "code": "phone_invalid",
+            }), 400
+
+    # Build the connector greeting Radim will say when the senior answers
+    data = request.get_json(silent=True) or {}
+    custom_msg = (data.get("message") or "").strip()[:400]
+    if custom_msg:
+        greeting = custom_msg
+    else:
+        rel_phrase = f" ({relationship})" if relationship else ""
+        greeting = (
+            f"Dobrý den. Volá vám {contact_name}{rel_phrase} přes aplikaci. "
+            "Chcete se s nimi spojit? Řekněte ano, nebo jen mluvte."
+        )
+
+    # Trigger Twilio outbound (reuses existing v389 function)
+    try:
+        from twilio_voice_helpers import initiate_proactive_call
+        result = initiate_proactive_call(
+            phone_number=senior_phone,
+            greeting=greeting,
+            user_id=sid,
+            reason="family_call",
+            voice_mode="HARMONY",
+        )
+    except Exception as e:
+        logger.exception(f"twilio outbound error: {e}")
+        return jsonify({"success": False, "error": "Twilio volání selhalo."}), 500
+
+    if not result.get("success"):
+        return jsonify({
+            "success": False,
+            "error": result.get("error", "Hovor se nepodařilo iniciovat."),
+        }), 500
+
+    # Audit
+    try:
+        from database import db_insert
+        import json as _json
+        with db_context(commit=True) as db:
+            db_insert(db, "agent_observations",
+                      ["user_id", "observation_type", "severity", "message",
+                       "action_taken", "details"],
+                      [sid, "ring_phone", "info",
+                       f"Twilio hovor na {contact_name}", "twilio_call",
+                       _json.dumps({
+                           "contact_id": cid,
+                           "phone_last4": senior_phone[-4:],
+                           "call_sid": result.get("call_sid", ""),
+                       })])
+    except Exception:
+        pass
+
+    return jsonify({
+        "success": True,
+        "message": f"Voláme {contact_name} na váš telefon — za chvíli zazvoní.",
+        "callSid": result.get("call_sid", ""),
+        "toPhone": senior_phone[-4:],  # only last 4 for display
+    })
+
+
 @contacts_bp.route("/api/contacts/<int:cid>/sms", methods=["POST", "OPTIONS"])
 @rate_limit(max_requests=10, window_seconds=60, key_func="user")
 @require_auth
