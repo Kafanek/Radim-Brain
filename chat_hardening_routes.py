@@ -13,7 +13,8 @@ import time
 
 from flask import Blueprint, jsonify, request
 
-from auth_middleware import optional_auth
+from auth_middleware import optional_auth, require_auth
+from flask import g as _g
 from database import db_context, is_postgres, db_insert
 
 logger = logging.getLogger(__name__)
@@ -84,9 +85,15 @@ def _log_audit(user_id, action, target_type=None, target_id=None, metadata=None)
 # ──────────────────────────────────────────────────────────────────
 
 @chat_hardening_bp.route('/api/chat/audit/<user_id>', methods=['GET'])
-@optional_auth
+@require_auth
 def get_audit(user_id):
     _init_audit_schema()
+    # Sprint W security: enforce user_id matches auth'd user (IDOR protection)
+    auth_uid = str((getattr(_g, 'auth_user', None) or {}).get('id') or '')
+    if not auth_uid:
+        return jsonify({'success': False, 'error': 'Auth required'}), 401
+    if auth_uid != str(user_id):
+        return jsonify({'success': False, 'error': 'Přístup odepřen'}), 403
     try:
         limit = min(int(request.args.get('limit', 50)), 500)
         with db_context() as db:
@@ -118,14 +125,18 @@ def get_audit(user_id):
 # ──────────────────────────────────────────────────────────────────
 
 @chat_hardening_bp.route('/api/chat/audit', methods=['POST'])
-@optional_auth
+@require_auth
 def post_audit():
     try:
         data = request.get_json() or {}
-        user_id = str(data.get('userId') or '')
+        # Sprint W: force user_id from auth, ignore client-supplied userId (IDOR fix)
+        auth_uid = str((getattr(_g, 'auth_user', None) or {}).get('id') or '')
+        if not auth_uid:
+            return jsonify({'success': False, 'error': 'Auth required'}), 401
+        user_id = auth_uid
         action = str(data.get('action') or '')
-        if not user_id or not action:
-            return jsonify({'success': False, 'error': 'Chybí userId/action'}), 400
+        if not action:
+            return jsonify({'success': False, 'error': 'Chybí action'}), 400
         _log_audit(
             user_id=user_id,
             action=action,
@@ -144,10 +155,16 @@ def post_audit():
 # ──────────────────────────────────────────────────────────────────
 
 @chat_hardening_bp.route('/api/chat/export/<user_id>', methods=['GET'])
-@optional_auth
+@require_auth
 def export_data(user_id):
     """Return all conversations + messages where user_id is participant or sender.
-    For GDPR Article 15 (right of access) compliance."""
+    For GDPR Article 15 (right of access) compliance.
+    Sprint W: enforce user_id matches auth'd user (IDOR protection)."""
+    auth_uid = str((getattr(_g, 'auth_user', None) or {}).get('id') or '')
+    if not auth_uid:
+        return jsonify({'success': False, 'error': 'Auth required'}), 401
+    if auth_uid != str(user_id):
+        return jsonify({'success': False, 'error': 'Přístup odepřen'}), 403
     try:
         with db_context() as db:
             # Conversations user participates in
