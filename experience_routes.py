@@ -263,6 +263,55 @@ EXPERIENCE_SCHEMA = """
     );
     CREATE INDEX IF NOT EXISTS idx_exp_scheduled_user ON experience_scheduled_messages(user_id, release_date);
     CREATE INDEX IF NOT EXISTS idx_exp_scheduled_status ON experience_scheduled_messages(status, release_date);
+
+    -- ── MVP: per-audience consent (family / research / companies) ─────
+    CREATE TABLE IF NOT EXISTS experience_consents (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        contribution_id INTEGER NOT NULL,
+        share_family BOOLEAN DEFAULT FALSE,
+        share_research BOOLEAN DEFAULT FALSE,
+        share_companies BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_exp_consents_user ON experience_consents(user_id, created_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_exp_consents_contribution ON experience_consents(contribution_id);
+
+    -- ── MVP: rewards (bank-transfer, length-based: 50/100/150 Kč) ─────
+    CREATE TABLE IF NOT EXISTS experience_rewards (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        contribution_id INTEGER NOT NULL,
+        amount_kc INTEGER NOT NULL,
+        tier TEXT NOT NULL,                  -- 'short' | 'medium' | 'long'
+        word_count INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'pending',       -- 'pending' | 'approved' | 'paid' | 'failed'
+        payout_method TEXT DEFAULT 'bank_transfer',
+        bank_iban_last4 TEXT,                -- for receipt display only
+        bank_ref TEXT,                       -- bank transaction ID after payout
+        admin_note TEXT,
+        approved_at TIMESTAMP,
+        paid_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_exp_rewards_user ON experience_rewards(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_exp_rewards_status ON experience_rewards(status, created_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_exp_rewards_contribution ON experience_rewards(contribution_id);
+
+    -- ── MVP: bank info for payouts (IBAN stored + hashed for privacy) ─
+    CREATE TABLE IF NOT EXISTS experience_bank_info (
+        user_id TEXT PRIMARY KEY,
+        account_holder TEXT NOT NULL,
+        iban TEXT NOT NULL,
+        iban_last4 TEXT,
+        bank_name TEXT,
+        swift_bic TEXT,
+        verified BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
 """
 
 
@@ -2870,6 +2919,597 @@ def erase_all():
         'success': True,
         'message': 'Vaše údaje byly smazány. Auditní záznam zůstal jako právní doklad.',
     })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MVP: PER-AUDIENCE CONSENT + BANK REWARD — Radimův Odkaz MVP (Sprint Q)
+# ─────────────────────────────────────────────────────────────────────────────
+# Philosophy:
+#   - Consent is per-audience (family / research / companies), not single-privacy.
+#   - Reward is length-based (50 / 100 / 150 Kč), paid by bank transfer.
+#   - Seniors can't approve reward without valid IBAN on file.
+#   - Admin workflow: pending → approved (admin) → paid (bank confirms → bank_ref).
+#
+# Tiers:
+#   short  (< 100 words)        →  50 Kč
+#   medium (100–249 words)      → 100 Kč
+#   long   (>= 250 words)       → 150 Kč
+#
+# Note: the existing /offers + /accept-offer system handles high-value
+# research/archive contracts (300–1500 Kč). This MVP reward is the flat-rate
+# micro-incentive for EVERY approved memory — research/archive contracts then
+# stack on top of it.
+
+REWARD_TIERS = [
+    (250, 150, 'long'),
+    (100, 100, 'medium'),
+    (0,    50, 'short'),
+]
+
+
+def _calc_reward_tier(word_count):
+    """Return (amount_kc, tier_label)."""
+    wc = int(word_count or 0)
+    for threshold, amount, label in REWARD_TIERS:
+        if wc >= threshold:
+            return (amount, label)
+    return (50, 'short')
+
+
+def _mask_iban(iban):
+    if not iban:
+        return ''
+    iban = ''.join(c for c in str(iban) if c.isalnum()).upper()
+    if len(iban) < 4:
+        return iban
+    return iban[-4:]
+
+
+def _owns_contribution(db, uid, cid):
+    row = db.execute(
+        "SELECT id, word_count FROM experience_contributions "
+        "WHERE id = ? AND user_id = ? AND privacy <> ?",
+        (cid, uid, 'deleted')
+    ).fetchone()
+    return row
+
+
+@experience_bp.route('/api/experience/contribution/<int:cid>/consent',
+                     methods=['GET', 'POST', 'OPTIONS'])
+@require_auth
+def contribution_consent(cid):
+    """Per-audience consent selection for a single memory.
+
+    POST body: { shareFamily: bool, shareResearch: bool, shareCompanies: bool }
+    GET       returns current consent (empty if not yet set).
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    # IDOR — must own the contribution
+    try:
+        with db_context() as db:
+            if not _owns_contribution(db, uid, cid):
+                return jsonify({'success': False, 'error': 'not found'}), 404
+    except Exception as e:
+        logger.error(f"consent idor: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    if request.method == 'GET':
+        try:
+            with db_context() as db:
+                r = db.execute(
+                    "SELECT share_family, share_research, share_companies, updated_at "
+                    "FROM experience_consents WHERE contribution_id = ?",
+                    (cid,)
+                ).fetchone()
+        except Exception:
+            r = None
+        if not r:
+            return jsonify({'success': True, 'consent': None})
+
+        def v(i, k):
+            return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+        return jsonify({
+            'success': True,
+            'consent': {
+                'shareFamily': bool(v(0, 'share_family')),
+                'shareResearch': bool(v(1, 'share_research')),
+                'shareCompanies': bool(v(2, 'share_companies')),
+                'updatedAt': str(v(3, 'updated_at') or ''),
+            }
+        })
+
+    # POST
+    if not _rate_ok(uid, 'consent', 30):
+        return jsonify({'success': False, 'code': 'rate_limit',
+                        'error': 'Moc rychle.'}), 429
+
+    data = request.get_json() or {}
+    sf = _to_bool(data.get('shareFamily'))
+    sr = _to_bool(data.get('shareResearch'))
+    sc = _to_bool(data.get('shareCompanies'))
+
+    # Derive privacy from consent flags (most-permissive wins, but we keep
+    # per-audience control separate)
+    if sc:
+        derived_privacy = 'public'
+    elif sr:
+        derived_privacy = 'research'
+    elif sf:
+        derived_privacy = 'family'
+    else:
+        derived_privacy = 'draft'
+
+    try:
+        with db_context(commit=True) as db:
+            existing = db.execute(
+                "SELECT id FROM experience_consents WHERE contribution_id = ?",
+                (cid,)
+            ).fetchone()
+
+            bool_f = (sf if is_postgres() else (1 if sf else 0))
+            bool_r = (sr if is_postgres() else (1 if sr else 0))
+            bool_c = (sc if is_postgres() else (1 if sc else 0))
+
+            if existing:
+                db.execute(
+                    "UPDATE experience_consents "
+                    "SET share_family = ?, share_research = ?, share_companies = ?, "
+                    "    updated_at = CURRENT_TIMESTAMP "
+                    "WHERE contribution_id = ?",
+                    (bool_f, bool_r, bool_c, cid)
+                )
+            else:
+                db.execute(
+                    "INSERT INTO experience_consents "
+                    "(user_id, contribution_id, share_family, share_research, share_companies) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (uid, cid, bool_f, bool_r, bool_c)
+                )
+
+            # Mirror to contribution.privacy if not draft
+            if derived_privacy != 'draft':
+                db.execute(
+                    "UPDATE experience_contributions "
+                    "SET privacy = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ? AND user_id = ?",
+                    (derived_privacy, cid, uid)
+                )
+    except Exception as e:
+        logger.error(f"consent write: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    _audit(uid, 'consent_set', 'contribution', cid,
+           f'family={sf} research={sr} companies={sc}')
+
+    return jsonify({
+        'success': True,
+        'contributionId': cid,
+        'consent': {
+            'shareFamily': sf,
+            'shareResearch': sr,
+            'shareCompanies': sc,
+        },
+        'derivedPrivacy': derived_privacy,
+    })
+
+
+@experience_bp.route('/api/experience/bank-info',
+                     methods=['GET', 'PUT', 'OPTIONS'])
+@require_auth
+def bank_info():
+    """Senior's bank account for reward payouts (IBAN, holder name)."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    if request.method == 'GET':
+        try:
+            with db_context() as db:
+                r = db.execute(
+                    "SELECT account_holder, iban_last4, bank_name, verified, updated_at "
+                    "FROM experience_bank_info WHERE user_id = ?",
+                    (uid,)
+                ).fetchone()
+        except Exception:
+            r = None
+        if not r:
+            return jsonify({'success': True, 'bankInfo': None})
+
+        def v(i, k):
+            return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+        return jsonify({
+            'success': True,
+            'bankInfo': {
+                'accountHolder': v(0, 'account_holder') or '',
+                'ibanLast4': v(1, 'iban_last4') or '',
+                'bankName': v(2, 'bank_name') or '',
+                'verified': bool(v(3, 'verified')),
+                'updatedAt': str(v(4, 'updated_at') or ''),
+            }
+        })
+
+    # PUT
+    if not _rate_ok(uid, 'bank_info', 10):
+        return jsonify({'success': False, 'code': 'rate_limit',
+                        'error': 'Moc rychle.'}), 429
+
+    data = request.get_json() or {}
+    holder = (data.get('accountHolder') or '').strip()[:120]
+    iban_raw = ''.join(c for c in str(data.get('iban') or '') if c.isalnum()).upper()
+    bank_name = (data.get('bankName') or '').strip()[:80]
+    swift = (data.get('swiftBic') or '').strip()[:15]
+
+    # Minimal IBAN validation: CZ format is 24 chars, general range 15–34
+    if not holder or len(holder) < 2:
+        return jsonify({'success': False,
+                        'error': 'Zadejte celé jméno majitele účtu.'}), 400
+    if len(iban_raw) < 15 or len(iban_raw) > 34:
+        return jsonify({'success': False,
+                        'error': 'IBAN se zdá být neúplný. Český IBAN má 24 znaků.'}), 400
+    if not iban_raw[:2].isalpha():
+        return jsonify({'success': False,
+                        'error': 'IBAN musí začínat kódem země (např. CZ).'}), 400
+
+    last4 = _mask_iban(iban_raw)
+
+    try:
+        with db_context(commit=True) as db:
+            existing = db.execute(
+                "SELECT user_id FROM experience_bank_info WHERE user_id = ?",
+                (uid,)
+            ).fetchone()
+            if existing:
+                db.execute(
+                    "UPDATE experience_bank_info "
+                    "SET account_holder = ?, iban = ?, iban_last4 = ?, "
+                    "    bank_name = ?, swift_bic = ?, verified = ?, "
+                    "    updated_at = CURRENT_TIMESTAMP "
+                    "WHERE user_id = ?",
+                    (holder, iban_raw, last4, bank_name, swift,
+                     (False if is_postgres() else 0), uid)
+                )
+            else:
+                db.execute(
+                    "INSERT INTO experience_bank_info "
+                    "(user_id, account_holder, iban, iban_last4, bank_name, swift_bic) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (uid, holder, iban_raw, last4, bank_name, swift)
+                )
+    except Exception as e:
+        logger.error(f"bank-info write: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    _audit(uid, 'bank_info_updated', 'user', None, f'last4={last4}')
+    return jsonify({
+        'success': True,
+        'bankInfo': {
+            'accountHolder': holder,
+            'ibanLast4': last4,
+            'bankName': bank_name,
+            'verified': False,
+        },
+        'message': 'Bankovní údaje uloženy. Ověření proběhne při první výplatě.',
+    })
+
+
+@experience_bp.route('/api/experience/contribution/<int:cid>/reward',
+                     methods=['POST', 'OPTIONS'])
+@require_auth
+def claim_reward(cid):
+    """Claim the MVP flat-rate reward for an approved memory.
+
+    Rules:
+      - Contribution must be approved (privacy != 'draft', != 'deleted')
+      - Must have consent record (at least one audience enabled)
+      - One reward per contribution (UNIQUE index enforces)
+      - Senior must have bank_info on file
+      - Amount derived from word_count via _calc_reward_tier()
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    if not _rate_ok(uid, 'reward_claim', 20):
+        return jsonify({'success': False, 'code': 'rate_limit',
+                        'error': 'Moc rychle.'}), 429
+
+    # 1. Fetch contribution + validate
+    try:
+        with db_context() as db:
+            contrib = db.execute(
+                "SELECT id, word_count, privacy, title FROM experience_contributions "
+                "WHERE id = ? AND user_id = ?",
+                (cid, uid)
+            ).fetchone()
+    except Exception as e:
+        logger.error(f"reward fetch: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    if not contrib:
+        return jsonify({'success': False, 'error': 'not found'}), 404
+
+    def cv(i, k):
+        return contrib[i] if isinstance(contrib, (list, tuple)) else contrib.get(k)
+
+    privacy = cv(2, 'privacy')
+    if privacy in ('draft', 'deleted'):
+        return jsonify({
+            'success': False,
+            'error': 'Vzpomínka ještě není schválena. Nejdřív zvolte sdílení.',
+            'code': 'not_approved',
+        }), 400
+
+    word_count = int(cv(1, 'word_count') or 0)
+    title = cv(3, 'title') or ''
+
+    # 2. Check consent exists
+    try:
+        with db_context() as db:
+            consent = db.execute(
+                "SELECT share_family, share_research, share_companies "
+                "FROM experience_consents WHERE contribution_id = ?",
+                (cid,)
+            ).fetchone()
+    except Exception:
+        consent = None
+    if not consent:
+        return jsonify({
+            'success': False,
+            'error': 'Nejdřív zvolte, kdo může vzpomínku číst.',
+            'code': 'consent_missing',
+        }), 400
+
+    def xv(i, k):
+        return consent[i] if isinstance(consent, (list, tuple)) else consent.get(k)
+    has_any_consent = any([xv(0, 'share_family'),
+                           xv(1, 'share_research'),
+                           xv(2, 'share_companies')])
+    if not has_any_consent:
+        return jsonify({
+            'success': False,
+            'error': 'Nevybrala jste žádného příjemce — vzpomínka zůstává pouze u vás.',
+            'code': 'no_audience',
+        }), 400
+
+    # 3. Check bank info exists
+    try:
+        with db_context() as db:
+            bank = db.execute(
+                "SELECT iban_last4 FROM experience_bank_info WHERE user_id = ?",
+                (uid,)
+            ).fetchone()
+    except Exception:
+        bank = None
+    if not bank:
+        return jsonify({
+            'success': False,
+            'error': 'Pro výplatu potřebuji znát vaše číslo účtu.',
+            'code': 'bank_info_missing',
+        }), 400
+
+    iban_last4 = bank[0] if isinstance(bank, (list, tuple)) else bank.get('iban_last4')
+
+    # 4. Check reward doesn't already exist
+    try:
+        with db_context() as db:
+            existing = db.execute(
+                "SELECT id, amount_kc, tier, status FROM experience_rewards "
+                "WHERE contribution_id = ?",
+                (cid,)
+            ).fetchone()
+    except Exception:
+        existing = None
+
+    if existing:
+        def ev(i, k):
+            return existing[i] if isinstance(existing, (list, tuple)) else existing.get(k)
+        return jsonify({
+            'success': True,
+            'alreadyClaimed': True,
+            'reward': {
+                'id': ev(0, 'id'),
+                'amountKc': ev(1, 'amount_kc'),
+                'tier': ev(2, 'tier'),
+                'status': ev(3, 'status'),
+            },
+        })
+
+    # 5. Calculate + insert
+    amount_kc, tier = _calc_reward_tier(word_count)
+
+    try:
+        with db_context(commit=True) as db:
+            if is_postgres():
+                r = db.execute(
+                    "INSERT INTO experience_rewards "
+                    "(user_id, contribution_id, amount_kc, tier, word_count, "
+                    " status, payout_method, bank_iban_last4) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                    (uid, cid, amount_kc, tier, word_count,
+                     'pending', 'bank_transfer', iban_last4)
+                ).fetchone()
+                rid = r[0] if isinstance(r, (list, tuple)) else r.get('id')
+            else:
+                cur = db.execute(
+                    "INSERT INTO experience_rewards "
+                    "(user_id, contribution_id, amount_kc, tier, word_count, "
+                    " status, payout_method, bank_iban_last4) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (uid, cid, amount_kc, tier, word_count,
+                     'pending', 'bank_transfer', iban_last4)
+                )
+                rid = cur.lastrowid if hasattr(cur, 'lastrowid') else None
+    except Exception as e:
+        logger.error(f"reward insert: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    _audit(uid, 'reward_claimed', 'contribution', cid,
+           f'amount={amount_kc}Kc tier={tier} words={word_count}')
+
+    return jsonify({
+        'success': True,
+        'reward': {
+            'id': rid,
+            'contributionId': cid,
+            'title': title,
+            'amountKc': amount_kc,
+            'tier': tier,
+            'wordCount': word_count,
+            'status': 'pending',
+            'payoutMethod': 'bank_transfer',
+            'bankIbanLast4': iban_last4,
+        },
+        'message': f'Odměna {amount_kc} Kč zaznamenána. Pošleme ji na účet končící {iban_last4} během 7 pracovních dní.',
+    })
+
+
+@experience_bp.route('/api/experience/rewards', methods=['GET', 'OPTIONS'])
+@require_auth
+def rewards_list():
+    """Reward history for current senior — pending / approved / paid."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT r.id, r.contribution_id, r.amount_kc, r.tier, r.word_count, "
+                "       r.status, r.payout_method, r.bank_iban_last4, r.bank_ref, "
+                "       r.approved_at, r.paid_at, r.created_at, c.title "
+                "FROM experience_rewards r "
+                "LEFT JOIN experience_contributions c ON c.id = r.contribution_id "
+                "WHERE r.user_id = ? ORDER BY r.created_at DESC LIMIT 200",
+                (uid,)
+            ).fetchall()
+    except Exception as e:
+        logger.debug(f"rewards list: {e}")
+        rows = []
+
+    def rv(r, i, k):
+        return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+
+    rewards = []
+    total_pending = 0
+    total_paid = 0
+    for r in rows or []:
+        status = rv(r, 5, 'status') or 'pending'
+        amount = int(rv(r, 2, 'amount_kc') or 0)
+        if status == 'paid':
+            total_paid += amount
+        elif status in ('pending', 'approved'):
+            total_pending += amount
+        rewards.append({
+            'id': rv(r, 0, 'id'),
+            'contributionId': rv(r, 1, 'contribution_id'),
+            'amountKc': amount,
+            'tier': rv(r, 3, 'tier'),
+            'wordCount': rv(r, 4, 'word_count') or 0,
+            'status': status,
+            'payoutMethod': rv(r, 6, 'payout_method') or 'bank_transfer',
+            'bankIbanLast4': rv(r, 7, 'bank_iban_last4') or '',
+            'bankRef': rv(r, 8, 'bank_ref') or '',
+            'approvedAt': str(rv(r, 9, 'approved_at') or ''),
+            'paidAt': str(rv(r, 10, 'paid_at') or ''),
+            'createdAt': str(rv(r, 11, 'created_at') or ''),
+            'title': rv(r, 12, 'title') or '(bez názvu)',
+        })
+
+    return jsonify({
+        'success': True,
+        'rewards': rewards,
+        'count': len(rewards),
+        'totalPendingKc': total_pending,
+        'totalPaidKc': total_paid,
+        'tiers': [
+            {'minWords': 0, 'maxWords': 99, 'amountKc': 50, 'label': 'short'},
+            {'minWords': 100, 'maxWords': 249, 'amountKc': 100, 'label': 'medium'},
+            {'minWords': 250, 'maxWords': None, 'amountKc': 150, 'label': 'long'},
+        ],
+    })
+
+
+# ── ADMIN: approve + mark paid (used by ops, not seniors) ─────────────
+@experience_bp.route('/api/experience/admin/reward/<int:rid>/approve',
+                     methods=['POST', 'OPTIONS'])
+def admin_approve_reward(rid):
+    """Ops endpoint — protected by ADMIN_SECRET header."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    admin_secret = os.environ.get('ADMIN_SECRET')
+    if not admin_secret or request.headers.get('X-Admin-Secret') != admin_secret:
+        return jsonify({'success': False, 'error': 'forbidden'}), 403
+
+    data = request.get_json() or {}
+    action = (data.get('action') or '').lower()  # 'approve' | 'pay' | 'fail'
+    bank_ref = (data.get('bankRef') or '').strip()[:60]
+    note = (data.get('note') or '').strip()[:500]
+
+    if action not in ('approve', 'pay', 'fail'):
+        return jsonify({'success': False, 'error': 'action must be approve|pay|fail'}), 400
+
+    try:
+        with db_context(commit=True) as db:
+            if action == 'approve':
+                db.execute(
+                    "UPDATE experience_rewards "
+                    "SET status = 'approved', approved_at = CURRENT_TIMESTAMP, "
+                    "    admin_note = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ? AND status = 'pending'",
+                    (note, rid)
+                )
+            elif action == 'pay':
+                db.execute(
+                    "UPDATE experience_rewards "
+                    "SET status = 'paid', paid_at = CURRENT_TIMESTAMP, "
+                    "    bank_ref = ?, admin_note = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ? AND status IN ('pending', 'approved')",
+                    (bank_ref, note, rid)
+                )
+                # Also mirror to experience_earnings for unified ledger
+                row = db.execute(
+                    "SELECT user_id, amount_kc FROM experience_rewards WHERE id = ?",
+                    (rid,)
+                ).fetchone()
+                if row:
+                    uid_r = row[0] if isinstance(row, (list, tuple)) else row.get('user_id')
+                    amt = row[1] if isinstance(row, (list, tuple)) else row.get('amount_kc')
+                    db.execute(
+                        "INSERT INTO experience_earnings "
+                        "(user_id, contract_id, amount_kc, gross_kc, source, "
+                        " payout_method, paid_at, period_label) "
+                        "VALUES (?, NULL, ?, ?, 'mvp_reward', 'bank_transfer', "
+                        " CURRENT_TIMESTAMP, ?)",
+                        (uid_r, amt, amt, bank_ref or f'reward#{rid}')
+                    )
+            elif action == 'fail':
+                db.execute(
+                    "UPDATE experience_rewards "
+                    "SET status = 'failed', admin_note = ?, "
+                    "    updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ?",
+                    (note, rid)
+                )
+    except Exception as e:
+        logger.error(f"admin reward: {e}")
+        return jsonify({'success': False, 'error': 'internal'}), 500
+
+    return jsonify({'success': True, 'rewardId': rid, 'action': action})
 
 
 def register_scheduler_jobs(scheduler):
