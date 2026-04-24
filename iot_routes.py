@@ -5,12 +5,15 @@
 # IoT senzory a vitální znaky pro smart rooms
 # Endpoints: /api/iot/system/status, /api/iot/sensors/<id>/vitals
 
+import logging
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
 import random
 import math
 from auth_middleware import require_auth, optional_auth
 from utils import now_iso
+
+logger = logging.getLogger(__name__)
 
 iot_bp = Blueprint('iot', __name__)
 
