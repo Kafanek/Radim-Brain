@@ -261,9 +261,17 @@ def generate_azure_tts(text, rate_pct=None, pitch_hz=None, mode="HARMONY", user_
     """Generate audio bytes using Azure TTS (AntoninNeural).
 
     v403: Accepts mode + user_id for adaptive voice styling.
+    Sprint V.9: Mode normalized via voice_mapping (accepts aliases).
     """
     if not azure_tts_available():
         return None
+
+    # Sprint V.9: normalize mode through central mapping
+    try:
+        from voice_mapping import normalize_mode
+        mode = normalize_mode(mode)
+    except ImportError:
+        pass
 
     if rate_pct is None:
         rate_pct = "-5%"

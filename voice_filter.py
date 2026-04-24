@@ -399,8 +399,16 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
         # Still honor length truncation for UX
         text = _truncate_for_tts(text)
         return build_simple_ssml(text, voice)
-    if mode not in VOICE_PROFILES:
-        logger.warning(f"Invalid voice mode '{mode}' — falling back to HARMONY")
+    # Sprint V.9: normalize mode via central mapping (handles aliases:
+    # 'harmony'/'friendly'/'calm' → HARMONY, etc.)
+    try:
+        from voice_mapping import normalize_mode
+        mode = normalize_mode(mode)
+    except ImportError:
+        # voice_mapping.py missing — fall back to direct lookup
+        if mode not in VOICE_PROFILES:
+            logger.warning(f"Invalid voice mode '{mode}' — falling back to HARMONY")
+            mode = "HARMONY"
     profile = dict(VOICE_PROFILES.get(mode, VOICE_PROFILES["HARMONY"]))
     overrides = []
 
