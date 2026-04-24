@@ -91,6 +91,75 @@ except ImportError:
 
 
 # ============================================
+# SPRINT T — TTS-SAFE SANITIZER
+# ============================================
+# AI sometimes ignores "no markdown/emoji" rules. This is the last line of
+# defense before the text hits Azure TTS (which would literally pronounce
+# "hvězdička hvězdička tučně" if we let markdown through).
+
+_EMOJI_RE = None
+def _sanitize_for_tts(text):
+    """Strip emoji, markdown, HTML — preserve Czech diacritics.
+
+    Rules:
+      - Keep: all UTF-8 letters (incl. ě š č ř ž ý á í é ú ů ť ď ň)
+      - Remove: emoji (broad Unicode ranges), markdown markers, HTML tags
+      - Normalize: collapse multiple spaces, strip trailing whitespace
+      - Preserve: punctuation (. , ? ! : ;) — they drive TTS pauses
+    """
+    if not text:
+        return text
+    import re as _re
+
+    global _EMOJI_RE
+    if _EMOJI_RE is None:
+        # Emoji ranges: pictographs, symbols, dingbats, flags, etc.
+        _EMOJI_RE = _re.compile(
+            "["
+            "\U0001F600-\U0001F64F"  # emoticons
+            "\U0001F300-\U0001F5FF"  # symbols & pictographs
+            "\U0001F680-\U0001F6FF"  # transport & map
+            "\U0001F700-\U0001F77F"  # alchemical
+            "\U0001F780-\U0001F7FF"  # geometric
+            "\U0001F800-\U0001F8FF"  # supplemental arrows
+            "\U0001F900-\U0001F9FF"  # supplemental symbols & pictographs
+            "\U0001FA00-\U0001FA6F"  # chess symbols
+            "\U0001FA70-\U0001FAFF"  # symbols & pictographs ext-a
+            "\U00002702-\U000027B0"  # dingbats
+            "\U000024C2-\U0001F251"
+            "\u2600-\u26FF"          # misc symbols
+            "\u2700-\u27BF"          # dingbats
+            "\uFE00-\uFE0F"          # variation selectors
+            "\u200D"                 # zero-width joiner
+            "]+",
+            flags=_re.UNICODE
+        )
+
+    t = str(text)
+    # 1. Strip HTML tags
+    t = _re.sub(r"<\/?[a-zA-Z][^>]*>", " ", t)
+    # 2. Decode basic HTML entities
+    t = t.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    t = t.replace("&nbsp;", " ").replace("&quot;", '"').replace("&#39;", "'")
+    # 3. Strip markdown: **bold**, *italic*, `code`, __underline__
+    t = _re.sub(r"\*\*([^*]+)\*\*", r"\1", t)
+    t = _re.sub(r"(?<!\w)\*([^*\n]+)\*(?!\w)", r"\1", t)
+    t = _re.sub(r"`([^`]+)`", r"\1", t)
+    t = _re.sub(r"__([^_]+)__", r"\1", t)
+    # 4. Strip markdown headings & bullets at line start
+    t = _re.sub(r"(?m)^#{1,6}\s+", "", t)
+    t = _re.sub(r"(?m)^\s*[-*+]\s+", "", t)
+    t = _re.sub(r"(?m)^\s*\d+\.\s+", "", t)
+    # 5. Remove emoji
+    t = _EMOJI_RE.sub("", t)
+    # 6. Normalize weird spacing + trailing whitespace + multi-newline
+    t = _re.sub(r"[ \t]+", " ", t)
+    t = _re.sub(r"\n{3,}", "\n\n", t)
+    t = t.strip()
+    return t
+
+
+# ============================================
 # MAIN CHAT ENDPOINT
 # ============================================
 
@@ -607,7 +676,13 @@ def radim_chat():
                     try:
                         client = get_claude_client()
                         if client:
-                            _sys = personalized or "Jsi Radim, český AI asistent péče. Odpovídej česky, stručně, s diakritikou."
+                            _sys = personalized or (
+                "Jsi Radim, český AI asistent péče pro seniory. "
+                "TTS-kritické: VŽDY odpovídej česky s DIAKRITIKOU (á é í ó ú ů ě š č ř ž ý ť ď ň). "
+                "Max 2–3 krátké věty, pod 200 znaků. "
+                "Bez emoji, bez markdown, bez anglicismů. "
+                "Teplý, klidný, trpělivý tón."
+            )
                             # Build messages with history
                             _msgs = []
                             if history:
@@ -688,6 +763,10 @@ def radim_chat():
             if '155' not in text_response and '112' not in text_response:
                 text_response += ' Doporučuji zavolat záchrannou službu na číslo 155.'
                 logger.info(f"🚨 Safety gate: injected 155 into response for user {user_id}")
+
+        # Sprint T: TTS-safe post-processing (guarantees clean output for voice)
+        if text_response:
+            text_response = _sanitize_for_tts(text_response)
 
         # ⚡ Cache successful AI response (5min TTL)
         if text_response and _ai_provider in ('gemini', 'claude'):
