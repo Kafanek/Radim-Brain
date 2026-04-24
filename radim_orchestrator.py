@@ -91,6 +91,152 @@ except ImportError:
 
 
 # ============================================
+# SPRINT V.2 — VISION ENDPOINT (Gemini Vision for images)
+# ============================================
+# POST /api/radim/vision
+# Body: { message: str, image_base64: str (data URL or raw b64), user_id?: str }
+# Senior sends a photo (medication, document, food, anything) + optional
+# question. Radim describes what he sees in Czech, senior-friendly.
+#
+# Uses Gemini Vision (gemini-2.0-flash with inline_data). Separate endpoint
+# from /chat to keep the complex text pipeline untouched.
+
+@radim_bp.route('/api/radim/vision', methods=['POST', 'OPTIONS'])
+@optional_auth
+@rate_limit(max_requests=10, window_seconds=60, key_func='ip')
+def radim_vision():
+    """Vision-aware chat: describe image + answer senior's question."""
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    import base64
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+    except Exception:
+        return jsonify({'success': False, 'error': 'Invalid JSON'}), 400
+
+    image_raw = data.get('image_base64') or ''
+    user_msg = (data.get('message') or '').strip()
+    user_id = _extract_user_id(getattr(g, 'auth_user', None), data.get('user_id'))
+
+    if not image_raw:
+        return jsonify({'success': False, 'error': 'image_base64 je povinné'}), 400
+
+    # Parse data URL or raw base64
+    if image_raw.startswith('data:'):
+        header, _, payload = image_raw.partition(',')
+        mime = header.split(';')[0].replace('data:', '') or 'image/jpeg'
+        b64 = payload
+    else:
+        mime = 'image/jpeg'
+        b64 = image_raw
+
+    # Normalize mime
+    if mime not in ('image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/gif'):
+        mime = 'image/jpeg'
+
+    # Decode + size cap
+    try:
+        image_bytes = base64.b64decode(b64, validate=False)
+    except Exception:
+        return jsonify({'success': False, 'error': 'Neplatný obrázek (base64).'}), 400
+    if len(image_bytes) < 1024:
+        return jsonify({'success': False, 'error': 'Obrázek je příliš malý nebo poškozený.'}), 400
+    if len(image_bytes) > 4 * 1024 * 1024:
+        return jsonify({
+            'success': False,
+            'error': f'Obrázek je větší než 4 MB ({len(image_bytes) // 1024} kB). Zmenšete ho.',
+            'code': 'too_large',
+        }), 413
+
+    # Gemini Vision
+    api_key = os.environ.get('GEMINI_API_KEY')
+    if not api_key:
+        return jsonify({
+            'success': False,
+            'error': 'Vize zatím není nakonfigurovaná. Zkuste popsat obsah slovy.',
+            'code': 'vision_unavailable',
+        }), 503
+
+    # Build prompt — senior-friendly with TTS rules
+    default_q = 'Popiš mi co vidíš na obrázku.'
+    question = user_msg or default_q
+
+    system_lines = [
+        "Jsi Radim, český AI asistent pro seniory.",
+        "",
+        "Senior ti poslal obrázek + otázku. Tvá odpověď se čte nahlas přes TTS.",
+        "",
+        "PRAVIDLA:",
+        "- Česky s diakritikou (á é í ó ú ů ě š č ř ž ý ť ď ň). VŽDY.",
+        "- Max 2-3 krátké věty, do 200 znaků.",
+        "- Žádný markdown, žádná emoji v textu, žádný HTML.",
+        "- Konkrétně popiš co vidíš. Neopakuj seniorovu otázku.",
+        "- Pokud je to dokument, přečti klíčová slova.",
+        "- Pokud jsou to léky, přečti název a dávkování (pokud vidíš).",
+        "- Pokud je to jídlo, pomoz s rozpoznáním.",
+        "- Pokud nevíš co to je, řekni upřímně 'Nejsem si jistý'.",
+        "- Buď vřelý, ale stručný.",
+        "",
+        f"Otázka seniora: {question}",
+    ]
+    prompt = "\n".join(system_lines)
+
+    # Personalized context (optional)
+    try:
+        from memory_logic import build_personalized_prompt
+        personalized = build_personalized_prompt(user_id) if user_id else ''
+        if personalized:
+            prompt = personalized + "\n\n" + prompt
+    except Exception:
+        pass
+
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-2.0-flash')
+
+        response = model.generate_content(
+            [prompt, {'mime_type': mime, 'data': image_bytes}],
+            generation_config={
+                'temperature': 0.3,
+                'max_output_tokens': 400,
+                'top_p': 0.9,
+            }
+        )
+        text = (response.text if hasattr(response, 'text') else '') or ''
+    except Exception as e:
+        logger.exception(f"vision call failed: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Obrázek se nepodařilo zpracovat. Zkuste to znovu.',
+        }), 500
+
+    # TTS sanitize (same as chat)
+    text = _sanitize_for_tts(text) if text else ''
+    if not text:
+        text = 'Nepodařilo se mi obrázek rozpoznat. Zkuste ho vyfotit znovu nebo mi ho popište slovy.'
+
+    # Mirror to history (best-effort)
+    try:
+        if user_id:
+            from memory_routes import record_interaction as _rec
+            _rec(user_id, 'user', '[obrázek] ' + (user_msg or default_q))
+            _rec(user_id, 'assistant', text)
+    except Exception:
+        pass
+
+    return jsonify({
+        'success': True,
+        'response': text,
+        'intent': 'vision',
+        'mode': 'senior',
+        'voice_mode': 'HARMONY',
+        'image_bytes': len(image_bytes),
+    })
+
+
+# ============================================
 # SPRINT T — TTS-SAFE SANITIZER
 # ============================================
 # AI sometimes ignores "no markdown/emoji" rules. This is the last line of
