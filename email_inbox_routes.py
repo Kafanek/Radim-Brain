@@ -382,11 +382,16 @@ def fetch_inbox():
         logger.error(f"inbox load_account: {e}")
         return jsonify({'success': False, 'error': 'account storage error'}), 500
     if not account:
+        # Sprint T: unconfigured is not an error — it's an expected state.
+        # Return 200 with configured:false so frontend can show setup UI
+        # without noisy console 404s.
         return jsonify({
-            'success': False,
-            'error': 'no_account',
-            'message': 'Nastavte prosím svůj emailový účet přes /api/email/account.'
-        }), 404
+            'success': True,
+            'configured': False,
+            'messages': [],
+            'count': 0,
+            'message': 'Nastavte prosím svůj emailový účet přes Nastavení → E-mail.',
+        }), 200
 
     try:
         limit = max(1, min(int(request.args.get('limit', 50)), 200))

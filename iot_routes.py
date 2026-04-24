@@ -343,15 +343,27 @@ def iot_system_status():
 @iot_bp.route('/api/iot/sensors/<senior_id>/vitals', methods=['GET'])
 @require_auth
 def get_vitals(senior_id):
-    """Vitální znaky a senzorová data pro konkrétního seniora"""
-    if senior_id not in ROOM_SENSORS:
-        return jsonify({
-            "success": False,
-            "error": f"Senior {senior_id} nemá nakonfigurované senzory",
-            "available_ids": list(ROOM_SENSORS.keys())
-        }), 404
+    """Vitální znaky a senzorová data pro konkrétního seniora.
 
-    config = ROOM_SENSORS[senior_id]
+    Sprint T: demo-safe fallback — when senior_id is unknown (e.g. numeric
+    '1' or user_id without sensors configured), serve first available
+    demo senior instead of 404. Logs the mismatch for ops to fix.
+    """
+    resolved_id = senior_id
+    if senior_id not in ROOM_SENSORS:
+        if ROOM_SENSORS:
+            resolved_id = next(iter(ROOM_SENSORS.keys()))
+            logger.info(f"[iot] senior_id={senior_id!r} unknown, "
+                        f"falling back to demo {resolved_id!r}")
+        else:
+            return jsonify({
+                "success": False,
+                "error": "Žádné senzory nejsou nakonfigurovány.",
+                "available_ids": []
+            }), 503
+
+    config = ROOM_SENSORS[resolved_id]
+    senior_id = resolved_id  # so downstream uses the resolved id
     vitals = generate_vitals(senior_id)
     room_readings = generate_room_readings(senior_id)
 
@@ -396,7 +408,11 @@ def get_vitals(senior_id):
 def get_vitals_history(senior_id):
     """Historie vitálních znaků za posledních 24h"""
     if senior_id not in ROOM_SENSORS:
-        return jsonify({"success": False, "error": f"Senior {senior_id} nenalezen"}), 404
+        # Sprint T: same demo fallback as /vitals
+        if ROOM_SENSORS:
+            senior_id = next(iter(ROOM_SENSORS.keys()))
+        else:
+            return jsonify({"success": False, "error": "Žádné senzory nejsou nakonfigurovány."}), 503
 
     hours = request.args.get('hours', 24, type=int)
     hours = min(hours, 168)  # Max 7 dní
