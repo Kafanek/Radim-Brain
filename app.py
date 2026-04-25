@@ -1687,16 +1687,18 @@ def admin_agent_run():
         from agent_loop import run_agent_cycle
         run_agent_cycle(app)
         # Return observations created in last 5 min
+        # Sprint AG.2: include id so admin tools / debug can correlate to
+        # caregiver inbox + ack endpoint.
         with db_context() as db:
             if is_postgres():
                 rows = db.execute(
-                    "SELECT user_id, observation_type, severity, message, action_taken, created_at "
+                    "SELECT id, user_id, observation_type, severity, message, action_taken, created_at "
                     "FROM agent_observations WHERE created_at > NOW() - INTERVAL '5 minutes' "
                     "ORDER BY created_at DESC"
                 ).fetchall()
             else:
                 rows = db.execute(
-                    "SELECT user_id, observation_type, severity, message, action_taken, created_at "
+                    "SELECT id, user_id, observation_type, severity, message, action_taken, created_at "
                     "FROM agent_observations WHERE created_at > datetime('now', '-5 minutes') "
                     "ORDER BY created_at DESC"
                 ).fetchall()
