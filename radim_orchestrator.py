@@ -363,6 +363,21 @@ def radim_chat():
             is_critical = any(w in msg_lower for w in ['155', '112', 'záchranka', 'záchranku', 'sebevražd', 'sebevrazd', 'chci umřít', 'chci umrit', 'zabij', 'nechci žít'])
             severity = 'critical' if is_critical else 'high'
 
+            # Sprint AD: write CRISIS Ψ(t) to brain_states + update C_history in
+            # memory_learning. Without this, the safety branch returned
+            # brain_mode:CRISIS in the JSON but never persisted it, so the
+            # very next TTS request fetched stale (pre-crisis) brain_speech
+            # and Antonín spoke in HARMONY/ALERT voice during a real fall.
+            # Now subsequent TTS sees C≥30 → CRISIS mode → slower, calmer,
+            # lower-pitched delivery; agent_loop next cycle picks up trend.
+            crisis_C = 35.0 if is_critical else 30.0
+            try:
+                from brain_core import compute_psi_state
+                # alpha=0.0 = fully reactive (low autonomy), correct for crisis
+                compute_psi_state(crisis_C, 0.0, user_id=user_id)
+            except Exception as _psi_err:
+                logger.warning(f"SAFETY: compute_psi_state failed (non-fatal): {_psi_err}")
+
             # v432: CRITICAL (explicit 155/suicide) → hardcoded fast response + notify
             # HIGH (pain, fall, breathing) → let AI respond with empathy, notify async
             import threading
@@ -379,9 +394,20 @@ def radim_chat():
 
             if is_critical:
                 # Explicit emergency call → fast hardcoded response
+                _crit_resp = 'Jsem tady s vámi. Dýchejte pomalu. Volám záchranku a informuji vaši rodinu. Zůstaňte v klidu, pomoc je na cestě.'
+                # Sprint AD: persist CRISIS to memory + C_history (anticipation
+                # engine reads this) so the next interaction sees the recent
+                # crisis. Wrapped in try because record_interaction touches
+                # multiple tables and we never want to block the safety reply.
+                try:
+                    if _ORCH_MEMORY_AVAILABLE:
+                        _orch_record(user_id, message, _crit_resp, brain_C=crisis_C, brain_mode='CRISIS')
+                except Exception as _rec_err:
+                    logger.warning(f"SAFETY: record_interaction failed (non-fatal): {_rec_err}")
+
                 return jsonify({
                     'success': True,
-                    'response': 'Jsem tady s vámi. Dýchejte pomalu. Volám záchranku a informuji vaši rodinu. Zůstaňte v klidu, pomoc je na cestě.',
+                    'response': _crit_resp,
                     'radim_action': {
                         'type': 'safety_alert',
                         'payload': {'user_id': user_id, 'severity': severity, 'message': message},
@@ -405,6 +431,13 @@ def radim_chat():
                     crisis_resp = 'Zůstaňte v klidu. Přitiskněte na ránu čistý hadřík a držte tlak. Je to velká rána? Doporučuji zavolat záchranku na 155.'
                 else:
                     crisis_resp = 'Slyším, že vám není dobře, a jsem tady s vámi. Posaďte se nebo si lehněte. Můžete mi říct víc o tom, co cítíte? Pokud je to vážné, doporučuji zavolat na 155. Chcete, abych zavolal lékaře nebo rodinu?'
+
+                # Sprint AD: persist CRISIS to memory + C_history (see critical branch)
+                try:
+                    if _ORCH_MEMORY_AVAILABLE:
+                        _orch_record(user_id, message, crisis_resp, brain_C=crisis_C, brain_mode='CRISIS')
+                except Exception as _rec_err:
+                    logger.warning(f"SAFETY: record_interaction failed (non-fatal): {_rec_err}")
 
                 return jsonify({
                     'success': True,
