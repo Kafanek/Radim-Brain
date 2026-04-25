@@ -124,6 +124,19 @@ def azure_tts_proxy():
                 f"|p={brain_speech.get('pitch_pct','?')}"
                 f"|ps={brain_speech.get('pause_ms','?')}"
             )
+            # Sprint AE: also include RTCF voice modifiers in cache key.
+            # When ENABLE_RTCF=true the rate_adjust/pause_adjust deltas
+            # change between conversations (beat oscillator phase + ratio
+            # vs Ψ(t-1)). Two requests with same brain_mode but different
+            # RTCF moments would produce different SSML / different audio,
+            # so they need separate cache slots.
+            _rtcf_v = brain_speech.get('rtcf_voice') or {}
+            if _rtcf_v:
+                _brain_fp += (
+                    f"|rt_r={_rtcf_v.get('rate_adjust','0')}"
+                    f"|rt_p={_rtcf_v.get('pause_adjust_ms','0')}"
+                    f"|rt_s={_rtcf_v.get('style_hint','-')}"
+                )
         _cache_rate = str(rate) + ':' + _cache_ctx + _brain_fp
         try:
             from scaling_optimizations import tts_cache

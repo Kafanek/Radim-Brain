@@ -697,6 +697,15 @@ def radim_chat():
                 }
                 if psi_state.get("rhythm_return"):
                     brain_meta["rhythm_return"] = psi_state["rhythm_return"]
+                # Sprint AE: surface RTCF heartbeat in chat response.
+                # Previously enhance_with_rtcf successfully enriched
+                # psi_state["rtcf"] but the orchestrator's whitelist dropped
+                # it on the way out, so frontend / debug had no way to see
+                # whether the heartbeat was active. brain_speech_for_user
+                # still reads RTCF independently for TTS modulation, but
+                # making it visible here closes the observability gap.
+                if psi_state.get("rtcf"):
+                    brain_meta["rtcf"] = psi_state["rtcf"]
                 personalized += f"\n\n[RADIM Brain: mode={psi_state['mode']}, coherence={psi_state['coherence']:.2f}]\n{decision['instructions']}"
             except Exception as brain_err:
                 logger.warning(f"Brain warning (non-fatal): {brain_err}")
