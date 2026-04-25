@@ -250,7 +250,8 @@ def _check_recent_chat_crisis(user_id, baselines):
         if not row:
             return None
 
-        # DictRow / tuple-safe access
+        # DictRow / tuple-safe access. PG RealDictRow lowercases identifiers,
+        # SQLite Row uses original case.
         try:
             C_val = float(row.get('c', row.get('C', 0)) or 0)
             mode = (row.get('mode') or '').upper()
@@ -258,6 +259,10 @@ def _check_recent_chat_crisis(user_id, baselines):
             # plain tuple
             C_val = float(row[0] or 0)
             mode = (row[1] or '').upper()
+
+        # Sprint AF diag: print key info so the path is visible in Heroku logs.
+        # Only fires when there's recent brain state — not spam.
+        print(f"💢 _check_recent_chat_crisis uid={user_id} C={C_val} mode={mode}", flush=True)
 
         if mode == 'CRISIS' or C_val >= T2:
             return {
@@ -274,6 +279,7 @@ def _check_recent_chat_crisis(user_id, baselines):
                 "details": {"C": C_val, "mode": mode, "source": "brain_states_recent"},
             }
     except Exception as e:
+        print(f"💢 _check_recent_chat_crisis ERROR uid={user_id}: {type(e).__name__}: {e}", flush=True)
         logger.debug(f"_check_recent_chat_crisis non-fatal: {e}")
     return None
 
