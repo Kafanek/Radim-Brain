@@ -186,9 +186,12 @@ def emergency_with_retry(user_id, trigger, app=None, max_retries=3):
     try:
         from database import db_context
         with db_context(commit=True) as db:
+            # Sprint AC: column is `observation_type`, not `type` (matches schema).
+            # Old wrong column name caused agent_loop's account_cleanup + this
+            # emergency_summary insert to silently fail with retry storms in logs.
             db.execute("""
                 INSERT INTO agent_observations
-                (user_id, type, severity, message, details, created_at)
+                (user_id, observation_type, severity, message, details, created_at)
                 VALUES (?, 'emergency_summary', 'CRISIS', ?, ?, ?)
             """, (
                 user_id,
@@ -211,9 +214,10 @@ def _emergency_log(user_id, trigger, app):
     """Log crisis event."""
     from database import db_context
     with db_context(commit=True) as db:
+        # Sprint AC: column is `observation_type` (matches schema)
         db.execute("""
             INSERT INTO agent_observations
-            (user_id, type, severity, message, created_at)
+            (user_id, observation_type, severity, message, created_at)
             VALUES (?, 'emergency_protocol', 'CRISIS', ?, ?)
         """, (user_id, f"Trigger: {trigger}", datetime.utcnow().isoformat()))
 

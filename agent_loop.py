@@ -1071,10 +1071,11 @@ def _cleanup_subscriptions(db=None):
             for row in (flagged or []):
                 uid, email, name = row[0], row[1], row[2]
                 # Log observation for admin visibility
+                # Sprint AC: column is `observation_type`, not `type`
                 try:
                     db.execute("""
                         INSERT INTO agent_observations
-                        (user_id, type, severity, message, created_at)
+                        (user_id, observation_type, severity, message, created_at)
                         VALUES (?, 'account_cleanup', 'WARNING', ?, ?)
                     """, (
                         str(uid),
