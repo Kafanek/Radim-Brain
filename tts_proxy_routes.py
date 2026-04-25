@@ -109,18 +109,41 @@ def azure_tts_proxy():
 
         # ⚡ TTS Cache — check before Azure API call
         # v10.15: Include context in cache key (poetry ≠ harmony for same text)
+        # Sprint AC: include brain_mode + rate/pitch/pause fingerprint so a
+        # CRISIS user doesn't accidentally get a HARMONY user's cached MP3
+        # (which would silently bypass Sprint AA wire-up). Each Ψ(t) state
+        # gets its own cache slot — cost-cheap, since most users settle on
+        # one mode per session anyway.
         rate = float(data.get('rate', 0.9))
         _cache_ctx = data.get('context', '') or data.get('style', '') or ''
-        _cache_rate = str(rate) + ':' + _cache_ctx
+        _brain_fp = ''
+        if brain_speech:
+            _brain_fp = (
+                f"|m={brain_speech.get('mode','?')}"
+                f"|r={brain_speech.get('rate','?')}"
+                f"|p={brain_speech.get('pitch_pct','?')}"
+                f"|ps={brain_speech.get('pause_ms','?')}"
+            )
+        _cache_rate = str(rate) + ':' + _cache_ctx + _brain_fp
         try:
             from scaling_optimizations import tts_cache
             cached_audio = tts_cache.get(text, voice, _cache_rate)
             if cached_audio:
                 logger.debug(f"TTS cache HIT: {text[:30]}...")
+                # Sprint AC: emit brain headers on cache HIT too, so callers
+                # can verify which Ψ(t)-aware variant they got. Previously
+                # cache HITs returned no X-Brain-* headers → indistinguishable
+                # from "no brain available" path.
+                _hit_headers = {'X-Voice-Name': voice, 'X-Cache': 'HIT', 'Cache-Control': 'no-cache'}
+                if brain_speech:
+                    _hit_headers['X-Brain-Mode'] = str(brain_speech.get('mode', ''))
+                    _hit_headers['X-Brain-Coherence'] = str(brain_speech.get('coherence', ''))
+                if ant_state:
+                    _hit_headers['X-Anticipation-State'] = ant_state
                 return Response(
                     cached_audio,
                     mimetype='audio/mpeg',
-                    headers={'X-Voice-Name': voice, 'X-Cache': 'HIT', 'Cache-Control': 'no-cache'}
+                    headers=_hit_headers
                 )
         except ImportError:
             pass
@@ -250,6 +273,24 @@ def azure_tts_proxy():
             try:
                 from scaling_optimizations import tts_cache
                 tts_cache.put(text, response.content, voice, _cache_rate)
+            except Exception:
+                pass
+
+            # Sprint AC: log a single visible line that summarises the full
+            # Ψ(t)→audio path. Helps debug whether brain magnitudes actually
+            # reached SSML (previously voice_filter's overrides log was
+            # buried below Heroku log level visibility).
+            try:
+                _log_parts = [f"mode={_mode}", f"size={len(response.content)}B"]
+                if brain_speech:
+                    _log_parts.append(
+                        f"brain[{brain_speech.get('mode')}/"
+                        f"r={brain_speech.get('rate')}/"
+                        f"p={brain_speech.get('pitch_pct')}%/"
+                        f"ps={brain_speech.get('pause_ms')}ms/"
+                        f"coh={brain_speech.get('coherence')}]"
+                    )
+                logger.info(f"🎙️ TTS uid={uid or 'anon'} text='{text[:40]}…' " + " ".join(_log_parts))
             except Exception:
                 pass
 
