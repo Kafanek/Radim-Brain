@@ -661,6 +661,64 @@ def get_senior_phone(user_id):
 
 
 # ============================================================================
+# SMS SENDER (Sprint AF) — used by emergency protocol
+# ============================================================================
+
+def send_sms(phone_number, message, user_id=None):
+    """Send a single SMS to phone_number.
+
+    Used by the emergency protocol (agent_bridge._emergency_sms) when a
+    safety event fires and caregivers must be notified out-of-band of
+    the chat / push channels.
+
+    Args:
+        phone_number: E.164 format (+420...) or raw 9-digit Czech (auto +420)
+        message: Text body (truncated to 1500 chars to fit two SMS segments
+                 with metadata)
+        user_id: Optional, logged for audit only
+
+    Returns:
+        dict {success, message_sid, to} on send,
+        dict {success: False, error} on failure.
+    Never raises — caller can react on success flag.
+    """
+    if not phone_number:
+        return {'success': False, 'error': 'phone_number missing'}
+
+    account_sid = TWILIO_ACCOUNT_SID
+    auth_token = TWILIO_AUTH_TOKEN
+    from_number = TWILIO_PHONE_NUMBER
+    if not (account_sid and auth_token and from_number):
+        return {'success': False, 'error': 'Twilio not configured'}
+
+    # Normalise phone — accept 9-digit Czech, prefix +420
+    phone_clean = str(phone_number).strip().replace(' ', '')
+    if not phone_clean.startswith('+'):
+        if len(phone_clean) == 9 and phone_clean.isdigit():
+            phone_clean = '+420' + phone_clean
+
+    # SMS body limit — two-segment safety
+    if len(message) > 1500:
+        message = message[:1497] + '...'
+
+    try:
+        from twilio.rest import Client
+        client = Client(account_sid, auth_token)
+        msg = client.messages.create(
+            body=message,
+            from_=from_number,
+            to=phone_clean,
+        )
+        logger.info(f"📨 SMS sent to {phone_clean} (user={user_id}): sid={msg.sid}")
+        return {'success': True, 'message_sid': msg.sid, 'to': phone_clean}
+    except ImportError:
+        return {'success': False, 'error': 'twilio package not installed'}
+    except Exception as e:
+        logger.error(f"SMS send error: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+# ============================================================================
 # WHATSAPP PROACTIVE SENDER (v10.24)
 # ============================================================================
 

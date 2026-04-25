@@ -160,15 +160,30 @@ def emergency_with_retry(user_id, trigger, app=None, max_retries=3):
         ('push', _emergency_push),
     ]
 
+    # Sprint AF: ValueError from emergency actions = permanent error
+    # ("No phone for X", "No emergency contacts configured", "No valid phone
+    # numbers in contacts"). Retrying these 3× with exp backoff just delays
+    # the rest of the protocol by 7s and fills logs with noise. Skip retry
+    # on ValueError; only retry transient failures (network, timeout,
+    # third-party API hiccups → RuntimeError, ConnectionError, requests
+    # exceptions, etc.).
+    permanent_error_types = (ValueError, AttributeError)
+
     results = {}
     for action_name, action_fn in actions:
         success = False
         last_error = None
+        attempt = 0
         for attempt in range(max_retries):
             try:
                 action_fn(user_id, trigger, app)
                 success = True
                 logger.info(f"🚨 Emergency {action_name}: ✅ (attempt {attempt + 1})")
+                break
+            except permanent_error_types as pe:
+                # Configuration / data missing — won't get better with retry
+                last_error = f"permanent: {pe}"
+                logger.warning(f"🚨 Emergency {action_name}: skipped permanently — {pe}")
                 break
             except Exception as e:
                 last_error = str(e)
