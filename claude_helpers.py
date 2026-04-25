@@ -27,7 +27,11 @@ except ImportError:
 # ============================================================================
 
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
-CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-sonnet-4-6-20250514')
+# Sprint AA hotfix: 'claude-sonnet-4-6-20250514' was a typo (extra "-6") and
+# returns 404 from Anthropic API on every News fetch. Correct name is
+# 'claude-sonnet-4-20250514'. Override via CLAUDE_MODEL env var on Heroku
+# if a newer model becomes available.
+CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-sonnet-4-20250514')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
 # ============================================================================

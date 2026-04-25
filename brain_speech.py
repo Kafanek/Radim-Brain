@@ -177,18 +177,27 @@ def get_brain_speech_for_user(user_id, _load_adaptation=None, _adaptation_fallba
     if not DB_AVAILABLE or not user_id:
         return None
     try:
+        # Sprint AA hotfix: PG `INTERVAL '? minutes'` doesn't expand `?`
+        # inside a string literal, so the wrapper sent 2 values to 1
+        # placeholder → "not all arguments converted" warning on every
+        # TTS request. BRAIN_STATE_TTL_MINUTES is a trusted int constant
+        # from brain_math, so f-string interpolation is safe (no SQL
+        # injection vector — value comes from server-side code, not user).
+        ttl = int(BRAIN_STATE_TTL_MINUTES)
         with db_context() as db:
             if is_postgres():
                 row = db.execute(
                     "SELECT C, E, R, S, alpha, mode, coherence FROM brain_states "
-                    "WHERE user_id = ? AND created_at > NOW() - INTERVAL '? minutes' ORDER BY created_at DESC LIMIT 1",
-                    (user_id, BRAIN_STATE_TTL_MINUTES)
+                    f"WHERE user_id = ? AND created_at > NOW() - INTERVAL '{ttl} minutes' "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (user_id,)
                 ).fetchone()
             else:
                 row = db.execute(
                     "SELECT C, E, R, S, alpha, mode, coherence FROM brain_states "
-                    "WHERE user_id = ? AND created_at > datetime('now', '-' || ? || ' minutes') ORDER BY created_at DESC LIMIT 1",
-                    (user_id, BRAIN_STATE_TTL_MINUTES)
+                    f"WHERE user_id = ? AND created_at > datetime('now', '-{ttl} minutes') "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (user_id,)
                 ).fetchone()
             if not row:
                 return None
