@@ -292,8 +292,8 @@ def azure_tts_proxy():
             # Sprint AC: log a single visible line that summarises the full
             # Ψ(t)→audio path. Uses print() (not logger.info) because gunicorn
             # in this app captures stdout to Heroku log stream while module
-            # loggers without explicit handlers stay silent. Other audit logs
-            # in radim_orchestrator use the same print() pattern.
+            # loggers without explicit handlers stay silent.
+            # Sprint AE: extend with RTCF heartbeat deltas when ENABLE_RTCF=true.
             try:
                 _log_parts = [f"mode={_mode}", f"size={len(response.content)}B"]
                 if brain_speech:
@@ -304,6 +304,15 @@ def azure_tts_proxy():
                         f"ps={brain_speech.get('pause_ms')}ms/"
                         f"coh={brain_speech.get('coherence')}]"
                     )
+                    _rtv = brain_speech.get('rtcf_voice') or {}
+                    if _rtv:
+                        _log_parts.append(
+                            f"rtcf[{brain_speech.get('rtcf_state','?')}/"
+                            f"Δr={_rtv.get('rate_adjust',0)}/"
+                            f"Δps={_rtv.get('pause_adjust_ms',0)}ms"
+                            + (f"/style={_rtv.get('style_hint')}" if _rtv.get('style_hint') else "")
+                            + "]"
+                        )
                 print(f"🎙️ TTS uid={uid or 'anon'} text='{text[:40]}' " + " ".join(_log_parts), flush=True)
             except Exception:
                 pass
