@@ -74,7 +74,13 @@ def azure_tts_preflight():
 
 
 @tts_proxy_bp.route('/api/azure/tts', methods=['POST'])
-@rate_limit(max_requests=60, window_seconds=60, key_func='ip')
+# Sprint AA hotfix: bump 60→200/min. Voice-first app legitimately bursts:
+# main TTS for chat reply + ack phrase + precache (12 phrases on startup) +
+# follow-up turns. 60/min was throttling normal use, especially when
+# SpeechPipeline.js precached and SpeechOrchestrator.js spoke simultaneously.
+# Backend cache (scaling_optimizations.tts_cache) absorbs repeats so the
+# Azure cost ceiling stays sane even at 200/min.
+@rate_limit(max_requests=200, window_seconds=60, key_func='ip')
 def azure_tts_proxy():
     """Azure TTS Proxy - Antonin voice"""
     if not AZURE_TTS_KEY:
