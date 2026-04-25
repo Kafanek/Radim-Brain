@@ -321,13 +321,25 @@ def compute_psi_state(C, alpha, voice_tone=0.5, hrv=0.5, speech_tempo=0.5, user_
         result["rhythm_return"] = rhythm_data
 
     # v10.25: RTCF — Radim Temporal Coherence Framework (the heartbeat)
+    # Sprint AE: print() diagnostics so Heroku log visibility doesn't hide
+    # silent failures. Logger.info is swallowed by gunicorn here, so we use
+    # bare print() to confirm the path actually runs and surfaces any error.
     try:
         from rtcf_bridge import enhance_with_rtcf, ENABLE_RTCF
         if ENABLE_RTCF:
+            _had_rtcf_before = 'rtcf' in result
             result = enhance_with_rtcf(result, C, alpha, user_id=user_id)
-    except ImportError:
-        pass
+            _has_rtcf_after = 'rtcf' in result
+            if not _has_rtcf_after and not _had_rtcf_before:
+                # bridge ran but didn't enrich — internal silent fail
+                print(f"💓 RTCF: enrich attempted but no rtcf key added "
+                      f"(uid={user_id} C={C} α={alpha})", flush=True)
+        else:
+            print(f"💓 RTCF: ENABLE_RTCF is False at runtime (uid={user_id})", flush=True)
+    except ImportError as ie:
+        print(f"💓 RTCF: ImportError {ie}", flush=True)
     except Exception as rtcf_err:
+        print(f"💓 RTCF: non-fatal {type(rtcf_err).__name__}: {rtcf_err}", flush=True)
         logger.debug(f"RTCF non-fatal: {rtcf_err}")
 
     return result
