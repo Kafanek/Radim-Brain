@@ -1470,6 +1470,232 @@ def run_daily_narratives():
     return generated
 
 
+# ═════════════════════════════════════════════════════════════════════
+# Sprint AG.1: CAREGIVER INBOX — agent_observations surfaced to family
+# ═════════════════════════════════════════════════════════════════════
+# Until now, agent_loop wrote observations to DB but the family / caregivers
+# had no way to see them. This endpoint exposes the senior's recent
+# observations + brain mode + last interaction so a caregiver dashboard
+# can render "what's happening with my parent right now".
+
+@caregiver_bp.route('/api/caregiver/inbox/<senior_id>', methods=['GET', 'OPTIONS'])
+def caregiver_inbox(senior_id):
+    """List recent agent observations + brain status for a senior.
+
+    Auth: caller must be linked to senior_id via senior_family_links
+    (confirmed, not revoked) OR be the senior themselves.
+
+    Query params:
+      since: optional ISO timestamp — only observations newer than this
+      limit: max observations (default 50, max 200)
+      severity_min: INFO|WARNING|ALERT|CRISIS (default INFO)
+
+    Response:
+    {
+      "senior": {"id", "name"},
+      "now": {
+        "brain_mode": "HARMONY|ALERT|CRISIS",
+        "coherence": 0.68,
+        "last_interaction_minutes_ago": 12
+      },
+      "observations": [
+        {"id", "type", "severity", "message", "created_at",
+         "acknowledged_at", "details": {...}}
+      ],
+      "summary": {"crisis": 0, "alert": 1, "warning": 2, "info": 5}
+    }
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    from auth_middleware import require_auth as _ra
+    # Inline auth: keep route handler readable, allow caller-not-linked → 403
+    @_ra
+    def _inner(_senior_id):
+        caller = getattr(g, 'auth_user', None) or {}
+        caller_id = str(caller.get('user_id') or caller.get('id') or '')
+        if not caller_id:
+            return jsonify({'success': False, 'error': 'Auth required'}), 401
+
+        if not _is_family_of(_senior_id, caller_id):
+            return jsonify({'success': False, 'error': 'Not linked to this senior'}), 403
+
+        try:
+            limit = max(1, min(200, int(request.args.get('limit', 50))))
+        except ValueError:
+            limit = 50
+        sev_min = (request.args.get('severity_min') or 'INFO').upper()
+        sev_order = ['INFO', 'WARNING', 'ALERT', 'CRISIS']
+        if sev_min not in sev_order:
+            sev_min = 'INFO'
+        sev_filter = sev_order[sev_order.index(sev_min):]
+        since_iso = request.args.get('since')
+
+        observations = []
+        summary = {'crisis': 0, 'alert': 0, 'warning': 0, 'info': 0}
+        try:
+            with db_context() as db:
+                # Build placeholders for severity IN (?, ?, ?)
+                placeholders = ','.join(['?'] * len(sev_filter))
+                params = [_senior_id] + sev_filter
+                where_extra = ''
+                if since_iso:
+                    where_extra = ' AND created_at > ?'
+                    params.append(since_iso)
+                params.append(limit)
+                rows = db.execute(
+                    f"SELECT id, observation_type, severity, message, "
+                    f"       details, action_taken, acknowledged_at, created_at "
+                    f"FROM agent_observations "
+                    f"WHERE user_id = ? AND severity IN ({placeholders})"
+                    f"{where_extra} "
+                    f"ORDER BY created_at DESC LIMIT ?",
+                    tuple(params)
+                ).fetchall()
+                for r in rows:
+                    try:
+                        details = r.get('details') if hasattr(r, 'get') else r[4]
+                    except Exception:
+                        details = None
+                    if isinstance(details, str):
+                        try:
+                            details = json.loads(details)
+                        except Exception:
+                            details = {'raw': details[:200]}
+                    obs_id = r.get('id') if hasattr(r, 'get') else r[0]
+                    obs_type = r.get('observation_type') if hasattr(r, 'get') else r[1]
+                    sev = (r.get('severity') if hasattr(r, 'get') else r[2]) or 'INFO'
+                    msg = r.get('message') if hasattr(r, 'get') else r[3]
+                    action = r.get('action_taken') if hasattr(r, 'get') else r[5]
+                    ack = r.get('acknowledged_at') if hasattr(r, 'get') else r[6]
+                    created = r.get('created_at') if hasattr(r, 'get') else r[7]
+
+                    observations.append({
+                        'id': int(obs_id) if obs_id is not None else None,
+                        'type': obs_type,
+                        'severity': sev.upper(),
+                        'message': msg,
+                        'action_taken': action,
+                        'acknowledged_at': created.isoformat() if hasattr(created, 'isoformat') and ack else (str(ack) if ack else None),
+                        'created_at': created.isoformat() if hasattr(created, 'isoformat') else str(created),
+                        'details': details or {},
+                    })
+                    sev_key = sev.lower()
+                    if sev_key in summary:
+                        summary[sev_key] += 1
+        except Exception as e:
+            logger.warning(f"caregiver_inbox observations error: {e}")
+
+        # Brain status NOW
+        brain_now = {'brain_mode': None, 'coherence': None}
+        try:
+            with db_context() as db:
+                if is_postgres():
+                    brow = db.execute(
+                        "SELECT mode, coherence FROM brain_states "
+                        "WHERE user_id = ? AND created_at > NOW() - INTERVAL '30 minutes' "
+                        "ORDER BY created_at DESC LIMIT 1",
+                        (_senior_id,)
+                    ).fetchone()
+                else:
+                    brow = db.execute(
+                        "SELECT mode, coherence FROM brain_states "
+                        "WHERE user_id = ? AND created_at > datetime('now', '-30 minutes') "
+                        "ORDER BY created_at DESC LIMIT 1",
+                        (_senior_id,)
+                    ).fetchone()
+            if brow:
+                brain_now['brain_mode'] = (brow.get('mode') if hasattr(brow, 'get') else brow[0]) or 'HARMONY'
+                co = brow.get('coherence') if hasattr(brow, 'get') else brow[1]
+                brain_now['coherence'] = round(float(co), 3) if co is not None else None
+        except Exception as e:
+            logger.debug(f"brain_now lookup: {e}")
+
+        # Last interaction
+        last_iso, last_min_ago = _last_interaction(_senior_id) if False else (None, None)
+        try:
+            with db_context() as db:
+                row = db.execute(
+                    "SELECT MAX(created_at) FROM memory_history WHERE user_id = ? AND role = 'user'",
+                    (_senior_id,)
+                ).fetchone()
+                if row and (row.get(0) if hasattr(row, 'get') else row[0]):
+                    last_dt = row.get(0) if hasattr(row, 'get') else row[0]
+                    if hasattr(last_dt, 'isoformat'):
+                        last_iso = last_dt.isoformat()
+                        delta = datetime.utcnow() - last_dt.replace(tzinfo=None) if hasattr(last_dt, 'tzinfo') and last_dt.tzinfo else datetime.utcnow() - last_dt
+                        last_min_ago = max(0, int(delta.total_seconds() // 60))
+        except Exception:
+            pass
+
+        return jsonify({
+            'success': True,
+            'senior': {
+                'id': _senior_id,
+                'name': _addressee_name(_senior_id),
+            },
+            'now': {
+                'brain_mode': brain_now['brain_mode'],
+                'coherence': brain_now['coherence'],
+                'last_interaction_at': last_iso,
+                'last_interaction_minutes_ago': last_min_ago,
+            },
+            'observations': observations,
+            'summary': summary,
+        })
+
+    return _inner(senior_id)
+
+
+@caregiver_bp.route('/api/caregiver/observations/<int:obs_id>/ack', methods=['POST', 'OPTIONS'])
+def caregiver_observation_ack(obs_id):
+    """Mark an agent_observation as acknowledged by the caregiver.
+
+    Caller must be linked to the senior the observation belongs to.
+    Idempotent: re-ack just refreshes the timestamp.
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    from auth_middleware import require_auth as _ra
+    @_ra
+    def _inner(_obs_id):
+        caller = getattr(g, 'auth_user', None) or {}
+        caller_id = str(caller.get('user_id') or caller.get('id') or '')
+        if not caller_id:
+            return jsonify({'success': False, 'error': 'Auth required'}), 401
+
+        # Look up observation senior
+        try:
+            with db_context() as db:
+                r = db.execute(
+                    "SELECT user_id, observation_type FROM agent_observations WHERE id = ?",
+                    (_obs_id,)
+                ).fetchone()
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)[:120]}), 500
+        if not r:
+            return jsonify({'success': False, 'error': 'observation not found'}), 404
+
+        senior_id = (r.get('user_id') if hasattr(r, 'get') else r[0])
+        if not senior_id or not _is_family_of(senior_id, caller_id):
+            return jsonify({'success': False, 'error': 'Not authorized for this senior'}), 403
+
+        # Mark
+        try:
+            with db_context(commit=True) as db:
+                db.execute(
+                    "UPDATE agent_observations SET acknowledged_at = ? WHERE id = ?",
+                    (datetime.utcnow().isoformat(), _obs_id)
+                )
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)[:120]}), 500
+
+        return jsonify({'success': True, 'observation_id': _obs_id, 'acknowledged_at': datetime.utcnow().isoformat()})
+
+    return _inner(obs_id)
+
+
 def register_scheduler_jobs(scheduler):
     """Hook into main APScheduler. Safe to call twice — replace_existing=True."""
     try:
