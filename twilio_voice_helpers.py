@@ -284,20 +284,23 @@ def generate_azure_tts(text, rate_pct=None, pitch_hz=None, mode="HARMONY", user_
         # v389: Use rich SSML from voice_filter (emotion + pauses + emphasis)
         # v403: Pass user_id for per-user adaptive voice (fatigue, recovery, pace)
         # v10.29: Fetch RTCF Beat Engine voice modifiers (if enabled)
+        # Sprint AA: also fetch full brain_speech dict so phone calls get
+        # Ψ(t)-driven rate/pitch/pause from compute_unified_speech.
         _rtcf_voice = None
+        _brain_speech = None
         if user_id:
             try:
                 from brain_speech import get_brain_speech_for_user
-                _bs = get_brain_speech_for_user(user_id)
-                if _bs:
-                    _rtcf_voice = _bs.get('rtcf_voice')
+                _brain_speech = get_brain_speech_for_user(user_id)
+                if _brain_speech:
+                    _rtcf_voice = _brain_speech.get('rtcf_voice')
             except Exception:
                 pass
 
         try:
             from voice_filter import build_radim_ssml
             ssml = build_radim_ssml(text, mode=mode, voice=RADIM_AZURE_VOICE, user_id=user_id,
-                                    rtcf_voice=_rtcf_voice)
+                                    rtcf_voice=_rtcf_voice, brain_speech=_brain_speech)
         except ImportError:
             safe_text = xml_escape(text)
             ssml = f"""<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='cs-CZ'>

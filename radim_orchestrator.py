@@ -1212,6 +1212,25 @@ def radim_chat_internal(message, user_id=None, mode="senior"):
         except Exception:
             pass
 
+        # Sprint AA: Anticipation Engine on every WhatsApp/phone turn.
+        # Previously only the HTTP /api/radim/chat path called anticipate(),
+        # so phone callers + WhatsApp users never got breaking-point overrides
+        # (B12 → ALERT, B27 → CRISIS) until the 5-min agent_loop catch-up.
+        # This closes the gap so all channels share the same predictive layer.
+        try:
+            from anticipation_engine import anticipate
+            antic = anticipate(user_id)
+            if antic:
+                bp = antic.get('breaking_points', {})
+                if bp.get('B27') and brain_mode != 'CRISIS':
+                    brain_mode = 'CRISIS'
+                    logger.info(f"🔮 Anticipation override (internal): B₂₇ → CRISIS for {user_id}")
+                elif bp.get('B12') and brain_mode == 'HARMONY':
+                    brain_mode = 'ALERT'
+                    logger.info(f"🔮 Anticipation override (internal): B₁₂ → ALERT for {user_id}")
+        except Exception as ae:
+            logger.debug(f"Anticipation (internal) skipped: {ae}")
+
         # v10.10: Update last_active for subscription tracking
         try:
             with db_context(commit=True) as _db:

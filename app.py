@@ -492,6 +492,14 @@ from anticipation_routes import anticipation_bp
 app.register_blueprint(anticipation_bp)
 logger.info("✅ Anticipation Engine registered: /api/anticipation/*")
 
+# 🧬 Sprint AA: Neuron Learning persistence (KafanekNeurons backend sync)
+try:
+    from neuron_routes import neuron_bp
+    app.register_blueprint(neuron_bp)
+    logger.info("🧬 Neuron Learning routes registered: /api/neurons/*")
+except ImportError as _e:
+    logger.warning(f"⚠️ Neuron Learning routes not available: {_e}")
+
 # 🎵 Import Rhythm Return Engine - Návrat rytmu (Parkinson)
 try:
     from rhythm_return_routes import rhythm_return_bp
@@ -2073,7 +2081,10 @@ def admin_crisis_demo():
             from voice_filter import build_radim_ssml
             crisis_text = "Zaznamenal jsem pád. Jste v pořádku? Pokud potřebujete pomoc, řekněte pomoc nebo stiskněte červené tlačítko."
             # v10.29: RTCF Beat Engine voice modifiers for crisis playback
+            # Sprint AA: also wire full brain_speech so CRISIS demo audio
+            # uses real per-user Ψ(t) magnitudes.
             _rtcf_voice = None
+            _bs = None
             try:
                 from brain_speech import get_brain_speech_for_user
                 _bs = get_brain_speech_for_user(user_id)
@@ -2082,9 +2093,9 @@ def admin_crisis_demo():
             except Exception:
                 pass
             tts_greeting = build_radim_ssml(crisis_text, mode='CRISIS', user_id=user_id,
-                                            rtcf_voice=_rtcf_voice)
+                                            rtcf_voice=_rtcf_voice, brain_speech=_bs)
             timeline.append({'t': 8, 'action': 'tts_crisis_ssml',
-                             'detail': f'CRISIS voice SSML generated (rtcf_voice={"yes" if _rtcf_voice else "no"})'})
+                             'detail': f'CRISIS voice SSML generated (rtcf_voice={"yes" if _rtcf_voice else "no"}, brain_speech={"yes" if _bs else "no"})'})
         except Exception as e:
             timeline.append({'t': 8, 'action': 'tts_ssml_failed', 'detail': str(e)})
 

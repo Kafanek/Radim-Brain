@@ -132,6 +132,19 @@ PG_MAIN_SCHEMA = '''
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- Sprint AA: per-user neuron learning state (Kafánek Neurons frontend).
+    -- Previously each neuron stored its threshold/rhythm/feedback only in
+    -- localStorage, so cookie clears or device changes wiped adaptability.
+    -- One row per (user_id, neuron_id); data is the raw NeuronLearning blob.
+    CREATE TABLE IF NOT EXISTS neuron_learning (
+        user_id TEXT NOT NULL,
+        neuron_id TEXT NOT NULL,
+        data JSONB NOT NULL DEFAULT '{}',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, neuron_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_neuron_learning_user ON neuron_learning(user_id);
+
     CREATE INDEX IF NOT EXISTS idx_memory_history_user ON memory_history(user_id);
     CREATE INDEX IF NOT EXISTS idx_memory_history_ts ON memory_history(created_at DESC);
 
@@ -795,6 +808,16 @@ SQLITE_SCHEMA = '''
         data TEXT NOT NULL DEFAULT '{}',
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- Sprint AA: per-user neuron learning (SQLite mirror of PG schema)
+    CREATE TABLE IF NOT EXISTS neuron_learning (
+        user_id TEXT NOT NULL,
+        neuron_id TEXT NOT NULL,
+        data TEXT NOT NULL DEFAULT '{}',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, neuron_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_neuron_learning_user ON neuron_learning(user_id);
 
     CREATE INDEX IF NOT EXISTS idx_memory_history_user ON memory_history(user_id);
     CREATE INDEX IF NOT EXISTS idx_memory_history_ts ON memory_history(created_at DESC);

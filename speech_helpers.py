@@ -170,7 +170,10 @@ def radim_speak(text, emotion='friendly', C=None, alpha=None, user_id=None):
             from voice_filter import build_radim_ssml
             # v10.29: Pass RTCF Beat Engine voice modifiers if available
             _rtcf_voice = brain_speech.get('rtcf_voice') if brain_speech else None
-            ssml = build_radim_ssml(text, mode=_mode, user_id=user_id, rtcf_voice=_rtcf_voice)
+            # Sprint AA: pass full brain_speech so SSML uses Ψ(t)-driven
+            # rate/pitch/pause from compute_unified_speech (4-layer output).
+            ssml = build_radim_ssml(text, mode=_mode, user_id=user_id,
+                                    rtcf_voice=_rtcf_voice, brain_speech=brain_speech)
         except ImportError:
             safe_text = xml_escape(text)
             ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"

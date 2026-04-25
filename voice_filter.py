@@ -377,8 +377,18 @@ def build_simple_ssml(text: str, voice: str) -> str:
     )
 
 
-def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=None, rtcf_voice=None):
+def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural",
+                     user_id=None, rtcf_voice=None, brain_speech=None):
     """Build rich SSML for Radim's voice with mode-adaptive styling.
+
+    Sprint AA: brain_speech param wires Ψ(t)-driven speech params into SSML.
+      - rate (e.g. 0.85 → "-15%"), pitch_pct, pause_ms
+      - When provided, overrides static VOICE_PROFILES values with dynamic
+        ones from compute_unified_speech() — closing the loop where brain
+        engine output was previously dead code.
+      - Mode is still derived from brain (CRISIS / ALERT / HARMONY) but
+        the magnitudes adapt per-user (per-user adaptation, anticipation
+        fine-tune, age, RTCF beat).
 
     v405 hardening:
     - MAX_TTS_CHARS truncation (seniors lose focus on long speech)
@@ -417,6 +427,51 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural", user_id=
     text = _truncate_for_tts(text)
     if len(text) < original_len:
         overrides.append(f"truncated:{original_len}→{len(text)}")
+
+    # ── Sprint AA: brain_speech wires Ψ(t) state into SSML ─────────────
+    # brain_speech comes from compute_unified_speech(C, alpha, mode, ...)
+    # which blends:
+    #   Layer 1 — brain baseline (HARMONY/ALERT/CRISIS)
+    #   Layer 2 — anticipation fine-tune (predicted Ĉ_{t+1})
+    #   Layer 3 — per-user adaptation (brain_adaptation table)
+    #   Layer 4 — age-aware pitch mapping (semitones → %)
+    # Previously only brain_speech.mode was consumed; rate/pitch/pause were
+    # dead code. This override closes the loop so Radim's audio actually
+    # reflects per-user Ψ(t) magnitudes, not just the static mode preset.
+    if brain_speech and isinstance(brain_speech, dict):
+        bs_rate = brain_speech.get('rate')
+        if bs_rate is not None:
+            try:
+                # Numeric rate (e.g. 0.85) → SSML percent ("-15%")
+                rate_pct = int(round((float(bs_rate) - 1.0) * 100))
+                profile['rate'] = f"{rate_pct:+d}%"
+            except (TypeError, ValueError):
+                pass
+        bs_pitch = brain_speech.get('pitch_pct')
+        if bs_pitch is not None:
+            try:
+                profile['pitch'] = f"{int(round(float(bs_pitch))):+d}%"
+            except (TypeError, ValueError):
+                pass
+        bs_pause = brain_speech.get('pause_ms')
+        if bs_pause is not None:
+            try:
+                profile['pause_ms'] = max(200, int(bs_pause))
+            except (TypeError, ValueError):
+                pass
+        bs_style = brain_speech.get('style')
+        if bs_style:
+            profile['style'] = bs_style
+        bs_sd = brain_speech.get('styledegree')
+        if bs_sd is not None:
+            try:
+                profile['styledegree'] = f"{float(bs_sd):.1f}"
+            except (TypeError, ValueError):
+                pass
+        overrides.append(
+            f"brain:{brain_speech.get('mode', mode)}"
+            f":r{profile['rate']}:p{profile['pause_ms']}"
+        )
 
     # v403: Per-user adaptive overrides
     if user_id:

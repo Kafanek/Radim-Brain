@@ -39,9 +39,12 @@ WARNING = "WARNING"
 ALERT = "ALERT"
 CRISIS = "CRISIS"
 
-# Brain thresholds (from brain_math.py)
-T1 = 12  # HARMONY → ALERT
-T2 = 27  # ALERT → CRISIS
+# Sprint AA: brain_math is the single source of truth for T1/T2.
+try:
+    from brain_math import T1, T2
+except ImportError:
+    T1 = 12  # HARMONY → ALERT
+    T2 = 27  # ALERT → CRISIS
 
 OBSERVATION_COOLDOWN_MINUTES = 60
 

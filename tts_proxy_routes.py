@@ -177,8 +177,12 @@ def azure_tts_proxy():
             from voice_filter import build_radim_ssml
             # v10.29: Pass RTCF voice modifiers (Beat Engine) if available
             _rtcf_voice = brain_speech.get('rtcf_voice') if brain_speech else None
+            # Sprint AA: pass full brain_speech so SSML uses Ψ(t)-driven
+            # rate/pitch/pause (compute_unified_speech 4-layer output) instead
+            # of static VOICE_PROFILES presets. Closes the dead-code loop
+            # where brain magnitudes were computed but never reached audio.
             ssml = build_radim_ssml(text, mode=_mode, voice=voice, user_id=uid or None,
-                                    rtcf_voice=_rtcf_voice)
+                                    rtcf_voice=_rtcf_voice, brain_speech=brain_speech)
         except Exception as e:
             logger.warning(f"voice_filter failed, using simple SSML: {e}")
             safe_text = xml_escape(text)

@@ -44,8 +44,14 @@ except ImportError:
 
 # Constants
 PHI = 1.618034
-T1 = 12   # HARMONY → ALERT threshold
-T2 = 27   # ALERT → CRISIS threshold
+# Sprint AA: T1/T2 single source of truth — brain_math is canonical.
+# Fall back to local values if brain_math is unavailable so engine still
+# works in isolated test contexts.
+try:
+    from brain_math import T1, T2
+except ImportError:
+    T1 = 12   # HARMONY → ALERT threshold
+    T2 = 27   # ALERT → CRISIS threshold
 LAMBDA_C = 0.3     # Trend smoothing for C
 LAMBDA_ALPHA = 0.3  # Trend smoothing for α
 K1 = 1.0   # Trend influence on prediction
