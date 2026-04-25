@@ -182,7 +182,10 @@ def _evaluate_user(user_id, app):
     sensitivity = _get_user_sensitivity(user_id)
 
     # ── Core detectors ──
-    for check in (_check_c_trend, _check_activity_drop, _check_vitals, _check_interaction_silence, _check_fall_detection):
+    # Sprint AF: _check_recent_chat_crisis added FIRST so a single safety
+    # event (fall, pain, suicide-talk) triggers caregiver notification within
+    # one 5-min cycle, not blocked by avg-of-5 in _check_c_trend.
+    for check in (_check_recent_chat_crisis, _check_c_trend, _check_activity_drop, _check_vitals, _check_interaction_silence, _check_fall_detection):
         obs = check(user_id, baselines)
         if obs and not _is_in_cooldown(user_id, obs["type"]):
             # Apply sensitivity filter: if sensitivity < 1.0, skip low-severity
@@ -208,6 +211,72 @@ def _evaluate_user(user_id, app):
 # ============================================================================
 # ANOMALY DETECTORS
 # ============================================================================
+
+def _check_recent_chat_crisis(user_id, baselines):
+    """Sprint AF: detect a fresh CRISIS row in brain_states (chat-induced).
+
+    Why this exists separately from _check_c_trend:
+    The trend detector takes the average of the last 5 C values to filter
+    out single noise spikes. But that's exactly the wrong behaviour for an
+    actual emergency: if a senior with 4 prior calm chats says "spadl jsem"
+    once, Sprint AD writes one C=30 row → the avg-of-5 stays ~10 → no
+    alert → caregivers never notified, even though the chat path responded
+    in CRISIS mode.
+
+    This detector reads the latest brain_states row directly (last 30 min,
+    same TTL as brain_speech_for_user) and fires CRISIS severity on any
+    row with C >= T2 or mode='CRISIS'. Cooldown (60 min) still prevents
+    duplicate notifications when the senior re-confirms the crisis.
+
+    Returns the standard observation dict (type/severity/message/details).
+    """
+    try:
+        with db_context() as db:
+            # 30-min window matches brain_speech TTL — fresh = relevant.
+            if is_postgres():
+                row = db.execute(
+                    "SELECT C, mode, created_at FROM brain_states "
+                    "WHERE user_id = ? AND created_at > NOW() - INTERVAL '30 minutes' "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (user_id,)
+                ).fetchone()
+            else:
+                row = db.execute(
+                    "SELECT C, mode, created_at FROM brain_states "
+                    "WHERE user_id = ? AND created_at > datetime('now', '-30 minutes') "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (user_id,)
+                ).fetchone()
+        if not row:
+            return None
+
+        # DictRow / tuple-safe access
+        try:
+            C_val = float(row.get('c', row.get('C', 0)) or 0)
+            mode = (row.get('mode') or '').upper()
+        except AttributeError:
+            # plain tuple
+            C_val = float(row[0] or 0)
+            mode = (row[1] or '').upper()
+
+        if mode == 'CRISIS' or C_val >= T2:
+            return {
+                "type": "recent_chat_crisis",
+                "severity": CRISIS,
+                "message": f"Uživatel právě hlásil krizovou situaci v rozhovoru (C={C_val:.0f}, mode={mode}). Okamžitá kontrola doporučena.",
+                "details": {"C": C_val, "mode": mode, "source": "brain_states_recent"},
+            }
+        elif mode == 'ALERT' or C_val >= T1:
+            return {
+                "type": "recent_chat_alert",
+                "severity": ALERT,
+                "message": f"Uživatel má zvýšený stres v rozhovoru (C={C_val:.0f}, mode={mode}).",
+                "details": {"C": C_val, "mode": mode, "source": "brain_states_recent"},
+            }
+    except Exception as e:
+        logger.debug(f"_check_recent_chat_crisis non-fatal: {e}")
+    return None
+
 
 def _check_c_trend(user_id, baselines):
     """Detect rising C trend: recent avg vs baseline."""
