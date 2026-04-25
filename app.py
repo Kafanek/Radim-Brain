@@ -375,8 +375,13 @@ else:
 CORS(app,
      resources={r"/*": {"origins": ALLOWED_ORIGINS}},
      supports_credentials=False,
-     allow_headers=["Content-Type", "Authorization"],
-     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+     allow_headers=["Content-Type", "Authorization", "X-Admin-Secret"],
+     # Sprint AG: PATCH was missing — chat_routes uses it for "mark as read"
+     # (/api/chat/messages/<id>/read) and reactions, both blocked by CORS
+     # preflight before backend ever saw them. Production users hit this
+     # the moment they opened a conversation. Adding PATCH unblocks all
+     # chat read-receipt + reaction flows without changing other surface.
+     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 
 # ═══════════════════════════════════════
 # v10.9: SECURITY HEADERS — production hardening
