@@ -277,9 +277,10 @@ def azure_tts_proxy():
                 pass
 
             # Sprint AC: log a single visible line that summarises the full
-            # Ψ(t)→audio path. Helps debug whether brain magnitudes actually
-            # reached SSML (previously voice_filter's overrides log was
-            # buried below Heroku log level visibility).
+            # Ψ(t)→audio path. Uses print() (not logger.info) because gunicorn
+            # in this app captures stdout to Heroku log stream while module
+            # loggers without explicit handlers stay silent. Other audit logs
+            # in radim_orchestrator use the same print() pattern.
             try:
                 _log_parts = [f"mode={_mode}", f"size={len(response.content)}B"]
                 if brain_speech:
@@ -290,7 +291,7 @@ def azure_tts_proxy():
                         f"ps={brain_speech.get('pause_ms')}ms/"
                         f"coh={brain_speech.get('coherence')}]"
                     )
-                logger.info(f"🎙️ TTS uid={uid or 'anon'} text='{text[:40]}…' " + " ".join(_log_parts))
+                print(f"🎙️ TTS uid={uid or 'anon'} text='{text[:40]}' " + " ".join(_log_parts), flush=True)
             except Exception:
                 pass
 
