@@ -528,15 +528,28 @@ def _is_in_cooldown(user_id, observation_type):
 
 
 def _save_observation(user_id, obs):
-    """Insert into agent_observations + audit_log. WebPush on WARNING+."""
+    """Insert into agent_observations + audit_log. WebPush on WARNING+.
+
+    Sprint AG.2: returns the new observation id so callers can include
+    it in caregiver push payloads for deep-link / ack flow on the
+    frontend dashboard. Returns None on failure.
+    """
+    obs_id = None
     try:
+        from database import db_insert
         with db_context(commit=True) as db:
-            db.execute(
-                "INSERT INTO agent_observations (user_id, observation_type, severity, message, details, action_taken) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (user_id, obs["type"], obs["severity"], obs["message"],
-                 json.dumps(obs.get("details", {})), obs["severity"].lower())
+            obs_id = db_insert(
+                db,
+                "agent_observations",
+                ["user_id", "observation_type", "severity", "message", "details", "action_taken"],
+                [user_id, obs["type"], obs["severity"], obs["message"],
+                 json.dumps(obs.get("details", {})), obs["severity"].lower()],
             )
+        # Pass id back into the obs dict so downstream actions
+        # (_alert_caregiver) can include it in push deep-links.
+        if obs_id is not None:
+            obs["id"] = obs_id
+
         audit_log(user_id, "agent_observation", "agent_loop",
                   f"[{obs['severity']}] {obs['type']}: {obs['message']}")
 
@@ -554,12 +567,16 @@ def _save_observation(user_id, obs):
                     title=title,
                     body=obs["message"][:140],
                     severity=sev_map.get(sev_up, "info"),
-                    data={"observation_type": obs["type"]},
+                    data={
+                        "observation_type": obs["type"],
+                        "obs_id": obs_id,  # Sprint AG.2: deep-link target
+                    },
                 )
             except Exception as push_err:
                 logger.debug(f"observation push failed (non-blocking): {push_err}")
     except Exception as e:
         logger.debug(f"save_observation error: {e}")
+    return obs_id
 
 
 def _inject_into_memory(user_id, obs):
@@ -748,7 +765,16 @@ def _alert_caregiver(user_id, obs, app):
                 title=f"Radim upozorňuje — {obs.get('severity', 'alert')}",
                 body=obs.get("message", ""),
                 severity=nice_sev,
-                data={"obs_type": obs.get("type") or obs.get("observation_type")},
+                # Sprint AG.2: include obs_id so a caregiver tap on the
+                # notification can deep-link to the inbox observation
+                # (and call POST /api/caregiver/observations/<id>/ack
+                # right from the system tray).
+                data={
+                    "obs_type": obs.get("type") or obs.get("observation_type"),
+                    "obs_id": obs.get("id"),
+                    "senior_id": user_id,
+                    "action": "open_caregiver_inbox",
+                },
                 include_caregiver=True,
             )
         except Exception as e:

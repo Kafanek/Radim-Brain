@@ -196,6 +196,16 @@ def _webpush_if_subscribed(user_id, title, body, severity, type, extra_data=None
             url = f"/?action=incoming_call&callerId={extra_data['callerId']}"
         elif action == "incoming_group_call" and (extra_data or {}).get("roomId"):
             url = f"/?action=incoming_group_call&roomId={extra_data['roomId']}"
+        elif action == "open_caregiver_inbox" and (extra_data or {}).get("senior_id"):
+            # Sprint AG.2: caregiver taps push for senior crisis → opens
+            # caregiver dashboard with that senior's inbox in focus, with
+            # the specific obs_id highlighted/pre-acked if obs_id present.
+            sid = extra_data["senior_id"]
+            obs_id = extra_data.get("obs_id")
+            if obs_id:
+                url = f"/?module=caregiver&senior={sid}&obs={obs_id}"
+            else:
+                url = f"/?module=caregiver&senior={sid}"
     except Exception:
         pass
 
