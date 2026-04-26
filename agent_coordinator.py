@@ -77,7 +77,15 @@ class SafetyAgent(BaseAgent):
         crisis_words = ['spadl', 'upadl', 'nemůžu vstát', 'pomoc', 'záchrank',
                         'bolí na hrudi', 'nemůžu dýchat', 'omdlel', 'krev',
                         'bezvědomí', '155', '112', 'nehoda', 'zranění', 'zlomenina']
-        matched = [w for w in crisis_words if w in lower]
+        # Sprint AO.6: digit-only words use word-boundary regex so phone
+        # numbers like "603111222" don't match the substring "112". Text
+        # words keep substring match so 'spadl' still catches 'spadl jsem'.
+        import re as _re_safety
+        def _match_crisis(w, txt):
+            if w.isdigit():
+                return bool(_re_safety.search(r'\b' + _re_safety.escape(w) + r'\b', txt))
+            return w in txt
+        matched = [w for w in crisis_words if _match_crisis(w, lower)]
         if matched:
             return AgentDecision(
                 agent_name=self.name, should_act=True, priority=1.0,
