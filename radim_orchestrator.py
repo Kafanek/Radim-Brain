@@ -610,6 +610,64 @@ def radim_chat():
         except (ImportError, Exception) as bus_err:
             logger.debug(f"Bus context (non-fatal): {bus_err}")
 
+        # Sprint AO: inject neuron learning summary so chat AI sees what
+        # topics matter to THIS senior. Without this, the AI has memory
+        # (chat history) and bus (recent agents) but no model of "what
+        # patterns this person responds well to" — wasted asset.
+        # Neurons live per-user in neuron_learning table (PG, mirror of
+        # localStorage). We pull top 4 by activation count + show their
+        # learned patterns + helpfulness ratio.
+        try:
+            from database import db_context as _ndb_ctx
+            with _ndb_ctx() as _ndb:
+                _nrows = _ndb.execute(
+                    "SELECT neuron_id, data FROM neuron_learning "
+                    "WHERE user_id = ? ORDER BY updated_at DESC LIMIT 8",
+                    (str(user_id),)
+                ).fetchall()
+            if _nrows:
+                _import_json = __import__('json')
+                _summary = []
+                for _r in _nrows:
+                    try:
+                        _nid = _r[0] if not hasattr(_r, 'get') else _r.get('neuron_id')
+                        _raw = _r[1] if not hasattr(_r, 'get') else _r.get('data')
+                        _data = _import_json.loads(_raw) if isinstance(_raw, str) else (_raw or {})
+                        _act = int(_data.get('activations') or 0)
+                        if _act < 1:
+                            continue
+                        _h = int(_data.get('helpfulCount') or 0)
+                        _d = int(_data.get('dismissCount') or 0)
+                        _ratio = (_h / max(1, _h + _d)) if (_h + _d) > 0 else 0.5
+                        _patterns = (_data.get('learnedPatterns') or [])[:4]
+                        _summary.append({
+                            'id': _nid, 'activations': _act,
+                            'helpful_ratio': _ratio,
+                            'patterns': _patterns,
+                        })
+                    except Exception:
+                        continue
+                # Pick top 4 by activations
+                _summary.sort(key=lambda x: -x['activations'])
+                _summary = _summary[:4]
+                if _summary:
+                    _lines = []
+                    for s in _summary:
+                        _h_label = ('funguje' if s['helpful_ratio'] >= 0.6
+                                    else 'spíš nefunguje' if s['helpful_ratio'] <= 0.3
+                                    else 'střídavě')
+                        _ptxt = ', '.join(s['patterns']) if s['patterns'] else '(zatím bez patternů)'
+                        _lines.append(f"  • {s['id']}: aktivován {s['activations']}× — {_h_label} — patterny: {_ptxt}")
+                    personalized += (
+                        '\n\n═══ NAUČENÉ NEURONY — CO TENTO SENIOR REAGUJE NA ═══\n'
+                        + '\n'.join(_lines) +
+                        '\n(Pokud na "funguje" pattern přijde téma znovu, nestyď se '
+                        'navázat. Pokud "spíš nefunguje", obejmi téma jinak nebo '
+                        'počkej. Tato data jsou tvoje paměť, ne uživatelova zkouška.)'
+                    )
+        except Exception as _neu_err:
+            logger.debug(f"Neuron context (non-fatal): {_neu_err}")
+
         # Sprint AJ.2: caregiver whispers — pečovatel chce abych při
         # přirozené příležitosti připomněl něco. Inject do system promptu
         # SEPARATELY (ne přes generic bus block) protože tady chceme silnou
@@ -951,13 +1009,26 @@ def radim_chat():
                     try:
                         client = get_claude_client()
                         if client:
-                            _sys = personalized or (
-                "Jsi Radim, český AI asistent péče pro seniory. "
-                "TTS-kritické: VŽDY odpovídej česky s DIAKRITIKOU (á é í ó ú ů ě š č ř ž ý ť ď ň). "
-                "Max 2–3 krátké věty, pod 200 znaků. "
-                "Bez emoji, bez markdown, bez anglicismů. "
-                "Teplý, klidný, trpělivý tón."
-            )
+                            # Sprint AO: ALWAYS include PROMPT_SOUL even
+                            # when personalized is empty (cold start
+                            # safety net). Hard fallback drops only the
+                            # personalization tail, never the philosophy.
+                            try:
+                                from radim_system_prompt import PROMPT_SOUL as _SOUL
+                            except ImportError:
+                                _SOUL = ''
+                            _fallback_rules = (
+                                "TTS-kritické: VŽDY odpovídej česky s DIAKRITIKOU (á é í ó ú ů ě š č ř ž ý ť ď ň). "
+                                "Max 2–3 krátké věty, pod 200 znaků. "
+                                "Bez emoji, bez markdown, bez anglicismů. "
+                                "Teplý, klidný, trpělivý tón."
+                            )
+                            if personalized:
+                                # personalized already contains soul (Sprint AO patch
+                                # to memory_logic.build_personalized_prompt)
+                                _sys = personalized
+                            else:
+                                _sys = _SOUL + '\n\n' + _fallback_rules if _SOUL else _fallback_rules
                             # Build messages with history
                             _msgs = []
                             if history:

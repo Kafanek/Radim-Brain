@@ -78,13 +78,37 @@ def get_user_context(user_id: str) -> dict:
 
 
 def build_personalized_prompt(user_id: str) -> str:
-    """Vytvořit personalizovaný system prompt addition"""
+    """Vytvořit personalizovaný system prompt addition.
+
+    Sprint AO: assembles a COMPLETE system prompt now — soul + Czech
+    rules + memory + personalization. Until AO this returned empty
+    string for new users, which meant the chat AI had only a
+    minimal fallback ("Jsi Radim ...") without the philosophical
+    foundation. Result: Radim spoke as a generic assistant for new
+    seniors, didn't reflect the 5 hodnot (Respekt / Cítění / Pravda /
+    Růst / Naděje) until a profile existed.
+    """
     ctx = get_user_context(user_id)
-
-    if not ctx["has_profile"] and ctx["interaction_count"] == 0:
-        return ""  # Nový uživatel - žádná personalizace
-
     parts = []
+
+    # AO.1: ALWAYS inject the soul first — this is who Radim IS,
+    # before any user-specific personalization. New users with no
+    # profile still get the philosophical foundation so first chat
+    # is recognisably Radim, not a bare LLM.
+    try:
+        from radim_system_prompt import PROMPT_SOUL
+        parts.append(PROMPT_SOUL)
+    except ImportError:
+        pass
+
+    # If user is brand new and has no profile, return just soul +
+    # minimal Czech rules (still useful — at least it's TTS-clean).
+    if not ctx["has_profile"] and ctx["interaction_count"] == 0:
+        # Stop here for first-message users, but still send soul.
+        # Memory and personalization will accumulate from chat 2+.
+        if parts:
+            return '\n'.join(parts)
+        return ""
 
     # v10.45: Long-term memory — injected FIRST so it frames everything else
     try:
