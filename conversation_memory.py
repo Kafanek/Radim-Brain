@@ -30,10 +30,47 @@ def extract_and_save(user_id: str, message: str, ai_response: str = ''):
     updates = {}
 
     # 1. NAME — "Jmenuji se Marie", "Já jsem Karel", "Říkejte mi Pepa"
-    name_match = re.search(
-        r'(?:jmenuj[ui] se|jsem|říkejte mi|říkej mi|moje jméno je|volám se)\s+([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+)',
+    # Sprint AO.6.2: standalone "jsem X" extrahovalo state-words jako jméno
+    # ("jsem sama" → name='Sama', "jsem unavený" → name='Unavený').
+    # Fix: "jsem" smí extrahovat jméno jen po "já" (já jsem Karel) nebo
+    # když následující slovo NENÍ známý state/adjective.
+    NAME_STOPWORDS = {
+        # State adjectives (jsem sama, jsem unavený, ...)
+        'sama', 'sám', 'sam', 'rád', 'rada', 'ráda', 'unavený', 'unavená',
+        'unaveny', 'unavena', 'smutný', 'smutná', 'smutny', 'smutna',
+        'šťastný', 'šťastná', 'stastny', 'stastna', 'nemocný', 'nemocná',
+        'nemocny', 'nemocna', 'doma', 'venku', 'tady', 'tam', 'tu', 'zde',
+        'osamělá', 'osamělý', 'osamela', 'osamely',
+        'dnes', 'včera', 'zítra', 'vcera', 'zitra',
+        'naštvaný', 'naštvaná', 'nastvany', 'nastvana',
+        'vzhůru', 'vzhuru', 'spánek', 'spanek', 'připraven', 'pripraven',
+        'připravená', 'pripravena', 'starý', 'stará', 'stary', 'stara',
+        'mladý', 'mladá', 'mlady', 'mlada', 'velmi',
+        'zdravý', 'zdravá', 'zdravy', 'zdrava',
+        # Auxiliary verbs (jsem byl, jsem měl, ...)
+        'byl', 'byla', 'bylo', 'byli', 'byly', 'měl', 'měla', 'mel', 'mela',
+        'měli', 'meli', 'měly', 'mely',
+        # Generic fillers
+        'taky', 'také', 'ale', 'jen', 'tu', 'pak', 'asi',
+    }
+
+    name_match = None
+    # 1a. Strong patterns first — explicit name introduction
+    strong = re.search(
+        r'(?:jmenuj[ui] se|říkejte mi|říkej mi|moje jméno je|volám se|já jsem)\s+([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+)',
         message, re.IGNORECASE
     )
+    if strong:
+        name_match = strong
+    else:
+        # 1b. Fallback: bare "jsem X" — only if X NOT a state-word
+        weak = re.search(
+            r'\bjsem\s+([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+)',
+            message, re.IGNORECASE
+        )
+        if weak and weak.group(1).lower() not in NAME_STOPWORDS:
+            name_match = weak
+
     if name_match:
         updates['name'] = name_match.group(1)
         logger.info(f"🧠 Memory: learned name '{updates['name']}' for {user_id}")
