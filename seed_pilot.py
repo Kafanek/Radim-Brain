@@ -192,9 +192,11 @@ def seed_pilot_demo():
                     (SENIOR_ID, C, 0.6, 0.5, 0.2 + (C / 50), 0.3,
                      brain_mode_for_C(C), 0.7 - (C / 80), ts)
                 )
-            # Last 5 hours: rising
-            for h, C in enumerate([11.0, 14.5, 18.0, 22.0, 30.0]):
-                ts = (now - timedelta(hours=4 - h, minutes=random.randint(0, 50))).isoformat()
+            # Last 5 hours: rising trend, last entry 5 min ago (CRISIS)
+            # so operator console (30min window) shows brain.mode=CRISIS
+            time_offsets_minutes = [240, 180, 120, 60, 5]
+            for offset_min, C in zip(time_offsets_minutes, [11.0, 14.5, 18.0, 22.0, 30.0]):
+                ts = (now - timedelta(minutes=offset_min)).isoformat()
                 db.execute(
                     "INSERT INTO brain_states "
                     "(user_id, C, E, R, S, alpha, mode, coherence, created_at) "
