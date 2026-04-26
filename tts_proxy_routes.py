@@ -196,14 +196,19 @@ def azure_tts_proxy():
         # senior's last C estimate didn't escalate). Without this, AI
         # generates "Anno, je mi to líto..." but TTS speaks it cheerily.
         _text_lower = (text or '').lower()
+        # Sprint AO: more permissive grief detection — match common stems
+        # rather than full phrases, so "je mi to líto" hits the same as
+        # "je mi líto". Each token is unambiguous enough on its own
+        # (e.g. 'lito' is rare outside "líto/lito" contexts).
         _grief_signals = (
+            # Core grief stems (diacritics)
             'zemřel', 'zemřela', 'umřel', 'umřela', 'pohřeb', 'truchl',
-            'je mi líto', 'je mi to líto', 'ztráta', 'odešel navždy',
-            'navždy', 'smutek', 'smutno', 'beznadě', 'pláču', 'brečím',
-            'soustrast', 'nemusíte mluvit',
+            'líto', 'soustrast', 'ztrát', 'odešel', 'odešla', 'navždy',
+            'smutek', 'smutno', 'beznadě', 'pláču', 'brečím',
+            'nemusíte mluvit', 'tichu',
             # ASCII fallbacks
-            'zemrel', 'umrel', 'pohreb', 'je mi lito',
-            'ztrata', 'beznadej', 'placu', 'soustrast',
+            'zemrel', 'umrel', 'pohreb', 'lito', 'soustrast',
+            'ztrat', 'odesel', 'odesla', 'beznadej', 'placu', 'brecim',
         )
         _is_grief_text = any(g in _text_lower for g in _grief_signals)
 
