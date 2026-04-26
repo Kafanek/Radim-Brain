@@ -1761,6 +1761,362 @@ def admin_agent_bus(user_id):
 # Sprint AH: Operator Console — single-pane-of-glass for one user.
 # ════════════════════════════════════════════════════════════════════
 
+@app.route('/api/admin/analytics', methods=['GET', 'OPTIONS'])
+def admin_analytics():
+    """Sprint AN: analytics over time — observations, bus, chat, brain trend.
+
+    Query params:
+      days: 7 | 14 | 30 (default 14)
+
+    Returns daily aggregates of:
+      - observations by severity per day
+      - chat messages per day (memory_history role='user')
+      - average brain C per day
+      - bus message volume per day
+      - TTS azure calls per session (in-memory only)
+      - top topics seen
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        days = max(1, min(60, int(request.args.get('days', 14))))
+        out = {'success': True, 'days': days}
+
+        with db_context() as db:
+            # ─── Observations by day + severity ───
+            if is_postgres():
+                rows = db.execute(f"""
+                    SELECT DATE(created_at) AS d, severity, COUNT(*)
+                    FROM agent_observations
+                    WHERE created_at > NOW() - INTERVAL '{days} days'
+                    GROUP BY DATE(created_at), severity
+                    ORDER BY d
+                """).fetchall()
+            else:
+                rows = db.execute(f"""
+                    SELECT DATE(created_at) AS d, severity, COUNT(*)
+                    FROM agent_observations
+                    WHERE created_at > datetime('now', '-{days} days')
+                    GROUP BY DATE(created_at), severity
+                    ORDER BY d
+                """).fetchall()
+            obs_daily = {}
+            for r in rows or []:
+                d = str(r[0])
+                sev = (r[1] or '').upper()
+                obs_daily.setdefault(d, {})[sev] = int(r[2] or 0)
+            out['observations_daily'] = obs_daily
+
+            # ─── Chat messages per day ───
+            if is_postgres():
+                rows = db.execute(f"""
+                    SELECT DATE(created_at) AS d, COUNT(*)
+                    FROM memory_history
+                    WHERE role = 'user' AND created_at > NOW() - INTERVAL '{days} days'
+                    GROUP BY DATE(created_at) ORDER BY d
+                """).fetchall()
+            else:
+                rows = db.execute(f"""
+                    SELECT DATE(created_at) AS d, COUNT(*)
+                    FROM memory_history
+                    WHERE role = 'user' AND created_at > datetime('now', '-{days} days')
+                    GROUP BY DATE(created_at) ORDER BY d
+                """).fetchall()
+            out['chat_daily'] = {str(r[0]): int(r[1] or 0) for r in rows or []}
+
+            # ─── Brain avg C per day ───
+            if is_postgres():
+                rows = db.execute(f"""
+                    SELECT DATE(created_at) AS d, ROUND(AVG(C)::numeric, 2), COUNT(*)
+                    FROM brain_states
+                    WHERE created_at > NOW() - INTERVAL '{days} days'
+                    GROUP BY DATE(created_at) ORDER BY d
+                """).fetchall()
+            else:
+                rows = db.execute(f"""
+                    SELECT DATE(created_at) AS d, ROUND(AVG(C), 2), COUNT(*)
+                    FROM brain_states
+                    WHERE created_at > datetime('now', '-{days} days')
+                    GROUP BY DATE(created_at) ORDER BY d
+                """).fetchall()
+            out['brain_daily'] = {
+                str(r[0]): {'avg_c': float(r[1]) if r[1] is not None else None,
+                            'samples': int(r[2] or 0)}
+                for r in rows or []
+            }
+
+            # ─── Bus volume per day ───
+            try:
+                if is_postgres():
+                    rows = db.execute(f"""
+                        SELECT DATE(created_at) AS d, kind, COUNT(*)
+                        FROM agent_messages
+                        WHERE created_at > NOW() - INTERVAL '{days} days'
+                        GROUP BY DATE(created_at), kind ORDER BY d
+                    """).fetchall()
+                else:
+                    rows = db.execute(f"""
+                        SELECT DATE(created_at) AS d, kind, COUNT(*)
+                        FROM agent_messages
+                        WHERE created_at > datetime('now', '-{days} days')
+                        GROUP BY DATE(created_at), kind ORDER BY d
+                    """).fetchall()
+                bus_daily = {}
+                for r in rows or []:
+                    d = str(r[0])
+                    bus_daily.setdefault(d, {})[r[1]] = int(r[2] or 0)
+                out['bus_daily'] = bus_daily
+            except Exception:
+                out['bus_daily'] = {}
+
+            # ─── Top observation topics (last N days) ───
+            if is_postgres():
+                rows = db.execute(f"""
+                    SELECT observation_type, COUNT(*) FROM agent_observations
+                    WHERE created_at > NOW() - INTERVAL '{days} days'
+                    GROUP BY observation_type ORDER BY COUNT(*) DESC LIMIT 10
+                """).fetchall()
+            else:
+                rows = db.execute(f"""
+                    SELECT observation_type, COUNT(*) FROM agent_observations
+                    WHERE created_at > datetime('now', '-{days} days')
+                    GROUP BY observation_type ORDER BY COUNT(*) DESC LIMIT 10
+                """).fetchall()
+            out['top_obs_topics'] = [
+                {'topic': r[0], 'count': int(r[1] or 0)} for r in rows or []
+            ]
+
+            # ─── Active users daily ───
+            if is_postgres():
+                rows = db.execute(f"""
+                    SELECT DATE(created_at), COUNT(DISTINCT user_id)
+                    FROM brain_states
+                    WHERE created_at > NOW() - INTERVAL '{days} days'
+                    GROUP BY DATE(created_at) ORDER BY 1
+                """).fetchall()
+            else:
+                rows = db.execute(f"""
+                    SELECT DATE(created_at), COUNT(DISTINCT user_id)
+                    FROM brain_states
+                    WHERE created_at > datetime('now', '-{days} days')
+                    GROUP BY DATE(created_at) ORDER BY 1
+                """).fetchall()
+            out['active_users_daily'] = {str(r[0]): int(r[1] or 0) for r in rows or []}
+
+        # ─── TTS in-memory ───
+        try:
+            from scaling_optimizations import tts_quota, tts_cache
+            out['tts_session'] = {**tts_quota.stats(), 'cache': tts_cache.stats()}
+        except Exception:
+            pass
+
+        return jsonify(out)
+    except Exception as e:
+        logger.error(f"analytics: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/system-health', methods=['GET', 'OPTIONS'])
+def admin_system_health():
+    """Sprint AM: complete system health snapshot in one call.
+
+    Combines circuits, scheduler jobs, agent counts (1h/24h/7d),
+    bus message counts, DB stats, TTS quota, push subscriptions,
+    and active user counts.
+
+    Designed for the admin-health.html dashboard. Cheap (~50ms).
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        from datetime import datetime as _dt
+        out = {
+            'success': True,
+            'timestamp': _dt.utcnow().isoformat() + 'Z',
+            'version': '3.5.1',
+        }
+
+        # ─── Circuits ───
+        try:
+            from self_healing import get_breaker
+            circuits = {}
+            for name in ('azure_tts', 'azure_stt', 'gemini', 'claude', 'twilio', 'database'):
+                br = get_breaker(name)
+                circuits[name] = {
+                    'state': 'open' if not br.can_proceed() else 'closed',
+                    'failures': getattr(br, 'failures', 0),
+                    'last_failure': getattr(br, 'last_failure_time', None),
+                }
+            out['circuits'] = circuits
+        except Exception:
+            out['circuits'] = {}
+
+        # ─── DB stats ───
+        try:
+            with db_context() as db:
+                # Active users (24h)
+                if is_postgres():
+                    r = db.execute(
+                        "SELECT COUNT(DISTINCT user_id) FROM brain_states "
+                        "WHERE created_at > NOW() - INTERVAL '24 hours'"
+                    ).fetchone()
+                else:
+                    r = db.execute(
+                        "SELECT COUNT(DISTINCT user_id) FROM brain_states "
+                        "WHERE created_at > datetime('now', '-24 hours')"
+                    ).fetchone()
+                active_24h = int(r[0] or 0)
+
+                # Total registered users
+                try:
+                    r = db.execute("SELECT COUNT(*) FROM auth_users").fetchone()
+                    total_users = int(r[0] or 0)
+                except Exception:
+                    total_users = None
+
+                # Senior family links count
+                try:
+                    r = db.execute(
+                        "SELECT COUNT(*) FROM senior_family_links "
+                        "WHERE confirmed_at IS NOT NULL AND revoked_at IS NULL"
+                    ).fetchone()
+                    family_links = int(r[0] or 0)
+                except Exception:
+                    family_links = 0
+
+                # Push subscriptions
+                try:
+                    r = db.execute("SELECT COUNT(*) FROM push_subscriptions").fetchone()
+                    push_subs = int(r[0] or 0)
+                except Exception:
+                    push_subs = 0
+
+                # Brain states count (last 24h, 7d, total)
+                if is_postgres():
+                    r1 = db.execute(
+                        "SELECT COUNT(*) FROM brain_states WHERE created_at > NOW() - INTERVAL '24 hours'"
+                    ).fetchone()
+                    r7 = db.execute(
+                        "SELECT COUNT(*) FROM brain_states WHERE created_at > NOW() - INTERVAL '7 days'"
+                    ).fetchone()
+                else:
+                    r1 = db.execute(
+                        "SELECT COUNT(*) FROM brain_states WHERE created_at > datetime('now', '-24 hours')"
+                    ).fetchone()
+                    r7 = db.execute(
+                        "SELECT COUNT(*) FROM brain_states WHERE created_at > datetime('now', '-7 days')"
+                    ).fetchone()
+                rt = db.execute("SELECT COUNT(*) FROM brain_states").fetchone()
+                brain_states = {
+                    '24h': int(r1[0] or 0),
+                    '7d': int(r7[0] or 0),
+                    'total': int(rt[0] or 0),
+                }
+
+                # Agent observations (severity breakdown 24h, 7d)
+                if is_postgres():
+                    r24 = db.execute(
+                        "SELECT severity, COUNT(*), SUM(CASE WHEN acknowledged_at IS NULL THEN 1 ELSE 0 END) "
+                        "FROM agent_observations WHERE created_at > NOW() - INTERVAL '24 hours' GROUP BY severity"
+                    ).fetchall()
+                    r7d = db.execute(
+                        "SELECT severity, COUNT(*) FROM agent_observations "
+                        "WHERE created_at > NOW() - INTERVAL '7 days' GROUP BY severity"
+                    ).fetchall()
+                else:
+                    r24 = db.execute(
+                        "SELECT severity, COUNT(*), SUM(CASE WHEN acknowledged_at IS NULL THEN 1 ELSE 0 END) "
+                        "FROM agent_observations WHERE created_at > datetime('now', '-24 hours') GROUP BY severity"
+                    ).fetchall()
+                    r7d = db.execute(
+                        "SELECT severity, COUNT(*) FROM agent_observations "
+                        "WHERE created_at > datetime('now', '-7 days') GROUP BY severity"
+                    ).fetchall()
+                obs_24h = {}
+                obs_7d = {}
+                for row in r24 or []:
+                    sev = (row[0] or '').upper()
+                    obs_24h[sev] = {'total': int(row[1] or 0), 'unack': int(row[2] or 0)}
+                for row in r7d or []:
+                    obs_7d[(row[0] or '').upper()] = int(row[1] or 0)
+
+                # Bus messages (last 24h)
+                try:
+                    if is_postgres():
+                        rb = db.execute(
+                            "SELECT kind, COUNT(*) FROM agent_messages "
+                            "WHERE created_at > NOW() - INTERVAL '24 hours' GROUP BY kind"
+                        ).fetchall()
+                    else:
+                        rb = db.execute(
+                            "SELECT kind, COUNT(*) FROM agent_messages "
+                            "WHERE created_at > datetime('now', '-24 hours') GROUP BY kind"
+                        ).fetchall()
+                    bus_by_kind = {row[0]: int(row[1] or 0) for row in rb or []}
+                except Exception:
+                    bus_by_kind = {}
+
+                out['db'] = {
+                    'active_users_24h': active_24h,
+                    'total_registered_users': total_users,
+                    'confirmed_family_links': family_links,
+                    'push_subscriptions': push_subs,
+                    'brain_states': brain_states,
+                    'observations_24h': obs_24h,
+                    'observations_7d': obs_7d,
+                    'bus_messages_24h_by_kind': bus_by_kind,
+                }
+        except Exception as e:
+            logger.warning(f"system_health DB stats: {e}")
+            out['db'] = {'error': str(e)[:120]}
+
+        # ─── Scheduler jobs ───
+        try:
+            from app import scheduler
+            jobs = []
+            for j in scheduler.get_jobs():
+                jobs.append({
+                    'id': j.id,
+                    'next_run': j.next_run_time.isoformat() if j.next_run_time else None,
+                    'name': str(j.name),
+                })
+            out['scheduler'] = {'jobs': jobs, 'count': len(jobs)}
+        except Exception:
+            out['scheduler'] = {}
+
+        # ─── TTS quota ───
+        try:
+            from scaling_optimizations import tts_cache, tts_quota
+            out['tts'] = {
+                'quota': tts_quota.stats(),
+                'cache': tts_cache.stats(),
+            }
+        except Exception:
+            out['tts'] = {}
+
+        # ─── Process / dyno info ───
+        try:
+            import os, resource
+            ru = resource.getrusage(resource.RUSAGE_SELF)
+            out['process'] = {
+                'rss_mb': round(ru.ru_maxrss / 1024 / 1024
+                                if hasattr(resource, 'getrusage') else 0, 1),
+                'pid': os.getpid(),
+                'dyno': os.environ.get('DYNO', 'local'),
+            }
+        except Exception:
+            out['process'] = {}
+
+        return jsonify(out)
+    except Exception as e:
+        logger.error(f"system_health: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/admin/tts-quota', methods=['GET', 'OPTIONS'])
 def admin_tts_quota():
     """Sprint AL.4: live TTS character + cost projection.
