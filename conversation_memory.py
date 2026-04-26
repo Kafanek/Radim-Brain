@@ -54,21 +54,30 @@ def extract_and_save(user_id: str, message: str, ai_response: str = ''):
         'taky', 'také', 'ale', 'jen', 'tu', 'pak', 'asi',
     }
 
+    def _is_proper_name(candidate):
+        """A proper Czech name must start with an uppercase letter and not
+        be a known state-word/preposition/auxiliary."""
+        if not candidate or not candidate[0].isupper():
+            return False
+        return candidate.lower() not in NAME_STOPWORDS
+
     name_match = None
     # 1a. Strong patterns first — explicit name introduction
     strong = re.search(
         r'(?:jmenuj[ui] se|říkejte mi|říkej mi|moje jméno je|volám se|já jsem)\s+([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+)',
         message, re.IGNORECASE
     )
-    if strong:
+    if strong and _is_proper_name(strong.group(1)):
         name_match = strong
     else:
-        # 1b. Fallback: bare "jsem X" — only if X NOT a state-word
+        # 1b. Fallback: bare "jsem X" — only if X is properly capitalized
+        # AND not a state-word. re.IGNORECASE makes [A-Z] match lowercase
+        # too (e.g. "byla jsem na procházce" → "na"), so we post-validate.
         weak = re.search(
             r'\bjsem\s+([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+)',
             message, re.IGNORECASE
         )
-        if weak and weak.group(1).lower() not in NAME_STOPWORDS:
+        if weak and _is_proper_name(weak.group(1)):
             name_match = weak
 
     if name_match:
