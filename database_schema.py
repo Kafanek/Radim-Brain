@@ -573,6 +573,34 @@ PG_IOT_TABLES = [
         "CREATE INDEX IF NOT EXISTS idx_agent_obs_severity ON agent_observations(severity)",
     ]),
 
+    # Sprint AG.4 — agent_messages bus.
+    # Single source of truth for "what agents currently know about user X".
+    # Three layers (chat coordinator, agent_loop, specialists) emit AND read
+    # from this table so the chat-time SafetyAgent can see what the proactive
+    # agent_loop just detected, anticipation breakpoints reach the chat
+    # system prompt, and dedupe is unified across detectors.
+    # Existing agent_observations table is preserved as a mirror (kind=
+    # 'observation' rows are also written there to keep caregiver inbox +
+    # admin endpoints working without changes).
+    # TTL via expires_at; daily cleanup at 3:00 AM prunes expired rows.
+    ('''CREATE TABLE IF NOT EXISTS agent_messages (
+            id SERIAL PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            sender TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            severity TEXT NOT NULL DEFAULT 'info',
+            topic TEXT NOT NULL,
+            payload JSONB NOT NULL DEFAULT '{}',
+            expires_at TIMESTAMP NOT NULL,
+            correlates_with INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''', [
+        "CREATE INDEX IF NOT EXISTS idx_am_user_recent ON agent_messages(user_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_am_user_topic ON agent_messages(user_id, topic, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_am_expires ON agent_messages(expires_at)",
+    ]),
+
     # v10.37 — In-app notifications (account-to-account, replaces Twilio SMS path for family alerts)
     ('''CREATE TABLE IF NOT EXISTS user_notifications (
             id SERIAL PRIMARY KEY,
@@ -1205,6 +1233,23 @@ SQLITE_SCHEMA = '''
     CREATE INDEX IF NOT EXISTS idx_agent_obs_user ON agent_observations(user_id);
     CREATE INDEX IF NOT EXISTS idx_agent_obs_created ON agent_observations(created_at);
     CREATE INDEX IF NOT EXISTS idx_agent_obs_severity ON agent_observations(severity);
+
+    -- Sprint AG.4: agent_messages bus (SQLite mirror of PG schema)
+    CREATE TABLE IF NOT EXISTS agent_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        sender TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        severity TEXT NOT NULL DEFAULT 'info',
+        topic TEXT NOT NULL,
+        payload TEXT NOT NULL DEFAULT '{}',
+        expires_at TIMESTAMP NOT NULL,
+        correlates_with INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_am_user_recent ON agent_messages(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_am_user_topic ON agent_messages(user_id, topic, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_am_expires ON agent_messages(expires_at);
 
     -- v10.37: In-app notifications (account-to-account)
     CREATE TABLE IF NOT EXISTS user_notifications (
