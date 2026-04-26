@@ -947,6 +947,53 @@ def caregiver_seniors():
         else:
             mood = 'heavy'
 
+        # Sprint AG.3: brain_mode now (last 30 min) + unacknowledged
+        # CRISIS/ALERT count — drives status dot + red badge on grid card
+        # so caregiver sees who needs attention before opening detail.
+        brain_mode_now = None
+        unack_crisis = 0
+        try:
+            with db_context() as db:
+                if is_postgres():
+                    brow = db.execute(
+                        "SELECT mode FROM brain_states WHERE user_id = ? "
+                        "AND created_at > NOW() - INTERVAL '30 minutes' "
+                        "ORDER BY created_at DESC LIMIT 1",
+                        (sid,)
+                    ).fetchone()
+                else:
+                    brow = db.execute(
+                        "SELECT mode FROM brain_states WHERE user_id = ? "
+                        "AND created_at > datetime('now', '-30 minutes') "
+                        "ORDER BY created_at DESC LIMIT 1",
+                        (sid,)
+                    ).fetchone()
+                if brow:
+                    brain_mode_now = (brow.get('mode') if hasattr(brow, 'get') else brow[0]) or None
+
+                # Count unacknowledged ALERT+CRISIS observations in last 24h
+                if is_postgres():
+                    crow = db.execute(
+                        "SELECT COUNT(*) FROM agent_observations WHERE user_id = ? "
+                        "AND severity IN ('CRISIS','ALERT') "
+                        "AND acknowledged_at IS NULL "
+                        "AND created_at > NOW() - INTERVAL '24 hours'",
+                        (sid,)
+                    ).fetchone()
+                else:
+                    crow = db.execute(
+                        "SELECT COUNT(*) FROM agent_observations WHERE user_id = ? "
+                        "AND severity IN ('CRISIS','ALERT') "
+                        "AND acknowledged_at IS NULL "
+                        "AND created_at > datetime('now', '-24 hours')",
+                        (sid,)
+                    ).fetchone()
+                if crow:
+                    val = crow.get(0) if hasattr(crow, 'get') else crow[0]
+                    unack_crisis = int(val or 0)
+        except Exception as e:
+            logger.debug(f"caregiver_seniors brain enrichment {sid}: {e}")
+
         out.append({
             'seniorId': sid,
             'name': name,
@@ -954,12 +1001,23 @@ def caregiver_seniors():
             'mood': mood,
             'cAvg24h': round(c_avg, 3) if c_avg is not None else None,
             'hasRealData': bool(_addressee_name(sid)) or samples > 0,
+            'brainMode': brain_mode_now,
+            'unacknowledgedCrisis': unack_crisis,
         })
 
-    # Sort: heavy mood first (needs attention), then by recency
+    # Sort: brain CRISIS/ALERT first → unack count → heavy mood → recency
+    # Sprint AG.3: brain_mode trumps mood for ordering, so a senior whose
+    # chat literally just said "spadl jsem" rises above someone with
+    # generic "heavy" 24h average — even if both look concerning, the
+    # acute case must surface first.
     mood_rank = {'heavy': 0, 'soso': 1, 'unknown': 3, 'good': 2}
-    out.sort(key=lambda s: (mood_rank.get(s['mood'], 5),
-                            s['minutesSinceLastInteraction'] or 99999))
+    brain_rank = {'CRISIS': 0, 'ALERT': 1, 'HARMONY': 3}
+    out.sort(key=lambda s: (
+        brain_rank.get(s.get('brainMode'), 4),
+        -int(s.get('unacknowledgedCrisis') or 0),
+        mood_rank.get(s['mood'], 5),
+        s['minutesSinceLastInteraction'] or 99999,
+    ))
 
     return jsonify({'success': True, 'seniors': out, 'count': len(out)})
 
