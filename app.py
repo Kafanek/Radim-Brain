@@ -1740,6 +1740,66 @@ def admin_agent_bus(user_id):
 # Sprint AH: Operator Console — single-pane-of-glass for one user.
 # ════════════════════════════════════════════════════════════════════
 
+@app.route('/api/admin/operator/<user_id>/ack-all-stale', methods=['POST', 'OPTIONS'])
+def admin_operator_ack_all_stale(user_id):
+    """Bulk-ack ALL unacked observations older than N hours for a user.
+
+    Body: {"older_than_hours": 24, "dry_run": false}
+    Used to clean up test users with hundreds of orphaned observations
+    (e.g. pilot/demo senior whose family left no caregiver linked).
+
+    Idempotent: re-running just touches already-acked rows again with
+    a new timestamp, harmless.
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    body = request.get_json(silent=True) or {}
+    hours = max(1, int(body.get('older_than_hours', 24)))
+    dry_run = bool(body.get('dry_run', False))
+    try:
+        from datetime import datetime as _dt
+        now_iso = _dt.utcnow().isoformat()
+        with db_context(commit=not dry_run) as db:
+            # Count stale unacked
+            if is_postgres():
+                cnt_row = db.execute(
+                    "SELECT COUNT(*) FROM agent_observations "
+                    f"WHERE user_id = ? AND acknowledged_at IS NULL "
+                    f"AND created_at < NOW() - INTERVAL '{hours} hours'",
+                    (user_id,)
+                ).fetchone()
+            else:
+                cnt_row = db.execute(
+                    "SELECT COUNT(*) FROM agent_observations "
+                    f"WHERE user_id = ? AND acknowledged_at IS NULL "
+                    f"AND created_at < datetime('now', '-{hours} hours')",
+                    (user_id,)
+                ).fetchone()
+            stale_count = int(cnt_row[0] if isinstance(cnt_row, (list, tuple)) else list(cnt_row.values())[0])
+            if dry_run:
+                return jsonify({'success': True, 'dry_run': True, 'would_ack': stale_count})
+
+            if is_postgres():
+                db.execute(
+                    "UPDATE agent_observations SET acknowledged_at = ? "
+                    f"WHERE user_id = ? AND acknowledged_at IS NULL "
+                    f"AND created_at < NOW() - INTERVAL '{hours} hours'",
+                    (now_iso, user_id)
+                )
+            else:
+                db.execute(
+                    "UPDATE agent_observations SET acknowledged_at = ? "
+                    f"WHERE user_id = ? AND acknowledged_at IS NULL "
+                    f"AND created_at < datetime('now', '-{hours} hours')",
+                    (now_iso, user_id)
+                )
+        return jsonify({'success': True, 'acked': stale_count, 'older_than_hours': hours})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/admin/operator/active-users', methods=['GET', 'OPTIONS'])
 def admin_operator_active_users():
     """List of users with recent activity, sorted by severity (worst first).
