@@ -1736,6 +1736,313 @@ def admin_agent_bus(user_id):
         return jsonify({'error': str(e)}), 500
 
 
+# ════════════════════════════════════════════════════════════════════
+# Sprint AH: Operator Console — single-pane-of-glass for one user.
+# ════════════════════════════════════════════════════════════════════
+
+@app.route('/api/admin/operator/active-users', methods=['GET', 'OPTIONS'])
+def admin_operator_active_users():
+    """List of users with recent activity, sorted by severity (worst first).
+
+    Returns enough info for the operator console front page to show
+    color-coded status dots before the user clicks in for detail.
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        with db_context() as db:
+            if is_postgres():
+                rows = db.execute("""
+                    SELECT DISTINCT user_id FROM (
+                        SELECT user_id FROM brain_states
+                            WHERE created_at > NOW() - INTERVAL '24 hours'
+                        UNION
+                        SELECT user_id FROM agent_messages
+                            WHERE created_at > NOW() - INTERVAL '24 hours'
+                        UNION
+                        SELECT user_id FROM agent_observations
+                            WHERE created_at > NOW() - INTERVAL '24 hours'
+                    ) sub LIMIT 200
+                """).fetchall()
+            else:
+                rows = db.execute("""
+                    SELECT DISTINCT user_id FROM (
+                        SELECT user_id FROM brain_states
+                            WHERE created_at > datetime('now', '-24 hours')
+                        UNION
+                        SELECT user_id FROM agent_messages
+                            WHERE created_at > datetime('now', '-24 hours')
+                        UNION
+                        SELECT user_id FROM agent_observations
+                            WHERE created_at > datetime('now', '-24 hours')
+                    ) LIMIT 200
+                """).fetchall()
+            user_ids = [r[0] if isinstance(r, (list, tuple)) else r.get('user_id') or list(r.values())[0]
+                        for r in rows or [] if (r[0] if isinstance(r, (list, tuple)) else (r.get('user_id') or list(r.values())[0]))]
+
+        # Enrich each user with brain_mode + unack count + bus message count
+        users = []
+        for uid in user_ids[:200]:
+            entry = {'user_id': uid, 'brain_mode': None, 'last_interaction_minutes_ago': None,
+                     'unack_crisis': 0, 'unack_alert': 0, 'bus_recent_count': 0,
+                     'highest_severity': 'info'}
+            try:
+                with db_context() as db:
+                    if is_postgres():
+                        brow = db.execute(
+                            "SELECT mode, coherence FROM brain_states "
+                            "WHERE user_id = ? AND created_at > NOW() - INTERVAL '30 minutes' "
+                            "ORDER BY created_at DESC LIMIT 1",
+                            (uid,)
+                        ).fetchone()
+                    else:
+                        brow = db.execute(
+                            "SELECT mode, coherence FROM brain_states "
+                            "WHERE user_id = ? AND created_at > datetime('now', '-30 minutes') "
+                            "ORDER BY created_at DESC LIMIT 1",
+                            (uid,)
+                        ).fetchone()
+                    if brow:
+                        entry['brain_mode'] = brow.get('mode') if hasattr(brow, 'get') else brow[0]
+                        co = brow.get('coherence') if hasattr(brow, 'get') else brow[1]
+                        entry['coherence'] = round(float(co), 3) if co is not None else None
+
+                    # Unack counts
+                    if is_postgres():
+                        ur = db.execute(
+                            "SELECT severity, COUNT(*) FROM agent_observations "
+                            "WHERE user_id = ? AND acknowledged_at IS NULL "
+                            "AND created_at > NOW() - INTERVAL '24 hours' "
+                            "GROUP BY severity",
+                            (uid,)
+                        ).fetchall()
+                    else:
+                        ur = db.execute(
+                            "SELECT severity, COUNT(*) FROM agent_observations "
+                            "WHERE user_id = ? AND acknowledged_at IS NULL "
+                            "AND created_at > datetime('now', '-24 hours') "
+                            "GROUP BY severity",
+                            (uid,)
+                        ).fetchall()
+                    for r in ur or []:
+                        sev = (r[0] if isinstance(r, (list, tuple)) else r.get('severity')) or ''
+                        cnt = r[1] if isinstance(r, (list, tuple)) else (r.get('count') or list(r.values())[1])
+                        if sev.upper() == 'CRISIS':
+                            entry['unack_crisis'] = int(cnt or 0)
+                        elif sev.upper() == 'ALERT':
+                            entry['unack_alert'] = int(cnt or 0)
+
+                    # Bus recent count
+                    if is_postgres():
+                        bcr = db.execute(
+                            "SELECT COUNT(*) FROM agent_messages "
+                            "WHERE user_id = ? AND created_at > NOW() - INTERVAL '30 minutes' "
+                            "AND expires_at > NOW()",
+                            (uid,)
+                        ).fetchone()
+                    else:
+                        bcr = db.execute(
+                            "SELECT COUNT(*) FROM agent_messages "
+                            "WHERE user_id = ? AND created_at > datetime('now', '-30 minutes') "
+                            "AND expires_at > datetime('now')",
+                            (uid,)
+                        ).fetchone()
+                    if bcr:
+                        entry['bus_recent_count'] = int((bcr[0] if isinstance(bcr, (list, tuple)) else bcr.get('count') or list(bcr.values())[0]) or 0)
+
+                    # Last interaction
+                    if is_postgres():
+                        lr = db.execute(
+                            "SELECT EXTRACT(EPOCH FROM NOW() - MAX(created_at))/60 "
+                            "FROM memory_history WHERE user_id = ? AND role = 'user'",
+                            (uid,)
+                        ).fetchone()
+                    else:
+                        lr = db.execute(
+                            "SELECT (julianday('now') - julianday(MAX(created_at))) * 1440 "
+                            "FROM memory_history WHERE user_id = ? AND role = 'user'",
+                            (uid,)
+                        ).fetchone()
+                    if lr and lr[0] is not None:
+                        entry['last_interaction_minutes_ago'] = int(float(lr[0] if isinstance(lr, (list, tuple)) else lr.get('count') or list(lr.values())[0]))
+            except Exception:
+                pass
+
+            # Compute highest severity for sorting / UI badge
+            if entry['unack_crisis'] > 0 or entry['brain_mode'] == 'CRISIS':
+                entry['highest_severity'] = 'crisis'
+            elif entry['unack_alert'] > 0 or entry['brain_mode'] == 'ALERT':
+                entry['highest_severity'] = 'alert'
+            elif entry['bus_recent_count'] > 0:
+                entry['highest_severity'] = 'info'
+            users.append(entry)
+
+        # Sort: crisis first, then alert, then by bus_recent_count desc
+        sev_rank = {'crisis': 0, 'alert': 1, 'warning': 2, 'info': 3}
+        users.sort(key=lambda u: (
+            sev_rank.get(u.get('highest_severity'), 4),
+            -int(u.get('bus_recent_count') or 0),
+            int(u.get('last_interaction_minutes_ago') or 99999),
+        ))
+        return jsonify({'success': True, 'count': len(users), 'users': users})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/operator/<user_id>', methods=['GET', 'OPTIONS'])
+def admin_operator_user(user_id):
+    """Single-user consolidated view for the operator console.
+
+    One round-trip = everything the operator/caregiver might want to
+    see about a user right now. Cheap (under ~10ms in steady state)
+    so safe to poll every 5 seconds from the dashboard.
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        from agent_bus import recent as _bus_recent, context as _bus_context
+        from datetime import datetime as _dt, timedelta as _td
+        result = {
+            'success': True,
+            'user_id': user_id,
+            'now': _dt.utcnow().isoformat() + 'Z',
+        }
+
+        with db_context() as db:
+            # Brain state (last 30 min)
+            if is_postgres():
+                brow = db.execute(
+                    "SELECT C, E, R, S, alpha, mode, coherence, created_at FROM brain_states "
+                    "WHERE user_id = ? AND created_at > NOW() - INTERVAL '30 minutes' "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (user_id,)
+                ).fetchone()
+            else:
+                brow = db.execute(
+                    "SELECT C, E, R, S, alpha, mode, coherence, created_at FROM brain_states "
+                    "WHERE user_id = ? AND created_at > datetime('now', '-30 minutes') "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (user_id,)
+                ).fetchone()
+            if brow:
+                result['brain'] = {
+                    'C': float(brow.get('c', brow.get('C')) or 0) if hasattr(brow, 'get') else float(brow[0] or 0),
+                    'E': float(brow.get('e', brow.get('E')) or 0) if hasattr(brow, 'get') else float(brow[1] or 0),
+                    'R': float(brow.get('r', brow.get('R')) or 0) if hasattr(brow, 'get') else float(brow[2] or 0),
+                    'S': float(brow.get('s', brow.get('S')) or 0) if hasattr(brow, 'get') else float(brow[3] or 0),
+                    'alpha': float(brow.get('alpha') or 0) if hasattr(brow, 'get') else float(brow[4] or 0),
+                    'mode': brow.get('mode') if hasattr(brow, 'get') else brow[5],
+                    'coherence': float(brow.get('coherence') or 0) if hasattr(brow, 'get') else float(brow[6] or 0),
+                }
+            else:
+                result['brain'] = None
+
+            # Brain trend 24h (avg)
+            if is_postgres():
+                trow = db.execute(
+                    "SELECT ROUND(AVG(c)::numeric, 2), COUNT(*) FROM brain_states "
+                    "WHERE user_id = ? AND created_at > NOW() - INTERVAL '24 hours'",
+                    (user_id,)
+                ).fetchone()
+            else:
+                trow = db.execute(
+                    "SELECT AVG(c), COUNT(*) FROM brain_states "
+                    "WHERE user_id = ? AND created_at > datetime('now', '-24 hours')",
+                    (user_id,)
+                ).fetchone()
+            if trow:
+                avg_c = trow[0] if isinstance(trow, (list, tuple)) else list(trow.values())[0]
+                cnt = trow[1] if isinstance(trow, (list, tuple)) else list(trow.values())[1]
+                result['brain_trend_24h'] = {
+                    'avg_c': float(avg_c) if avg_c is not None else None,
+                    'samples': int(cnt or 0),
+                }
+
+            # Last interaction
+            if is_postgres():
+                lr = db.execute(
+                    "SELECT MAX(created_at) FROM memory_history WHERE user_id = ? AND role = 'user'",
+                    (user_id,)
+                ).fetchone()
+            else:
+                lr = db.execute(
+                    "SELECT MAX(created_at) FROM memory_history WHERE user_id = ? AND role = 'user'",
+                    (user_id,)
+                ).fetchone()
+            if lr and lr[0]:
+                last_dt = lr[0]
+                if hasattr(last_dt, 'isoformat'):
+                    result['last_interaction_at'] = last_dt.isoformat()
+                else:
+                    result['last_interaction_at'] = str(last_dt)
+
+            # Open observations (24h, unacked, severity ALERT+)
+            if is_postgres():
+                obs_rows = db.execute(
+                    "SELECT id, observation_type, severity, message, created_at, acknowledged_at "
+                    "FROM agent_observations "
+                    "WHERE user_id = ? AND created_at > NOW() - INTERVAL '24 hours' "
+                    "ORDER BY created_at DESC LIMIT 30",
+                    (user_id,)
+                ).fetchall()
+            else:
+                obs_rows = db.execute(
+                    "SELECT id, observation_type, severity, message, created_at, acknowledged_at "
+                    "FROM agent_observations "
+                    "WHERE user_id = ? AND created_at > datetime('now', '-24 hours') "
+                    "ORDER BY created_at DESC LIMIT 30",
+                    (user_id,)
+                ).fetchall()
+            obs = []
+            for r in obs_rows or []:
+                rec = {
+                    'id': r[0] if isinstance(r, (list, tuple)) else r.get('id'),
+                    'type': r[1] if isinstance(r, (list, tuple)) else r.get('observation_type'),
+                    'severity': (r[2] if isinstance(r, (list, tuple)) else r.get('severity') or '').upper(),
+                    'message': r[3] if isinstance(r, (list, tuple)) else r.get('message'),
+                    'acked': bool(r[5] if isinstance(r, (list, tuple)) else r.get('acknowledged_at')),
+                }
+                created = r[4] if isinstance(r, (list, tuple)) else r.get('created_at')
+                rec['created_at'] = created.isoformat() if hasattr(created, 'isoformat') else str(created)
+                obs.append(rec)
+            result['observations'] = obs
+
+            # Profile snapshot
+            try:
+                from memory_helpers import db_load_profile
+                p = db_load_profile(user_id) or {}
+                result['profile'] = {
+                    'name': p.get('preferred_name') or p.get('name') or '',
+                    'medications_count': len(p.get('medications_list') or []),
+                    'contacts_count': len(p.get('contacts') or p.get('emergency_contacts') or []),
+                }
+            except Exception:
+                pass
+
+        # Bus
+        result['bus_recent'] = _bus_recent(user_id, since=240, limit=30)  # 4h
+        result['bus_context'] = _bus_context(user_id, lookback_minutes=30, max_items=15)
+
+        # Self-healing circuits
+        try:
+            from self_healing import get_breaker
+            circuits = {}
+            for name in ('azure_tts', 'azure_stt', 'gemini', 'claude', 'twilio', 'database'):
+                br = get_breaker(name)
+                circuits[name] = 'open' if not br.can_proceed() else 'closed'
+            result['circuits'] = circuits
+        except Exception:
+            result['circuits'] = {}
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/admin/agents-status', methods=['GET', 'OPTIONS'])
 def admin_agents_status():
     """Full status of all agents — for admin dashboard.
