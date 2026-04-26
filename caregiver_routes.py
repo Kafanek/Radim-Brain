@@ -1733,6 +1733,159 @@ def caregiver_inbox(senior_id):
     return _inner(senior_id)
 
 
+# ═════════════════════════════════════════════════════════════════════
+# Sprint AJ: caregiver -> Radim -> senior message injection ("whisper")
+# ═════════════════════════════════════════════════════════════════════
+# Caregiver doesn't write directly to the senior. They write a whisper
+# TO RADIM and Radim weaves it into the next natural conversation.
+# This preserves the "personal assistant who happens to remember"
+# illusion instead of "your daughter is monitoring you" anxiety.
+
+@caregiver_bp.route('/api/caregiver/senior/<senior_id>/whisper', methods=['POST', 'OPTIONS'])
+def caregiver_whisper(senior_id):
+    """Caregiver leaves a private note for Radim about their senior.
+
+    Body: {"text": "Připomeň jí prosím vzít léky večer", "priority": "normal"}
+        priority: 'low' | 'normal' | 'high' (affects how soon Radim raises it)
+
+    Stored in memory_learning.caregiver_whispers + emitted to bus
+    as kind='context' so chat-time prompt builder picks it up.
+
+    Idempotent: same text within 5 min returns existing whisper id.
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    from auth_middleware import require_auth as _ra
+    @_ra
+    def _inner(_senior_id):
+        caller = getattr(g, 'auth_user', None) or {}
+        caller_id = str(caller.get('user_id') or caller.get('id') or '')
+        if not caller_id:
+            return jsonify({'success': False, 'error': 'Auth required'}), 401
+
+        if not _is_family_of(_senior_id, caller_id):
+            return jsonify({'success': False, 'error': 'Not linked to this senior'}), 403
+
+        body = request.get_json(silent=True) or {}
+        text = (body.get('text') or '').strip()
+        if not text:
+            return jsonify({'success': False, 'error': 'text required'}), 400
+        if len(text) > 500:
+            text = text[:500]
+        priority = body.get('priority', 'normal')
+        if priority not in ('low', 'normal', 'high'):
+            priority = 'normal'
+
+        # Idempotency check: same caller + same text within 5 min
+        try:
+            from memory_helpers import db_load_learning, db_save_learning
+            learning = db_load_learning(_senior_id) or {}
+            whispers = learning.get('caregiver_whispers', [])
+            now_iso = datetime.utcnow().isoformat()
+            cutoff = (datetime.utcnow() - timedelta(minutes=5)).isoformat()
+            for w in whispers:
+                if (w.get('text') == text and w.get('from') == caller_id
+                        and w.get('created_at', '') > cutoff and not w.get('consumed_at')):
+                    return jsonify({
+                        'success': True,
+                        'whisper_id': w.get('id'),
+                        'message': 'Stejný whisper poslán před chvílí — zachovávám původní.',
+                        'idempotent': True,
+                    })
+
+            # New whisper
+            new_id = max([w.get('id', 0) for w in whispers], default=0) + 1
+            whisper = {
+                'id': new_id,
+                'text': text,
+                'priority': priority,
+                'from': caller_id,
+                'created_at': now_iso,
+                'consumed_at': None,  # set when Radim weaves it into a chat reply
+                'expires_at': (datetime.utcnow() + timedelta(hours=24)).isoformat(),
+            }
+            whispers.append(whisper)
+            # Cap history — keep last 50 (consumed/expired pruned by daily cleanup)
+            learning['caregiver_whispers'] = whispers[-50:]
+            db_save_learning(_senior_id, learning)
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)[:120]}), 500
+
+        # Bus emit so chat sees it via bus.context as well
+        try:
+            from agent_bus import emit as _bus_emit
+            _bus_emit(
+                user_id=_senior_id,
+                sender=f'caregiver.{caller_id}',
+                kind='context',
+                severity='info',
+                topic='whisper',
+                payload={
+                    'whisper_id': new_id,
+                    'text': text,
+                    'priority': priority,
+                    'message': f'Pečovatel chce, abys při přirozené příležitosti řekl: "{text}"',
+                },
+                ttl_minutes=1440,  # 24h
+            )
+        except Exception:
+            pass
+
+        # Audit log so we can trace what caregiver requested
+        try:
+            from memory_helpers import audit_log as _audit
+            _audit(caller_id, 'caregiver_whisper', f'senior:{_senior_id}',
+                   f'priority={priority} text={text[:120]}')
+        except Exception:
+            pass
+
+        return jsonify({
+            'success': True,
+            'whisper_id': new_id,
+            'expires_at': whisper['expires_at'],
+        })
+
+    return _inner(senior_id)
+
+
+@caregiver_bp.route('/api/caregiver/senior/<senior_id>/whispers', methods=['GET', 'OPTIONS'])
+def caregiver_whispers_list(senior_id):
+    """List active (not yet consumed, not expired) whispers for a senior.
+
+    Used by the caregiver UI to show "what's still pending" — so they
+    don't double-send the same nudge.
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    from auth_middleware import require_auth as _ra
+    @_ra
+    def _inner(_senior_id):
+        caller = getattr(g, 'auth_user', None) or {}
+        caller_id = str(caller.get('user_id') or caller.get('id') or '')
+        if not caller_id or not _is_family_of(_senior_id, caller_id):
+            return jsonify({'success': False, 'error': 'Not linked'}), 403
+        try:
+            from memory_helpers import db_load_learning
+            learning = db_load_learning(_senior_id) or {}
+            whispers = learning.get('caregiver_whispers', [])
+            now_iso = datetime.utcnow().isoformat()
+            active = [w for w in whispers
+                      if not w.get('consumed_at')
+                      and w.get('expires_at', '') > now_iso]
+            consumed = [w for w in whispers if w.get('consumed_at')][-5:]
+            return jsonify({
+                'success': True,
+                'active': active,
+                'recently_delivered': consumed,
+            })
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)[:120]}), 500
+
+    return _inner(senior_id)
+
+
 @caregiver_bp.route('/api/caregiver/observations/<int:obs_id>/ack', methods=['POST', 'OPTIONS'])
 def caregiver_observation_ack(obs_id):
     """Mark an agent_observation as acknowledged by the caregiver.

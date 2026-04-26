@@ -610,6 +610,46 @@ def radim_chat():
         except (ImportError, Exception) as bus_err:
             logger.debug(f"Bus context (non-fatal): {bus_err}")
 
+        # Sprint AJ.2: caregiver whispers — pečovatel chce abych při
+        # přirozené příležitosti připomněl něco. Inject do system promptu
+        # SEPARATELY (ne přes generic bus block) protože tady chceme silnou
+        # instrukci pro AI: "vyber JEDEN whisper, vlož ho přirozeně, ne
+        # jako 'rodina mi řekla'". Po doručení označíme jako consumed.
+        _active_whispers_to_consume = []
+        try:
+            from memory_helpers import db_load_learning
+            _learning = db_load_learning(user_id) or {}
+            _whispers = _learning.get('caregiver_whispers', []) or []
+            now_iso = datetime.utcnow().isoformat()
+            _active_whispers = [
+                w for w in _whispers
+                if not w.get('consumed_at')
+                and w.get('expires_at', '') > now_iso
+            ]
+            if _active_whispers:
+                # Sort by priority (high first) then oldest first
+                prio_rank = {'high': 0, 'normal': 1, 'low': 2}
+                _active_whispers.sort(key=lambda w: (
+                    prio_rank.get(w.get('priority', 'normal'), 1),
+                    w.get('created_at', ''),
+                ))
+                # Take top 1 — overwhelm vs surgical reminder
+                _to_use = _active_whispers[0]
+                _active_whispers_to_consume = [_to_use]
+                personalized += (
+                    '\n\n═══ ZPRÁVA OD PEČOVATELE PRO TEBE ═══\n'
+                    f'Pečovatel/rodina ti tiše vzkázal/a: "{_to_use["text"]}"\n'
+                    f'Priorita: {_to_use.get("priority", "normal")}.\n'
+                    'INSTRUKCE: Při přirozené příležitosti v této odpovědi to '
+                    'připomeň seniorovi vlastními slovy. NEŘÍKEJ "vaše dcera/'
+                    'rodina mi řekla" — bylo by to vetřelecké. Řekni to tak, '
+                    'jako bys si na to vzpomněl sám. Pokud aktuální zpráva '
+                    'seniora přímo nedává prostor, ukonči svou odpověď '
+                    'mírným nadhozením tématu.'
+                )
+        except Exception as _wh_err:
+            logger.debug(f"Whisper inject (non-fatal): {_wh_err}")
+
         # Load pending tasks context for AI awareness
         if _ORCH_TASK_SERVICE:
             try:
@@ -1102,6 +1142,46 @@ def radim_chat():
                 _orch_record(user_id, message, text_response, brain_C=_brain_C_val, brain_mode=_brain_mode_val)
             except Exception as rec_err:
                 logger.warning(f"Memory record warning: {rec_err}")
+
+        # Sprint AJ.2: mark whispers as consumed once Radim has spoken.
+        # We don't verify that the LLM literally referenced the whisper —
+        # we trust that the strong system-prompt instruction did its job.
+        # If the next chat has the whisper still active, the AI will get
+        # the same prompt again — but we'd rather have a chance of
+        # missing one delivery than a senior hearing the same nudge twice.
+        if _active_whispers_to_consume:
+            try:
+                from memory_helpers import db_load_learning, db_save_learning
+                _ll = db_load_learning(user_id) or {}
+                _wlist = _ll.get('caregiver_whispers', []) or []
+                _consumed_ids = {w['id'] for w in _active_whispers_to_consume}
+                _now_iso = datetime.utcnow().isoformat()
+                for w in _wlist:
+                    if w.get('id') in _consumed_ids and not w.get('consumed_at'):
+                        w['consumed_at'] = _now_iso
+                _ll['caregiver_whispers'] = _wlist
+                db_save_learning(user_id, _ll)
+                # Bus ack so caregiver can see "delivered" in their dashboard
+                try:
+                    from agent_bus import emit as _bus_emit
+                    for w in _active_whispers_to_consume:
+                        _bus_emit(
+                            user_id=user_id,
+                            sender='radim_orchestrator.whisper_delivery',
+                            kind='ack',
+                            severity='info',
+                            topic='whisper',
+                            payload={
+                                'whisper_id': w['id'],
+                                'text': w['text'],
+                                'message': f'Whisper doručen: "{w["text"][:80]}"',
+                            },
+                            correlates_with=w.get('id'),
+                        )
+                except Exception:
+                    pass
+            except Exception as _wh_consume_err:
+                logger.debug(f"Whisper consume (non-fatal): {_wh_consume_err}")
 
         # v10.4: Extract memorable topics for future follow-up
         try:
