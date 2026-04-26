@@ -81,6 +81,14 @@ STRESS_WORDS = {
     'spatne', 'nemuzu', 'nemazu',
     'trapi', 'nevim', 'ztraceny',
     'brecim', 'placu', 'styska',
+    # Sprint AO: grief / loss vocabulary — stress for brain mode +
+    # voice modulation, not crisis (no immediate emergency action).
+    # Without these, "manžel mi zemřel" left brain in HARMONY and
+    # voice picked RHYTHMIC (upbeat) which is the wrong tone for
+    # grief. Now C bumps to ALERT range → voice slows + style empathetic.
+    'zemrel', 'zemrela', 'umrel', 'umrela', 'pohreb', 'truchlim',
+    'ztrata', 'odesel', 'odesla', 'navzdy', 'sirotek', 'truchlici',
+    'smutek', 'smutno', 'beznadeji',
     # With diacritics
     'bojím', 'nervózní', 'nemocný',
     'unavený', 'problém', 'bolí',
@@ -89,6 +97,10 @@ STRESS_WORDS = {
     'špatně', 'nemůžu',
     'trápí', 'nevím', 'ztracený',
     'brečím', 'pláču', 'stýská',
+    # Sprint AO grief diacritics
+    'zemřel', 'zemřela', 'umřel', 'umřela', 'pohřeb', 'truchlím',
+    'ztráta', 'odešel', 'odešla', 'navždy', 'truchlící',
+    'beznaději',
 }
 
 CALM_WORDS = {

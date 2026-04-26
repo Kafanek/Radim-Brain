@@ -348,6 +348,15 @@ def build_personalized_prompt(user_id: str) -> str:
 
     parts.append("===============================================================")
 
+    # Sprint AO: tail reminder of TTS budget. Long context tends to drown
+    # out the "max 200 chars" rule that's buried in the middle. Putting
+    # it last + explicit length budget brings AI back on rule.
+    parts.append("\n══ POSLEDNÍ INSTRUKCE PŘED ODPOVĚDÍ ══")
+    parts.append("• Max 3 krátké věty, MAX 200 znaků celé odpovědi.")
+    parts.append("• Pokud je téma těžké (smrt, ztráta, krize), mluvím TIŠE a STRUČNĚ — jedna věta uznání + jedna věta přítomnosti je často víc než tři.")
+    parts.append("• Při překročení 200 znaků UŘÍZNI poslední větu, dokonči její myšlenku.")
+    parts.append("• Bez emoji. Bez markdown. Vše s diakritikou.")
+
     return "\n".join(parts)
 
 
