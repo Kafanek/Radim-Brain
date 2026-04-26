@@ -261,8 +261,19 @@ def _check_recent_chat_crisis(user_id, baselines):
             mode = (row[1] or '').upper()
 
         if mode == 'CRISIS' or C_val >= T2:
-            # Sprint AF: log only when actually triggering — every-user-per-cycle
-            # noise was useful for diagnostics but spammy in steady state.
+            # Sprint AG.4 dedupe: if any sender already emitted a recent
+            # CRISIS observation for this user under the SAME topic in the
+            # last 15 min (e.g. safety branch from Sprint AD already wrote
+            # one), skip — caregiver was already notified.
+            try:
+                from agent_bus import dedupe as _bus_dedupe
+                if _bus_dedupe(user_id, sender=None, topic='recent_chat_crisis',
+                               within_minutes=15, any_sender=True,
+                               severity_min='alert'):
+                    return None
+            except Exception:
+                pass
+            # Sprint AF: log only when actually triggering
             print(f"💢 recent_chat_crisis FIRE uid={user_id} C={C_val} mode={mode}", flush=True)
             return {
                 "type": "recent_chat_crisis",
@@ -271,6 +282,14 @@ def _check_recent_chat_crisis(user_id, baselines):
                 "details": {"C": C_val, "mode": mode, "source": "brain_states_recent"},
             }
         elif mode == 'ALERT' or C_val >= T1:
+            try:
+                from agent_bus import dedupe as _bus_dedupe
+                if _bus_dedupe(user_id, sender=None, topic='recent_chat_alert',
+                               within_minutes=15, any_sender=True,
+                               severity_min='warning'):
+                    return None
+            except Exception:
+                pass
             print(f"💢 recent_chat_alert FIRE uid={user_id} C={C_val} mode={mode}", flush=True)
             return {
                 "type": "recent_chat_alert",
@@ -530,21 +549,56 @@ def _is_in_cooldown(user_id, observation_type):
 def _save_observation(user_id, obs):
     """Insert into agent_observations + audit_log. WebPush on WARNING+.
 
-    Sprint AG.2: returns the new observation id so callers can include
-    it in caregiver push payloads for deep-link / ack flow on the
-    frontend dashboard. Returns None on failure.
+    Sprint AG.2: returns the new observation id for caregiver push
+    deep-link / ack flow.
+
+    Sprint AG.4: ALSO emits to agent_bus so chat-time coordinator,
+    anticipation engine, and specialists can read recent observations
+    via bus.context() / bus.recent(). The bus.emit() with
+    kind='observation' internally re-mirrors into agent_observations,
+    so to avoid double-write we go through the bus first and use its
+    side-effect mirror — UNLESS the bus is unavailable, in which case
+    we fall back to direct insert below. (Keeps the existing public
+    contract: caregiver inbox + admin endpoints work either way.)
     """
     obs_id = None
+
+    # Try bus path first (single insert + auto-mirror to agent_observations)
     try:
-        from database import db_insert
-        with db_context(commit=True) as db:
-            obs_id = db_insert(
-                db,
-                "agent_observations",
-                ["user_id", "observation_type", "severity", "message", "details", "action_taken"],
-                [user_id, obs["type"], obs["severity"], obs["message"],
-                 json.dumps(obs.get("details", {})), obs["severity"].lower()],
-            )
+        from agent_bus import emit as _bus_emit
+        bus_payload = {
+            'message': obs.get('message', ''),
+            'observation_type': obs.get('type'),
+            **(obs.get('details') or {}),
+        }
+        obs_id = _bus_emit(
+            user_id=user_id,
+            sender=f"agent_loop.{obs.get('type', 'unknown')}",
+            kind='observation',
+            severity=(obs.get('severity') or 'info').lower(),
+            topic=obs.get('type', 'unknown'),
+            payload=bus_payload,
+        )
+    except Exception as bus_err:
+        logger.debug(f"agent_bus emit failed, falling back to direct insert: {bus_err}")
+
+    # Fallback: direct insert into agent_observations if bus path didn't write
+    if obs_id is None:
+        try:
+            from database import db_insert
+            with db_context(commit=True) as db:
+                obs_id = db_insert(
+                    db,
+                    "agent_observations",
+                    ["user_id", "observation_type", "severity", "message", "details", "action_taken"],
+                    [user_id, obs["type"], obs["severity"], obs["message"],
+                     json.dumps(obs.get("details", {})), obs["severity"].lower()],
+                )
+        except Exception as e:
+            logger.debug(f"save_observation fallback insert error: {e}")
+            return None
+
+    try:
         # Pass id back into the obs dict so downstream actions
         # (_alert_caregiver) can include it in push deep-links.
         if obs_id is not None:
@@ -1102,6 +1156,18 @@ def run_daily_cleanup(app):
 
         except Exception as e:
             logger.error(f"Daily cleanup error: {e}")
+
+        # Sprint AG.4: prune expired bus messages. TTL is per-message
+        # (see agent_bus._TTL_DEFAULTS) so anything past expires_at is
+        # safe to delete. Done in a separate try so it doesn't break
+        # the rest of the cleanup if bus module is unavailable.
+        try:
+            from agent_bus import prune as _bus_prune
+            pruned = _bus_prune()
+            if pruned and pruned > 0:
+                logger.info(f"🚌 Bus cleanup: {pruned} expired agent_messages removed")
+        except Exception as e:
+            logger.debug(f"Bus cleanup (non-fatal): {e}")
 
         # v10.10: Subscription cleanup — expired/inactive accounts
         try:

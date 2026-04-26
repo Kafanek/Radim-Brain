@@ -378,6 +378,31 @@ def radim_chat():
             except Exception as _psi_err:
                 logger.warning(f"SAFETY: compute_psi_state failed (non-fatal): {_psi_err}")
 
+            # Sprint AG.4: emit CRISIS observation to bus immediately so:
+            #   - agent_loop next cycle sees it via dedupe -> skips duplicate alert
+            #   - chat-time coordinator (next user message) sees it in
+            #     bus.context() -> includes "crisis just reported" in prompt
+            #   - caregiver inbox shows it via mirror to agent_observations
+            try:
+                from agent_bus import emit as _bus_emit
+                _bus_emit(
+                    user_id=user_id,
+                    sender='radim_orchestrator.safety_branch',
+                    kind='observation',
+                    severity='crisis' if is_critical else 'alert',
+                    topic='recent_chat_crisis' if is_critical else 'recent_chat_alert',
+                    payload={
+                        'C': crisis_C,
+                        'mode': 'CRISIS',
+                        'severity_label': severity,  # 'critical' | 'high'
+                        'message': f"Uživatel hlásil v chatu: {message[:200]}",
+                        'source': 'safety_intent',
+                    },
+                    ttl_minutes=120,  # 2h — caregiver has time to ack
+                )
+            except Exception as _bus_err:
+                logger.debug(f"SAFETY bus emit (non-fatal): {_bus_err}")
+
             # v432: CRITICAL (explicit 155/suicide) → hardcoded fast response + notify
             # HIGH (pain, fall, breathing) → let AI respond with empathy, notify async
             import threading
@@ -562,6 +587,28 @@ def radim_chat():
                 personalized += '\n\n═══ OSOBNÍ KONTEXT ═══\n' + growth_ctx
         except (ImportError, Exception) as ge:
             logger.debug(f"Personal growth context: {ge}")
+
+        # Sprint AG.4.3: agent message bus context.
+        # If agent_loop or safety branch detected something concerning in
+        # the last 30 minutes (CRISIS row, anticipation warning, isolation
+        # alert, missed medication, …), surface it here so the chat AI
+        # references it instead of treating the current message in isolation.
+        # Without this, senior says "spadl jsem" -> safety reply -> 10 min
+        # later "jak je počasí" -> AI cheerfully describes weather as if
+        # nothing happened. Bus context fixes that disconnect.
+        try:
+            from agent_bus import context as _bus_context, format_for_prompt as _bus_fmt
+            bus_msgs = _bus_context(user_id, lookback_minutes=30, max_items=8)
+            if bus_msgs:
+                bus_text = _bus_fmt(bus_msgs, max_lines=8)
+                if bus_text:
+                    personalized += (
+                        '\n\n═══ AGENT BUS — CO V POSLEDNÍCH 30 MIN AGENTI ZAZNAMENALI ═══\n'
+                        + bus_text +
+                        '\n(Pokud tu je CRISIS nebo ALERT, navaž — nezačínej znovu od nuly.)'
+                    )
+        except (ImportError, Exception) as bus_err:
+            logger.debug(f"Bus context (non-fatal): {bus_err}")
 
         # Load pending tasks context for AI awareness
         if _ORCH_TASK_SERVICE:
@@ -1225,6 +1272,19 @@ def radim_chat_internal(message, user_id=None, mode="senior"):
             if _ORCH_MEMORY_AVAILABLE:
                 try:
                     personalized = _orch_build_prompt(user_id)
+                    # Sprint AG.4.3: same bus context injection as HTTP chat.
+                    # WhatsApp / phone callers must also see "spadl jsem"
+                    # context if the senior reported it 10 min ago via web.
+                    try:
+                        from agent_bus import context as _bc, format_for_prompt as _bf
+                        _bm = _bc(user_id, lookback_minutes=30, max_items=8)
+                        if _bm:
+                            personalized += (
+                                '\n\n═══ AGENT BUS ═══\n' + _bf(_bm, max_lines=8) +
+                                '\n(Pokud je tu CRISIS/ALERT, naváž na to.)'
+                            )
+                    except Exception:
+                        pass
                     history = _orch_get_history(user_id, limit=15)
                 except Exception:
                     pass

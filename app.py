@@ -1708,6 +1708,34 @@ def admin_agent_run():
         logger.error(f"Agent run error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/admin/agent-bus/<user_id>', methods=['GET', 'OPTIONS'])
+def admin_agent_bus(user_id):
+    """Sprint AG.4: inspect the agent message bus for one user.
+
+    Returns last 50 messages (any kind, any severity) so we can see
+    exactly what each layer is emitting and whether dedupe + context
+    flow are working. Useful for production debug + e2e tests.
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        from agent_bus import recent, context
+        all_recent = recent(user_id, since=240, limit=50)  # last 4 hours
+        ctx = context(user_id, lookback_minutes=30, max_items=20)
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'recent_count': len(all_recent),
+            'recent': all_recent,
+            'context_count': len(ctx),
+            'context_for_chat_prompt': ctx,
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/admin/agents-status', methods=['GET', 'OPTIONS'])
 def admin_agents_status():
     """Full status of all agents — for admin dashboard.
