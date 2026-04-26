@@ -206,12 +206,25 @@ SAFETY_KEYWORDS = [
 STORY_KEYWORDS = ['příběh', 'story', 'instagram', 'facebook', 'pozvánka']
 
 
+def _safety_word_match(word, msg_lower):
+    """Match safety keyword in message.
+
+    For digit-only keywords (e.g. '155', '112'), use word-boundary regex
+    so that phone numbers like '603111222' don't accidentally match '112'
+    via substring containment. For text keywords, plain substring match is
+    fine (we want 'spadl' to match 'spadl jsem v koupelně').
+    """
+    if word.isdigit():
+        return bool(re.search(r'\b' + re.escape(word) + r'\b', msg_lower))
+    return word in msg_lower
+
+
 def detect_intent(message):
     """Detekce záměru ze zprávy — safety > medication > health > task > story > chat"""
     msg_lower = message.lower()
 
     for word in SAFETY_KEYWORDS:
-        if word in msg_lower:
+        if _safety_word_match(word, msg_lower):
             return 'safety'
 
     # v398: Fuzzy safety for speech-impaired seniors ("pomo" → "pomoc")
