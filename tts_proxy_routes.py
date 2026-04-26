@@ -190,9 +190,26 @@ def azure_tts_proxy():
         _frontend_mode = _style_to_mode.get(_frontend_style)
         _brain_mode = ant_state or (brain_speech.get('mode') if brain_speech else None)
 
-        # Auto-detect singing (text matches known song)
+        # Sprint AO: detect grief / loss / distress in the TEXT being
+        # synthesized. If the assistant is replying about grief, voice
+        # must reflect that even if brain_mode is HARMONY (because the
+        # senior's last C estimate didn't escalate). Without this, AI
+        # generates "Anno, je mi to líto..." but TTS speaks it cheerily.
+        _text_lower = (text or '').lower()
+        _grief_signals = (
+            'zemřel', 'zemřela', 'umřel', 'umřela', 'pohřeb', 'truchl',
+            'je mi líto', 'je mi to líto', 'ztráta', 'odešel navždy',
+            'navždy', 'smutek', 'smutno', 'beznadě', 'pláču', 'brečím',
+            'soustrast', 'nemusíte mluvit',
+            # ASCII fallbacks
+            'zemrel', 'umrel', 'pohreb', 'je mi lito',
+            'ztrata', 'beznadej', 'placu', 'soustrast',
+        )
+        _is_grief_text = any(g in _text_lower for g in _grief_signals)
+
+        # Auto-detect singing (text matches known song) — but skip if grief
         _auto_singing = None
-        if not _context_mode and not _frontend_mode:
+        if not _context_mode and not _frontend_mode and not _is_grief_text:
             try:
                 from voice_melody import match_song
                 if match_song(text):
@@ -201,8 +218,10 @@ def azure_tts_proxy():
                 pass
 
         # Autonomous: use RHYTHMIC for happy/energetic brain states
+        # — but never for grief content
         _auto_rhythmic = None
-        if not _context_mode and not _frontend_mode and not _auto_singing:
+        if (not _context_mode and not _frontend_mode and not _auto_singing
+                and not _is_grief_text):
             if _brain_mode == 'HARMONY' and uid:
                 try:
                     from voice_learning import should_use_melody
@@ -213,8 +232,13 @@ def azure_tts_proxy():
 
         # v10.20: Brain Ψ(t) ALWAYS wins for CRISIS/ALERT (safety override)
         # Context refines within HARMONY (poetry, education, narration, singing)
+        # Sprint AO: grief text override beats RHYTHMIC defaults but loses
+        # to brain-CRISIS/ALERT (real emergency takes priority over grief
+        # voice tone — both are slow/calm, CRISIS just stronger).
         if _brain_mode in ('CRISIS', 'ALERT'):
             _mode = _brain_mode
+        elif _is_grief_text:
+            _mode = 'ALERT'  # grief voice = empathetic + slow
         else:
             _mode = _auto_singing or _context_mode or _frontend_mode or _auto_rhythmic or _brain_mode or 'HARMONY'
         try:
