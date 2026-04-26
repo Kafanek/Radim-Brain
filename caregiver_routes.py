@@ -1686,6 +1686,33 @@ def caregiver_inbox(senior_id):
         except Exception:
             pass
 
+        # Sprint AI.1: caregiver-appropriate bus slice.
+        # Filters out internal kinds (intent, decision, user_input, ack)
+        # — caregiver shouldn't see "AI rozhodl: speak". Keeps observation
+        # + context (warning+) so the family can see "co Radim právě
+        # zaznamenal" without raw technical noise. Translation to plain
+        # Czech happens client-side via caregiver-module._translateSender.
+        recent_activity = []
+        try:
+            from agent_bus import recent as _bus_recent
+            raw = _bus_recent(_senior_id, since=120, limit=20,
+                              kinds=['observation', 'context'],
+                              severity_min='warning')
+            for m in raw:
+                # Strip payload internals — only what UI needs
+                payload = m.get('payload') or {}
+                recent_activity.append({
+                    'id': m.get('id'),
+                    'sender': m.get('sender'),
+                    'kind': m.get('kind'),
+                    'severity': m.get('severity'),
+                    'topic': m.get('topic'),
+                    'message': payload.get('message') or '',
+                    'created_at': m.get('created_at'),
+                })
+        except Exception as e:
+            logger.debug(f"caregiver_inbox bus fetch: {e}")
+
         return jsonify({
             'success': True,
             'senior': {
@@ -1700,6 +1727,7 @@ def caregiver_inbox(senior_id):
             },
             'observations': observations,
             'summary': summary,
+            'recent_activity': recent_activity,
         })
 
     return _inner(senior_id)
