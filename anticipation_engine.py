@@ -383,6 +383,55 @@ def anticipate(user_id):
     }
     db_save_learning(user_id, learning)
 
+    # Sprint AG.4.4: emit anticipation breakpoints to bus so chat-time
+    # AI sees "Ĉ predicts ALERT in next interaction" before the user
+    # even crosses the threshold. Dedupe per topic so we don't spam
+    # the bus on every chat (anticipation runs per-message in
+    # radim_orchestrator). 30-min context TTL is enough — if the
+    # prediction doesn't materialize, it expires naturally.
+    try:
+        from agent_bus import emit as _bus_emit, dedupe as _bus_dedupe
+        if B27 and not _bus_dedupe(user_id, sender=None,
+                                   topic='approaching_crisis',
+                                   within_minutes=30, any_sender=True):
+            _bus_emit(
+                user_id=user_id,
+                sender='anticipation',
+                kind='context',
+                severity='alert',
+                topic='approaching_crisis',
+                payload={
+                    'C_now': round(C_t, 2),
+                    'C_hat': round(C_hat, 2),
+                    'message': f'Anticipace: během příští interakce hrozí přechod do CRISIS (Ĉ={C_hat:.1f}, T2={T2}).',
+                    'predicted_emotions': {
+                        'tension': round(e_tension, 3),
+                        'fear': round(e_fear, 3),
+                    },
+                },
+            )
+        elif B12 and not _bus_dedupe(user_id, sender=None,
+                                     topic='approaching_alert',
+                                     within_minutes=30, any_sender=True):
+            _bus_emit(
+                user_id=user_id,
+                sender='anticipation',
+                kind='context',
+                severity='warning',
+                topic='approaching_alert',
+                payload={
+                    'C_now': round(C_t, 2),
+                    'C_hat': round(C_hat, 2),
+                    'message': f'Anticipace: vědomí směřuje k ALERT (Ĉ={C_hat:.1f}, T1={T1}).',
+                    'predicted_emotions': {
+                        'tension': round(e_tension, 3),
+                        'fear': round(e_fear, 3),
+                    },
+                },
+            )
+    except Exception as _bus_err:
+        logger.debug(f"anticipation bus emit (non-fatal): {_bus_err}")
+
     return {
         'current': {
             'C': round(C_t, 2),
