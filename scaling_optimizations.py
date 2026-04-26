@@ -112,6 +112,57 @@ tts_cache = TTSCache()
 
 
 # ============================================
+# Sprint AL.4: Azure TTS QUOTA TRACKER
+# ============================================
+# Counts characters sent to Azure (cache MISS = real Azure call) so we
+# can predict monthly cost. Azure Neural TTS pricing is per character:
+#   - Standard tier: $16 / 1M chars
+#   - Free tier: 500k chars/month
+# Live counters reset on dyno restart. For long-term tracking we'd
+# need a DB row, but per-dyno counters are enough for spot-checks.
+
+import time as _time_az
+
+class _TTSQuotaTracker:
+    def __init__(self):
+        self.start_ts = _time_az.time()
+        self.azure_chars = 0      # chars actually sent to Azure
+        self.cached_chars = 0      # chars served from cache (no $)
+        self.azure_calls = 0
+        self.cached_calls = 0
+
+    def record_azure(self, text_len):
+        self.azure_chars += int(text_len or 0)
+        self.azure_calls += 1
+
+    def record_cached(self, text_len):
+        self.cached_chars += int(text_len or 0)
+        self.cached_calls += 1
+
+    def stats(self):
+        uptime_h = max(0.001, (_time_az.time() - self.start_ts) / 3600)
+        # Project to 30-day bill at current rate
+        chars_per_h = self.azure_chars / uptime_h
+        projected_30d = chars_per_h * 24 * 30
+        # Azure standard tier: $16 / 1M chars (Neural)
+        projected_usd = projected_30d / 1_000_000 * 16
+        total_calls = self.azure_calls + self.cached_calls
+        cache_savings_pct = (self.cached_calls / total_calls * 100) if total_calls else 0
+        return {
+            'uptime_hours': round(uptime_h, 2),
+            'azure_chars': self.azure_chars,
+            'azure_calls': self.azure_calls,
+            'cached_chars': self.cached_chars,
+            'cached_calls': self.cached_calls,
+            'cache_savings_pct': round(cache_savings_pct, 1),
+            'projected_monthly_chars': round(projected_30d),
+            'projected_monthly_usd': round(projected_usd, 2),
+        }
+
+tts_quota = _TTSQuotaTracker()
+
+
+# ============================================
 # 2. AI RESPONSE CACHE — Skip Gemini for repeated queries
 # ============================================
 # Many seniors ask same things: "kolik je hodin", "jaké je počasí"

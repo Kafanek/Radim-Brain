@@ -139,10 +139,12 @@ def azure_tts_proxy():
                 )
         _cache_rate = str(rate) + ':' + _cache_ctx + _brain_fp
         try:
-            from scaling_optimizations import tts_cache
+            from scaling_optimizations import tts_cache, tts_quota
             cached_audio = tts_cache.get(text, voice, _cache_rate)
             if cached_audio:
                 logger.debug(f"TTS cache HIT: {text[:30]}...")
+                # Sprint AL.4: cache HIT = no Azure cost
+                tts_quota.record_cached(len(text))
                 # Sprint AC: emit brain headers on cache HIT too, so callers
                 # can verify which Ψ(t)-aware variant they got. Previously
                 # cache HITs returned no X-Brain-* headers → indistinguishable
@@ -284,8 +286,10 @@ def azure_tts_proxy():
         if response.status_code == 200:
             # ⚡ Cache the audio for future requests
             try:
-                from scaling_optimizations import tts_cache
+                from scaling_optimizations import tts_cache, tts_quota
                 tts_cache.put(text, response.content, voice, _cache_rate)
+                # Sprint AL.4: cache MISS = real Azure call, count chars
+                tts_quota.record_azure(len(text))
             except Exception:
                 pass
 

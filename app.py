@@ -1657,6 +1657,27 @@ def admin_seed_demo():
         logger.error(f"Seed demo error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+@app.route('/api/admin/seed-pilot-demo', methods=['POST', 'OPTIONS'])
+def admin_seed_pilot_demo():
+    """Sprint AL.5: full pilot scenario seeded — Anna + Jana + 7d trend +
+    chat history + IoT + CRISIS obs + active whisper. Idempotent.
+
+    Use case: kick off pilot/screening demo with a single curl. The
+    operator console + caregiver dashboard will both have realistic
+    data the moment the page loads.
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        from seed_pilot import seed_pilot_demo
+        return jsonify({'success': True, **seed_pilot_demo()}), 201
+    except Exception as e:
+        logger.error(f"Seed pilot error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 # v382: Manual agent loop trigger (full cycle with saves)
 @app.route('/api/admin/news-briefing-test', methods=['POST', 'OPTIONS'])
 def admin_news_briefing_test():
@@ -1739,6 +1760,28 @@ def admin_agent_bus(user_id):
 # ════════════════════════════════════════════════════════════════════
 # Sprint AH: Operator Console — single-pane-of-glass for one user.
 # ════════════════════════════════════════════════════════════════════
+
+@app.route('/api/admin/tts-quota', methods=['GET', 'OPTIONS'])
+def admin_tts_quota():
+    """Sprint AL.4: live TTS character + cost projection.
+
+    Reset on dyno restart, so good for spot-checks not long-term billing.
+    Projects monthly cost based on current per-hour Azure call rate.
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        from scaling_optimizations import tts_cache, tts_quota
+        return jsonify({
+            'success': True,
+            'quota': tts_quota.stats(),
+            'cache': tts_cache.stats(),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/admin/operator/<user_id>/ack-all-stale', methods=['POST', 'OPTIONS'])
 def admin_operator_ack_all_stale(user_id):
