@@ -376,12 +376,51 @@ def pick_best_action(state: UserRhythmState, user_input: str = '') -> Optional[A
     safety = next((d for d in active if d.agent_name == 'safety'), None)
     if safety and safety.priority > 0.8:
         logger.info(f"🛡️ Safety agent takes over: {safety.reason}")
+        _emit_decision_to_bus(state, safety)
         return safety
 
     # Otherwise highest priority
     best = active[0]
     logger.info(f"🎭 Best agent: {best.agent_name} (priority={best.priority:.2f}, action={best.action})")
+    _emit_decision_to_bus(state, best)
     return best
+
+
+def _emit_decision_to_bus(state, decision):
+    """Sprint AG.4.7: log coordinator's chosen agent + action to bus.
+
+    This closes the feedback loop: anticipation/agent_loop can see
+    what the chat-time coordinator decided and avoid duplicate alerts
+    if the action was already taken (e.g. safety_agent fired a crisis
+    response — agent_loop next cycle sees the decision and dedupes).
+    """
+    try:
+        from agent_bus import emit as _bus_emit
+        if not state or not getattr(state, 'user_id', None):
+            return
+        # severity mirrors decision urgency
+        urgency_map = {'low': 'info', 'normal': 'info', 'high': 'warning',
+                       'critical': 'crisis'}
+        severity = urgency_map.get(getattr(decision, 'urgency', 'normal'), 'info')
+        _bus_emit(
+            user_id=state.user_id,
+            sender=f'coordinator.{decision.agent_name}',
+            kind='decision',
+            severity=severity,
+            topic=f'action:{decision.action}',
+            payload={
+                'agent': decision.agent_name,
+                'action': decision.action,
+                'priority': round(float(decision.priority or 0), 3),
+                'urgency': getattr(decision, 'urgency', 'normal'),
+                'reason': (decision.reason or '')[:200],
+                'tone': decision.tone,
+                'message': (decision.message or '')[:200],
+            },
+        )
+    except Exception:
+        # Bus failure must never block coordinator response.
+        pass
 
 
 logger.info("🎭 Agent Coordinator loaded — 6 agents (safety, care, coordinator, daily, social, growth)")

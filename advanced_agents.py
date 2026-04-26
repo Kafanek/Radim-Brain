@@ -201,6 +201,37 @@ class SleepAgent:
         learning["sleep_history"] = history[-90:]
         db_save_learning(user_id, learning)
 
+        # Sprint AG.4.5: emit poor sleep to bus so chat-time CareAgent
+        # sees it without re-running the analysis. Dedupe per day so a
+        # repeated analysis call doesn't spam the bus.
+        try:
+            from agent_bus import emit as _bus_emit, dedupe as _bus_dedupe
+            quality = analysis.get('quality')
+            if quality in ('poor', 'very_poor'):
+                topic = 'poor_sleep'
+                # Dedupe: one bus message per day per user
+                if not _bus_dedupe(user_id, sender=None, topic=topic,
+                                   within_minutes=720, any_sender=True,
+                                   severity_min='warning'):
+                    severity = 'alert' if quality == 'very_poor' else 'warning'
+                    _bus_emit(
+                        user_id=user_id,
+                        sender='sleep_agent',
+                        kind='context',
+                        severity=severity,
+                        topic=topic,
+                        payload={
+                            'quality': quality,
+                            'score': analysis.get('score'),
+                            'motion_events': analysis.get('motion_events'),
+                            'message': f"Spánek byl {analysis.get('description', quality)}.",
+                            'date': analysis.get('date'),
+                        },
+                        ttl_minutes=720,  # 12h — covers morning chat awareness
+                    )
+        except Exception:
+            pass
+
 
 @agents_bp.route('/api/agents/sleep/<user_id>', methods=['GET'])
 def sleep_analysis(user_id):
@@ -294,6 +325,34 @@ class SocialIsolationAgent:
         else:
             level = "critical"
             desc = "Kritická izolace — nutný okamžitý kontakt"
+
+        # Sprint AG.4.5: emit isolation level to bus for chat awareness +
+        # caregiver dashboard. Only when level >= high (avoid noise).
+        # Dedupe per 6h so repeated calls don't spam.
+        try:
+            if level in ('high', 'critical'):
+                from agent_bus import emit as _bus_emit, dedupe as _bus_dedupe
+                topic = 'isolation_high' if level == 'high' else 'isolation_critical'
+                if not _bus_dedupe(user_id, sender=None, topic=topic,
+                                   within_minutes=360, any_sender=True,
+                                   severity_min='warning'):
+                    severity = 'alert' if level == 'critical' else 'warning'
+                    _bus_emit(
+                        user_id=user_id,
+                        sender='social_isolation_agent',
+                        kind='context',
+                        severity=severity,
+                        topic=topic,
+                        payload={
+                            'score': score,
+                            'level': level,
+                            'signals': signals,
+                            'message': desc,
+                        },
+                        ttl_minutes=360,  # 6h
+                    )
+        except Exception:
+            pass
 
         return {
             "score": score,

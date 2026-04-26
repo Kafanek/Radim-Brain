@@ -1739,6 +1739,21 @@ def caregiver_observation_ack(obs_id):
         if not senior_id or not _is_family_of(senior_id, caller_id):
             return jsonify({'success': False, 'error': 'Not authorized for this senior'}), 403
 
+        # Look up observation type/severity for the bus ack message
+        obs_type = None
+        obs_severity = None
+        try:
+            with db_context() as db:
+                row = db.execute(
+                    "SELECT observation_type, severity FROM agent_observations WHERE id = ?",
+                    (_obs_id,)
+                ).fetchone()
+            if row:
+                obs_type = row.get('observation_type') if hasattr(row, 'get') else row[0]
+                obs_severity = row.get('severity') if hasattr(row, 'get') else row[1]
+        except Exception:
+            pass
+
         # Mark
         try:
             with db_context(commit=True) as db:
@@ -1748,6 +1763,30 @@ def caregiver_observation_ack(obs_id):
                 )
         except Exception as e:
             return jsonify({'success': False, 'error': str(e)[:120]}), 500
+
+        # Sprint AG.4.6: emit ack to bus so:
+        #   - chat-time AI sees that caregiver has been notified
+        #     (-> calmer follow-up tone, no "rodina o tom neví")
+        #   - agent_loop dedupe sees ack -> can skip re-alerting on
+        #     same topic for the cooldown window
+        try:
+            from agent_bus import emit as _bus_emit
+            _bus_emit(
+                user_id=senior_id,
+                sender=f'caregiver.{caller_id}',
+                kind='ack',
+                severity='info',
+                topic=obs_type or 'unknown',
+                payload={
+                    'observation_id': _obs_id,
+                    'acknowledged_by': caller_id,
+                    'original_severity': obs_severity,
+                    'message': f'Pečovatel potvrdil pozorování typu {obs_type}.',
+                },
+                correlates_with=_obs_id,
+            )
+        except Exception:
+            pass
 
         return jsonify({'success': True, 'observation_id': _obs_id, 'acknowledged_at': datetime.utcnow().isoformat()})
 
