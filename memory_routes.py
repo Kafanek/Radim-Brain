@@ -145,6 +145,255 @@ def delete_profile(user_id):
     })
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SPRINT AP: TRANSPARENCY — "Co Radim ví" + selective forget + senior whispers
+# ─────────────────────────────────────────────────────────────────────────────
+
+@memory_bp.route('/profile/<user_id>/summary', methods=['GET', 'OPTIONS'])
+def profile_summary(user_id):
+    """Friendly 'what Radim knows about me' view for the senior.
+
+    Combines profile + learning + family + meds into a single readable
+    structure for the Settings → 'Co Radim ví' transparency section.
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    @require_auth
+    def _inner(_uid):
+        auth_user_id = str(g.auth_user.get('id', ''))
+        if auth_user_id and auth_user_id != str(_uid):
+            return jsonify({"success": False, "error": "Přístup odepřen"}), 403
+
+        profile = db_load_profile(_uid) or {}
+        learning = db_load_learning(_uid) or {}
+
+        # Pull family from senior_family_links if present
+        family = []
+        try:
+            with db_context() as db:
+                rows = db.execute(
+                    "SELECT name, relation, status FROM senior_family_links "
+                    "WHERE senior_id = ? AND status = 'confirmed'",
+                    (_uid,)
+                ).fetchall()
+                family = [{
+                    'name': (r.get('name') if hasattr(r, 'get') else r[0]),
+                    'relation': (r.get('relation') if hasattr(r, 'get') else r[1]),
+                } for r in (rows or [])]
+        except Exception as e:
+            logger.debug(f"family fetch (non-fatal): {e}")
+
+        # Top topics + sensitive context
+        sensitive = []
+        for k in ('grief_context', 'recent_loss', 'recent_crisis'):
+            if learning.get(k):
+                sensitive.append({'key': k, 'value': learning[k]})
+
+        whisper_count = len(learning.get('caregiver_whispers') or [])
+
+        return jsonify({
+            'success': True,
+            'user_id': _uid,
+            'identity': {
+                'name': profile.get('name'),
+                'phone': profile.get('phone'),
+                'preferred_length': profile.get('preferred_length') or learning.get('preferred_length'),
+                'communication_style': profile.get('communication_style') or learning.get('communication_style'),
+                'tone': profile.get('tone'),
+            },
+            'health': {
+                'medications': profile.get('medications_list') or profile.get('medications') or [],
+                'medication_times': profile.get('medication_times') or {},
+                'mobility': profile.get('mobility'),
+                'hearing': profile.get('hearing'),
+                'vision': profile.get('vision'),
+                'memory_support': profile.get('memory_support'),
+            },
+            'family': family,
+            'emergency_contacts': profile.get('emergency_contacts') or [],
+            'interests': {
+                'top_topics': dict(sorted(
+                    (learning.get('topics') or {}).items(),
+                    key=lambda x: x[1], reverse=True
+                )[:10]),
+                'last_mood': learning.get('last_mood'),
+                'interaction_count': learning.get('interaction_count', 0),
+            },
+            'sensitive': sensitive,  # things tagged grief/loss/crisis
+            'whisper_count': whisper_count,
+            'updated_at': profile.get('updated_at'),
+        })
+
+    return _inner(user_id)
+
+
+@memory_bp.route('/profile/<user_id>/forget', methods=['POST', 'OPTIONS'])
+def profile_forget(user_id):
+    """Selective memory wipe — senior asks Radim to forget specific things.
+
+    Body: {"keys": ["grief_context", "topics", "medications_list"]}
+
+    Different from DELETE /profile (full GDPR wipe). Allows e.g. a widow
+    to say "forget the grief context, I'm moving on" without losing her
+    medication list and family contacts.
+
+    Allowed keys (whitelist):
+      profile:    medications_list, medication_times, emergency_contacts,
+                  daily_routine_notes, baseline_C, mobility, hearing, vision
+      learning:   grief_context, recent_loss, recent_crisis, topics,
+                  last_mood, caregiver_whispers, C_history
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    @require_auth
+    def _inner(_uid):
+        auth_user_id = str(g.auth_user.get('id', ''))
+        if auth_user_id and auth_user_id != str(_uid):
+            return jsonify({"success": False, "error": "Přístup odepřen"}), 403
+
+        body = request.get_json(silent=True) or {}
+        keys = body.get('keys') or []
+        if not isinstance(keys, list) or not keys:
+            return jsonify({'success': False, 'error': 'keys array required'}), 400
+
+        PROFILE_FORGETTABLE = {
+            'medications_list', 'medications', 'medication_times',
+            'emergency_contacts', 'daily_routine_notes', 'baseline_C',
+            'mobility', 'hearing', 'vision', 'memory_support',
+            'phone', 'character', 'tone',
+        }
+        LEARNING_FORGETTABLE = {
+            'grief_context', 'recent_loss', 'recent_crisis', 'topics',
+            'last_mood', 'caregiver_whispers', 'C_history',
+            'preferred_length', 'communication_style',
+        }
+
+        profile = db_load_profile(_uid) or {}
+        learning = db_load_learning(_uid) or {}
+        forgot = []
+        rejected = []
+
+        for k in keys:
+            if k in PROFILE_FORGETTABLE and k in profile:
+                profile.pop(k, None)
+                forgot.append(k)
+            elif k in LEARNING_FORGETTABLE and k in learning:
+                learning.pop(k, None)
+                forgot.append(k)
+            else:
+                rejected.append(k)
+
+        if forgot:
+            profile['updated_at'] = datetime.utcnow().isoformat()
+            db_save_profile(_uid, profile)
+            db_save_learning(_uid, learning)
+            audit_log(_uid, 'memory_forget', 'selective',
+                      f"forgot {forgot} via senior request",
+                      request.remote_addr)
+
+        # Bus emit so chat-time prompt builder doesn't reuse stale context
+        try:
+            from agent_bus import emit as _bus_emit
+            _bus_emit(
+                user_id=_uid,
+                sender='memory_routes.profile_forget',
+                kind='context',
+                severity='info',
+                topic='memory_forgotten',
+                payload={'keys': forgot},
+                ttl_minutes=60,
+            )
+        except Exception:
+            pass
+
+        return jsonify({
+            'success': True,
+            'forgot': forgot,
+            'rejected': rejected,
+            'message': f"Zapomenuto: {', '.join(forgot)}" if forgot else "Nic k zapomenutí.",
+        })
+
+    return _inner(user_id)
+
+
+@memory_bp.route('/whispers/mine', methods=['GET', 'OPTIONS'])
+def my_whispers():
+    """Senior-side whisper inbox.
+
+    Returns the list of whispers caregivers left for Radim about THIS
+    senior — both pending (not yet woven) and recently woven. Gives the
+    senior transparency: 'what is my family asking Radim to nudge me about?'
+
+    The senior sees but cannot reply through Radim — that's the design.
+    They can answer the caregiver via a separate chat channel if needed.
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    @require_auth
+    def _inner():
+        auth_user_id = str(g.auth_user.get('id', ''))
+        if not auth_user_id:
+            return jsonify({'success': False, 'error': 'Auth required'}), 401
+
+        try:
+            learning = db_load_learning(auth_user_id) or {}
+            whispers = learning.get('caregiver_whispers', [])
+            now_iso = datetime.utcnow().isoformat()
+
+            # Resolve caregiver names for friendly display
+            cg_ids = list({w.get('from') for w in whispers if w.get('from')})
+            cg_names = {}
+            if cg_ids:
+                try:
+                    placeholders = ','.join(['?'] * len(cg_ids))
+                    with db_context() as db:
+                        rows = db.execute(
+                            f"SELECT id, name FROM chat_users WHERE id IN ({placeholders})",
+                            tuple(cg_ids)
+                        ).fetchall()
+                        for r in (rows or []):
+                            rid = r.get('id') if hasattr(r, 'get') else r[0]
+                            rnm = r.get('name') if hasattr(r, 'get') else r[1]
+                            cg_names[str(rid)] = rnm
+                except Exception:
+                    pass
+
+            def _enrich(w):
+                from_id = str(w.get('from', ''))
+                return {
+                    'id': w.get('id'),
+                    'text': w.get('text'),
+                    'priority': w.get('priority', 'normal'),
+                    'from_name': cg_names.get(from_id, 'Někdo z rodiny'),
+                    'created_at': w.get('created_at'),
+                    'consumed_at': w.get('consumed_at'),
+                    'expires_at': w.get('expires_at'),
+                    'status': ('delivered' if w.get('consumed_at')
+                               else ('expired' if w.get('expires_at', '') < now_iso
+                                     else 'pending')),
+                }
+
+            pending = [_enrich(w) for w in whispers
+                       if not w.get('consumed_at')
+                       and w.get('expires_at', '') > now_iso]
+            delivered = [_enrich(w) for w in whispers if w.get('consumed_at')][-10:]
+
+            return jsonify({
+                'success': True,
+                'pending': pending,
+                'delivered': delivered,
+                'total': len(whispers),
+            })
+        except Exception as e:
+            logger.warning(f"my_whispers error: {e}")
+            return jsonify({'success': False, 'error': str(e)[:120]}), 500
+
+    return _inner()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CONVERSATION HISTORY
 # ─────────────────────────────────────────────────────────────────────────────
 
