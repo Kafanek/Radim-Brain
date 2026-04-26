@@ -60,7 +60,19 @@ _CRISIS_WORDS = {
 _STRESS_WORDS = {
     'strach', 'bojím', 'nervózní', 'nemocný', 'unavený', 'problém',
     'bolí', 'nespím', 'samota', 'sám', 'smutný', 'osamělý', 'úzkost',
-    'panika', 'špatně', 'nemůžu', 'trápí', 'nevím', 'ztracený'
+    'panika', 'špatně', 'nemůžu', 'trápí', 'nevím', 'ztracený',
+    # Sprint AO: grief / loss vocabulary so brain mode bumps to ALERT
+    # range for "manžel mi zemřel" / "je mi smutno". Without these
+    # text_rhythm.estimate_C_alpha_from_text returns C in HARMONY
+    # range and the chat HTTP path picks RHYTHMIC voice for grief.
+    'zemřel', 'zemřela', 'umřel', 'umřela', 'pohřeb', 'truchlím',
+    'truchlí', 'ztráta', 'ztratil', 'ztratila', 'odešel', 'odešla',
+    'navždy', 'sirotek', 'truchlící', 'smutek', 'smutno',
+    'beznaději', 'beznaděj',
+    # ASCII fallbacks
+    'zemrel', 'zemrela', 'umrel', 'umrela', 'pohreb', 'truchlim',
+    'ztrata', 'ztratil', 'ztratila', 'odesel', 'odesla',
+    'truchlici',
 }
 
 _CALM_WORDS = {

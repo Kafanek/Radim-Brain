@@ -1303,14 +1303,38 @@ def radim_chat():
             logger.debug(f"Anticipation rhythm: {ae}")
 
         # v10.18: Autonomous voice mode selection for HTTP endpoint
+        # Sprint AO: detect emotional content (grief, sadness, fear) BEFORE
+        # any SINGING/RHYTHMIC matching — these tones are wrong for grief
+        # even if the response text happens to contain a song lyric word.
         _voice_mode = _brain_mode_val or 'HARMONY'
+        _is_grief_or_distress = False
+        try:
+            _msg_lower = (message or '').lower()
+            _grief_signals = (
+                'zemřel', 'zemřela', 'umřel', 'umřela', 'pohřeb',
+                'truchl', 'ztráta', 'odešel navždy', 'navždy',
+                'smutek', 'smutno', 'beznadě', 'pláču', 'brečím',
+                # ascii fallbacks
+                'zemrel', 'umrel', 'pohreb', 'ztrata', 'beznadej', 'placu',
+            )
+            _is_grief_or_distress = any(g in _msg_lower for g in _grief_signals)
+        except Exception:
+            pass
+
         try:
             from voice_melody import match_song
             from voice_learning import should_use_melody
 
-            # Music intent → SINGING
+            # Music intent → SINGING (but not for grief content)
             _final_intent = _resolved_intent if _INTENT_RESOLVER else intent
-            if _final_intent == 'music':
+            if _is_grief_or_distress:
+                # Sprint AO: grief overrides everything else. Force ALERT
+                # voice (slower, lower pitch, empathetic style) regardless
+                # of brain mode value. Brain may still report HARMONY if
+                # the C estimate didn't push above T1, but voice should
+                # not be cheery.
+                _voice_mode = 'ALERT'
+            elif _final_intent == 'music':
                 _voice_mode = 'SINGING'
             elif text_response and match_song(text_response):
                 _voice_mode = 'SINGING'
@@ -1324,7 +1348,7 @@ def radim_chat():
                 except (ImportError, Exception):
                     pass
 
-            if _voice_mode not in ('SINGING',):
+            if _voice_mode not in ('SINGING', 'ALERT', 'CRISIS'):
                 if _brain_mode_val in ('CRISIS', 'ALERT'):
                     _voice_mode = _brain_mode_val
                 elif _brain_mode_val == 'HARMONY' and user_id:
