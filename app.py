@@ -109,6 +109,14 @@ except ImportError:
     LEGACY_AVAILABLE = False
     logger.warning("⚠️ Legacy engine not available")
 
+# 🐛 Bug Telemetry Agent — frontend chyby auto-capture
+try:
+    from bug_telemetry import bug_bp as radim_bug_bp
+    BUG_TELEMETRY_AVAILABLE = True
+except ImportError:
+    BUG_TELEMETRY_AVAILABLE = False
+    logger.warning("⚠️ Bug telemetry not available")
+
 # 👴 Import Seniors API
 try:
     from seniors_routes import seniors_bp
@@ -605,6 +613,11 @@ if LIFE_PRESETS_AVAILABLE:
 if LEGACY_AVAILABLE:
     app.register_blueprint(radim_legacy_bp)
     logger.info("✅ Legacy module registered: /api/legacy/*")
+
+# 🐛 Bug Telemetry — frontend errors → DB + bus + auto-diagnosis
+if BUG_TELEMETRY_AVAILABLE:
+    app.register_blueprint(radim_bug_bp)
+    logger.info("✅ Bug telemetry registered: /api/telemetry/bug + /api/admin/bug-summary")
 
 # KAL Routes (Kolibri Abstraction Layer)
 from kal_routes import kal_bp, init_kal_routes
