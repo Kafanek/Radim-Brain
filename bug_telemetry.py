@@ -254,22 +254,26 @@ def report_bug():
                         )
                 first_time = False
             else:
-                # New bug — insert
+                # New bug — insert. PgConnectionWrapper proxies execute()
+                # but fetchone() lives on the cursor returned by execute()
+                # in PG mode. Use the unified pattern:
                 if is_postgres():
-                    db.execute("""
+                    cur = db.execute("""
                         INSERT INTO frontend_bugs
                         (fingerprint, user_id, message, stack, url, module, method, user_agent)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         RETURNING id
                     """, (fp, user_id, message, stack, url, module, method, ua))
-                    bug_id = db.fetchone()[0] if db.fetchone() else None
+                    row = cur.fetchone() if cur else None
+                    bug_id = (row.get('id') if row and hasattr(row, 'get')
+                              else (row[0] if row else None))
                 else:
-                    db.execute("""
+                    cur = db.execute("""
                         INSERT INTO frontend_bugs
                         (fingerprint, user_id, message, stack, url, module, method, user_agent)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, (fp, user_id, message, stack, url, module, method, ua))
-                    bug_id = db.lastrowid
+                    bug_id = getattr(cur, 'lastrowid', None) or getattr(db, 'lastrowid', None)
                 first_time = True
     except Exception as e:
         logger.warning(f"bug telemetry insert failed: {e}")
