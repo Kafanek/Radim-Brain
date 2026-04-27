@@ -140,7 +140,12 @@ def get_claude_client():
 
 
 def call_gemini_fallback(prompt, system_prompt="", max_tokens=1024):
-    """Gemini fallback when Claude API is unavailable (e.g. credits exhausted)"""
+    """Gemini fallback when Claude API is unavailable (e.g. credits exhausted).
+
+    Hotfix: timeout 30→22s — Heroku router cuts at 30s, we need buffer for
+    response transmission. If Gemini exceeds 22s, caller falls to static
+    fallback rather than 503-ing the whole request.
+    """
     if not GEMINI_API_KEY:
         return None
     try:
@@ -157,7 +162,7 @@ def call_gemini_fallback(prompt, system_prompt="", max_tokens=1024):
                     "topP": 0.9
                 }
             },
-            timeout=30
+            timeout=22
         )
         if resp.status_code == 200:
             data = resp.json()

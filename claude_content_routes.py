@@ -204,10 +204,15 @@ def generate_quiz():
         data = request.get_json() or {}
         topic = data.get('topic', 'general')
         difficulty = data.get('difficulty', 'easy')
-        count = data.get('count', 5)
+        count = int(data.get('count', 5))
+        # Hotfix: cap count at 7 (frontend uses 3/5/7) — anything more
+        # makes Gemini exceed 22s timeout before Heroku router cuts.
+        count = max(1, min(7, count))
 
         system = f"""Vytvoř {count} kvízových otázek pro seniory.
 Téma: {topic}, Obtížnost: {difficulty}
+
+Krátké otázky, krátké odpovědi (max 60 znaků každá), krátké explanace.
 
 FORMÁT (pouze JSON):
 [{{"question": "Otázka?", "options": {{"A": "...", "B": "...", "C": "...", "D": "..."}}, "correct": "A", "explanation": "Vysvětlení."}}]"""
@@ -228,12 +233,12 @@ FORMÁT (pouze JSON):
             except Exception as claude_err:
                 logger.warning(f"Claude quiz failed: {claude_err}")
 
-        # Gemini fallback
+        # Gemini fallback (1500 tokens to fit Heroku 30s budget for hard mode)
         if not text:
             gemini_text = call_gemini_fallback(
                 f"Vytvoř kvíz na téma: {topic}",
                 system,
-                2048
+                1500
             )
             if gemini_text:
                 text = gemini_text
