@@ -111,6 +111,9 @@ def save_profile(user_id):
                       "radim_mode",        # 'observer' | 'guide' | 'guardian'
                       "accessibility",     # {"highContrast", "largeButtons", ...}
                       "language",          # 'cs' | 'sk' (multi-language pilot prep)
+                      # Sprint AT
+                      "tour_completed",    # bool — first-time Settings tour seen
+                      "settings_snapshots",# array of weekly settings backups
                       ]
 
     profile = db_load_profile(user_id)
@@ -336,6 +339,171 @@ def profile_forget(user_id):
         })
 
     return _inner(user_id)
+
+
+@memory_bp.route('/profile/<user_id>/snapshot', methods=['GET', 'POST', 'OPTIONS'])
+def profile_snapshot(user_id):
+    """Sprint AT: 'Předchozí já' — týdenní zálohy nastavení.
+
+    GET  → list všech snapshots (max 4) + popis kdy byl pořízen
+    POST → vytvoří nový snapshot teď (manual nebo z APScheduler)
+
+    Snapshotuje JEN nastavení (appearance, voice_pref, accessibility,
+    privacy, quiet_hours, radim_mode, simplified_ui) — NE paměť, NE rodina,
+    NE léky. To by uživatele zmátlo a riskovalo regresi v důležitých datech.
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    SNAPSHOT_KEYS = [
+        'appearance', 'voice_pref', 'accessibility', 'privacy',
+        'quiet_hours', 'radim_mode', 'simplified_ui', 'language',
+    ]
+
+    @require_auth
+    def _inner(_uid):
+        auth_user_id = str(g.auth_user.get('id', ''))
+        if auth_user_id and auth_user_id != str(_uid):
+            return jsonify({'success': False, 'error': 'Přístup odepřen'}), 403
+
+        profile = db_load_profile(_uid) or {}
+        snapshots = profile.get('settings_snapshots') or []
+
+        if request.method == 'GET':
+            # Return summary (no nested settings to keep response small)
+            return jsonify({
+                'success': True,
+                'snapshots': [
+                    {
+                        'id': s.get('id'),
+                        'created_at': s.get('created_at'),
+                        'reason': s.get('reason', 'manual'),
+                        'label': s.get('label'),
+                        'fields_count': len(s.get('settings') or {}),
+                    } for s in snapshots
+                ],
+                'count': len(snapshots),
+                'max': 4,
+            })
+
+        # POST — create new snapshot
+        body = request.get_json(silent=True) or {}
+        reason = body.get('reason', 'manual')   # 'manual' | 'weekly' | 'pre_change'
+        label = body.get('label')               # optional human-friendly name
+
+        snap_settings = {k: profile.get(k) for k in SNAPSHOT_KEYS if k in profile}
+        if not snap_settings:
+            return jsonify({
+                'success': False,
+                'error': 'Žádná nastavení k uložení (profil je prázdný)',
+            }), 400
+
+        new_id = max([s.get('id', 0) for s in snapshots], default=0) + 1
+        snap = {
+            'id': new_id,
+            'created_at': datetime.utcnow().isoformat(),
+            'reason': reason,
+            'label': label or f'Záloha {datetime.utcnow().strftime("%d.%m.%Y")}',
+            'settings': snap_settings,
+        }
+        snapshots.append(snap)
+        # Keep only last 4 (FIFO)
+        snapshots = snapshots[-4:]
+        profile['settings_snapshots'] = snapshots
+        profile['updated_at'] = datetime.utcnow().isoformat()
+        db_save_profile(_uid, profile)
+
+        try:
+            audit_log(_uid, 'settings_snapshot', reason,
+                      f"id={new_id} fields={list(snap_settings.keys())}",
+                      request.remote_addr)
+        except Exception:
+            pass
+
+        logger.info(f"📸 settings snapshot created for user={_uid} (id={new_id}, reason={reason})")
+
+        return jsonify({
+            'success': True,
+            'snapshot': {
+                'id': new_id,
+                'created_at': snap['created_at'],
+                'reason': reason,
+                'label': snap['label'],
+                'fields_count': len(snap_settings),
+            },
+            'total': len(snapshots),
+        })
+
+    return _inner(user_id)
+
+
+@memory_bp.route('/profile/<user_id>/snapshot/<int:snapshot_id>/restore',
+                 methods=['POST', 'OPTIONS'])
+def profile_snapshot_restore(user_id, snapshot_id):
+    """Sprint AT: restore settings from a specific snapshot."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    @require_auth
+    def _inner(_uid, _sid):
+        auth_user_id = str(g.auth_user.get('id', ''))
+        if auth_user_id and auth_user_id != str(_uid):
+            return jsonify({'success': False, 'error': 'Přístup odepřen'}), 403
+
+        profile = db_load_profile(_uid) or {}
+        snapshots = profile.get('settings_snapshots') or []
+        target = next((s for s in snapshots if s.get('id') == _sid), None)
+        if not target:
+            return jsonify({
+                'success': False,
+                'error': f'Snapshot id={_sid} neexistuje',
+            }), 404
+
+        # Take a "pre_restore" snapshot first so user can revert the revert
+        SNAPSHOT_KEYS = [
+            'appearance', 'voice_pref', 'accessibility', 'privacy',
+            'quiet_hours', 'radim_mode', 'simplified_ui', 'language',
+        ]
+        pre = {k: profile.get(k) for k in SNAPSHOT_KEYS if k in profile}
+        new_id = max([s.get('id', 0) for s in snapshots], default=0) + 1
+        snapshots.append({
+            'id': new_id,
+            'created_at': datetime.utcnow().isoformat(),
+            'reason': 'pre_restore',
+            'label': f'Před obnovou (před {target.get("label", "?")})',
+            'settings': pre,
+        })
+
+        # Apply target snapshot's settings
+        for k, v in (target.get('settings') or {}).items():
+            profile[k] = v
+
+        # Keep only 4 most recent (FIFO)
+        profile['settings_snapshots'] = snapshots[-4:]
+        profile['updated_at'] = datetime.utcnow().isoformat()
+        db_save_profile(_uid, profile)
+
+        try:
+            audit_log(_uid, 'settings_snapshot_restore', str(_sid),
+                      f"label={target.get('label')}",
+                      request.remote_addr)
+        except Exception:
+            pass
+
+        logger.info(f"📸 settings restored from snapshot id={_sid} for user={_uid}")
+
+        return jsonify({
+            'success': True,
+            'restored_from': {
+                'id': _sid,
+                'label': target.get('label'),
+                'created_at': target.get('created_at'),
+            },
+            'restored_keys': list((target.get('settings') or {}).keys()),
+            'message': 'Nastavení obnoveno z „' + str(target.get('label', '?')) + '".',
+        })
+
+    return _inner(user_id, snapshot_id)
 
 
 @memory_bp.route('/profile/<user_id>/recent-trace', methods=['GET', 'OPTIONS'])

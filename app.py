@@ -1168,6 +1168,17 @@ try:
     except ImportError:
         logger.warning("⚠️ life preset expires check not available")
 
+    # Sprint AT: weekly settings snapshot for "Předchozí já" feature
+    try:
+        from snapshot_job import run_weekly_snapshots
+        # Sundays 23:30 — end of week, after most user activity
+        scheduler.add_job(run_weekly_snapshots, 'cron', day_of_week='sun',
+                          hour=23, minute=30, id='weekly_settings_snapshot',
+                          max_instances=1, misfire_grace_time=7200)
+        logger.info("✅ Weekly settings snapshot registered (Sun 23:30)")
+    except ImportError:
+        logger.warning("⚠️ weekly settings snapshot not available")
+
     # v445: Daily engagement (positive proactive interaction, 14:00)
     try:
         from agent_loop import run_daily_engagement
