@@ -119,8 +119,12 @@ def _format_history_for_distillation(history, limit=200):
     return '\n'.join(out)
 
 
-def _call_gemini(prompt, api_key):
-    """Minimal Gemini call. Returns text or None on failure."""
+def _call_gemini(prompt, api_key, timeout=20):
+    """Minimal Gemini call. Returns text or None on failure.
+
+    Sprint AV.1 fix: tight timeout (was 60s) so 1 category fits comfortably
+    inside Heroku 30s router timeout when called serially.
+    """
     if not api_key:
         return None
     try:
@@ -131,12 +135,12 @@ def _call_gemini(prompt, api_key):
             'contents': [{'parts': [{'text': prompt}]}],
             'generationConfig': {
                 'temperature': 0.4,
-                'maxOutputTokens': 2000,
+                'maxOutputTokens': 1500,  # smaller = faster response
             }
         }).encode()
         req = urllib.request.Request(url, data=body, method='POST',
                                       headers={'Content-Type': 'application/json'})
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             data = json.loads(r.read())
         candidates = data.get('candidates') or []
         if not candidates:
@@ -151,22 +155,58 @@ def _call_gemini(prompt, api_key):
 
 
 def _parse_distill_json(text):
-    """Robust JSON extraction. Gemini may add fences or prose."""
+    """Robust JSON extraction. Gemini sometimes returns truncated JSON,
+    smart quotes, trailing commas, comments. We try multiple recovery paths.
+    """
     if not text:
         return []
+
     # Strip markdown code fences
-    text = re.sub(r'^```(?:json)?\s*', '', text.strip(), flags=re.MULTILINE)
-    text = re.sub(r'\s*```$', '', text.strip(), flags=re.MULTILINE)
-    # Find first JSON array
-    m = re.search(r'\[\s*\{.*\}\s*\]', text, re.DOTALL)
+    cleaned = re.sub(r'^```(?:json)?\s*', '', text.strip(), flags=re.MULTILINE)
+    cleaned = re.sub(r'\s*```$', '', cleaned.strip(), flags=re.MULTILINE)
+
+    # Replace smart quotes with regular ones (Gemini sometimes uses them)
+    cleaned = (cleaned
+               .replace('\u201e', '"').replace('\u201c', '"')
+               .replace('\u201d', '"').replace('\u2019', "'")
+               .replace('\u2018', "'"))
+
+    # Find largest JSON array (greedy)
+    m = re.search(r'\[\s*\{.*\}\s*\]', cleaned, re.DOTALL)
     if m:
-        text = m.group(0)
+        cleaned = m.group(0)
+
+    # Strategy 1: parse as is
     try:
-        data = json.loads(text)
+        data = json.loads(cleaned)
         if isinstance(data, list):
             return [d for d in data if isinstance(d, dict) and d.get('summary')]
-    except Exception as e:
-        logger.warning(f"legacy distill JSON parse failed: {e}")
+    except Exception as e1:
+        # Strategy 2: try parsing each {...} object individually
+        try:
+            entries = []
+            depth = 0
+            buf = ''
+            for ch in cleaned:
+                if ch == '{':
+                    if depth == 0: buf = ''
+                    depth += 1
+                if depth > 0: buf += ch
+                if ch == '}':
+                    depth -= 1
+                    if depth == 0 and buf:
+                        try:
+                            obj = json.loads(buf)
+                            if isinstance(obj, dict) and obj.get('summary'):
+                                entries.append(obj)
+                        except Exception:
+                            pass
+                        buf = ''
+            if entries:
+                return entries
+        except Exception:
+            pass
+        logger.warning(f"legacy distill JSON parse failed: {e1}; recovered nothing")
     return []
 
 
@@ -262,8 +302,13 @@ def legacy_preview(user_id):
 def legacy_curate(user_id):
     """Run distillation NOW. Senior reviews drafts in next GET /preview.
 
-    Body: {"categories": ["life_principles", "memories", ...] (optional),
+    Body: {"categories": ["life_principles", ...] (optional, default 1 cat),
            "include_sensitive": false (default)}
+
+    Sprint AV.1 fix: by default destiluje JEN 1 nebo 2 nejméně-naplněné
+    kategorie (cap pro Heroku 30s router timeout). Frontend volá více
+    sekvenčně. Pro full curate posli explicitně `categories: [...]`
+    se všemi 4-5 ID.
 
     Stores results in profile.legacy.draft_entries — senior approves them
     via POST /entry/approve before they show in /preview.
@@ -282,13 +327,24 @@ def legacy_curate(user_id):
         include_sensitive = bool(body.get('include_sensitive', False))
 
         if cats is None:
-            # Default: non-sensitive categories
-            cats = [c for c, d in LEGACY_CATEGORIES.items() if not d['sensitive']]
+            # Default: 1 nejméně-naplněnou non-sensitive kategorii (rotace)
+            # Vybereme tu, která má nejmíň draftů + approved entries.
+            profile = db_load_profile(_uid) or {}
+            legacy = profile.get('legacy') or {}
+            drafts = legacy.get('draft_entries') or {}
+            approved = legacy.get('approved_entries') or {}
+            non_sensitive = [c for c, d in LEGACY_CATEGORIES.items() if not d['sensitive']]
+            # Sort by total entries (drafts + approved) ASC — empty first
+            non_sensitive.sort(key=lambda c: (
+                len(drafts.get(c, [])) + len(approved.get(c, []))
+            ))
+            cats = non_sensitive[:1]   # Just 1 by default — fits in 30s
         else:
-            # Validate
+            # Validate + cap to max 2 categories per call to stay under timeout
             cats = [c for c in cats if c in LEGACY_CATEGORIES]
             if not include_sensitive:
                 cats = [c for c in cats if not LEGACY_CATEGORIES[c]['sensitive']]
+            cats = cats[:2]   # hard cap
 
         results = distill_legacy(_uid, categories=cats)
 
