@@ -610,24 +610,52 @@ def _save_observation(user_id, obs):
         # v10.59: Push observation to subscribed devices (Sprint D D6)
         sev_up = (obs.get("severity") or "").upper()
         if sev_up in ("WARNING", "ALERT", "CRISIS"):
-            try:
-                from notification_helpers import notify
-                sev_map = {"WARNING": "warning", "ALERT": "alert", "CRISIS": "crisis"}
-                icon_map = {"WARNING": "⚠️", "ALERT": "🔴", "CRISIS": "🚨"}
-                title = f"{icon_map.get(sev_up, '🔔')} {sev_up.capitalize()}"
-                notify(
-                    to_user_id=user_id,
-                    type="health_alert",
-                    title=title,
-                    body=obs["message"][:140],
-                    severity=sev_map.get(sev_up, "info"),
-                    data={
-                        "observation_type": obs["type"],
-                        "obs_id": obs_id,  # Sprint AG.2: deep-link target
-                    },
-                )
-            except Exception as push_err:
-                logger.debug(f"observation push failed (non-blocking): {push_err}")
+            # Sprint AQ: respect senior's quiet hours — no pushes 22:00-07:00
+            # by default. CRISIS always overrides (life safety > sleep).
+            _quiet_blocked = False
+            if sev_up != "CRISIS":
+                try:
+                    from memory_helpers import db_load_profile
+                    _qh = (db_load_profile(user_id) or {}).get('quiet_hours') or {}
+                    _start = (_qh.get('start') or '').strip()
+                    _end = (_qh.get('end') or '').strip()
+                    if _start and _end and len(_start) >= 4 and len(_end) >= 4:
+                        from datetime import datetime as _dt
+                        _now = _dt.now().time()
+                        _sh, _sm = int(_start[:2]), int(_start[3:5])
+                        _eh, _em = int(_end[:2]), int(_end[3:5])
+                        from datetime import time as _t
+                        _s = _t(_sh, _sm); _e = _t(_eh, _em)
+                        # Cross-midnight (22:00 → 07:00) needs OR logic
+                        if _s > _e:
+                            _quiet_blocked = (_now >= _s or _now <= _e)
+                        else:
+                            _quiet_blocked = (_s <= _now <= _e)
+                except Exception:
+                    pass
+
+            if _quiet_blocked:
+                logger.info(f"🌙 push for user={user_id} blocked by quiet_hours "
+                           f"(severity={sev_up} not CRISIS)")
+            else:
+                try:
+                    from notification_helpers import notify
+                    sev_map = {"WARNING": "warning", "ALERT": "alert", "CRISIS": "crisis"}
+                    icon_map = {"WARNING": "⚠️", "ALERT": "🔴", "CRISIS": "🚨"}
+                    title = f"{icon_map.get(sev_up, '🔔')} {sev_up.capitalize()}"
+                    notify(
+                        to_user_id=user_id,
+                        type="health_alert",
+                        title=title,
+                        body=obs["message"][:140],
+                        severity=sev_map.get(sev_up, "info"),
+                        data={
+                            "observation_type": obs["type"],
+                            "obs_id": obs_id,  # Sprint AG.2: deep-link target
+                        },
+                    )
+                except Exception as push_err:
+                    logger.debug(f"observation push failed (non-blocking): {push_err}")
     except Exception as e:
         logger.debug(f"save_observation error: {e}")
     return obs_id

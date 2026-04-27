@@ -1205,12 +1205,26 @@ def radim_chat():
             except Exception as act_err:
                 logger.warning(f"Action processing warning: {act_err}")
 
-        # Record interaction to memory
+        # Record interaction to memory.
+        # Sprint AQ: respect senior's privacy.saveHistory preference. If
+        # they opted out, skip persistence — Radim still works in this
+        # session via in-memory history, but nothing reaches the DB.
+        # Crisis events are exempted (life safety > privacy).
         if _ORCH_MEMORY_AVAILABLE and text_response != "Promiňte, zkuste to za chvíli. 🙏":
             try:
                 _brain_C_val = brain_meta["psi"]["C"] if brain_meta else None
                 _brain_mode_val = brain_meta["mode"] if brain_meta else None
-                _orch_record(user_id, message, text_response, brain_C=_brain_C_val, brain_mode=_brain_mode_val)
+                _save_history = True
+                try:
+                    from memory_helpers import db_load_profile
+                    _priv = (db_load_profile(user_id) or {}).get('privacy') or {}
+                    if _priv.get('saveHistory') is False and _brain_mode_val != 'CRISIS':
+                        _save_history = False
+                        logger.info(f"📭 history save skipped for user={user_id} (privacy opt-out)")
+                except Exception:
+                    pass
+                if _save_history:
+                    _orch_record(user_id, message, text_response, brain_C=_brain_C_val, brain_mode=_brain_mode_val)
             except Exception as rec_err:
                 logger.warning(f"Memory record warning: {rec_err}")
 

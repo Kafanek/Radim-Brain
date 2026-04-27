@@ -115,6 +115,26 @@ def azure_tts_proxy():
         # gets its own cache slot — cost-cheap, since most users settle on
         # one mode per session anyway.
         rate = float(data.get('rate', 0.9))
+
+        # Sprint AQ: senior's voice rate preference — additive modifier
+        # to whatever brain Ψ-driven rate decided. User can speed up or
+        # slow down by ±20% on top of mode-aware rate. Doesn't override
+        # brain logic (CRISIS still slow, RHYTHMIC still upbeat) but
+        # respects personal comfort.
+        try:
+            _user_id = data.get('user_id') or data.get('userId') or ''
+            if _user_id:
+                from memory_helpers import db_load_profile
+                _vp = (db_load_profile(_user_id) or {}).get('voice_pref') or {}
+                _rate_mod = float(_vp.get('rate_modifier', 0))
+                # Clamp to [-0.2, +0.2] = ±20%
+                _rate_mod = max(-0.2, min(0.2, _rate_mod))
+                if _rate_mod != 0:
+                    rate = max(0.5, min(1.5, rate + _rate_mod))
+                    logger.debug(f"TTS rate adjusted by user pref: {_rate_mod:+.2f}")
+        except Exception as _vp_err:
+            logger.debug(f"voice_pref load (non-fatal): {_vp_err}")
+
         _cache_ctx = data.get('context', '') or data.get('style', '') or ''
         _brain_fp = ''
         if brain_speech:
