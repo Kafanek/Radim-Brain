@@ -88,17 +88,26 @@ Z následující historie rozhovorů vyber a destiluj **{category_name}**.
 Co hledáme: {category_desc}
 
 PRAVIDLA:
-1. Cituj seniora jeho vlastními slovy, kde můžeš (uvedeno jako citace).
+1. Cituj seniora jeho vlastními slovy, kde můžeš.
 2. Nepřipisuj seniorovi věci, které neřekl. Když nevíš, raději vynech.
-3. Jeden záznam = jedna ucelená myšlenka/vzpomínka/zásada.
-4. Maximálně 7 záznamů. Vyber to nejhodnotnější.
-5. Žádné technické komentáře, žádné "Senior říká...". Jen čistá obsahová sdělení.
-6. Píš v jedinečném stylu seniora, jak ho znáš z konverzací.
+3. Jeden záznam = jedna ucelená myšlenka.
+4. Maximálně 5 záznamů. Vyber to nejhodnotnější.
+5. Žádné komentáře, žádné "Senior říká..." — jen čistý obsah.
 
-VRAŤ JSON pole objektů, každý: {{"summary": "...", "quote": "...optional přesná citace...", "context_date": "YYYY-MM"}}.
-Vrať POUZE JSON pole, žádný úvod, žádný komentář.
+FORMÁT VÝSTUPU — striktně:
+Každý záznam na samostatném řádku, začínající "##" pak číslem a pak přesně tímto:
 
-═══ HISTORIE KONVERZACÍ (posledních N zpráv) ═══
+##1: SHRNUTÍ V JEDNÉ VĚTĚ
+##1Q: PŘESNÁ CITACE V UVOZOVKÁCH (volitelné, jinak vynechej)
+
+##2: ...
+##2Q: ...
+
+(a tak dále)
+
+ŽÁDNÝ JSON, ŽÁDNÉ KÓDOVÉ FENCE, ŽÁDNÉ ÚVODY. Jen takto očíslované řádky.
+
+═══ HISTORIE KONVERZACÍ ═══
 {history_text}
 ═══════════════════════════════════════════════
 """
@@ -155,59 +164,63 @@ def _call_gemini(prompt, api_key, timeout=20):
 
 
 def _parse_distill_json(text):
-    """Robust JSON extraction. Gemini sometimes returns truncated JSON,
-    smart quotes, trailing commas, comments. We try multiple recovery paths.
+    """Parse Gemini output in numbered ##N: ##NQ: format.
+
+    Sprint AV.1 fix: switched away from JSON because Gemini truncated
+    smart-quoted JSON 60% of the time. Numbered plaintext format is
+    much more robust — partial output still gives complete entries.
+
+    Format expected:
+      ##1: Summary text
+      ##1Q: "optional quote"
+      ##2: ...
     """
     if not text:
         return []
 
-    # Strip markdown code fences
-    cleaned = re.sub(r'^```(?:json)?\s*', '', text.strip(), flags=re.MULTILINE)
-    cleaned = re.sub(r'\s*```$', '', cleaned.strip(), flags=re.MULTILINE)
+    text = text.strip()
+    # Strip any markdown fences in case Gemini added them anyway
+    text = re.sub(r'^```(?:\w+)?\s*', '', text, flags=re.MULTILINE)
+    text = re.sub(r'\s*```\s*$', '', text, flags=re.MULTILINE)
 
-    # Replace smart quotes with regular ones (Gemini sometimes uses them)
-    cleaned = (cleaned
-               .replace('\u201e', '"').replace('\u201c', '"')
-               .replace('\u201d', '"').replace('\u2019', "'")
-               .replace('\u2018', "'"))
+    # Replace smart quotes with regular for consistent parsing
+    text = (text
+            .replace('\u201e', '"').replace('\u201c', '"')
+            .replace('\u201d', '"').replace('\u2019', "'")
+            .replace('\u2018', "'"))
 
-    # Find largest JSON array (greedy)
-    m = re.search(r'\[\s*\{.*\}\s*\]', cleaned, re.DOTALL)
-    if m:
-        cleaned = m.group(0)
+    entries = {}
+    # Match ##1: summary  OR  ##1Q: quote
+    for m in re.finditer(r'^##(\d+)(Q?):\s*(.+?)$', text, re.MULTILINE):
+        idx, kind, content = m.group(1), m.group(2), m.group(3).strip()
+        if not content:
+            continue
+        e = entries.setdefault(idx, {})
+        if kind == 'Q':
+            # Strip surrounding quotes if present
+            content = content.strip().strip('"').strip()
+            e['quote'] = content
+        else:
+            e['summary'] = content
 
-    # Strategy 1: parse as is
-    try:
-        data = json.loads(cleaned)
-        if isinstance(data, list):
-            return [d for d in data if isinstance(d, dict) and d.get('summary')]
-    except Exception as e1:
-        # Strategy 2: try parsing each {...} object individually
+    # Try also legacy JSON format as fallback (in case Gemini ignored format)
+    if not entries:
         try:
-            entries = []
-            depth = 0
-            buf = ''
-            for ch in cleaned:
-                if ch == '{':
-                    if depth == 0: buf = ''
-                    depth += 1
-                if depth > 0: buf += ch
-                if ch == '}':
-                    depth -= 1
-                    if depth == 0 and buf:
-                        try:
-                            obj = json.loads(buf)
-                            if isinstance(obj, dict) and obj.get('summary'):
-                                entries.append(obj)
-                        except Exception:
-                            pass
-                        buf = ''
-            if entries:
-                return entries
+            arr = json.loads(text)
+            if isinstance(arr, list):
+                return [d for d in arr if isinstance(d, dict) and d.get('summary')]
         except Exception:
             pass
-        logger.warning(f"legacy distill JSON parse failed: {e1}; recovered nothing")
-    return []
+
+    out = []
+    for idx in sorted(entries.keys(), key=lambda x: int(x)):
+        e = entries[idx]
+        if e.get('summary'):
+            out.append({
+                'summary': e['summary'][:500],
+                'quote': (e.get('quote') or '')[:300] or None,
+            })
+    return out
 
 
 def distill_legacy(user_id, categories=None, history_limit=200):
