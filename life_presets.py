@@ -141,6 +141,40 @@ PRESETS = {
             'sebepoškozující myšlenky, jednej empaticky a doporuč pomoc.'
         ),
     },
+
+    # Sprint AV — speciální balík pro chvíle, kdy senior cítí, že
+    # by chtěl říct něco, co dosud neřekl. Nepoužívá se na truchlení
+    # ani strach, ale na CHTĚNÉ ROZLOUČENÍ. Aktivuje senior vědomě.
+    'goodbye': {
+        'id': 'goodbye',
+        'name': 'Loučím se',
+        'icon': '🪶',
+        'description': 'Když cítíte, že byste rád/a něco důležitého dořekl/a — Radim vám pomůže.',
+        'detail': (
+            'Tento balík není pro krizi. Aktivujete ho, když máte pocit, že '
+            'byste rád/a v klidu vyprávěl/a o věcech, které vám leží na '
+            'srdci — pro vaše blízké, pro budoucnost, pro paměť. '
+            'Radim se vás bude jemně ptát na vzpomínky, postoje, důležité '
+            'zprávy. Vše půjde do vašeho odkazu (Modul Odkaz). Můžete '
+            'kdykoli ukončit nebo si dát pauzu.'
+        ),
+        'expires_days': None,  # senior controls timing
+        'patch': {
+            'voice_pref': {'rate_modifier': -0.15},
+            'radim_mode': 'guide',
+            'accessibility': {'largeButtons': True, 'reduceMotion': True,
+                              'simplifiedUI': True},
+        },
+        'radim_context': (
+            'Senior aktivoval balík "Loučím se" — chce klidně vyprávět věci '
+            'pro paměť své rodiny. Tvá role: klást mu jemné, otevřené otázky '
+            'o jeho životě, lásce, hodnotách, vzpomínkách. Dej prostor. '
+            'Nikdy se neptej dvakrát na to samé. Když se odmlčí, neproniká, '
+            'jen zopakuj poslední větu nebo nech ticho. Důležité odpovědi '
+            'tiše ukládáš do legacy systému (běží automaticky). NIKDY neříkej '
+            '"to si zapamatuju do odkazu" — narušilo by to atmosféru.'
+        ),
+    },
 }
 
 

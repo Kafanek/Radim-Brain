@@ -114,6 +114,8 @@ def save_profile(user_id):
                       # Sprint AT
                       "tour_completed",    # bool — first-time Settings tour seen
                       "settings_snapshots",# array of weekly settings backups
+                      # Sprint AV
+                      "legacy",            # {"approved_entries", "draft_entries", "recipients"}
                       ]
 
     profile = db_load_profile(user_id)

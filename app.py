@@ -101,6 +101,14 @@ except ImportError:
     LIFE_PRESETS_AVAILABLE = False
     logger.warning("⚠️ Life presets not available")
 
+# Sprint AV: Modul Odkaz (legacy)
+try:
+    from legacy_engine import legacy_bp as radim_legacy_bp
+    LEGACY_AVAILABLE = True
+except ImportError:
+    LEGACY_AVAILABLE = False
+    logger.warning("⚠️ Legacy engine not available")
+
 # 👴 Import Seniors API
 try:
     from seniors_routes import seniors_bp
@@ -592,6 +600,11 @@ if MEMORY_AVAILABLE:
 if LIFE_PRESETS_AVAILABLE:
     app.register_blueprint(life_presets_bp)
     logger.info("✅ Life presets registered: /api/memory/profile/<uid>/preset")
+
+# 🪶 Sprint AV: Modul Odkaz
+if LEGACY_AVAILABLE:
+    app.register_blueprint(radim_legacy_bp)
+    logger.info("✅ Legacy module registered: /api/legacy/*")
 
 # KAL Routes (Kolibri Abstraction Layer)
 from kal_routes import kal_bp, init_kal_routes
@@ -1178,6 +1191,17 @@ try:
         logger.info("✅ Weekly settings snapshot registered (Sun 23:30)")
     except ImportError:
         logger.warning("⚠️ weekly settings snapshot not available")
+
+    # Sprint AV: legacy delivery — daily inactivity check (04:00 morning,
+    # before anyone wakes up, no disturbance)
+    try:
+        from legacy_delivery import check_inactivity_delivery
+        scheduler.add_job(check_inactivity_delivery, 'cron', hour=4, minute=0,
+                          id='legacy_inactivity_check', max_instances=1,
+                          misfire_grace_time=7200)
+        logger.info("✅ Legacy inactivity check registered (04:00 daily)")
+    except ImportError:
+        logger.warning("⚠️ legacy inactivity check not available")
 
     # v445: Daily engagement (positive proactive interaction, 14:00)
     try:
