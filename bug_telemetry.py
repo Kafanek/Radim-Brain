@@ -168,19 +168,18 @@ def _diagnose_async(bug_id, bug_data):
         )
         body = json.dumps({
             'contents': [{'parts': [{'text': prompt}]}],
-            'generationConfig': {'temperature': 0.3, 'maxOutputTokens': 400},
+            'generationConfig': {'temperature': 0.3, 'maxOutputTokens': 1500},
         }).encode()
         req = urllib.request.Request(gemini_url(api_key), data=body, method='POST',
                                       headers={'Content-Type': 'application/json'})
-        with urllib.request.urlopen(req, timeout=15) as r:
+        with urllib.request.urlopen(req, timeout=20) as r:
             resp = json.loads(r.read())
         cands = resp.get('candidates') or []
         if not cands:
             return
-        parts = (cands[0].get('content') or {}).get('parts') or []
-        if not parts:
-            return
-        diagnosis = parts[0].get('text', '').strip()[:1000]
+        # Concatenate ALL parts (Gemini sometimes splits response into multiple)
+        all_parts = (cands[0].get('content') or {}).get('parts') or []
+        diagnosis = ''.join(p.get('text', '') for p in all_parts).strip()[:1500]
 
         # Save back to DB
         from database import db_context
