@@ -88,9 +88,57 @@ def register_socketio_handlers(socketio, users_online, cleanup_fn):
 
     @socketio.on('join_conversation')
     def handle_join_conversation(data):
+        """Audit-fix B4: žádná auth check znamenala IDOR — kdokoli s tokenem
+        se přihlásil na cizí conversation_id a dostal všechny zprávy té
+        konverzace přes new_message broadcast.
+
+        Teď: ověříme, že user_id z payloadu je v participants konverzace.
+        Sender Pi sender_id (z handle_join → users_online[uid] = sid) také
+        zkontrolujeme proti DB účastníkům.
+        """
         conversation_id = data.get('conversationId')
-        if conversation_id:
-            join_room(conversation_id)
+        if not conversation_id:
+            return
+        # Najdi user_id pro tuto socket session (uložen při handle_join)
+        user_id = None
+        for uid, sid in (_users_online or {}).items():
+            if sid == request.sid:
+                user_id = uid
+                break
+        # Anonymous (nepřipojen přes 'join') NESMÍ joinovat konverzaci
+        if not user_id:
+            logger.warning(f"join_conversation blocked: anonymous sid={request.sid} -> conv={conversation_id}")
+            emit('join_error', {'reason': 'auth_required', 'conversationId': conversation_id})
+            return
+        # IDOR: ověř, že user_id je v participants
+        db = None
+        try:
+            import json as _json
+            db = get_connection()
+            cursor = db.execute('SELECT participants FROM chat_conversations WHERE id = ?', (conversation_id,))
+            row = cursor.fetchone()
+            if not row:
+                emit('join_error', {'reason': 'not_found', 'conversationId': conversation_id})
+                return
+            try:
+                participants = _json.loads(row['participants']) if row['participants'] else []
+            except (TypeError, ValueError):
+                participants = []
+            if user_id not in participants and user_id != 'radim':
+                logger.warning(f"join_conversation IDOR blocked: user={user_id} -> conv={conversation_id} (not participant)")
+                emit('join_error', {'reason': 'forbidden', 'conversationId': conversation_id})
+                return
+        except Exception as e:
+            logger.warning(f"join_conversation auth check failed: {e}")
+            emit('join_error', {'reason': 'temporary', 'conversationId': conversation_id})
+            return
+        finally:
+            if db:
+                try:
+                    db.close()
+                except Exception:
+                    pass
+        join_room(conversation_id)
 
     @socketio.on('leave_conversation')
     def handle_leave_conversation(data):
@@ -98,11 +146,18 @@ def register_socketio_handlers(socketio, users_online, cleanup_fn):
         if conversation_id:
             leave_room(conversation_id)
 
-    @socketio.on('send_message')
-    def handle_send_message(data):
-        conversation_id = data.get('conversationId') or data.get('conversation_id')
-        if conversation_id:
-            emit('new_message', data, room=conversation_id, include_self=False)
+    # Audit-fix B2: handle_send_message handler ODSTRANĚN.
+    #
+    # Důvody:
+    #   1) Frontend zprávy posílá HTTP POST /api/chat/messages — nikdy
+    #      neemituje 'send_message' přes socket. Handler byl dead code.
+    #   2) Bezpečnostní díra: kdokoli připojený k socketu mohl emitovat
+    #      'send_message' s libovolným conversationId a obsahem — broadcast
+    #      do roomu šel BEZ DB persistence i BEZ účastnické kontroly.
+    #      Útočník by mohl posílat fake zprávy "od" kohokoli.
+    #   3) Pokud jsme chtěli kdy SocketIO send v budoucnu, vyžadovalo by to
+    #      stejnou auth + DB persistence cestu jako HTTP. Lepší to napsat
+    #      pak najednou než nechat nebezpečný stub.
 
     @socketio.on('typing')
     def handle_typing(data):

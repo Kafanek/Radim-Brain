@@ -53,17 +53,32 @@ def _get_app_helpers():
 # ============================================
 
 def _check_idor(requested_user_id):
-    """v330: Validate authenticated user matches requested user_id.
+    """v330+B6: Validate authenticated user matches requested user_id.
     Returns None if OK, or error response tuple if IDOR detected.
-    Allows 'radim-ai' requests and admins through."""
+    Allows admins/caregivers through.
+
+    Audit-fix B6: dříve `if not auth_user: return None` umožňoval ANONYMNÍMU
+    uživateli (žádný token) přistupovat k libovolnému user_id — IDOR bypass.
+    Teď: anonymní user může jen pokud requested_user_id == 'radim'/'radim-ai'
+    (nutné pro server-side broadcasty Radimových zpráv) — všechny ostatní
+    cesty pro anonymous=403.
+    """
     auth_user = getattr(g, 'auth_user', None)
+
+    # B6: Anonymous přístup povolen JEN pro Radimovy systémové akce
     if not auth_user:
-        return None  # optional_auth -- no token = anonymous access (for senior devices)
+        if str(requested_user_id) in ('radim', 'radim-ai'):
+            return None
+        logger.warning(f"IDOR blocked: anonymous user tried to access {requested_user_id}")
+        return jsonify({'success': False, 'error': 'Pristup zamitnut — vyzaduje prihlaseni'}), 401
+
     user_role = auth_user.get('role', 'user') if isinstance(auth_user, dict) else 'user'
     auth_id = str(auth_user.get('id', '')) if isinstance(auth_user, dict) else ''
-    # Admins bypass IDOR check
+
+    # Admins / pečující bypass IDOR check
     if user_role in ('administrator', 'admin', 'caregiver'):
         return None
+
     # Check if requesting own data
     if auth_id and str(requested_user_id) != auth_id:
         logger.warning(f"IDOR blocked: user {auth_id} tried to access {requested_user_id}")
@@ -288,22 +303,58 @@ def send_message():
             logger.debug(f'push fanout skipped: {e}')
 
         # === RADIM AI ODPOVED ===
-        # Pokud je zprava pro Radima (obsahuje 'radim' v participants)
+        # Audit-fix B1+B3+B5:
+        #   B1) AI volání bylo bez try/except — pokud Gemini timeoutoval,
+        #       user msg byl uložen, AI msg ne, frontend čekal navěky na typing.
+        #   B3) push notifikace AI odpovědi se posílala SENDERU (sám sobě)
+        #       místo OSTATNÍM lidským účastníkům — push spam u sendera, ostatní
+        #       nedostali nic.
+        #   B5) AI engine běžel i když sender_id NENÍ v participants → data
+        #       corruption (cizí user pošle AI v cizí konverzaci).
         cursor = db.execute('SELECT participants FROM chat_conversations WHERE id = ?', (conversation_id,))
         conv = cursor.fetchone()
 
-        if conv and 'radim' in json.loads(conv['participants']) and sender_id != 'radim':
-            # Ziskej historii konverzace
-            cursor = db.execute('''
-                SELECT sender_id, content FROM chat_messages
-                WHERE conversation_id = ?
-                ORDER BY timestamp DESC LIMIT 10
-            ''', (conversation_id,))
-            history = [dict(row) for row in cursor.fetchall()]
-            history.reverse()
+        try:
+            participants = json.loads(conv['participants']) if conv else []
+        except (TypeError, ValueError):
+            participants = []
 
-            # Ziskej AI odpoved
-            ai_response = get_ai_response(history)
+        # Bezpečnostní gate: Radim odpoví JEN když:
+        #   1) konverzace má Radima jako účastníka
+        #   2) sender_id je v participants (sender skutečně patří do konverzace)
+        #   3) sender není Radim sám (zabránit nekonečné smyčce AI ↔ AI)
+        sender_in_conv = sender_id in participants
+        radim_in_conv = 'radim' in participants
+        ai_should_run = radim_in_conv and sender_in_conv and sender_id != 'radim'
+
+        if ai_should_run:
+            try:
+                # Ziskej historii konverzace
+                cursor = db.execute('''
+                    SELECT sender_id, content FROM chat_messages
+                    WHERE conversation_id = ?
+                    ORDER BY timestamp DESC LIMIT 10
+                ''', (conversation_id,))
+                history = [dict(row) for row in cursor.fetchall()]
+                history.reverse()
+
+                # Ziskej AI odpoved (může timeoutovat / vyhodit)
+                ai_response = get_ai_response(history)
+            except Exception as ai_err:
+                # B1: AI selhalo (timeout, rate limit, výpadek poskytovatele).
+                # User msg už je commitnutá z dřívějška. Frontend by čekal na
+                # typing co nikdy nepřijde — emitneme 'ai_error' aby frontend
+                # mohl skrýt typing dots a pokud chce, ukázal toast.
+                logger.warning(f"AI response failed for conv={conversation_id}: {ai_err}")
+                try:
+                    socketio.emit('ai_error', {
+                        'conversationId': conversation_id,
+                        'replyTo': message['id'],
+                        'reason': 'temporary',  # nemusíme leakovat detaily uživateli
+                    }, room=conversation_id)
+                except Exception:
+                    pass
+                ai_response = None
 
             if ai_response:
                 ai_message = {
@@ -321,35 +372,66 @@ def send_message():
                     'ai_generated': 1
                 }
 
-                db.execute('''
-                    INSERT INTO chat_messages
-                    (id, conversation_id, sender_id, type, content, reply_to, metadata, timestamp, status, reactions, read_by, ai_generated)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (ai_message['id'], ai_message['conversation_id'], ai_message['sender_id'], ai_message['type'],
-                      ai_message['content'], ai_message['reply_to'], json.dumps(ai_message['metadata']),
-                      ai_message['timestamp'], ai_message['status'], json.dumps(ai_message['reactions']),
-                      json.dumps(ai_message['read_by']), ai_message['ai_generated']))
+                try:
+                    db.execute('''
+                        INSERT INTO chat_messages
+                        (id, conversation_id, sender_id, type, content, reply_to, metadata, timestamp, status, reactions, read_by, ai_generated)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (ai_message['id'], ai_message['conversation_id'], ai_message['sender_id'], ai_message['type'],
+                          ai_message['content'], ai_message['reply_to'], json.dumps(ai_message['metadata']),
+                          ai_message['timestamp'], ai_message['status'], json.dumps(ai_message['reactions']),
+                          json.dumps(ai_message['read_by']), ai_message['ai_generated']))
 
-                db.execute('''
-                    UPDATE chat_conversations SET updated_at = ?, last_message = ? WHERE id = ?
-                ''', (ai_message['timestamp'], json.dumps({
-                    'content': ai_response[:50],
-                    'sender_id': 'radim',
-                    'timestamp': ai_message['timestamp']
-                }), conversation_id))
-                db.commit()
+                    db.execute('''
+                        UPDATE chat_conversations SET updated_at = ?, last_message = ? WHERE id = ?
+                    ''', (ai_message['timestamp'], json.dumps({
+                        'content': ai_response[:50],
+                        'sender_id': 'radim',
+                        'timestamp': ai_message['timestamp']
+                    }), conversation_id))
+                    db.commit()
 
-                # Emit AI response
-                socketio.emit('new_message', ai_message, room=conversation_id)
-                update_daily_stats('ai_messages')
+                    # Emit AI response
+                    socketio.emit('new_message', ai_message, room=conversation_id)
+                    update_daily_stats('ai_messages')
 
-                # Send push notification
-                send_push_notification(
-                    sender_id,
-                    'Radim odpovedel',
-                    ai_response[:100],
-                    {'conversationId': conversation_id, 'messageId': ai_message['id']}
-                )
+                    # B3: push notifikace AI odpovědi → OSTATNÍM lidským
+                    # účastníkům (typicky pečující rodina), NE senderu.
+                    # Sender už vidí Radimovu odpověď v UI — push by jen rušila.
+                    # Ostatní v rodině můžou chtít vidět "Babička dostala
+                    # odpověď od Radima — vše OK" jako kontrolní signál.
+                    try:
+                        ai_other_humans = [p for p in participants
+                                           if p and p != sender_id and p != 'radim']
+                        for other_uid in ai_other_humans:
+                            send_push_notification(
+                                other_uid,
+                                'Radim odpovedel',
+                                ai_response[:100],
+                                {
+                                    'conversationId': conversation_id,
+                                    'messageId': ai_message['id'],
+                                    'senderId': 'radim',
+                                    'action': 'open_conversation',
+                                }
+                            )
+                    except Exception as push_err:
+                        logger.debug(f'AI push fanout failed: {push_err}')
+                except Exception as db_err:
+                    # B1: ukládání AI odpovědi do DB selhalo (síť, locks...)
+                    logger.error(f"AI message save failed for conv={conversation_id}: {db_err}", exc_info=True)
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+                    try:
+                        socketio.emit('ai_error', {
+                            'conversationId': conversation_id,
+                            'replyTo': message['id'],
+                            'reason': 'storage',
+                        }, room=conversation_id)
+                    except Exception:
+                        pass
 
         return jsonify({'success': True, 'message': message}), 201
     except Exception as e:
