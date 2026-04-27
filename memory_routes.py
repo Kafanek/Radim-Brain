@@ -104,6 +104,13 @@ def save_profile(user_id):
                       "appearance",        # {"theme", "fontSize", "colorScheme"}
                       "privacy",           # {"saveHistory", "analytics", "shareData"}
                       "simplified_ui",     # bool
+                      # Sprint AR: critical bug — radim_mode was missing from
+                      # whitelist so setRadimMode() PUTs returned 200 OK but
+                      # silently dropped the value. Pilot users couldn't
+                      # change observer/guide/guardian mode.
+                      "radim_mode",        # 'observer' | 'guide' | 'guardian'
+                      "accessibility",     # {"highContrast", "largeButtons", ...}
+                      "language",          # 'cs' | 'sk' (multi-language pilot prep)
                       ]
 
     profile = db_load_profile(user_id)
