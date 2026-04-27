@@ -167,19 +167,26 @@ def profile_summary(user_id):
         profile = db_load_profile(_uid) or {}
         learning = db_load_learning(_uid) or {}
 
-        # Pull family from senior_family_links if present
+        # Pull family from senior_family_links if present.
+        # Schema: family_name (not name), confirmed_at (not status — confirmed
+        # if confirmed_at IS NOT NULL AND revoked_at IS NULL).
         family = []
         try:
             with db_context() as db:
                 rows = db.execute(
-                    "SELECT name, relation, status FROM senior_family_links "
-                    "WHERE senior_id = ? AND status = 'confirmed'",
+                    "SELECT family_name, relation FROM senior_family_links "
+                    "WHERE senior_id = ? AND confirmed_at IS NOT NULL "
+                    "AND revoked_at IS NULL",
                     (_uid,)
                 ).fetchall()
-                family = [{
-                    'name': (r.get('name') if hasattr(r, 'get') else r[0]),
-                    'relation': (r.get('relation') if hasattr(r, 'get') else r[1]),
-                } for r in (rows or [])]
+                for r in (rows or []):
+                    if hasattr(r, 'get'):
+                        family.append({
+                            'name': r.get('family_name'),
+                            'relation': r.get('relation'),
+                        })
+                    else:
+                        family.append({'name': r[0], 'relation': r[1]})
         except Exception as e:
             logger.debug(f"family fetch (non-fatal): {e}")
 
@@ -342,23 +349,44 @@ def my_whispers():
             whispers = learning.get('caregiver_whispers', [])
             now_iso = datetime.utcnow().isoformat()
 
-            # Resolve caregiver names for friendly display
+            # Resolve caregiver names for friendly display.
+            # IDs come from `from` field which is set in caregiver_whisper as
+            # str(caller.user_id) — auth_users.id (int) for direct registrations
+            # or wp_<id> for WordPress JWT users. Try both tables.
             cg_ids = list({w.get('from') for w in whispers if w.get('from')})
             cg_names = {}
             if cg_ids:
                 try:
-                    placeholders = ','.join(['?'] * len(cg_ids))
                     with db_context() as db:
-                        rows = db.execute(
-                            f"SELECT id, name FROM chat_users WHERE id IN ({placeholders})",
-                            tuple(cg_ids)
-                        ).fetchall()
-                        for r in (rows or []):
-                            rid = r.get('id') if hasattr(r, 'get') else r[0]
-                            rnm = r.get('name') if hasattr(r, 'get') else r[1]
-                            cg_names[str(rid)] = rnm
-                except Exception:
-                    pass
+                        # auth_users — direct register path (most pilot users)
+                        for cid in cg_ids:
+                            try:
+                                cid_int = int(cid)
+                                row = db.execute(
+                                    "SELECT name FROM auth_users WHERE id = ?",
+                                    (cid_int,)
+                                ).fetchone()
+                                if row:
+                                    nm = row.get('name') if hasattr(row, 'get') else row[0]
+                                    if nm:
+                                        cg_names[str(cid)] = nm
+                            except (ValueError, TypeError):
+                                pass
+                        # chat_users — WordPress JWT path (legacy)
+                        missing = [c for c in cg_ids if str(c) not in cg_names]
+                        if missing:
+                            placeholders = ','.join(['?'] * len(missing))
+                            rows = db.execute(
+                                f"SELECT id, name FROM chat_users WHERE id IN ({placeholders})",
+                                tuple(missing)
+                            ).fetchall()
+                            for r in (rows or []):
+                                rid = r.get('id') if hasattr(r, 'get') else r[0]
+                                rnm = r.get('name') if hasattr(r, 'get') else r[1]
+                                if rnm:
+                                    cg_names[str(rid)] = rnm
+                except Exception as _ce:
+                    logger.debug(f"caregiver name resolve (non-fatal): {_ce}")
 
             def _enrich(w):
                 from_id = str(w.get('from', ''))
