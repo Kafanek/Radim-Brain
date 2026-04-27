@@ -93,6 +93,33 @@ Současně:
 
 ---
 
+## Co umí modul Nastavení (Sprint AP + AQ)
+
+Senior má v Settings těchto **12 sekcí**, všechny napojené na backend:
+
+| Sekce | Co dělá | Backend endpoint |
+|---|---|---|
+| 👤 Profil | jméno, telefon, avatar — sync z paměti Radima | `GET/PUT /api/memory/profile/<uid>` |
+| 👨‍👩‍👧 Rodina | invite + manage propojení | `/api/family/link/*` |
+| 🎉 Pozdrav | festive template | `/api/festive/*` |
+| 🔊 Hlas | rychlost ±20% k Radimovu rytmu, test Azure TTS | `voice_pref.rate_modifier` v profilu |
+| 🎨 Vzhled | theme, fontSize, colorScheme | `appearance` v profilu |
+| 🔔 Oznámení | VAPID push subscribe + tichý režim | `/api/push/subscribe`, `quiet_hours` |
+| ♿ Přístupnost | highContrast, largeButtons, reduceMotion, simplifiedUI | localStorage + body class |
+| 🔒 Soukromí | saveHistory, analytics, shareData (skutečně fungují) | `privacy` v profilu |
+| 💾 Data | export, import, GDPR delete | `/api/memory/profile/<uid>` DELETE |
+| 🤝 Režim | observer / guide / guardian | `radim_mode` v profilu |
+| 🧠 Co Radim ví | identity, léky, rodina, témata, citlivý kontext + selektivní zapomnění | `GET /api/memory/profile/<uid>/summary`, `POST .../forget` |
+| 💌 Vzkazy | seznam whisperů od rodiny (pending vs delivered) | `GET /api/memory/whispers/mine` |
+| 📊 Stav systému | ✅/⚠️ checks: hlas, backend, rodina, push, mozek | `GET /api/memory/profile/<uid>/system-status` |
+| 🧠 Mozek + stopa | live Ψ(t) + posledních 5 interakcí s bus stopou | `GET /api/memory/profile/<uid>/recent-trace` |
+
+Klíčové vlastnosti:
+- **Privacy.saveHistory=False** → orchestrator přeskočí persistenci, ale CRISIS události se uloží vždy (bezpečnost > preference).
+- **Quiet hours 22:00-07:00** → agent_loop blokuje běžné push, ale CRISIS prochází vždy.
+- **voice_pref.rate_modifier ±0.2** → aditivní k Ψ-driven rate, takže senior si může jemně přizpůsobit ale CRISIS je stále zpomalený.
+- **Selektivní zapomnění** → senior říká "Radime, zapomeň truchlení po manželovi" — léky a rodina zůstanou.
+
 ## Pilot setup checklist
 
 ### Před prvním spuštěním
