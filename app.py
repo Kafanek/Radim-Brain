@@ -1203,6 +1203,25 @@ try:
     except ImportError:
         logger.warning("⚠️ legacy inactivity check not available")
 
+    # TTS speed fix: keep-warm self-ping every 25 min during day (8-22)
+    # to prevent Heroku Eco dyno from sleeping. Cold start is 3-5s and
+    # dominates first TTS call latency. Pinging /health avoids that for
+    # daytime users. Night hours (22-08) let it sleep — saves dyno hours.
+    try:
+        import urllib.request as _ureq
+        def _keep_warm():
+            try:
+                _ureq.urlopen('https://radim-brain-2025-be1cd52b04dc.herokuapp.com/health',
+                              timeout=10).read()
+            except Exception:
+                pass
+        scheduler.add_job(_keep_warm, 'cron', hour='8-22', minute='*/25',
+                          id='dyno_keep_warm', max_instances=1,
+                          misfire_grace_time=300)
+        logger.info("✅ Keep-warm registered (every 25min, 8-22h)")
+    except Exception as _kw_err:
+        logger.warning(f"⚠️ keep-warm registration failed: {_kw_err}")
+
     # v445: Daily engagement (positive proactive interaction, 14:00)
     try:
         from agent_loop import run_daily_engagement

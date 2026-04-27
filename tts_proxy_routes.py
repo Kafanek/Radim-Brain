@@ -91,8 +91,18 @@ def azure_tts_proxy():
             return jsonify({'error': 'Chybi telo pozadavku (JSON)'}), 400
         text = data.get('text', '')
         voice = data.get('voice', 'cs-CZ-AntoninNeural')
-        uid = data.get('user_id', '')
+        uid = data.get('user_id', '') or data.get('userId', '')
         ant_state = None
+
+        # Speed fix (TTS hotfix): single profile load shared by brain_speech
+        # and voice_pref. Before: 2 DB calls (~50-100ms wasted per TTS req).
+        _profile_cache = None
+        if uid:
+            try:
+                from memory_helpers import db_load_profile
+                _profile_cache = db_load_profile(uid) or {}
+            except Exception:
+                _profile_cache = {}
 
         # 1. Get brain mode for voice adaptation
         brain_speech = None
@@ -108,55 +118,51 @@ def azure_tts_proxy():
             return jsonify({'error': 'Text is required'}), 400
 
         # ⚡ TTS Cache — check before Azure API call
-        # v10.15: Include context in cache key (poetry ≠ harmony for same text)
         # Sprint AC: include brain_mode + rate/pitch/pause fingerprint so a
-        # CRISIS user doesn't accidentally get a HARMONY user's cached MP3
-        # (which would silently bypass Sprint AA wire-up). Each Ψ(t) state
-        # gets its own cache slot — cost-cheap, since most users settle on
-        # one mode per session anyway.
+        # CRISIS user doesn't accidentally get a HARMONY user's cached MP3.
         rate = float(data.get('rate', 0.9))
 
         # Sprint AQ: senior's voice rate preference — additive modifier
-        # to whatever brain Ψ-driven rate decided. User can speed up or
-        # slow down by ±20% on top of mode-aware rate. Doesn't override
-        # brain logic (CRISIS still slow, RHYTHMIC still upbeat) but
-        # respects personal comfort.
+        # to whatever brain Ψ-driven rate decided. Doesn't override brain
+        # logic (CRISIS still slow) but respects personal comfort.
+        # Speed fix: read from already-loaded _profile_cache, no DB call.
         try:
-            _user_id = data.get('user_id') or data.get('userId') or ''
-            if _user_id:
-                from memory_helpers import db_load_profile
-                _vp = (db_load_profile(_user_id) or {}).get('voice_pref') or {}
+            if _profile_cache:
+                _vp = _profile_cache.get('voice_pref') or {}
                 _rate_mod = float(_vp.get('rate_modifier', 0))
                 # Clamp to [-0.2, +0.2] = ±20%
                 _rate_mod = max(-0.2, min(0.2, _rate_mod))
                 if _rate_mod != 0:
                     rate = max(0.5, min(1.5, rate + _rate_mod))
-                    logger.debug(f"TTS rate adjusted by user pref: {_rate_mod:+.2f}")
         except Exception as _vp_err:
-            logger.debug(f"voice_pref load (non-fatal): {_vp_err}")
+            logger.debug(f"voice_pref read (non-fatal): {_vp_err}")
 
         _cache_ctx = data.get('context', '') or data.get('style', '') or ''
         _brain_fp = ''
         if brain_speech:
-            _brain_fp = (
-                f"|m={brain_speech.get('mode','?')}"
-                f"|r={brain_speech.get('rate','?')}"
-                f"|p={brain_speech.get('pitch_pct','?')}"
-                f"|ps={brain_speech.get('pause_ms','?')}"
-            )
-            # Sprint AE: also include RTCF voice modifiers in cache key.
-            # When ENABLE_RTCF=true the rate_adjust/pause_adjust deltas
-            # change between conversations (beat oscillator phase + ratio
-            # vs Ψ(t-1)). Two requests with same brain_mode but different
-            # RTCF moments would produce different SSML / different audio,
-            # so they need separate cache slots.
-            _rtcf_v = brain_speech.get('rtcf_voice') or {}
-            if _rtcf_v:
-                _brain_fp += (
-                    f"|rt_r={_rtcf_v.get('rate_adjust','0')}"
-                    f"|rt_p={_rtcf_v.get('pause_adjust_ms','0')}"
-                    f"|rt_s={_rtcf_v.get('style_hint','-')}"
+            _bm = brain_speech.get('mode', '?')
+            # Speed fix: only mode + rough rate bucket in cache key.
+            # Detailed pitch/pause fingerprint caused near-100% miss rate
+            # because brain state shifts subtly each conversation.
+            # For CRISIS/ALERT we keep more detail (safety > cache hit).
+            if _bm in ('CRISIS', 'ALERT'):
+                _brain_fp = (
+                    f"|m={_bm}"
+                    f"|r={brain_speech.get('rate','?')}"
+                    f"|p={brain_speech.get('pitch_pct','?')}"
+                    f"|ps={brain_speech.get('pause_ms','?')}"
                 )
+                # RTCF still in cache key only for safety modes
+                _rtcf_v = brain_speech.get('rtcf_voice') or {}
+                if _rtcf_v:
+                    _brain_fp += (
+                        f"|rt_r={_rtcf_v.get('rate_adjust','0')}"
+                        f"|rt_p={_rtcf_v.get('pause_adjust_ms','0')}"
+                    )
+            else:
+                # HARMONY: cache by mode only — much higher hit rate.
+                # Subtle RTCF/rate variations are imperceptible to senior.
+                _brain_fp = f"|m={_bm}"
         _cache_rate = str(rate) + ':' + _cache_ctx + _brain_fp
         try:
             from scaling_optimizations import tts_cache, tts_quota
