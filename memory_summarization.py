@@ -15,7 +15,7 @@ Storage:
         "text": "Valerie má 82 let, žije v Praze...",
         "updated_at": "2026-04-18T12:00:00",
         "message_count_at_update": 247,
-        "model": "gemini-2.0-flash"
+        "model": GEMINI_MODEL
     }
 
 Injection:
@@ -33,6 +33,7 @@ import logging
 import os
 import json
 from datetime import datetime
+from ai_config import GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +180,7 @@ def _call_gemini_for_summary(prompt):
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        model = genai.GenerativeModel(GEMINI_MODEL)
         resp = model.generate_content(prompt,
             generation_config={
                 "temperature": 0.3,
@@ -273,7 +274,7 @@ def summarize_user_memory(user_id, force=False):
 
     # Try Gemini first, fallback to Claude
     summary = _call_gemini_for_summary(prompt)
-    model_used = "gemini-2.0-flash"
+    model_used = GEMINI_MODEL
     if not summary:
         summary = _call_claude_for_summary(prompt)
         model_used = "claude-opus-4-5"

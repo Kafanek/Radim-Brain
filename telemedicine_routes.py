@@ -25,6 +25,7 @@ from telemedicine_helpers import (
 from telemedicine_audit import (
     log_event, check_join_eligibility, generate_join_token,
 )
+from ai_config import GEMINI_MODEL
 
 telemedicine_bp = Blueprint('telemedicine', __name__)
 
@@ -407,7 +408,7 @@ def telemed_patient_summary(consultation_id):
     try:
         import requests as req
         resp = req.post(
-            f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}',
+            f'https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={api_key}',
             json={
                 'contents': [{'parts': [{'text': prompt}]}],
                 'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 300},
@@ -740,7 +741,7 @@ def _parse_followup_gemini(recommendations, findings, api_key):
     try:
         import requests as req
         resp = req.post(
-            f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}',
+            f'https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={api_key}',
             json={
                 'contents': [{'parts': [{'text': prompt}]}],
                 'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 120,

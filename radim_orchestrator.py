@@ -193,8 +193,9 @@ def radim_vision():
 
     try:
         import google.generativeai as genai
+        from ai_config import GEMINI_MODEL
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = genai.GenerativeModel(GEMINI_MODEL)
 
         response = model.generate_content(
             [prompt, {'mime_type': mime, 'data': image_bytes}],

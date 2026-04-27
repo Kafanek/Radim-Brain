@@ -26,6 +26,7 @@ from flask import Blueprint, request, jsonify, g
 
 from auth_middleware import require_auth, optional_auth
 from database import db_context, db_insert, is_postgres
+from ai_config import GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -1768,7 +1769,7 @@ def symptoms_summary(senior_id):
     try:
         import requests as req
         resp = req.post(
-            f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}',
+            f'https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={api_key}',
             json={
                 'contents': [{'parts': [{'text': prompt}]}],
                 'generationConfig': {'temperature': 0.3, 'maxOutputTokens': 600},

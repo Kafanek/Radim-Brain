@@ -43,6 +43,7 @@ from flask import Blueprint, g, jsonify, request, redirect
 
 from auth_middleware import require_auth
 from database import db_context, is_postgres
+from ai_config import GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -544,7 +545,7 @@ def _generate_caption_gemini(image_bytes, mime):
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = genai.GenerativeModel(GEMINI_MODEL)
         prompt = (
             "Stručně v češtině popiš, co vidíš na fotografii, dvěma větami. "
             "Piš vřele, tak aby potěšilo staršího uživatele. "

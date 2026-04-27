@@ -52,6 +52,7 @@ except ImportError:
 # Voice system prompt
 from radim_system_prompt import get_voice_prompt as _build_voice_prompt
 from radim_shared import build_time_context as _shared_time_context
+from ai_config import GEMINI_MODEL
 
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
@@ -78,7 +79,7 @@ def get_voice_ai_response(messages, context=None):
             prompt = f"{system_prompt}\n\nKonverzace:\n{conversation}\n\nRadim:"
 
             response = requests.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
+                f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
                 headers={"Content-Type": "application/json"},
                 json={
                     "contents": [{"parts": [{"text": prompt}]}],

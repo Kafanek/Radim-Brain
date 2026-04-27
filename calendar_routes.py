@@ -202,6 +202,7 @@ def get_today():
 import os
 import re
 from datetime import date as _date
+from ai_config import GEMINI_MODEL
 
 
 def _ensure_reminder_columns():
@@ -386,7 +387,7 @@ def _parse_event_gemini(text, api_key):
     try:
         import requests as req
         resp = req.post(
-            f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}',
+            f'https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={api_key}',
             json={
                 'contents': [{'parts': [{'text': prompt}]}],
                 'generationConfig': {

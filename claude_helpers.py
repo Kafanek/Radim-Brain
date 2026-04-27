@@ -9,6 +9,7 @@
 import os
 import logging
 from datetime import datetime
+from ai_config import GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +147,7 @@ def call_gemini_fallback(prompt, system_prompt="", max_tokens=1024):
         import requests as req
         parts = [{"text": f"{system_prompt}\n\n{prompt}" if system_prompt else prompt}]
         resp = req.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
             headers={"Content-Type": "application/json"},
             json={
                 "contents": [{"parts": parts}],

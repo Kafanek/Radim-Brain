@@ -27,6 +27,7 @@ import requests
 from flask import Blueprint, jsonify, request
 
 from rate_limiter import rate_limit
+from ai_config import GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +214,7 @@ def _translate_gemini(text: str, source: str, target: str):
     try:
         resp = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"gemini-2.0-flash:generateContent?key={api_key}",
+            f"{GEMINI_MODEL}:generateContent?key={api_key}",
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
@@ -238,7 +239,7 @@ def _translate_gemini(text: str, source: str, target: str):
         out = _strip_wrapping_quotes(out)
         if not out:
             return None, None
-        return out, "gemini-2.0-flash"
+        return out, GEMINI_MODEL
     except Exception as e:
         logger.warning(f"Gemini translate failed: {e}")
         return None, None
@@ -395,7 +396,7 @@ def _translate_gemini_batch(texts: list, source: str, target: str):
     try:
         resp = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"gemini-2.0-flash:generateContent?key={api_key}",
+            f"{GEMINI_MODEL}:generateContent?key={api_key}",
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
@@ -421,7 +422,7 @@ def _translate_gemini_batch(texts: list, source: str, target: str):
         result = _parse_numbered_list(raw, expected_count=len(texts))
         if not result:
             return None, None
-        return result, "gemini-2.0-flash-batch"
+        return result, f"{GEMINI_MODEL}-batch"
     except Exception as e:
         logger.warning(f"Gemini batch failed: {e}")
         return None, None
@@ -573,7 +574,7 @@ def _gemini_ocr_and_translate(image_b64: str, mime: str, target: str):
     try:
         resp = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"gemini-2.0-flash:generateContent?key={api_key}",
+            f"{GEMINI_MODEL}:generateContent?key={api_key}",
             json={
                 "contents": [{
                     "parts": [
@@ -600,7 +601,7 @@ def _gemini_ocr_and_translate(image_b64: str, mime: str, target: str):
         if not parts:
             return None, None, None, None
         raw = (parts[0].get("text") or "").strip()
-        return _parse_ocr_response(raw) + ("gemini-2.0-flash-vision",)
+        return _parse_ocr_response(raw) + (f"{GEMINI_MODEL}-vision",)
     except Exception as e:
         logger.warning(f"Gemini OCR failed: {e}")
         return None, None, None, None

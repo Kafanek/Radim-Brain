@@ -23,6 +23,7 @@ from radim_helpers import (
     GEMINI_API_KEY, _extract_user_id
 )
 from radim_ai_engine import STORY_TEMPLATES
+from ai_config import GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +270,7 @@ Odpověz POUZE textem příspěvku:"""
         if GEMINI_API_KEY:
             import requests as _req
             response = _req.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
+                f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
                 headers={"Content-Type": "application/json"},
                 json={
                     "contents": [{"parts": [{"text": prompt}]}],

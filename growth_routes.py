@@ -34,6 +34,7 @@ from flask import Blueprint, g, jsonify, request
 
 from auth_middleware import require_auth
 from database import db_context, is_postgres
+from ai_config import GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -761,7 +762,7 @@ def _generate_narrative_via_gemini(context_text):
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = genai.GenerativeModel(GEMINI_MODEL)
         prompt = (
             "Jsi Radim — AI společník seniora. "
             "Napiš krátký vřelý příběh našeho vztahu v 1. osobě, 2-3 odstavce, "

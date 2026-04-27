@@ -24,6 +24,7 @@ Falls back to time-of-day greeting if AI unavailable.
 import logging
 import os
 from datetime import datetime, timedelta
+from ai_config import GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +131,7 @@ def _call_gemini_proactive(prompt):
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        model = genai.GenerativeModel(GEMINI_MODEL)
         resp = model.generate_content(prompt, generation_config={
             "temperature": 0.8, "max_output_tokens": 150,
         })

@@ -13,6 +13,7 @@ import time
 from datetime import datetime
 from flask import Blueprint, request, jsonify
 from auth_middleware import optional_auth
+from ai_config import GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -386,7 +387,7 @@ def _summarize_for_senior(items, category):
         import requests as req
         resp = req.post(
             f'https://generativelanguage.googleapis.com/v1beta/models/'
-            f'gemini-2.0-flash:generateContent?key={api_key}',
+            f'{GEMINI_MODEL}:generateContent?key={api_key}',
             json={
                 'contents': [{'parts': [{'text': prompt}]}],
                 'generationConfig': {'temperature': 0.3, 'maxOutputTokens': 1600},
@@ -495,7 +496,7 @@ Začni rovnou hranatou závorkou [, neuváděj markdown ani komentáře."""
         try:
             import requests as req
             resp = req.post(
-                f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}',
+                f'https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={gemini_key}',
                 json={'contents': [{'parts': [{'text': prompt}]}],
                       'generationConfig': {'temperature': 0.8, 'maxOutputTokens': 2000}},
                 timeout=15

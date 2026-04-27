@@ -17,6 +17,7 @@ import logging
 import requests
 
 from radim_helpers import GEMINI_API_KEY, _get_dynamic_system_prompt
+from ai_config import GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ def call_gemini_whatsapp(message, context=None, mode='senior', personalized_prom
         max_tokens = gen_config["max_tokens"] if gen_config else 500
 
         response = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
             headers={"Content-Type": "application/json"},
             json={
                 "contents": [{"parts": [{"text": full_prompt}]}],

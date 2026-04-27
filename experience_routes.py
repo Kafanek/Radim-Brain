@@ -71,6 +71,7 @@ from flask import Blueprint, g, jsonify, request
 
 from auth_middleware import require_auth
 from database import db_context, is_postgres
+from ai_config import GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -1185,7 +1186,7 @@ def _structure_via_gemini(transcript, title, theme):
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = genai.GenerativeModel(GEMINI_MODEL)
         prompt = (
             "Jsi Radim, pomocník seniora při zaznamenávání vzpomínky. "
             "Dostaneš přepis rozhovoru v češtině. Tvůj úkol:\n\n"

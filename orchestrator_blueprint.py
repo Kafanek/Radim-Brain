@@ -13,6 +13,7 @@ from datetime import datetime
 import time
 import concurrent.futures
 from utils import now_iso
+from ai_config import GEMINI_MODEL
 
 orchestrator_bp = Blueprint('orchestrator', __name__)
 
@@ -147,7 +148,7 @@ Odpověz strukturovaně:
     
     try:
         resp = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
             headers={"Content-Type": "application/json"},
             json={
                 "contents": [{"parts": [{"text": prompt}]}],

@@ -8,6 +8,7 @@
 import os
 import logging
 import requests as http_requests
+from ai_config import GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ def call_gemini_ai(messages, context=None, image=None):
             })
 
         response = http_requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
             headers={"Content-Type": "application/json"},
             json={
                 "contents": [{"parts": parts}],
