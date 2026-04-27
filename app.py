@@ -93,6 +93,14 @@ except ImportError:
     MEMORY_AVAILABLE = False
     logger.warning("⚠️ Memory routes not available")
 
+# Sprint AS: Life situation presets
+try:
+    from life_presets import presets_bp as life_presets_bp
+    LIFE_PRESETS_AVAILABLE = True
+except ImportError:
+    LIFE_PRESETS_AVAILABLE = False
+    logger.warning("⚠️ Life presets not available")
+
 # 👴 Import Seniors API
 try:
     from seniors_routes import seniors_bp
@@ -579,6 +587,11 @@ if MEMORY_AVAILABLE:
     app.register_blueprint(gdpr_bp)
     logger.info("✅ Memory routes registered: /api/memory/*")
     logger.info("✅ GDPR routes registered: /api/memory/gdpr/*")
+
+# 🌱 Sprint AS: Life situation presets
+if LIFE_PRESETS_AVAILABLE:
+    app.register_blueprint(life_presets_bp)
+    logger.info("✅ Life presets registered: /api/memory/profile/<uid>/preset")
 
 # KAL Routes (Kolibri Abstraction Layer)
 from kal_routes import kal_bp, init_kal_routes
@@ -1145,6 +1158,15 @@ try:
         logger.info("✅ Daily cleanup registered (3:00 AM)")
     except ImportError:
         logger.warning("⚠️ daily cleanup not available")
+
+    # Sprint AS: daily check for expired life-situation presets
+    try:
+        from life_presets import check_expired_presets
+        scheduler.add_job(check_expired_presets, 'cron', hour=10, minute=0,
+                          id='life_preset_expires', max_instances=1, misfire_grace_time=3600)
+        logger.info("✅ Life preset expires check registered (10:00 daily)")
+    except ImportError:
+        logger.warning("⚠️ life preset expires check not available")
 
     # v445: Daily engagement (positive proactive interaction, 14:00)
     try:

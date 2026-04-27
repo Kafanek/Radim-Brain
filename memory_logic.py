@@ -131,6 +131,29 @@ def build_personalized_prompt(user_id: str) -> str:
     except Exception:
         pass
 
+    # Sprint AS: Life-situation preset — when senior activated a context
+    # ("V truchlení", "Po nemocnici", "Cítím se silně", "Mám horší dny"),
+    # the preset's radim_context tells Radim how to BE for the whole
+    # duration of the preset (not just 30 min like bus context). This is
+    # what makes presets feel like a relationship change, not a settings
+    # toggle.
+    try:
+        from memory_helpers import db_load_profile as _dlp
+        _prof = _dlp(str(user_id)) or {}
+        _ap = _prof.get('active_preset')
+        if _ap and _ap.get('id'):
+            from life_presets import PRESETS as _PRESETS
+            _preset = _PRESETS.get(_ap['id'])
+            if _preset and _preset.get('radim_context'):
+                parts.append("\n\n═══════════════════════════════════════════════════════════════")
+                parts.append(f"🌱 ŽIVOTNÍ KONTEXT — {_preset.get('icon','')} {_ap.get('name', _ap['id'])}")
+                parts.append("═══════════════════════════════════════════════════════════════")
+                parts.append(_preset['radim_context'])
+                parts.append("(Tento kontext platí, dokud senior nezruší. Vetkej tón přirozeně do každé odpovědi.)")
+    except Exception as _ap_err:
+        try: logger.debug(f"active_preset prompt inject failed: {_ap_err}")
+        except: pass
+
     parts.append("\n\n═══════════════════════════════════════════════════════════════")
     parts.append("🇨🇿 ČESKÁ PRAVIDLA KOMUNIKACE (TTS-optimized, Sprint T)")
     parts.append("═══════════════════════════════════════════════════════════════")
