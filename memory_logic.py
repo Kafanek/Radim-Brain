@@ -154,6 +154,31 @@ def build_personalized_prompt(user_id: str) -> str:
         try: logger.debug(f"active_preset prompt inject failed: {_ap_err}")
         except: pass
 
+    # Sprint AU: Voice preset suggestion — když senior řekl něco co spustilo
+    # detect_preset_intent, čekáme jeho potvrzení. V system promptu Radimovi
+    # řekneme aby na konec své příští odpovědi přirozeně přidal nabídku.
+    try:
+        from memory_helpers import db_load_learning as _dll
+        _lrn = _dll(str(user_id)) or {}
+        _pend = _lrn.get('pending_preset_suggestion')
+        if _pend and _pend.get('preset_id'):
+            from voice_intent import build_suggestion_text as _bst
+            _offer = _bst(_pend['preset_id'])
+            if _offer:
+                parts.append("\n\n═══════════════════════════════════════════════════════════════")
+                parts.append("🎙 NABÍDKA ŽIVOTNÍHO BALÍKU (Sprint AU)")
+                parts.append("═══════════════════════════════════════════════════════════════")
+                parts.append(
+                    "Senior právě řekl něco, z čeho cítím změnu kontextu. "
+                    "Po své obvyklé empatické odpovědi PŘIROZENĚ přidej tuto nabídku "
+                    "(neřekni ji doslova, ale ve vlastním tónu, který je tvůj):"
+                )
+                parts.append(f"  → {_offer}")
+                parts.append("(Pokud senior řekne 'ano', balík se sám zapne. Pokud 'ne', necháš to být.)")
+    except Exception as _vs_err:
+        try: logger.debug(f"voice suggestion prompt inject failed: {_vs_err}")
+        except: pass
+
     parts.append("\n\n═══════════════════════════════════════════════════════════════")
     parts.append("🇨🇿 ČESKÁ PRAVIDLA KOMUNIKACE (TTS-optimized, Sprint T)")
     parts.append("═══════════════════════════════════════════════════════════════")

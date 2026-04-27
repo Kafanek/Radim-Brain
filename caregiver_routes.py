@@ -1887,6 +1887,141 @@ def caregiver_whispers_list(senior_id):
     return _inner(senior_id)
 
 
+# ═════════════════════════════════════════════════════════════════════
+# Sprint AU: Caregiver navrhne životní balík → senior musí potvrdit
+# ═════════════════════════════════════════════════════════════════════
+
+@caregiver_bp.route('/api/caregiver/senior/<senior_id>/suggest-preset',
+                    methods=['POST', 'OPTIONS'])
+def caregiver_suggest_preset(senior_id):
+    """Caregiver suggests a life preset to senior — sets pending suggestion
+    that senior sees + must explicitly confirm before any settings change.
+
+    Body: {"preset_id": "grief" | "recovery" | "strong" | "rough_days",
+           "note": "Mami, kvůli tátovi..."}
+
+    No bypass: caregiver cannot directly activate presets. Senior is
+    always in the loop — push notification + explicit confirm.
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    from auth_middleware import require_auth as _ra
+    @_ra
+    def _inner(_senior_id):
+        caller = getattr(g, 'auth_user', None) or {}
+        caller_id = str(caller.get('user_id') or caller.get('id') or '')
+        if not caller_id:
+            return jsonify({'success': False, 'error': 'Auth required'}), 401
+        if not _is_family_of(_senior_id, caller_id):
+            return jsonify({'success': False, 'error': 'Not linked to this senior'}), 403
+
+        body = request.get_json(silent=True) or {}
+        preset_id = body.get('preset_id')
+        note = (body.get('note') or '').strip()[:300]
+
+        try:
+            from life_presets import PRESETS
+        except ImportError:
+            return jsonify({'success': False, 'error': 'Presets not available'}), 503
+        if preset_id not in PRESETS:
+            return jsonify({
+                'success': False,
+                'error': 'Neznámý preset',
+                'available': list(PRESETS.keys()),
+            }), 400
+
+        preset = PRESETS[preset_id]
+
+        # Resolve caregiver name
+        cg_name = 'Někdo z rodiny'
+        try:
+            with db_context() as db:
+                row = db.execute(
+                    "SELECT name FROM auth_users WHERE id = ?",
+                    (int(caller_id),) if caller_id.isdigit() else (caller_id,)
+                ).fetchone()
+                if row:
+                    cg_name = (row.get('name') if hasattr(row, 'get') else row[0]) or cg_name
+        except Exception:
+            pass
+
+        # Save as pending suggestion in learning (same path as voice intent)
+        try:
+            from memory_helpers import db_load_learning, db_save_learning
+            learning = db_load_learning(_senior_id) or {}
+            learning['pending_preset_suggestion'] = {
+                'preset_id': preset_id,
+                'suggested_at': datetime.utcnow().isoformat(),
+                'confidence': 'high',  # caregiver-initiated = explicit
+                'source': 'caregiver',
+                'caregiver_id': caller_id,
+                'caregiver_name': cg_name,
+                'note': note,
+            }
+            db_save_learning(_senior_id, learning)
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)[:120]}), 500
+
+        # Push notification to senior — explicit consent flow
+        try:
+            from notification_helpers import notify
+            notify(
+                to_user_id=_senior_id,
+                type='preset_suggestion',
+                title=f"{preset['icon']} {cg_name} něco navrhuje",
+                body=('Doporučuje balík „' + preset['name'] + '". ' +
+                      (('Vzkaz: ' + note) if note else 'Otevřete Radim a podívejte se.')),
+                severity='info',
+                data={
+                    'preset_id': preset_id,
+                    'preset_name': preset['name'],
+                    'from_name': cg_name,
+                    'note': note,
+                },
+            )
+        except Exception as _push_err:
+            logger.debug(f"preset suggestion push (non-fatal): {_push_err}")
+
+        # Bus emit — chat-time prompt picks it up too
+        try:
+            from agent_bus import emit as _bus_emit
+            _bus_emit(
+                user_id=_senior_id,
+                sender=f'caregiver.{caller_id}.suggest_preset',
+                kind='context',
+                severity='info',
+                topic='preset_suggested_by_caregiver',
+                payload={
+                    'preset_id': preset_id,
+                    'preset_name': preset['name'],
+                    'caregiver_name': cg_name,
+                    'note': note,
+                    'message': (f"Pečovatel/ka {cg_name} doporučuje aktivovat balík "
+                                f"'{preset['name']}'. {('Vzkaz: ' + note) if note else ''}"),
+                },
+                ttl_minutes=60 * 48,
+            )
+        except Exception:
+            pass
+
+        # Audit
+        try:
+            from memory_helpers import audit_log as _audit
+            _audit(caller_id, 'caregiver_preset_suggest', _senior_id,
+                   f"preset={preset_id} note={note[:80]}")
+        except Exception:
+            pass
+
+        return jsonify({
+            'success': True,
+            'message': f"Návrh '{preset['name']}' poslán seniorovi. Musí potvrdit.",
+            'preset': {'id': preset_id, 'name': preset['name'], 'icon': preset['icon']},
+        })
+
+    return _inner(senior_id)
+
+
 @caregiver_bp.route('/api/caregiver/observations/<int:obs_id>/ack', methods=['POST', 'OPTIONS'])
 def caregiver_observation_ack(obs_id):
     """Mark an agent_observation as acknowledged by the caregiver.

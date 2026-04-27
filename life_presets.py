@@ -324,6 +324,100 @@ def activate_preset(user_id):
     return _inner(user_id)
 
 
+@presets_bp.route('/profile/<user_id>/preset/extend', methods=['POST', 'OPTIONS'])
+def extend_preset(user_id):
+    """Sprint AU.3: prodlouží aktivní preset o expires_days znova.
+
+    Use case: recovery preset vypršel po 14 dnech, Radim se zeptal,
+    senior říká "ještě 14 dní". Snapshot zůstává netknutý.
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    @require_auth
+    def _inner(_uid):
+        auth_user_id = str(g.auth_user.get('id', ''))
+        if auth_user_id and auth_user_id != str(_uid):
+            return jsonify({'success': False, 'error': 'Přístup odepřen'}), 403
+
+        profile = db_load_profile(_uid) or {}
+        active = profile.get('active_preset')
+        if not active or not active.get('id'):
+            return jsonify({'success': False, 'error': 'Žádný aktivní balík'}), 400
+
+        preset = PRESETS.get(active['id'])
+        if not preset:
+            return jsonify({'success': False, 'error': 'Preset definice neexistuje'}), 400
+
+        # New expires_at
+        new_expires = None
+        if preset.get('expires_days'):
+            new_expires = (datetime.utcnow() + timedelta(days=preset['expires_days'])).isoformat()
+
+        active['expires_at'] = new_expires
+        active['extended_at'] = datetime.utcnow().isoformat()
+        active['extension_count'] = (active.get('extension_count') or 0) + 1
+        profile['active_preset'] = active
+        profile['updated_at'] = datetime.utcnow().isoformat()
+        db_save_profile(_uid, profile)
+
+        try:
+            audit_log(_uid, 'life_preset_extend', active['id'],
+                      f"new_expires={new_expires}", request.remote_addr)
+        except Exception:
+            pass
+
+        return jsonify({
+            'success': True,
+            'active': active,
+            'message': (f"Balík „{preset['name']}" + '" prodloužen o ' +
+                        f"{preset['expires_days']} dní.") if preset.get('expires_days') else
+                       (f"Balík „{preset['name']}" + '" pokračuje.'),
+        })
+
+    return _inner(user_id)
+
+
+@presets_bp.route('/profile/<user_id>/preset/snooze', methods=['POST', 'OPTIONS'])
+def snooze_preset_check(user_id):
+    """Sprint AU.3: senior říká "zeptej se mě za N dní".
+
+    Body: {"days": 3}
+    Záznam ve profilu - check_expired_presets to respektuje.
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    @require_auth
+    def _inner(_uid):
+        auth_user_id = str(g.auth_user.get('id', ''))
+        if auth_user_id and auth_user_id != str(_uid):
+            return jsonify({'success': False, 'error': 'Přístup odepřen'}), 403
+
+        body = request.get_json(silent=True) or {}
+        days = int(body.get('days', 3))
+        days = max(1, min(30, days))
+
+        profile = db_load_profile(_uid) or {}
+        active = profile.get('active_preset')
+        if not active:
+            return jsonify({'success': False, 'error': 'Žádný aktivní balík'}), 400
+
+        snooze_until = (datetime.utcnow() + timedelta(days=days)).isoformat()
+        active['snoozed_until'] = snooze_until
+        profile['active_preset'] = active
+        profile['updated_at'] = datetime.utcnow().isoformat()
+        db_save_profile(_uid, profile)
+
+        return jsonify({
+            'success': True,
+            'snoozed_until': snooze_until,
+            'message': f"Dobře, zeptám se za {days} {'den' if days==1 else 'dní'}.",
+        })
+
+    return _inner(user_id)
+
+
 @presets_bp.route('/profile/<user_id>/preset', methods=['DELETE', 'OPTIONS'])
 def deactivate_preset(user_id):
     """Revert active preset — restore snapshot taken at first activation."""
@@ -429,6 +523,9 @@ def check_expired_presets():
                     continue
                 if ap['expires_at'] > now_iso:
                     continue  # not expired yet
+                # Sprint AU.3: respect snooze
+                if ap.get('snoozed_until') and ap['snoozed_until'] > now_iso:
+                    continue
 
                 # Emit check-in bus event
                 from agent_bus import emit as _bus_emit

@@ -359,6 +359,104 @@ def radim_chat():
             context['extracted_time'] = extract_time(message)
             context['extracted_date'] = extract_date(message)
 
+        # Sprint AU: Voice intent — detekce preset suggestion + confirmation
+        # Provádíme PŘED safety check protože "ano" by mohlo přijít po nabídce
+        # ale zároveň nesmí přerušit safety detection ("je mi smutno" jde
+        # nejdřív přes safety_fuzzy v detect_intent).
+        try:
+            from voice_intent import detect_preset_intent, detect_confirmation
+            from memory_helpers import db_load_learning, db_save_learning
+
+            _learning = db_load_learning(user_id) or {}
+            _pending_suggestion = _learning.get('pending_preset_suggestion')
+
+            # 1. Pokud čeká nabídka a senior odpovídá ano/ne → vyřešit
+            if _pending_suggestion and intent != 'safety':
+                _confirm = detect_confirmation(message)
+                if _confirm == 'yes':
+                    # Aplikuj preset přes interní call
+                    try:
+                        from life_presets import PRESETS, _take_snapshot, _apply_patch
+                        from memory_helpers import db_load_profile, db_save_profile
+                        from datetime import datetime as _dt, timedelta as _td
+                        _pid = _pending_suggestion.get('preset_id')
+                        _preset = PRESETS.get(_pid)
+                        if _preset:
+                            _profile = db_load_profile(user_id) or {}
+                            _existing = _profile.get('active_preset') or {}
+                            _snap = _existing.get('snapshot') or _take_snapshot(_profile)
+                            _apply_patch(_profile, _preset['patch'])
+                            _exp = None
+                            if _preset.get('expires_days'):
+                                _exp = (_dt.utcnow() + _td(days=_preset['expires_days'])).isoformat()
+                            _profile['active_preset'] = {
+                                'id': _pid,
+                                'name': _preset['name'],
+                                'activated_at': _dt.utcnow().isoformat(),
+                                'expires_at': _exp,
+                                'snapshot': _snap,
+                                'activated_via': 'voice',
+                            }
+                            db_save_profile(user_id, _profile)
+                            logger.info(f"🎙 Preset '{_pid}' activated VOICE for user={user_id}")
+                            # Bus emit
+                            try:
+                                from agent_bus import emit as _bus_emit
+                                _bus_emit(user_id=user_id, sender='voice_intent.confirm',
+                                          kind='context', severity='info', topic='life_event',
+                                          payload={
+                                              'preset_id': _pid,
+                                              'preset_name': _preset['name'],
+                                              'context_for_radim': _preset['radim_context'],
+                                              'activated_via': 'voice',
+                                              'message': f"Senior hlasem aktivoval balík '{_preset['name']}'. {_preset['radim_context']}"
+                                          },
+                                          ttl_minutes=60*24*7)
+                            except Exception:
+                                pass
+                    except Exception as _ap_err:
+                        logger.debug(f"voice preset apply failed: {_ap_err}")
+                    # Clear pending
+                    _learning.pop('pending_preset_suggestion', None)
+                    db_save_learning(user_id, _learning)
+                    context['voice_action'] = {
+                        'kind': 'preset_activated',
+                        'preset_id': _pending_suggestion.get('preset_id'),
+                    }
+                elif _confirm == 'no':
+                    _learning.pop('pending_preset_suggestion', None)
+                    db_save_learning(user_id, _learning)
+                    context['voice_action'] = {'kind': 'preset_declined'}
+                # Jinak (None) — nabídka zůstává, čekáme další zprávu
+
+            # 2. Pokud nečeká a v textu je hint → ulož návrh (nepřepisuj existující)
+            if not _pending_suggestion or context.get('voice_action'):
+                _hint = detect_preset_intent(message)
+                if _hint and _hint.get('confidence') in ('high', 'medium'):
+                    # Pokud už senior preset má, nedoporučovat ten samý
+                    _profile_check = (db_load_profile(user_id) if False
+                                      else (_learning.get('_cached_active') or {}))
+                    try:
+                        from memory_helpers import db_load_profile as _dlp
+                        _ap = (_dlp(user_id) or {}).get('active_preset') or {}
+                        if _ap.get('id') == _hint['preset_id']:
+                            _hint = None
+                    except Exception:
+                        pass
+                if _hint:
+                    from datetime import datetime as _dt2
+                    _learning['pending_preset_suggestion'] = {
+                        'preset_id': _hint['preset_id'],
+                        'matched': _hint['matched'],
+                        'suggested_at': _dt2.utcnow().isoformat(),
+                        'confidence': _hint['confidence'],
+                    }
+                    db_save_learning(user_id, _learning)
+                    context['voice_suggestion'] = _hint
+                    logger.info(f"🎙 Voice intent suggestion: {_hint['preset_id']} for user={user_id}")
+        except Exception as _vi_err:
+            logger.debug(f"voice intent (non-fatal): {_vi_err}")
+
         if intent == 'safety':
             msg_lower = message.lower()
             is_critical = any(w in msg_lower for w in ['155', '112', 'záchranka', 'záchranku', 'sebevražd', 'sebevrazd', 'chci umřít', 'chci umrit', 'zabij', 'nechci žít'])
