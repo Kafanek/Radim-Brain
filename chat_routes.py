@@ -181,7 +181,7 @@ def get_messages(conversation_id):
 @rate_limit(30, 60, 'ip')  # v330: Rate limit message sending
 def send_message():
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         conversation_id = data.get('conversationId')
         sender_id = data.get('senderId')
         content = data.get('content')
@@ -365,7 +365,7 @@ def send_message():
 @optional_auth
 def mark_as_read(message_id):
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         user_id = data.get('userId')
         if not user_id:
             return jsonify({'success': False, 'error': 'Chybi userId'}), 400
@@ -392,7 +392,7 @@ def mark_as_read(message_id):
 @optional_auth
 def add_reaction(message_id):
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         user_id = data.get('userId')
         emoji = data.get('emoji')
         if not user_id or not emoji:
@@ -433,7 +433,7 @@ def delete_message(message_id):
     """Soft-delete: replaces content with tombstone marker, preserves the
     bubble in chronology. WhatsApp-style "Tato zpráva byla odstraněna"."""
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         user_id = data.get('userId')
         if not user_id:
             return jsonify({'success': False, 'error': 'Chybi userId'}), 400
@@ -493,7 +493,7 @@ def delete_message(message_id):
 def star_message(message_id):
     """Toggle a star on a message — per-user list stored in message.metadata.starred_by[]."""
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         user_id = data.get('userId')
         if not user_id:
             return jsonify({'success': False, 'error': 'Chybi userId'}), 400
@@ -578,7 +578,7 @@ def get_contacts(user_id):
 @optional_auth
 def add_contact():
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         if not data.get('userId') or not data.get('contactId') or not data.get('name'):
             return jsonify({'success': False, 'error': 'Chybi povinna pole (userId, contactId, name)'}), 400
         contact = {
