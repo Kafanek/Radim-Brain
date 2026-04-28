@@ -1711,6 +1711,359 @@ def partner_interest():
     })
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# GOPAY PAYMENTS — partner platí KOLIBRI, KOLIBRI vyplácí seniorovi
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Tok:
+#   1) Partner klikne "zaplatit" na své faktuře → POST /partner-pay
+#   2) Backend zavolá GoPay create_payment → vrátí gw_url (redirect URL)
+#   3) Partner přesměrován do GoPay → uhradí → GoPay webhook
+#   4) POST /gopay-webhook ověří signaturu, načte stav z GoPay,
+#      pokud PAID → vytvoří experience_earnings záznam pro seniora
+#   5) Admin 5. v měsíci spustí GET /admin/payouts/monthly-export →
+#      stáhne CSV pro internet banking, hromadně převede
+
+@experience_bp.route('/api/experience/partner-pay', methods=['POST', 'OPTIONS'])
+def partner_pay_init():
+    """Partner zahájí platbu za podepsaný kontrakt.
+
+    Volá ho admin panel KOLIBRI po schválení partnerského dealu, NIKOLIV
+    senior. Senior smlouvu podepíše přes accept_offer, ale finanční
+    transakci spouští KOLIBRI (jsme merchant of record).
+
+    Body:
+      contractId:   ID kontraktu z experience_contracts
+      partnerEmail: kontakt na partnera (pro doklady)
+      partnerOrg:   název organizace (zobrazí se v GoPay)
+      itemName:     krátký popis (vzpomínka XYZ — anonymní licence)
+      anonymized:   bool (ovlivňuje DPH sazbu)
+      returnUrl:    kam vrátit po platbě (default: app.radimcare.cz/admin/payments)
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+    _init_schema()
+
+    # Admin-only — vyžaduje admin token v hlavičce nebo X-Admin-Secret
+    admin_secret = request.headers.get('X-Admin-Secret', '')
+    if not admin_secret or admin_secret != os.environ.get('ADMIN_SECRET', ''):
+        return jsonify({'success': False, 'error': 'admin auth required'}), 401
+
+    try:
+        import gopay_helpers
+    except ImportError:
+        logger.error('gopay_helpers module not importable — check deploy')
+        return jsonify({'success': False, 'error': 'GoPay integration not deployed'}), 500
+
+    if not gopay_helpers.is_configured():
+        return jsonify({
+            'success': False,
+            'code': 'gopay_not_configured',
+            'error': 'GoPay credentials nejsou nastavené (GOPAY_CLIENT_ID, GOPAY_CLIENT_SECRET, GOPAY_GO_ID).',
+        }), 503
+
+    data = request.get_json(silent=True) or {}
+    contract_id = int(data.get('contractId') or 0)
+    partner_email = (data.get('partnerEmail') or '').strip()[:200]
+    partner_org = (data.get('partnerOrg') or '').strip()[:200]
+    item_name = (data.get('itemName') or 'Vzpomínka — licence').strip()[:200]
+    anonymized = bool(data.get('anonymized', True))
+    return_url = (data.get('returnUrl') or 'https://app.radimcare.cz/admin/payments').strip()[:500]
+
+    if not contract_id or not partner_email or not partner_org:
+        return jsonify({'success': False, 'error': 'Chybí contractId / partnerEmail / partnerOrg'}), 400
+
+    # Načti kontrakt z DB
+    try:
+        with db_context() as db:
+            row = db.execute(
+                "SELECT id, user_id, contribution_id, offer_id, buyer_id, "
+                "       price_kc, royalty_years, royalty_kc_per_year, "
+                "       anonymized, signed_at, revoked_at "
+                "FROM experience_contracts WHERE id = ?",
+                (contract_id,)
+            ).fetchone()
+    except Exception as e:
+        logger.error(f'partner_pay load contract: {e}')
+        return jsonify({'success': False, 'error': 'DB error'}), 500
+
+    if not row:
+        return jsonify({'success': False, 'error': 'Kontrakt nenalezen'}), 404
+
+    def cv(i, k):
+        return row[i] if isinstance(row, (list, tuple)) else row.get(k)
+
+    if cv(10, 'revoked_at'):
+        return jsonify({'success': False, 'error': 'Kontrakt byl zrušen'}), 400
+
+    gross_kc = int(cv(5, 'price_kc') or 0)
+    if gross_kc < 50:
+        return jsonify({'success': False, 'error': 'Cena pod minimem 50 Kč'}), 400
+
+    # Vygenerovat order_number unikátní pro tuto platbu
+    order_number = f'RADIM-CONTRACT-{contract_id}-{int(time.time())}'
+    notify_url = data.get('notifyUrl') or 'https://radim-brain-2025-be1cd52b04dc.herokuapp.com/api/experience/gopay-webhook'
+
+    # GoPay API call
+    payment = gopay_helpers.create_payment(
+        amount_kc=gross_kc,
+        order_number=order_number,
+        partner_email=partner_email,
+        partner_org=partner_org,
+        item_name=item_name,
+        return_url=return_url,
+        notify_url=notify_url,
+        anonymized=anonymized,
+    )
+
+    if not payment or not payment.get('id'):
+        return jsonify({
+            'success': False,
+            'error': 'GoPay API selhalo. Zkontrolujte logy.',
+        }), 502
+
+    # Uložit payment intent do DB pro tracking
+    try:
+        with db_context(commit=True) as db:
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS experience_payments ("
+                "  id SERIAL PRIMARY KEY, "
+                "  contract_id INTEGER NOT NULL, "
+                "  gopay_payment_id TEXT NOT NULL UNIQUE, "
+                "  order_number TEXT NOT NULL UNIQUE, "
+                "  amount_kc INTEGER NOT NULL, "
+                "  state TEXT DEFAULT 'CREATED', "
+                "  partner_email TEXT, "
+                "  partner_org TEXT, "
+                "  gw_url TEXT, "
+                "  paid_at TIMESTAMP, "
+                "  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+            db.execute(
+                "INSERT INTO experience_payments "
+                "(contract_id, gopay_payment_id, order_number, amount_kc, "
+                " state, partner_email, partner_org, gw_url) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (contract_id, str(payment['id']), order_number, gross_kc,
+                 payment.get('state', 'CREATED'), partner_email, partner_org,
+                 payment.get('gw_url', ''))
+            )
+        logger.info(f'GoPay payment intent created: contract={contract_id} amount={gross_kc} CZK gw_url={payment.get("gw_url")}')
+    except Exception as e:
+        logger.error(f'partner_pay save intent: {e}', exc_info=True)
+        # Nevracíme 500 — platba existuje v GoPay, jen DB selhalo
+        # Admin to ručně dohledá v GoPay administraci
+
+    return jsonify({
+        'success': True,
+        'gopayId': str(payment['id']),
+        'gwUrl': payment.get('gw_url'),
+        'orderNumber': order_number,
+        'amountKc': gross_kc,
+        'state': payment.get('state'),
+    })
+
+
+@experience_bp.route('/api/experience/gopay-webhook', methods=['POST'])
+def gopay_webhook():
+    """Webhook od GoPay — platba dokončena, refunded, atd.
+
+    GoPay POST sem `notification_url` po každé změně stavu platby.
+    My ověříme signaturu, načteme aktuální stav, a pokud PAID,
+    vytvoříme experience_earnings záznam pro seniora.
+    """
+    try:
+        import gopay_helpers
+    except ImportError:
+        return jsonify({'success': False}), 500
+
+    raw_body = request.get_data()
+    signature = request.headers.get('X-GoPay-Signature') or request.headers.get('Signature') or ''
+
+    if not gopay_helpers.verify_webhook_signature(raw_body, signature):
+        logger.warning(f'GoPay webhook: invalid signature, header={signature[:20]}')
+        return jsonify({'success': False, 'error': 'invalid signature'}), 403
+
+    data = request.get_json(silent=True) or {}
+    payment_id = str(data.get('id') or data.get('parent_id') or '').strip()
+    if not payment_id:
+        return jsonify({'success': False, 'error': 'missing payment id'}), 400
+
+    # Re-fetch z GoPay aby měli authoritative state (webhook může být replay)
+    payment = gopay_helpers.get_payment_status(payment_id)
+    if not payment:
+        return jsonify({'success': False, 'error': 'GoPay status fetch failed'}), 502
+
+    state = payment.get('state', '')
+    logger.info(f'GoPay webhook: payment={payment_id} state={state}')
+
+    # Update DB
+    try:
+        with db_context(commit=True) as db:
+            db.execute(
+                "UPDATE experience_payments SET state = ?, "
+                "       paid_at = CASE WHEN ? = 'PAID' THEN CURRENT_TIMESTAMP ELSE paid_at END "
+                "WHERE gopay_payment_id = ?",
+                (state, state, payment_id)
+            )
+            # Pokud je platba PAID, vytvořit earnings záznam pro seniora
+            if state == 'PAID':
+                pay_row = db.execute(
+                    "SELECT contract_id, amount_kc FROM experience_payments "
+                    "WHERE gopay_payment_id = ?",
+                    (payment_id,)
+                ).fetchone()
+                if pay_row:
+                    contract_id = pay_row[0] if isinstance(pay_row, (list, tuple)) else pay_row.get('contract_id')
+                    gross_kc = pay_row[1] if isinstance(pay_row, (list, tuple)) else pay_row.get('amount_kc')
+
+                    contract_row = db.execute(
+                        "SELECT user_id FROM experience_contracts WHERE id = ?",
+                        (contract_id,)
+                    ).fetchone()
+                    if contract_row:
+                        senior_uid = contract_row[0] if isinstance(contract_row, (list, tuple)) else contract_row.get('user_id')
+                        senior_net = _calc_senior_net(gross_kc)
+                        db.execute(
+                            "INSERT INTO experience_earnings "
+                            "(user_id, contract_id, amount_kc, gross_kc, "
+                            " source, payout_method, period_label) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (senior_uid, contract_id, senior_net, gross_kc,
+                             'gopay_partner', 'pending_bank_transfer',
+                             datetime.utcnow().strftime('%Y-%m'))
+                        )
+                        logger.info(f'Earnings created: senior={senior_uid} gross={gross_kc} net={senior_net}')
+    except Exception as e:
+        logger.error(f'gopay_webhook DB error: {e}', exc_info=True)
+        # I tak vrátíme 200 aby GoPay neretryl donekonečna; admin issue
+        return jsonify({'success': True, 'note': 'DB sync issue logged'}), 200
+
+    return jsonify({'success': True, 'state': state})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ADMIN — payouts export pro hromadnou výplatu seniorům
+# ─────────────────────────────────────────────────────────────────────────────
+
+@experience_bp.route('/api/admin/payouts/monthly-export', methods=['GET'])
+def admin_payouts_monthly_export():
+    """Vygeneruje CSV pro internet banking — všichni senioři, kterým
+    máme něco vyplatit.
+
+    CSV formát kompatibilní s ČSOB/KB/Raiffeisenbank multi-payment import:
+       account_holder, iban, amount_kc, ks, vs, ss, message
+
+    Vyžaduje admin secret v hlavičce.
+    """
+    admin_secret = request.headers.get('X-Admin-Secret', '')
+    if not admin_secret or admin_secret != os.environ.get('ADMIN_SECRET', ''):
+        return 'admin auth required', 401
+
+    period = request.args.get('period') or datetime.utcnow().strftime('%Y-%m')
+
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT e.id, e.user_id, e.amount_kc, e.created_at, "
+                "       b.account_holder, b.iban "
+                "FROM experience_earnings e "
+                "LEFT JOIN experience_bank_info b ON b.user_id = e.user_id "
+                "WHERE e.paid_at IS NULL "
+                "  AND e.amount_kc > 0 "
+                "  AND e.payout_method = 'pending_bank_transfer' "
+                "ORDER BY e.user_id, e.created_at"
+            ).fetchall()
+    except Exception as e:
+        logger.error(f'admin_payouts_monthly_export: {e}', exc_info=True)
+        return f'DB error: {e}', 500
+
+    # Agreguj per senior (jeden řádek = jeden bank transfer)
+    by_senior = {}
+    for r in rows or []:
+        def gv(i, k):
+            return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+        uid = gv(1, 'user_id')
+        amount = int(gv(2, 'amount_kc') or 0)
+        holder = gv(4, 'account_holder') or 'NEZNÁMÝ — DOPLNIT IBAN'
+        iban = gv(5, 'iban') or ''
+        if uid not in by_senior:
+            by_senior[uid] = {
+                'holder': holder, 'iban': iban, 'amount': 0,
+                'earning_ids': []
+            }
+        by_senior[uid]['amount'] += amount
+        by_senior[uid]['earning_ids'].append(gv(0, 'id'))
+
+    # CSV výstup
+    csv_lines = [
+        '# Radimův Odkaz — měsíční výplaty seniorům',
+        f'# Období: {period}',
+        f'# Generated: {datetime.utcnow().isoformat()}Z',
+        f'# Celkem příjemců: {len(by_senior)}',
+        f'# Celkem Kč: {sum(s["amount"] for s in by_senior.values())}',
+        '#',
+        'account_holder,iban,amount_kc,vs,ss,ks,message,internal_user_id,earning_ids',
+    ]
+    for uid, info in by_senior.items():
+        # VS (variable symbol) = month YYYYMM, SS (specific) = abbreviated uid hash
+        vs = period.replace('-', '')
+        ss = abs(hash(uid)) % 9999999999
+        ks = '0308'  # Konstantní symbol pro "běžnou platbu" v ČR
+        message = f'Radim Odkaz {period}'
+        ids_str = '|'.join(str(eid) for eid in info['earning_ids'])
+        csv_lines.append(
+            f'"{info["holder"]}","{info["iban"]}",{info["amount"]},'
+            f'{vs},{ss},{ks},"{message}","{uid}","{ids_str}"'
+        )
+
+    csv_text = '\n'.join(csv_lines) + '\n'
+    from flask import Response
+    return Response(
+        csv_text,
+        mimetype='text/csv; charset=utf-8',
+        headers={
+            'Content-Disposition': f'attachment; filename="radim-payouts-{period}.csv"',
+        }
+    )
+
+
+@experience_bp.route('/api/admin/payouts/mark-paid', methods=['POST'])
+def admin_payouts_mark_paid():
+    """Po hromadné bankovní výplatě označí dané earnings záznamy
+    jako paid_at = NOW + payout_method = 'bank_transfer_done'.
+
+    Body: {"earningIds": [1, 2, 3, ...], "bankRef": "TX-2026-04-001"}
+    """
+    admin_secret = request.headers.get('X-Admin-Secret', '')
+    if not admin_secret or admin_secret != os.environ.get('ADMIN_SECRET', ''):
+        return jsonify({'success': False, 'error': 'admin auth required'}), 401
+
+    data = request.get_json(silent=True) or {}
+    earning_ids = data.get('earningIds') or []
+    bank_ref = (data.get('bankRef') or '').strip()[:100]
+
+    if not isinstance(earning_ids, list) or not earning_ids:
+        return jsonify({'success': False, 'error': 'earningIds required'}), 400
+
+    try:
+        with db_context(commit=True) as db:
+            placeholders = ','.join(['?'] * len(earning_ids))
+            db.execute(
+                f"UPDATE experience_earnings SET paid_at = CURRENT_TIMESTAMP, "
+                f"       payout_method = 'bank_transfer_done', "
+                f"       period_label = COALESCE(period_label, ?) "
+                f"WHERE id IN ({placeholders})",
+                tuple([bank_ref] + list(earning_ids))
+            )
+        logger.info(f'admin_payouts_mark_paid: {len(earning_ids)} earnings marked paid (bankRef={bank_ref})')
+        return jsonify({'success': True, 'updated': len(earning_ids)})
+    except Exception as e:
+        logger.error(f'admin_payouts_mark_paid: {e}', exc_info=True)
+        return jsonify({'success': False, 'error': 'DB error'}), 500
+
+
 @experience_bp.route('/api/experience/contribution/<int:cid>/accept-offer', methods=['POST'])
 @require_auth
 def accept_offer(cid):
