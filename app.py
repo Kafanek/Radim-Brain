@@ -3333,6 +3333,27 @@ def rate_limited(e):
 def server_error(e):
     return jsonify({'success': False, 'error': 'Interní chyba serveru', 'code': 500}), 500
 
+
+# Defensive handlers — turn common parsing errors into clean 400 instead of 500.
+# Catches `int(request.args.get(...))` ValueError, bracket-access KeyError on
+# request.args/form/files/headers, and TypeError from None coercion.
+@app.errorhandler(ValueError)
+def value_error_handler(e):
+    logger.warning(f"ValueError caught (likely bad input): {e}")
+    return jsonify({'success': False, 'error': 'Neplatná hodnota parametru', 'detail': str(e), 'code': 400}), 400
+
+
+@app.errorhandler(KeyError)
+def key_error_handler(e):
+    logger.warning(f"KeyError caught (likely missing field): {e}")
+    return jsonify({'success': False, 'error': 'Chybí povinné pole', 'detail': str(e), 'code': 400}), 400
+
+
+@app.errorhandler(TypeError)
+def type_error_handler(e):
+    logger.warning(f"TypeError caught: {e}")
+    return jsonify({'success': False, 'error': 'Nesprávný typ vstupu', 'detail': str(e), 'code': 400}), 400
+
 # Initialize database
 with app.app_context():
     init_db()

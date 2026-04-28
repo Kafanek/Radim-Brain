@@ -294,6 +294,7 @@ def windsurf_health():
 # CLIENT & EMERGENCY
 # ============================================
 @admin_bp.route('/api/clients', methods=['POST', 'OPTIONS'])
+@require_auth
 def api_clients():
     if request.method == 'OPTIONS':
         return '', 204
@@ -494,6 +495,7 @@ def admin_system():
 
 
 @admin_bp.route('/api/emergency', methods=['POST', 'OPTIONS'])
+@require_auth
 def api_emergency():
     if request.method == 'OPTIONS':
         return '', 204
