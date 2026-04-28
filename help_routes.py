@@ -69,7 +69,7 @@ def help_feedback():
     email dispatch fails (DB row remains for admin to handle).
     """
     _init_help_schema()
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     message = (data.get('message') or '').strip()
     if len(message) < 3:
         return jsonify({'success': False, 'error': 'message too short'}), 400
@@ -138,7 +138,7 @@ def help_ask():
     Body: { query: string, context: string (optional prior search hits) }
     """
     import os
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     query = (data.get('query') or '').strip()
     if len(query) < 3:
         return jsonify({'success': False, 'error': 'query too short'}), 400
@@ -202,7 +202,7 @@ def help_view():
             result_count: int, user_id: str }
     Best-effort. Silently drops if analytics disabled or DB write fails.
     """
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     event_type = (data.get('event_type') or '')[:32]
     if event_type not in ('section', 'search', 'ask', 'tip_click', 'tutorial'):
         return jsonify({'success': False, 'error': 'invalid event_type'}), 400

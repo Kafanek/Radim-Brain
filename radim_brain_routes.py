@@ -160,7 +160,7 @@ def brain_constants():
 @optional_auth
 def brain_consciousness():
     """Výpočet rovnice stavu vědomí (§6)."""
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     n = data.get('n', 5)
     alpha = data.get('alpha', 0.0)
 
@@ -210,7 +210,7 @@ def brain_state_get():
 @optional_auth
 def brain_state():
     """Výpočet stavového vektoru Ψ(t) = (C, E, R, S)."""
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
 
     C = clamp(float(data.get('C', 5.0)), 0.0, C_MAX)
     alpha = clamp(float(data.get('alpha', 0.0)), 0.0, 1.0)
@@ -285,7 +285,7 @@ def brain_state():
 @optional_auth
 def brain_perceive():
     """PERCEPTION vrstva — zpracování senzorových dat."""
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
 
     noise = float(data.get('noise_db', 40))
     light = float(data.get('light_lux', 300))
@@ -342,7 +342,7 @@ def brain_perceive():
 @optional_auth
 def brain_adapt():
     """Adaptace (Master Prompt §11)."""
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     success = data.get('success', True)
     context = data.get('context', '')
     user_id = data.get('user_id')
@@ -361,7 +361,7 @@ def brain_adapt():
 @optional_auth
 def brain_feedback():
     """Speech feedback from frontend (v2.1)."""
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     user_id = data.get('user_id')
     if not user_id:
         return jsonify({"success": False, "error": "user_id is required"}), 400
@@ -407,7 +407,7 @@ def brain_feedback():
 @radim_brain_bp.route('/rhythm', methods=['POST'])
 def brain_rhythm():
     """Rytmická regulace (Master Prompt §8)."""
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     omega = float(data.get('omega', 2 * math.pi))
     application = data.get('application', 'speech')
 

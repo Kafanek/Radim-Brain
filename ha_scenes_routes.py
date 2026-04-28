@@ -156,7 +156,7 @@ def save_custom_scene():
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     name = (data.get('name') or '').strip()[:80]
     icon = (data.get('icon') or '')[:8] or '✨'
     actions = data.get('actions')
@@ -284,7 +284,7 @@ def trigger_emergency():
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     source = (data.get('source') or 'smart_home')[:40]
     message = (data.get('message') or 'Nouzové tlačítko stisknuto')[:400]
     ctx = data.get('device_context') or {}

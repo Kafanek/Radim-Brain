@@ -472,7 +472,7 @@ def photo_item(photo_id):
         return jsonify({'success': True, 'photo': _row_to_dict(row)})
 
     # PUT — partial update (caption / album / shared / ai_caption flag ignored)
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     allowed = {
         'caption': ('caption', lambda v: str(v or '').strip()[:500]),
         'album': ('album',

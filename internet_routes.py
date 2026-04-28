@@ -118,7 +118,7 @@ def toggle_favorite():
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     url = (data.get('url') or '').strip()
     if not _validate_url(url):
         return jsonify({'success': False, 'error': 'invalid url'}), 400
@@ -190,7 +190,7 @@ def add_history():
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     url = (data.get('url') or '').strip()
     if not _validate_url(url):
         return jsonify({'success': False, 'error': 'invalid url'}), 400
@@ -349,7 +349,7 @@ def translate_text():
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     text = (data.get('text') or '').strip()
     source = (data.get('sourceLang') or 'auto')[:8]
     if not text:

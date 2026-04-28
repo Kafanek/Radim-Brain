@@ -236,7 +236,7 @@ def calendar_parse():
     Returns: { parsed: {title, date, time, type, description}, source }
     Uses Gemini 2.0 Flash when GEMINI_API_KEY is set, falls back to rule-based.
     """
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     text = (data.get('text') or '').strip()
     if len(text) < 3:
         return jsonify({'success': False, 'error': 'text too short'}), 400

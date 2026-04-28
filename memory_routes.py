@@ -90,7 +90,7 @@ def save_profile(user_id):
     auth_user_id = str(g.auth_user.get('id', ''))
     if auth_user_id and auth_user_id != str(user_id):
         return jsonify({"success": False, "error": "Přístup odepřen"}), 403
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
 
     allowed_fields = ["name", "age_group", "hearing", "vision", "memory_support",
                       "communication_style", "preferred_length", "character", "tone",
@@ -846,7 +846,7 @@ def add_to_history(user_id):
     auth_user_id = str(g.auth_user.get('id', ''))
     if auth_user_id and auth_user_id != str(user_id):
         return jsonify({"success": False, "error": "Přístup odepřen"}), 403
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
 
     role = data.get("role", "user")
     content = data.get("content", "")
@@ -924,7 +924,7 @@ def get_context(user_id):
 @optional_auth
 def submit_feedback(user_id):
     """Feedback with brain RL integration"""
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
 
     feedback_type = data.get("type", "neutral")
     comment = data.get("comment", "")
@@ -972,7 +972,7 @@ def submit_feedback(user_id):
 @optional_auth
 def set_caregiver(user_id):
     """Set caregiver for crisis notifications"""
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     caregiver_id = data.get("caregiver_id")
 
     if not caregiver_id:

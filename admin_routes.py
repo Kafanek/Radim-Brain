@@ -297,7 +297,7 @@ def windsurf_health():
 def api_clients():
     if request.method == 'OPTIONS':
         return '', 204
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     action = data.get('action', 'sync')
     if action == 'sync':
         client = data.get('client', {})
@@ -411,7 +411,7 @@ def admin_change_role(user_id):
     if request.method == 'OPTIONS':
         return '', 204
     from database import db_context
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     new_role = data.get('role', '')
     valid_roles = ('subscriber', 'premium', 'teacher', 'administrator')
     if new_role not in valid_roles:
@@ -497,7 +497,7 @@ def admin_system():
 def api_emergency():
     if request.method == 'OPTIONS':
         return '', 204
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     event = data.get('event', 'unknown')
     user_id = data.get('user_id', 'unknown')
     timestamp = data.get('timestamp', now_iso())

@@ -36,7 +36,7 @@ except ImportError:
 def sync_gdpr_consent(user_id):
     """Sync GDPR consent from WordPress/frontend to Heroku backend.
     Called after user grants/revokes consent in GDPR dialog."""
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     consent = {
         "data_processing": bool(data.get("data_processing", False)),
         "chat_history": bool(data.get("chat_history", False)),

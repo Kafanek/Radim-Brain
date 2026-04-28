@@ -103,7 +103,7 @@ def kal_radim_register():
     """Register a new user in memory system"""
     if request.method == 'OPTIONS':
         return '', 204
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     user_id = data.get('user_id', str(uuid.uuid4()))
     try:
         if kal_helpers.MEMORY_AVAILABLE:
@@ -129,7 +129,7 @@ def kal_radim_update_user(user_id):
         return '', 204
     idor = check_idor(user_id)
     if idor: return idor
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     try:
         if kal_helpers.MEMORY_AVAILABLE:
             from memory_routes import _db_load_profile, _db_save_profile
@@ -173,7 +173,7 @@ def kal_radim_conversation():
     """Save a conversation turn"""
     if request.method == 'OPTIONS':
         return '', 204
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     user_id = data.get('user_id', 'anonymous')
     try:
         if kal_helpers.MEMORY_AVAILABLE:
@@ -221,7 +221,7 @@ def kal_agents_interact():
     """KAL Agent interaction — routes to appropriate agent via orchestrator (v281)"""
     if request.method == 'OPTIONS':
         return '', 204
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     agent = data.get('agent', 'core')
     message = data.get('message', '')
     context = data.get('context', {})
@@ -287,7 +287,7 @@ def kal_timing_calculate():
     """phi-based timing calculation for text (v281)"""
     if request.method == 'OPTIONS':
         return '', 204
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     text = data.get('text', '')
 
     try:
@@ -319,7 +319,7 @@ def kal_safety_check():
     """Safety/crisis detection for message (v281)"""
     if request.method == 'OPTIONS':
         return '', 204
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     message = data.get('message', '') or data.get('text', '')
 
     if not message:
@@ -377,7 +377,7 @@ def kal_emotion_analyze():
     """Emotion analysis from text — valence/arousal model (v319)"""
     if request.method == 'OPTIONS':
         return '', 204
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     text = data.get('text', '')
 
     try:
@@ -474,7 +474,7 @@ def kal_neurons_save():
         return '', 204
 
     user_id = getattr(request, 'user_id', None)
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
 
     if not user_id:
         user_id = data.get('user_id', 'anonymous')

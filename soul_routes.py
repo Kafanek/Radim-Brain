@@ -219,7 +219,7 @@ def get_lessons():
 def add_lesson():
     """Pridat nove ponauceni"""
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
 
         description = data.get('description', '')
         what_learned = data.get('what_learned', '')
@@ -272,7 +272,7 @@ def add_lesson():
 def log_interaction():
     """Zalogovat interakci pro statistiky"""
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
 
         user_id = data.get('user_id', 'anonymous')
         interaction_type = data.get('type', 'chat')

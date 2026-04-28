@@ -128,7 +128,7 @@ def get_audit(user_id):
 @require_auth
 def post_audit():
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         # Sprint W: force user_id from auth, ignore client-supplied userId (IDOR fix)
         auth_uid = str((getattr(_g, 'auth_user', None) or {}).get('id') or '')
         if not auth_uid:

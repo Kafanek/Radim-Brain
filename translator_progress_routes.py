@@ -101,7 +101,7 @@ def add_history():
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     source_text = (data.get('sourceText') or data.get('source_text') or '').strip()
     if not source_text:
         return jsonify({'success': False, 'error': 'sourceText required'}), 400
@@ -228,7 +228,7 @@ def toggle_favorite():
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     phrase_id = (data.get('phraseId') or data.get('phrase_id') or '').strip()
     if not phrase_id:
         return jsonify({'success': False, 'error': 'phraseId required'}), 400

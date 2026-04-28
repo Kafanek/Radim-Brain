@@ -276,7 +276,7 @@ def scan_email():
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     subject = (data.get('subject') or '')[:500]
     body = (data.get('body') or '')[:10000]
     from_email = (data.get('from_email') or data.get('from') or '')[:200]
@@ -332,7 +332,7 @@ def flag_family():
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     subject = (data.get('subject') or '')[:500]
     from_email = (data.get('from') or data.get('from_email') or '')[:200]
     from_name = (data.get('from_name') or '')[:200]
@@ -505,7 +505,7 @@ def block_sender():
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     sender = (data.get('sender') or data.get('sender_email') or '').strip().lower()
     if not _is_valid_email(sender):
         return jsonify({'success': False, 'error': 'invalid sender email'}), 400

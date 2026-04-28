@@ -196,7 +196,7 @@ def save_account():
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     email_addr = (data.get('email') or data.get('email_address') or '').strip().lower()
     password = data.get('password') or ''
 

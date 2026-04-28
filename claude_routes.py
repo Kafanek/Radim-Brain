@@ -93,7 +93,7 @@ def get_nameday():
 def chat_with_radim():
     """Hlavni chat endpoint s Claude + Web Search"""
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         message = data.get('message', '')
         auth_user = getattr(g, 'auth_user', None) or {}
         user_id = str(auth_user.get('id', '')) or data.get('user_id', 'anonymous')
@@ -348,7 +348,7 @@ from claude_emotion_routes import analyze_emotions_local, calculate_harmony
 def save_memory_note():
     """Ulozit poznamku do pameti (persisted to PostgreSQL)"""
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         user_id = data.get('user_id', 'anonymous')
         note_type = data.get('type', 'observation')
         content = data.get('content', '')
@@ -379,7 +379,7 @@ def save_memory_note():
 def recall_memory():
     """Vybavit si vzpominky (from PostgreSQL)"""
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         user_id = data.get('user_id', 'anonymous')
         limit = data.get('limit', 20)
 

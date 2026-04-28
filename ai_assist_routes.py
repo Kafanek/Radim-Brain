@@ -75,7 +75,7 @@ def _parse_json_loose(text: str):
 @rate_limit(20, 60, 'ip')
 def ai_assist():
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         task = str(data.get('task', '')).strip().lower()
         if task not in {'suggest_replies', 'translate', 'summarize',
                         'extract_event', 'explain_word'}:

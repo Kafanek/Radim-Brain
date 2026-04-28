@@ -90,7 +90,7 @@ def analyze_emotion():
     """
     text = ''
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         text = data.get('text', '')
         context = data.get('context', 'senior_care')
 
@@ -175,7 +175,7 @@ def get_consciousness_state():
     🧠 Získat doporučení pro stav vědomí
     """
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         emotions = data.get('emotions', {})
 
         harmony = calculate_harmony(emotions)

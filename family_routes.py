@@ -465,7 +465,7 @@ def create_proposal(senior_id):
     """
     _ensure_proposals_table()
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         activity = data.get('activity_type', '').strip()
         if activity not in VALID_ACTIVITIES:
             return jsonify({
@@ -601,7 +601,7 @@ def respond_to_proposal(senior_id, proposal_id):
     Body: { "action": "accept" | "reject", "note": "Díky, hned to zkusím" }
     """
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         action = data.get('action', '').strip().lower()
         note = data.get('note', '')
 

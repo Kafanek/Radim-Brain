@@ -339,7 +339,7 @@ def pilot_onboarding_complete():
     if not uid:
         return jsonify({"success": False, "error": "Auth required"}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     phone_raw = (data.get("phone") or "").strip()
     phone = "".join(c for c in phone_raw if c.isdigit() or c == "+")[:20]
     privacy_accepted = bool(data.get("privacyAccepted"))

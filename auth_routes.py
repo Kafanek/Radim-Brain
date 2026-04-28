@@ -155,7 +155,7 @@ def auth_register():
     """Register user in PostgreSQL (+ try WordPress sync)"""
     if request.method == 'OPTIONS':
         return '', 204
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     email = data.get('email', '').strip().lower()
     password = data.get('password', '')
     name = data.get('name', '')
@@ -212,7 +212,7 @@ def auth_login():
     """Login from PostgreSQL (+ WordPress fallback)"""
     if request.method == 'OPTIONS':
         return '', 204
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     email = data.get('email', '').strip().lower()
     password = data.get('password', '')
 
@@ -301,7 +301,7 @@ def auth_lost_password():
     """Password reset -- try WordPress, always return success"""
     if request.method == 'OPTIONS':
         return '', 204
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     email = data.get('email', '').strip().lower()
 
     if not email:

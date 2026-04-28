@@ -130,7 +130,7 @@ def create_alert_rule():
     if request.method == 'OPTIONS':
         return '', 204
 
-    data = request.get_json()
+    data = request.get_json(silent=True)
     if not data:
         return jsonify({'error': 'JSON body required'}), 400
 
@@ -290,7 +290,7 @@ def acknowledge_alert(alert_id):
     if request.method == 'OPTIONS':
         return '', 204
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     ack_by = data.get('acknowledged_by', 'caregiver')
 
     db, is_pg = _get_db()
@@ -410,7 +410,7 @@ def add_caregiver():
     if request.method == 'OPTIONS':
         return '', 204
 
-    data = request.get_json()
+    data = request.get_json(silent=True)
     if not data or not data.get('room_id') or not data.get('name') or not data.get('phone'):
         return jsonify({'error': 'room_id, name, phone required'}), 400
 
@@ -483,7 +483,7 @@ def manage_caregiver(caregiver_id):
             db.commit()
             return jsonify({'success': True, 'action': 'deactivated'}), 200
 
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         updates = []
         params = []
         for field in ['name', 'phone', 'email', 'role']:
@@ -523,7 +523,7 @@ def test_sms():
     if request.method == 'OPTIONS':
         return '', 204
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     phone = data.get('phone')
 
     if not phone:

@@ -146,7 +146,7 @@ def upload_voice_message():
 @rate_limit(10, 60, 'ip')
 def subscribe_push():
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         user_id = data.get('userId')
         subscription = data.get('subscription')
         if not user_id or not subscription:
@@ -176,7 +176,7 @@ def subscribe_push():
 @media_push_bp.route('/api/push/unsubscribe', methods=['POST'])
 def unsubscribe_push():
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         user_id = data.get('userId')
         if not user_id:
             return jsonify({'success': False, 'error': 'Chybí userId'}), 400
@@ -204,7 +204,7 @@ def get_vapid_key():
 @media_push_bp.route('/api/push/test', methods=['POST'])
 def test_push():
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         user_id = data.get('userId')
         if not user_id:
             return jsonify({'success': False, 'error': 'Chybí userId'}), 400

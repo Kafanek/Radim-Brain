@@ -1315,7 +1315,7 @@ def decline_cosign(contract_id):
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     reason = (data.get('reason') or '').strip()[:500]
 
     # Verify contract exists + caregiver is family of the senior

@@ -99,7 +99,7 @@ def sync_lesson_progress():
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     lesson_id = (data.get('lessonId') or data.get('lesson_id') or '').strip()
     if not lesson_id:
         return jsonify({'success': False, 'error': 'lessonId required'}), 400
@@ -284,7 +284,7 @@ def save_quiz_result():
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     course_id = (data.get('courseId') or '')[:64] or None
     module_id = (data.get('moduleId') or '')[:64] or None
     score = max(0, min(100, int(data.get('score') or 0)))

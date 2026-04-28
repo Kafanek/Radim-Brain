@@ -102,7 +102,7 @@ def upsert_progress(book_id):
     if not book_id:
         return jsonify({'success': False, 'error': 'book_id required'}), 400
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     paragraph = max(0, int(data.get('paragraph') or 0))
     percent = max(0, min(100, int(data.get('percent') or 0)))
     title = (data.get('title') or '')[:160] or None
@@ -219,7 +219,7 @@ def add_bookmark(book_id):
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
     book_id = (book_id or '').strip()[:64]
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     paragraph = data.get('paragraph')
     if paragraph is None:
         return jsonify({'success': False, 'error': 'paragraph required'}), 400

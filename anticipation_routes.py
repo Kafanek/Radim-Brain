@@ -157,7 +157,7 @@ def predict():
     Output: {current, predicted, trends, speech_params, breakpoints, orchestrator_instructions}
     """
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
 
         C_current = float(data.get('C', 10))
         alpha_current = float(data.get('alpha', 0.3))
@@ -258,7 +258,7 @@ def speech_adjust():
     Output: {ssml, params, voice, state, emotions}
     """
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
 
         text = data.get('text', '')
         C = float(data.get('C', 10))

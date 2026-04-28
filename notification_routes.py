@@ -151,7 +151,7 @@ def notification_prefs():
             return jsonify({"success": True, "muted_types": [], "dnd_until": None})
 
     # PUT
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     muted = data.get("muted_types") or []
     if not isinstance(muted, list):
         return jsonify({"success": False, "error": "muted_types must be array"}), 400

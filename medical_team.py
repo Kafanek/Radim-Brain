@@ -628,7 +628,7 @@ def get_observations(senior_id):
 @optional_auth
 def acknowledge_observation(senior_id):
     """Mark an observation as acknowledged by the caregiver/senior."""
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     obs_id = data.get('id')
     if not obs_id:
         return jsonify({'success': False, 'error': 'missing id'}), 400
@@ -1466,7 +1466,7 @@ def medical_video_call(senior_id):
 def update_team_member(senior_id, member_id):
     """Update name/email/phone/role on an existing team member."""
     _init_medical_schema()
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     allowed = {'name', 'email', 'phone', 'role'}
     updates = {k: v for k, v in data.items() if k in allowed}
     if not updates:
@@ -1514,7 +1514,7 @@ def medical_symptoms(senior_id):
     _init_medical_schema()
 
     if request.method == 'POST':
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         def _clamp(x):
             try: return max(0, min(10, int(x)))
             except: return None
@@ -1573,7 +1573,7 @@ def medical_appointments(senior_id):
     _init_medical_schema()
 
     if request.method == 'POST':
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         appt_id = data.get('id') or f"appt-{int(datetime.utcnow().timestamp()*1000):x}"
         with_member = (data.get('with') or '')[:200]
         when_str = data.get('when') or ''
@@ -1935,7 +1935,7 @@ def medications_today(senior_id):
 @optional_auth
 def log_medication(senior_id):
     """Mark a medication dose as taken."""
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     name = (data.get('medication_name') or '').strip()
     dose = data.get('dose') or ''
     time_slot = data.get('time_slot') or ''

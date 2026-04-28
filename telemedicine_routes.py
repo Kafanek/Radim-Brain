@@ -302,7 +302,7 @@ def telemed_consent(consultation_id):
     Writes audit event + updates consent_version on consultation row.
     """
     user_id = _get_user_id()
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     consent = bool(data.get('consent', False))
     version = str(data.get('consent_version') or '1.0')[:32]
 
@@ -466,7 +466,7 @@ def telemed_rating(consultation_id):
     Activates the telemedicine_quality_log table (previously unused).
     """
     user_id = _get_user_id()
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     try:
         stars = int(data.get('stars', 0))
     except (ValueError, TypeError):
@@ -537,7 +537,7 @@ def telemed_invite_family(consultation_id):
     Sets can_view_clinical=false, can_edit_notes=false, generates join_token.
     """
     user_id = _get_user_id()
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     family_user_id = (data.get('family_user_id') or '').strip()
     family_name = (data.get('name') or '')[:200]
     if not family_user_id:

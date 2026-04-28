@@ -544,7 +544,7 @@ def add_memory():
                         'error': f'Moc rychle. Zkuste to za chvilku.',
                         'code': 'rate_limit'}), 429
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     text = (data.get('text') or '').strip()
     if len(text) < 3:
         return jsonify({'success': False, 'error': 'Napište prosím delší text.'}), 400
@@ -621,7 +621,7 @@ def update_or_delete_memory(mem_id):
             return jsonify({'success': False, 'error': 'internal'}), 500
 
     # PUT
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     updates = {}
     if 'text' in data:
         t = str(data.get('text') or '').strip()[:MAX_MEMORY_LEN]
@@ -714,7 +714,7 @@ def toggle_intent():
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     key = str(data.get('key') or '').strip()[:64]
     enabled = bool(data.get('enabled'))
     valid_keys = {d['key']: d for d in DEFAULT_INTENTS}

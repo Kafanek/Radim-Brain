@@ -112,7 +112,7 @@ def notes_collection():
         return jsonify({'success': True, 'notes': notes, 'count': len(notes)})
 
     # POST
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     text = (data.get('text') or '').strip()
     if not text:
         return jsonify({'success': False, 'error': 'text required'}), 400
@@ -201,7 +201,7 @@ def note_item(note_id):
             return jsonify({'success': False, 'error': str(e)[:100]}), 500
 
     # PUT — partial update
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     allowed = {
         'text': 'text', 'category': 'category',
         'pinned': 'pinned', 'important': 'important',
@@ -356,7 +356,7 @@ def convert_to_event(note_id):
         return jsonify({'success': False, 'error': 'note not found'}), 404
     text = row[0] if isinstance(row, (list, tuple)) else row.get('text')
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     event_date = data.get('date')
     event_time = data.get('time')
     title = (data.get('title') or '').strip() or (text or '')[:80]
@@ -441,7 +441,7 @@ def convert_to_task(note_id):
         return jsonify({'success': False, 'error': 'note not found'}), 404
     text = row[0] if isinstance(row, (list, tuple)) else row.get('text')
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     title = (data.get('title') or '').strip() or (text or '')[:120]
     priority = (data.get('priority') or 'normal')[:16]
     due_date = (data.get('dueDate') or '')[:10] or None

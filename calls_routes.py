@@ -203,7 +203,7 @@ def log_call():
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     contact_id = (data.get('contactId') or '')[:64]
     contact_name = (data.get('contactName') or 'Kontakt')[:200]
     callee_uid = (data.get('calleeUserId') or '')[:80]
@@ -257,7 +257,7 @@ def end_call():
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     call_id = int(data.get('callId') or 0)
     duration = max(0, int(data.get('durationSec') or 0))
     reason = (data.get('reason') or 'completed').strip().lower()
@@ -485,7 +485,7 @@ def telemetry():
     uid = _uid()
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     call_id = data.get('callId')
     quality = (data.get('quality') or 'unknown')[:32]
     bitrate_kbps = int(data.get('bitrateKbps') or 0)
@@ -649,7 +649,7 @@ def save_transcript(call_id):
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     text = (data.get('text') or '').strip()[:_MAX_TRANSCRIPT_LEN]
     if len(text) < 20:
         return jsonify({'success': False, 'error': 'Přepis je příliš krátký.'}), 400

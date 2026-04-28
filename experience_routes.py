@@ -946,7 +946,7 @@ def session_start():
                         'error': f'Máte už {MAX_CONTRIBUTIONS_PER_SENIOR} vzpomínek. Smažte některou starou.',
                         'code': 'quota'}), 413
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     ctype = (data.get('type') or 'story').strip().lower()
     theme = (data.get('theme') or 'family').strip().lower()
     depth = int(data.get('depth') or 1)
@@ -1009,7 +1009,7 @@ def quick_memory_from_message():
                         'error': f'Máte už {MAX_CONTRIBUTIONS_PER_SENIOR} vzpomínek.',
                         'code': 'quota'}), 413
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     text = (data.get('text') or '').strip()
     if not text:
         return jsonify({'success': False, 'error': 'Chybí text'}), 400
@@ -1059,7 +1059,7 @@ def session_append(session_id):
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     chunk = (data.get('text') or '').strip()
     if not chunk:
         return jsonify({'success': False, 'error': 'Prázdný text.'}), 400
@@ -1257,7 +1257,7 @@ def session_approve(session_id):
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     privacy = (data.get('privacy') or 'family').strip().lower()
     use_structured = _to_bool(data.get('useStructured'))
     if privacy not in {'family', 'research', 'public'}:
@@ -1316,7 +1316,7 @@ def change_privacy(cid):
     if not _rate_ok(uid, 'privacy_change', 30):
         return jsonify({'success': False, 'code': 'rate_limit',
                         'error': 'Moc rychle. Zkuste to za chvilku.'}), 429
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     new_privacy = (data.get('privacy') or '').strip().lower()
     if new_privacy not in {'family', 'research', 'public'}:
         return jsonify({'success': False, 'error': 'Neplatná volba.'}), 400
@@ -1381,7 +1381,7 @@ def session_replace(session_id):
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     new_transcript = (data.get('text') or '').strip()
 
     try:
@@ -1511,7 +1511,7 @@ def attach_gallery_photo(cid):
     uid = _uid()
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     photo_id = int(data.get('photoId') or 0)
     if not photo_id:
         return jsonify({'success': False, 'error': 'Chybí photoId.'}), 400
@@ -3367,7 +3367,7 @@ def inheritance():
         })
 
     # PUT
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     heir_name = (data.get('heirName') or '').strip()[:200]
     heir_relation = (data.get('heirRelation') or '').strip()[:100]
     heir_contact = (data.get('heirContact') or '').strip()[:200]
@@ -3515,7 +3515,7 @@ def scheduled_messages():
         return jsonify({'success': False, 'code': 'rate_limit',
                         'error': 'Moc rychle. Zkuste to za chvilku.'}), 429
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     recipient_name = (data.get('recipientName') or '').strip()[:200]
     recipient_relation = (data.get('recipientRelation') or '').strip()[:100]
     recipient_contact = (data.get('recipientContact') or '').strip()[:200]
@@ -3615,7 +3615,7 @@ def link_parent(cid):
     uid = _uid()
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     parent_id = int(data.get('parentId') or 0)
     if parent_id == cid:
         return jsonify({'success': False, 'error': 'Nelze odkázat na sebe.'}), 400
@@ -4369,7 +4369,7 @@ def erase_all():
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     confirm = (data.get('confirm') or '').strip().upper()
     if confirm != 'SMAZAT VSE':
         return jsonify({
@@ -4518,7 +4518,7 @@ def contribution_consent(cid):
         return jsonify({'success': False, 'code': 'rate_limit',
                         'error': 'Moc rychle.'}), 429
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     sf = _to_bool(data.get('shareFamily'))
     sr = _to_bool(data.get('shareResearch'))
     sc = _to_bool(data.get('shareCompanies'))
@@ -4631,7 +4631,7 @@ def bank_info():
         return jsonify({'success': False, 'code': 'rate_limit',
                         'error': 'Moc rychle.'}), 429
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     holder = (data.get('accountHolder') or '').strip()[:120]
     iban_raw = ''.join(c for c in str(data.get('iban') or '') if c.isalnum()).upper()
     bank_name = (data.get('bankName') or '').strip()[:80]
@@ -5030,7 +5030,7 @@ def admin_approve_reward(rid):
     if not admin_secret or request.headers.get('X-Admin-Secret') != admin_secret:
         return jsonify({'success': False, 'error': 'forbidden'}), 403
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     action = (data.get('action') or '').lower()  # 'approve' | 'pay' | 'fail'
     bank_ref = (data.get('bankRef') or '').strip()[:60]
     note = (data.get('note') or '').strip()[:500]

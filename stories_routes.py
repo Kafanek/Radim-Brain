@@ -123,7 +123,7 @@ def stories_collection():
         return jsonify({'success': True, 'stories': stories, 'count': len(stories)})
 
     # POST
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     title = (data.get('title') or '').strip()[:200]
     content = (data.get('content') or '').strip()[:20000]
     if not title or not content:
@@ -204,7 +204,7 @@ def story_item(story_id):
             return jsonify({'success': False, 'error': str(e)[:100]}), 500
 
     # PUT — partial update
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     allowed = {
         'title': 'title', 'content': 'content', 'genre': 'genre',
         'theme': 'theme', 'length': 'length',
