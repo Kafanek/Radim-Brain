@@ -49,7 +49,15 @@ VOICE_PROFILES = {
         "emphasis": True,
     },
     "CRISIS": {
-        "style": "calm",
+        # Bug-fix (TTS audit #13): cs-CZ-AntoninNeural NEPODPORUJE 'calm' style.
+        # Azure docs (https://learn.microsoft.com/azure/ai-services/speech-service/
+        # language-support#prebuilt-neural-voices) — Czech neural voices podporují
+        # jen 'friendly' a 'empathetic'. 'calm' Azure ignoroval = CRISIS zněl
+        # jako default voice (ne uklidňující jako jsme zamýšleli).
+        # Fix: 'empathetic' se styledegree 2.0 (max) je v Czech repertoáru
+        # nejblíž pocitu klidného uklidnění. Plus pomalejší rate -20% +
+        # delší pauzy 1200ms drží tu uklidňující kvalitu.
+        "style": "empathetic",
         "styledegree": "2.0",
         "rate": "-20%",          # výrazně pomalejší
         "pitch": "+0%",          # v10.23: hlubší pro klid
@@ -191,14 +199,24 @@ def _fix_czech_pronunciation(text):
     """Fix Azure mispronunciations using IPA phoneme tags.
 
     Must be called AFTER xml_escape() so the SSML tags are not escaped.
+
+    Bug-fix (TTS audit #8): dříve `re.search()` našel jen PRVNÍ výskyt
+    slova v textu. Pokud text obsahoval "PDF a další PDF dokument",
+    jen první PDF dostal phoneme tag, druhý zněl Azure-default.
+    Fix: re.sub s callbackem nahradí VŠECHNY výskyty pattern najednou.
     """
     for pattern, ipa, display in _CZECH_PHONEME_FIXES:
-        match = re.search(pattern, text)
-        if match:
-            word = match.group(0)
+        # Pre-check: pokud žádný match, přeskočit (re.sub by stejně neudělal nic,
+        # ale tím se vyhneme zbytečné regex compilation)
+        if not re.search(pattern, text):
+            continue
+
+        def _replace_match(m, ipa=ipa, display=display):
+            word = m.group(0)
             display_text = display or word
-            replacement = f'<phoneme alphabet="ipa" ph="{ipa}">{display_text}</phoneme>'
-            text = text[:match.start()] + replacement + text[match.end():]
+            return f'<phoneme alphabet="ipa" ph="{ipa}">{display_text}</phoneme>'
+
+        text = re.sub(pattern, _replace_match, text)
     return text
 
 
@@ -294,7 +312,49 @@ MAX_TTS_CHARS = 200
 _FATIGUE_ACTIVATE = 0.65
 _FATIGUE_DEACTIVATE = 0.55
 _FATIGUE_MAX_ENTRIES = 500  # v407: prevent memory leak — evict oldest when full
-_fatigue_slow_active = {}  # user_id → bool
+# Bug-fix (TTS audit #11): dict používáme s timestampem.
+# Hodnota: (is_slow_active: bool, last_seen_ts: float)
+# Pravidelně vyklízíme entries starší než 7 dní (úplně, nejen flag=False).
+_fatigue_slow_active = {}  # user_id → (bool, timestamp)
+_FATIGUE_TTL_SEC = 7 * 24 * 3600  # 7 dní
+_fatigue_last_prune = 0  # časová značka posledního prune (lazy)
+
+
+def _fatigue_get(user_id):
+    """Helper: načíst is_slow flag, nebo False pokud entry neexistuje/expired."""
+    entry = _fatigue_slow_active.get(user_id)
+    if not entry:
+        return False
+    is_slow, ts = entry
+    import time as _t
+    if _t.time() - ts > _FATIGUE_TTL_SEC:
+        # expired — vyklidíme
+        del _fatigue_slow_active[user_id]
+        return False
+    return is_slow
+
+
+def _fatigue_set(user_id, is_slow):
+    """Helper: zapsat is_slow flag s timestampem + lazy prune."""
+    import time as _t
+    global _fatigue_last_prune
+    now = _t.time()
+    _fatigue_slow_active[user_id] = (is_slow, now)
+
+    # Lazy prune: jednou za hodinu projít celý dict a vyhodit expired
+    if now - _fatigue_last_prune > 3600:
+        _fatigue_last_prune = now
+        expired_keys = [
+            uid for uid, (_, ts) in _fatigue_slow_active.items()
+            if now - ts > _FATIGUE_TTL_SEC
+        ]
+        for k in expired_keys:
+            _fatigue_slow_active.pop(k, None)
+
+    # Hard cap: pokud i po prune má dict > MAX, vyhodit nejstarší
+    if len(_fatigue_slow_active) > _FATIGUE_MAX_ENTRIES:
+        oldest_uid = min(_fatigue_slow_active, key=lambda k: _fatigue_slow_active[k][1])
+        _fatigue_slow_active.pop(oldest_uid, None)
 
 
 def _truncate_for_tts(text, max_chars=MAX_TTS_CHARS):
@@ -486,20 +546,19 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural",
                     overrides.append("slow_speech")
 
                 # v405: Fatigue with hysteresis
+                # v407 + TTS audit #11: dict s TTL, eviction při každém touch.
                 fatigue = state.get("fatigue_level", 0)
-                was_slow = _fatigue_slow_active.get(user_id, False)
+                was_slow = _fatigue_get(user_id)
                 if fatigue > _FATIGUE_ACTIVATE or (was_slow and fatigue > _FATIGUE_DEACTIVATE):
-                    # v407: Evict oldest entries to prevent memory leak
-                    if len(_fatigue_slow_active) > _FATIGUE_MAX_ENTRIES:
-                        oldest = next(iter(_fatigue_slow_active))
-                        del _fatigue_slow_active[oldest]
-                    _fatigue_slow_active[user_id] = True
+                    _fatigue_set(user_id, True)
                     current_rate = int(profile["rate"].replace("%", "").replace("+", ""))
                     profile["rate"] = f"{min(current_rate, -15)}%"
                     profile["pause_ms"] = max(profile["pause_ms"], 1200)
                     overrides.append(f"fatigue:{fatigue}")
                 else:
-                    _fatigue_slow_active[user_id] = False
+                    # Recovery: pokud user nikdy nebyl slow, nemusíme záznam ani vytvářet
+                    if was_slow:
+                        _fatigue_set(user_id, False)
 
                 recovery = state.get("recovery", {})
                 if recovery.get("active") and recovery.get("level", 0) >= 2:

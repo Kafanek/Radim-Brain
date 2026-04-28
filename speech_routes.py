@@ -433,8 +433,14 @@ def get_azure_token():
     now = time.time()
     _token_cache = get_cached_token()
 
-    # Return cached token if still valid (refresh 1 min before expiry)
-    if _token_cache['token'] and _token_cache['expires'] > now + 60:
+    # Bug-fix (TTS audit #7): refresh margin zvýšen z 60s na 300s.
+    # Důvod: Azure SDK STT/TTS call typicky trvá 5-20 sekund (streaming
+    # transcription). Pokud klient dostal token s 60s do expirace a SDK
+    # call běží přes hranici → Azure 401 + STT/TTS prasklo bez fallbacku.
+    # 300s margin = 5 minut zaručí, že nejdelší rozumné session doběhne.
+    # Trade-off: token cache hit rate klesne (refresh každých 5 min místo
+    # 9 min), ale Azure issueToken endpoint je rychlý (~50-100ms) + zdarma.
+    if _token_cache['token'] and _token_cache['expires'] > now + 300:
         return jsonify({
             'success': True,
             'token': _token_cache['token'],

@@ -324,7 +324,30 @@ def generate_azure_tts(text, rate_pct=None, pitch_hz=None, mode="HARMONY", user_
         _latency = round((_time.time() - _t0) * 1000)
         if resp.status_code == 200:
             _size = len(resp.content)
-            logger.info(f"TTS OK: {_latency}ms {_size}bytes mode={mode} chars={len(text)}")
+            # Bug-fix (TTS audit #9): validace minimální velikosti.
+            # Azure občas vrátí 200 + partial blob (síťová truncation,
+            # idle connection drop). Pokud vrátíme malý blob na Twilio,
+            # senior na telefonu slyší půl věty.
+            # Minimum: 500 bytes pro 16kHz/32kbps mp3 ~= 0.5 sekundy zvuku.
+            # Plus poměr bytes/text_chars: kratších než 50B/char je
+            # suspicious truncation.
+            MIN_BLOB_SIZE = 500
+            MIN_BYTES_PER_CHAR = 50
+            text_chars = len(text)
+            if _size < MIN_BLOB_SIZE:
+                logger.warning(
+                    f"TTS blob suspicious: only {_size}B for {text_chars}ch "
+                    f"({_latency}ms) — possible truncation, returning None for fallback"
+                )
+                return None
+            if text_chars > 10 and (_size / text_chars) < MIN_BYTES_PER_CHAR:
+                logger.warning(
+                    f"TTS blob too small: {_size}B/{text_chars}ch = "
+                    f"{_size//text_chars}B/char (expected ≥{MIN_BYTES_PER_CHAR}) "
+                    f"— possible mid-stream cut, returning None"
+                )
+                return None
+            logger.info(f"TTS OK: {_latency}ms {_size}bytes mode={mode} chars={text_chars}")
             return resp.content
         else:
             logger.error(f"Azure TTS error: {resp.status_code} {_latency}ms {resp.text[:100]}")
