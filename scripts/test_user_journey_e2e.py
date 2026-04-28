@@ -359,7 +359,29 @@ class TestRunner:
             return True, "GDPR export OK"
         return False, f"HTTP {status} — {p}"
 
-    def s19_admin_partners_deactivate(self):
+    def s19_royalty_contracts_list(self):
+        """GET /admin/royalty/contracts — ověř že endpoint funguje."""
+        status, p = http_request('GET',
+                                 '/api/admin/royalty/contracts?status=active',
+                                 headers=self.admin_headers())
+        if status == 200 and p.get('success'):
+            return True, f"{p.get('count', 0)} aktivních royalty kontraktů"
+        return False, f"HTTP {status} — {p.get('error', p)}"
+
+    def s20_royalty_trigger_dry_run(self):
+        """POST /admin/royalty/trigger {dryRun: true} — verifikuj cyklus."""
+        status, p = http_request('POST',
+                                 '/api/admin/royalty/trigger',
+                                 {'dryRun': True},
+                                 headers=self.admin_headers())
+        if status == 200 and p.get('success'):
+            m = p.get('metrics', {})
+            return True, (f"DRY RUN: {m.get('candidates_found', 0)} kandidátů, "
+                          f"by vytvořilo {m.get('earnings_created', 0)} earnings "
+                          f"({m.get('total_kc', 0)} Kč)")
+        return False, f"HTTP {status} — {p.get('error', p)}"
+
+    def s21_admin_partners_deactivate(self):
         if not self.buyer_id:
             return True, "skipping (no buyer to cleanup)"
         status, p = http_request('POST',
@@ -370,7 +392,7 @@ class TestRunner:
             return True, f"buyer {self.buyer_id} deactivated"
         return False, f"HTTP {status} — {p.get('error', p)}"
 
-    def s20_delete_test_user(self):
+    def s22_delete_test_user(self):
         """Cleanup: smazat test účet přes GDPR delete-account."""
         status, p = http_request('POST', '/api/auth/delete-account',
                                  {'confirm': True}, headers=self.auth_headers())
@@ -438,11 +460,17 @@ class TestRunner:
         self.step('17. GET /api/experience/earnings/receipt', self.s17_earnings_receipt_html)
         self.step('18. GET /api/auth/data-export', self.s18_data_export, allow_fail=True)
 
-        # Phase 6: CLEANUP
-        print(f'\n{BLUE}── Phase 6: Cleanup ──{NC}')
+        # Phase 6: ROYALTY (průběžné placení)
+        print(f'\n{BLUE}── Phase 6: Royalty cron (průběžné placení) ──{NC}')
         if self.admin_secret:
-            self.step('19. Deactivate test partner', self.s19_admin_partners_deactivate)
-        self.step('20. Delete test user (GDPR)', self.s20_delete_test_user, allow_fail=True)
+            self.step('19. GET /api/admin/royalty/contracts', self.s19_royalty_contracts_list)
+            self.step('20. POST /api/admin/royalty/trigger DRY RUN', self.s20_royalty_trigger_dry_run)
+
+        # Phase 7: CLEANUP
+        print(f'\n{BLUE}── Phase 7: Cleanup ──{NC}')
+        if self.admin_secret:
+            self.step('21. Deactivate test partner', self.s21_admin_partners_deactivate)
+        self.step('22. Delete test user (GDPR)', self.s22_delete_test_user, allow_fail=True)
 
         return self._summary()
 
