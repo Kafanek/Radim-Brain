@@ -2563,6 +2563,346 @@ def admin_partners_list():
     })
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# PDF / HTML — Potvrzení o vyplacené odměně (pro § 10 ZDP)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Pro pilot vracíme HTML s @media print stylováním. Senior si stáhne
+# přes "Tisk → Uložit jako PDF" v prohlížeči — bez nutnosti reportlab/wkhtmltopdf
+# na backendu. Po pilotu můžeme nasadit headless Chromium, ale pro 50 seniorů
+# je HTML print elegantní a stačí.
+
+@experience_bp.route('/api/experience/earnings/receipt', methods=['GET'])
+@require_auth
+def earnings_receipt():
+    """Vygeneruje HTML potvrzení o vyplacené odměně pro daného seniora a období.
+
+    Query params:
+        period: '2026-04' (YYYY-MM, povinný)
+        format: 'html' (default) | 'json' (data only)
+
+    Senior vidí potvrzení v prohlížeči, klepne 'Uložit jako PDF' a má doklad
+    pro § 10 ZDP (Ostatní příjmy, do 30 000 Kč/rok bez DAP).
+    """
+    _init_schema()
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+
+    period = request.args.get('period', '').strip()[:10]
+    fmt = request.args.get('format', 'html').strip()[:10]
+
+    # Validace formátu period (YYYY-MM)
+    import re
+    if not re.match(r'^\d{4}-\d{2}$', period):
+        return jsonify({
+            'success': False,
+            'error': 'period musí být ve formátu YYYY-MM (např. 2026-04)'
+        }), 400
+
+    # Načti všechny earnings za toto období + senior info
+    try:
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT e.id, e.amount_kc, e.gross_kc, e.contract_id, "
+                "       e.created_at, e.paid_at, e.payout_method, "
+                "       e.bank_ref, e.source, c.signed_at, "
+                "       b.name AS buyer_name "
+                "FROM experience_earnings e "
+                "LEFT JOIN experience_contracts c ON c.id = e.contract_id "
+                "LEFT JOIN experience_buyers b ON b.id = c.buyer_id "
+                "WHERE e.user_id = ? AND e.period_label = ? "
+                "ORDER BY e.created_at",
+                (uid, period)
+            ).fetchall()
+
+            # Senior info — z chat_users nebo memory_profiles
+            senior_name = ''
+            try:
+                u = db.execute(
+                    "SELECT name FROM chat_users WHERE id = ?",
+                    (uid,)
+                ).fetchone()
+                if u:
+                    senior_name = (u[0] if isinstance(u, (list, tuple)) else u.get('name')) or ''
+            except Exception:
+                pass
+
+            # Bank info (pro identifikaci IBAN posledních 4 číslic)
+            iban_last4 = ''
+            try:
+                bi = db.execute(
+                    "SELECT iban_last4 FROM experience_bank_info WHERE user_id = ?",
+                    (uid,)
+                ).fetchone()
+                if bi:
+                    iban_last4 = (bi[0] if isinstance(bi, (list, tuple)) else bi.get('iban_last4')) or ''
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f'earnings_receipt: {e}', exc_info=True)
+        return jsonify({'success': False, 'error': 'DB error'}), 500
+
+    # Strukturuj data
+    items = []
+    total_kc = 0
+    for r in rows or []:
+        def gv(i, k):
+            return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+        amount = int(gv(1, 'amount_kc') or 0)
+        items.append({
+            'id': gv(0, 'id'),
+            'amountKc': amount,
+            'grossKc': int(gv(2, 'gross_kc') or 0),
+            'contractId': gv(3, 'contract_id'),
+            'createdAt': str(gv(4, 'created_at') or '')[:10],
+            'paidAt': str(gv(5, 'paid_at') or '')[:10] if gv(5, 'paid_at') else None,
+            'payoutMethod': gv(6, 'payout_method'),
+            'bankRef': gv(7, 'bank_ref'),
+            'source': gv(8, 'source'),
+            'buyerName': gv(10, 'buyer_name') or '—',
+        })
+        total_kc += amount
+
+    if fmt == 'json':
+        return jsonify({
+            'success': True,
+            'period': period,
+            'seniorName': senior_name,
+            'ibanLast4': iban_last4,
+            'items': items,
+            'totalKc': total_kc,
+        })
+
+    # HTML s print CSS
+    period_cz = {
+        '01': 'leden', '02': 'únor', '03': 'březen', '04': 'duben',
+        '05': 'květen', '06': 'červen', '07': 'červenec', '08': 'srpen',
+        '09': 'září', '10': 'říjen', '11': 'listopad', '12': 'prosinec',
+    }
+    year, month = period.split('-')
+    month_cz = period_cz.get(month, month)
+
+    rows_html = ''
+    for it in items:
+        status = '✓ vyplaceno' if it['paidAt'] else '⏳ připravuje se'
+        date_display = it.get('paidAt') or it.get('createdAt') or '—'
+        rows_html += f'''
+        <tr>
+            <td>{date_display}</td>
+            <td>Kontrakt #{it['contractId'] or '—'} · {_html_escape(it['buyerName'])}</td>
+            <td class="num">{it['grossKc']:,} Kč</td>
+            <td class="num">{it['amountKc']:,} Kč</td>
+            <td class="status">{status}</td>
+        </tr>'''.replace(',', ' ')
+
+    if not items:
+        rows_html = '<tr><td colspan="5" class="empty">V tomto období nebyly žádné odměny.</td></tr>'
+
+    html = f'''<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <title>Potvrzení o odměně · {_html_escape(senior_name) or 'Radim'} · {month_cz} {year}</title>
+    <style>
+        @page {{ size: A4; margin: 18mm; }}
+        body {{
+            font-family: 'Inter', -apple-system, sans-serif;
+            color: #1a2530;
+            font-size: 11pt;
+            line-height: 1.5;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 24px;
+        }}
+        header.doc-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            border-bottom: 2px solid #1a2530;
+            padding-bottom: 16px;
+            margin-bottom: 24px;
+        }}
+        header.doc-header h1 {{
+            font-size: 18pt;
+            margin: 0 0 4px 0;
+            color: #1a2530;
+        }}
+        header.doc-header .subtitle {{
+            color: #6a7880;
+            font-size: 10pt;
+        }}
+        .issuer {{ text-align: right; font-size: 10pt; }}
+        .issuer strong {{ display: block; font-size: 11pt; }}
+        .recipient {{
+            background: #f3f5f8;
+            padding: 14px 18px;
+            border-radius: 8px;
+            margin-bottom: 24px;
+        }}
+        .recipient h2 {{
+            font-size: 11pt;
+            margin: 0 0 6px 0;
+            color: #6a7880;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+        .recipient .name {{ font-size: 14pt; font-weight: 600; }}
+        .recipient .meta {{ font-size: 10pt; color: #6a7880; margin-top: 4px; }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 24px;
+        }}
+        th, td {{
+            text-align: left;
+            padding: 10px 12px;
+            border-bottom: 1px solid #e1e6ed;
+        }}
+        th {{
+            background: #f3f5f8;
+            font-weight: 600;
+            font-size: 9pt;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            color: #6a7880;
+        }}
+        td.num {{ text-align: right; font-variant-numeric: tabular-nums; }}
+        td.status {{ font-size: 9pt; color: #6a7880; }}
+        td.empty {{ text-align: center; color: #6a7880; padding: 24px; }}
+        tfoot td {{
+            border-top: 2px solid #1a2530;
+            border-bottom: none;
+            padding-top: 14px;
+            font-weight: 600;
+            font-size: 13pt;
+        }}
+        .tax-note {{
+            background: #fffbf0;
+            border-left: 4px solid #d9a84f;
+            padding: 14px 18px;
+            margin: 24px 0;
+            border-radius: 4px;
+            font-size: 10pt;
+            line-height: 1.6;
+        }}
+        .tax-note strong {{ display: block; margin-bottom: 4px; }}
+        footer.doc-footer {{
+            margin-top: 36px;
+            padding-top: 18px;
+            border-top: 1px solid #e1e6ed;
+            font-size: 9pt;
+            color: #6a7880;
+            text-align: center;
+        }}
+        .actions {{ text-align: center; margin: 24px 0; }}
+        .btn-print {{
+            background: #2e5fa8;
+            color: #fff;
+            border: none;
+            padding: 12px 24px;
+            font-size: 12pt;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: inherit;
+        }}
+        @media print {{
+            .actions {{ display: none; }}
+            body {{ padding: 0; }}
+        }}
+    </style>
+</head>
+<body>
+    <header class="doc-header">
+        <div>
+            <h1>Potvrzení o vyplacené odměně</h1>
+            <div class="subtitle">Radimův Odkaz · období {month_cz} {year}</div>
+        </div>
+        <div class="issuer">
+            <strong>KOLIBRI s.r.o.</strong>
+            IČO: [DOPLNIT]<br>
+            DIČ: [DOPLNIT]<br>
+            kafanek@kafanek.com
+        </div>
+    </header>
+
+    <div class="recipient">
+        <h2>Příjemce</h2>
+        <div class="name">{_html_escape(senior_name) or 'Senior'}</div>
+        <div class="meta">
+            Účet: {'IBAN končící ' + iban_last4 if iban_last4 else 'IBAN evidovaný v aplikaci'}<br>
+            ID v platformě: {_html_escape(uid[:12]) if uid else '—'}…
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Datum</th>
+                <th>Předmět</th>
+                <th class="num">Hrubá cena</th>
+                <th class="num">Vyplaceno</th>
+                <th class="status">Stav</th>
+            </tr>
+        </thead>
+        <tbody>
+            {rows_html}
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="3" style="text-align:right">Celkem za období:</td>
+                <td class="num">{total_kc:,} Kč</td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+
+    <div class="tax-note">
+        <strong>📋 Daňový režim — § 10 ZDP (Ostatní příjmy)</strong>
+        Tento příjem je dle § 10 zákona č. 586/1992 Sb. o daních z příjmů
+        kvalifikován jako <em>ostatní příjmy</em>. Pokud váš celkový souhrn
+        ostatních příjmů za rok {year} nepřesáhne <strong>30 000 Kč</strong>,
+        není třeba podávat daňové přiznání. Při překročení limitu je nutné
+        příjem uvést v daňovém přiznání do 31. března {int(year)+1}.
+        Toto potvrzení slouží jako daňový doklad.
+    </div>
+
+    <div class="actions">
+        <button class="btn-print" onclick="window.print()">🖨️ Vytisknout / Uložit jako PDF</button>
+    </div>
+
+    <footer class="doc-footer">
+        Vygenerováno {_iso_date_now_cz()} platformou Radim · radimcare.cz<br>
+        V případě nejasností: kafanek@kafanek.com
+    </footer>
+</body>
+</html>'''.replace(',', ' ')
+
+    from flask import Response
+    return Response(html, mimetype='text/html; charset=utf-8')
+
+
+def _html_escape(s):
+    """Minimální HTML escape pro generování dokumentů."""
+    if not s:
+        return ''
+    s = str(s)
+    return (s.replace('&', '&amp;')
+              .replace('<', '&lt;')
+              .replace('>', '&gt;')
+              .replace('"', '&quot;')
+              .replace("'", '&#39;'))
+
+
+def _iso_date_now_cz():
+    """Aktuální datum v českém formátu."""
+    now = datetime.utcnow()
+    months_cz = ['', 'ledna', 'února', 'března', 'dubna', 'května', 'června',
+                 'července', 'srpna', 'září', 'října', 'listopadu', 'prosince']
+    return f'{now.day}. {months_cz[now.month]} {now.year}'
+
+
 @experience_bp.route('/api/admin/payouts/mark-paid', methods=['POST'])
 def admin_payouts_mark_paid():
     """Po hromadné bankovní výplatě označí dané earnings záznamy
