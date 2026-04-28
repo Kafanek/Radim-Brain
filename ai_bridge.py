@@ -56,13 +56,27 @@ def call_gemini_ai(messages, context=None, image=None):
                 "contents": [{"parts": parts}],
                 "generationConfig": {
                     "temperature": 0.7,
-                    # Bug-fix (komunikace "Mám" truncation):
-                    #   200 tokens = ~50 slov v češtině, často odpoví věta-půl.
-                    #   500 nechá Radimovi prostor na 2-3 plné věty s emoji.
-                    #   Heroku router timeout je 30s, Gemini Flash typicky
-                    #   stihne i 1000 tokens pod 5s — žádný risk.
-                    "maxOutputTokens": 500,
-                    "topP": 0.9
+                    # Bug-fix (komunikace "Mám" / "abych ti nasl" truncation):
+                    #
+                    #   ROOT CAUSE Gemini 2.5 Flash:
+                    #     Gemini 2.5+ rodina má THINKING tokens (interní
+                    #     reasoning), které se počítají PROTI maxOutputTokens
+                    #     PŘED viditelnou odpovědí. Když Radim "myslí" za
+                    #     ~400 tokenů, na text zbude ~20 → useknuté slovo.
+                    #
+                    #   Fix dvojí (belt + suspenders):
+                    #     1) thinkingBudget = 0 → vypneme reasoning úplně.
+                    #        Pro senior chat nepotřebujeme deep reasoning,
+                    #        jen rychlou empatickou odpověď. Bonus: nižší
+                    #        latence + cena.
+                    #     2) maxOutputTokens 500 → 1500 jako safety net,
+                    #        kdyby thinkingConfig nebyl podporovaný v
+                    #        budoucích verzích modelu.
+                    "maxOutputTokens": 1500,
+                    "topP": 0.9,
+                    "thinkingConfig": {
+                        "thinkingBudget": 0
+                    }
                 },
                 "safetySettings": [
                     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
