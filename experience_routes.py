@@ -364,14 +364,21 @@ def _migrate_schema_additive():
 
 
 def _init_schema():
-    try:
-        with db_context(commit=True) as db:
-            for stmt in EXPERIENCE_SCHEMA.strip().split(';'):
-                stmt = stmt.strip()
-                if stmt:
-                    db.execute(stmt)
-    except Exception as e:
-        logger.debug(f"Experience schema init: {e}")
+    # Bug-fix: dříve celý EXPERIENCE_SCHEMA běžel v JEDNOM `with db_context(commit=True)`
+    # bloku — pokud KTERÝKOLI statement selhal (např. nový CREATE TABLE s funkčním
+    # indexem na PG, který ještě neexistuje), CELÁ transakce se rolbackla a všechny
+    # další tabulky NEBYLY vytvořeny. Důsledek: experience_partner_leads neexistovala
+    # i když všechny ostatní tabulky byly OK. Teď: každý statement v VLASTNÍ transakci,
+    # selhání jednoho neovlivní ostatní.
+    statements = [s.strip() for s in EXPERIENCE_SCHEMA.strip().split(';') if s.strip()]
+    for stmt in statements:
+        try:
+            with db_context(commit=True) as db:
+                db.execute(stmt)
+        except Exception as e:
+            # Idempotence: IF NOT EXISTS by toto neměl trigger, ale pokud jsme v race
+            # se starou verzí dyna, log ne-fatální chybu a pokračuj.
+            logger.debug(f"Experience schema stmt skipped: {str(e)[:120]} — stmt: {stmt[:80]}")
     if is_postgres():
         _migrate_schema_additive()
     # Pilot fix: NEpouštíme _seed_demo_buyers_if_empty.
