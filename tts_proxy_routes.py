@@ -137,7 +137,13 @@ def azure_tts_proxy():
         except Exception as _vp_err:
             logger.debug(f"voice_pref read (non-fatal): {_vp_err}")
 
-        _cache_ctx = data.get('context', '') or data.get('style', '') or ''
+        # Bug-fix (TTS audit #6): dříve `context OR style` = pokud byly oba,
+        # style se ignoroval → různé style requesty (cheerful × empathetic)
+        # dostaly stejný cache key a tím i stejný audio (cache HIT).
+        # Fix: obě hodnoty v key, zarovnané dvojtečkou.
+        _ctx_val = (data.get('context') or '').strip()[:30]
+        _style_val = (data.get('style') or '').strip()[:30]
+        _cache_ctx = _ctx_val + ':' + _style_val
         _brain_fp = ''
         if brain_speech:
             _bm = brain_speech.get('mode', '?')
