@@ -145,12 +145,25 @@ def call_gemini_fallback(prompt, system_prompt="", max_tokens=1024):
     Hotfix: timeout 30→22s — Heroku router cuts at 30s, we need buffer for
     response transmission. If Gemini exceeds 22s, caller falls to static
     fallback rather than 503-ing the whole request.
+
+    Bug-fix (komunikace + kvíz "neviditelné" truncation):
+      Stejný issue jako v ai_bridge.py — Gemini 2.5 thinking tokens
+      sežrou maxOutputTokens před viditelnou odpovědí. Plus parts[0]
+      truncation pokud Gemini rozdělí response.
+      Fixes:
+        1) thinkingConfig.thinkingBudget = 0 → vypnout reasoning
+        2) iterace přes všechny content.parts (ne jen [0])
+        3) max_tokens efektivní (default 1024 → 1500 protože quiz
+           potřebuje JSON s 5-7 otázkami)
     """
     if not GEMINI_API_KEY:
         return None
     try:
         import requests as req
         parts = [{"text": f"{system_prompt}\n\n{prompt}" if system_prompt else prompt}]
+        # Defenzivně: kvíz/story endpointy posílají 1500, default 1024 je
+        # málo i pro "thinking off" mode kvůli JSON struktuře odpovědi.
+        effective_max = max(max_tokens, 1500)
         resp = req.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
             headers={"Content-Type": "application/json"},
@@ -158,8 +171,11 @@ def call_gemini_fallback(prompt, system_prompt="", max_tokens=1024):
                 "contents": [{"parts": parts}],
                 "generationConfig": {
                     "temperature": 0.7,
-                    "maxOutputTokens": max_tokens,
-                    "topP": 0.9
+                    "maxOutputTokens": effective_max,
+                    "topP": 0.9,
+                    "thinkingConfig": {
+                        "thinkingBudget": 0
+                    }
                 }
             },
             timeout=22
@@ -167,11 +183,24 @@ def call_gemini_fallback(prompt, system_prompt="", max_tokens=1024):
         if resp.status_code == 200:
             data = resp.json()
             if 'candidates' in data and data['candidates']:
-                return data['candidates'][0]['content']['parts'][0]['text'].strip()
-        logger.warning(f"Gemini fallback error: {resp.status_code}")
+                content_parts = data['candidates'][0].get('content', {}).get('parts', [])
+                texts = [p.get('text', '') for p in content_parts if p.get('text')]
+                full_text = ''.join(texts).strip()
+                if full_text:
+                    finish = data['candidates'][0].get('finishReason', '')
+                    if finish == 'MAX_TOKENS':
+                        logger.warning(
+                            f"Gemini fallback hit MAX_TOKENS at {effective_max}, "
+                            f"may be truncated: {full_text[:80]}..."
+                        )
+                    return full_text
+        logger.warning(f"Gemini fallback error: {resp.status_code} — {(resp.text or '')[:200]}")
+        return None
+    except req.exceptions.Timeout:
+        logger.warning(f"Gemini fallback timeout (22s) — caller bude fallbackovat na static")
         return None
     except Exception as e:
-        logger.error(f"Gemini fallback exception: {e}")
+        logger.error(f"Gemini fallback exception: {e}", exc_info=True)
         return None
 
 

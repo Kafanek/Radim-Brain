@@ -42,7 +42,7 @@ def get_news():
     category = 'general'
     count = 5
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         category = data.get('category', 'general')
         count = data.get('count', 5)
 
@@ -144,7 +144,7 @@ def get_weather():
     """🌤️ Získat aktuální počasí"""
     get_claude_client, extract_text_from_response, get_today_info, is_credit_error, call_gemini_fallback, CLAUDE_MODEL = _get_claude_helpers()
     if request.method == 'POST':
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         location = data.get('city') or data.get('location', 'Praha')
     else:
         location = request.args.get('location', 'Praha')
@@ -201,7 +201,7 @@ def generate_quiz():
     get_claude_client, extract_text_from_response, get_today_info, is_credit_error, call_gemini_fallback, CLAUDE_MODEL = _get_claude_helpers()
     topic = 'general'
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         topic = data.get('topic', 'general')
         difficulty = data.get('difficulty', 'easy')
         count = int(data.get('count', 5))
@@ -282,7 +282,7 @@ def generate_story():
     get_claude_client, extract_text_from_response, get_today_info, is_credit_error, call_gemini_fallback, CLAUDE_MODEL = _get_claude_helpers()
     theme = 'nature'
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         theme = data.get('theme', 'nature')
         length = data.get('length', 'short')
         style = data.get('style', 'relaxing')
