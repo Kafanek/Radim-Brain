@@ -56,7 +56,12 @@ def call_gemini_ai(messages, context=None, image=None):
                 "contents": [{"parts": parts}],
                 "generationConfig": {
                     "temperature": 0.7,
-                    "maxOutputTokens": 200,
+                    # Bug-fix (komunikace "Mám" truncation):
+                    #   200 tokens = ~50 slov v češtině, často odpoví věta-půl.
+                    #   500 nechá Radimovi prostor na 2-3 plné věty s emoji.
+                    #   Heroku router timeout je 30s, Gemini Flash typicky
+                    #   stihne i 1000 tokens pod 5s — žádný risk.
+                    "maxOutputTokens": 500,
                     "topP": 0.9
                 },
                 "safetySettings": [
@@ -66,21 +71,39 @@ def call_gemini_ai(messages, context=None, image=None):
                     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
                 ]
             },
-            timeout=30
+            timeout=22  # B1: tightened pod Heroku 30s router buffer
         )
 
         if response.status_code == 200:
             data = response.json()
             if data.get('candidates'):
-                parts = data['candidates'][0].get('content', {}).get('parts', [])
-                if parts and parts[0].get('text'):
-                    return parts[0]['text'].strip()
+                # Bug-fix (komunikace "Mám" truncation):
+                #   PŘEDTÍM `return parts[0]['text']` — Gemini občas rozdělí
+                #   odpověď do více `parts` segmentů (např. když je v odpovědi
+                #   inline obrázek, code block, nebo prostě interní streaming).
+                #   První part byl typicky úvodní fragment "Ahoj! Mám" a
+                #   pokračování "se dobře, jak ty?" se ZAHODILO.
+                #   Teď iterujeme přes všechny parts a spojíme text.
+                content_parts = data['candidates'][0].get('content', {}).get('parts', [])
+                texts = [p.get('text', '') for p in content_parts if p.get('text')]
+                full_text = ''.join(texts).strip()
+                if full_text:
+                    # Doplňková kontrola: pokud Gemini hlásí finishReason
+                    # MAX_TOKENS, nechá uživatele vědět ale text vrátíme tak
+                    # jak je (server ho nesmí oseknout dál).
+                    finish = data['candidates'][0].get('finishReason', '')
+                    if finish == 'MAX_TOKENS':
+                        logger.warning(f"Gemini hit MAX_TOKENS, response may be truncated: {full_text[:80]}...")
+                    return full_text
 
-        logger.error(f"Gemini error: {response.status_code}")
+        logger.error(f"Gemini error: {response.status_code} — body: {(response.text or '')[:200]}")
         return None
 
+    except http_requests.exceptions.Timeout:
+        logger.warning("Gemini timeout — caller bude fallbackovat na Claude")
+        return None
     except Exception as e:
-        logger.error(f"Gemini AI error: {e}")
+        logger.error(f"Gemini AI error: {e}", exc_info=True)
         return None
 
 
@@ -102,22 +125,39 @@ def call_claude_ai(messages, context=None):
             },
             json={
                 "model": "claude-haiku-4-5-20251001",
-                "max_tokens": 200,
+                # Bug-fix: 200 tokens je málo, viz Gemini fix výše.
+                "max_tokens": 500,
                 "system": RADIM_SYSTEM_PROMPT,
                 "messages": conversation
             },
-            timeout=30
+            timeout=22  # tightened pod Heroku 30s router buffer
         )
 
         if response.status_code == 200:
             data = response.json()
             if 'content' in data and data['content']:
-                return data['content'][0]['text'].strip()
+                # Bug-fix (komunikace "Mám" truncation):
+                #   Claude Messages API vrací `content` jako pole bloků
+                #   (typicky [{"type":"text","text":"..."}], ale může být
+                #   i tool_use, image, atd.). Předtím jsme brali jen [0],
+                #   teď konkatenujeme všechny text bloky.
+                texts = [b.get('text', '') for b in data['content']
+                         if b.get('type') == 'text' and b.get('text')]
+                full_text = ''.join(texts).strip()
+                if full_text:
+                    stop_reason = data.get('stop_reason', '')
+                    if stop_reason == 'max_tokens':
+                        logger.warning(f"Claude hit max_tokens, may be truncated: {full_text[:80]}...")
+                    return full_text
 
+        logger.error(f"Claude error: {response.status_code} — body: {(response.text or '')[:200]}")
         return None
 
+    except http_requests.exceptions.Timeout:
+        logger.warning("Claude timeout")
+        return None
     except Exception as e:
-        logger.error(f"Claude AI error: {e}")
+        logger.error(f"Claude AI error: {e}", exc_info=True)
         return None
 
 
