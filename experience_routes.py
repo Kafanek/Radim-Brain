@@ -2029,6 +2029,540 @@ def admin_payouts_monthly_export():
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ADMIN — partner onboarding (po podpisu MoU)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Workflow:
+#   1) Partner vyplní formulář v aplikaci → POST /api/experience/partner-interest
+#      → záznam v experience_partner_leads se status='new'
+#   2) Admin (Radim) ručně reviewuje, rozhodne se navázat
+#   3) Schůzka, podpis MoU + DPA + 3-stranná smlouva
+#   4) Admin volá POST /api/admin/partners/onboard
+#      → vytvoří experience_buyers (active=true)
+#      → volitelně vytvoří 1-N experience_offers
+#      → nastaví lead.status='signed'
+#   5) Senior nyní vidí v UI nové nabídky tohoto partnera
+
+def _require_admin():
+    """Vrátí None pokud auth OK, jinak (response, status) tuple."""
+    admin_secret = request.headers.get('X-Admin-Secret', '')
+    if not admin_secret or admin_secret != os.environ.get('ADMIN_SECRET', ''):
+        return jsonify({'success': False, 'error': 'admin auth required'}), 401
+    return None
+
+
+@experience_bp.route('/api/admin/partners/leads', methods=['GET'])
+def admin_partners_leads():
+    """Seznam všech leadů (kandidátní partneři) pro admin review.
+
+    Query params:
+        status: filtr (new|contacted|mou_sent|signed|rejected) — default 'new'
+        limit:  max počet (default 50)
+    """
+    auth_err = _require_admin()
+    if auth_err:
+        return auth_err
+
+    status_filter = request.args.get('status', 'new')[:30]
+    limit = min(200, int(request.args.get('limit', 50) or 50))
+    _init_schema()
+
+    try:
+        with db_context() as db:
+            if status_filter == 'all':
+                rows = db.execute(
+                    "SELECT id, org_name, contact_name, contact_email, contact_phone, "
+                    "       org_type, org_ico, message, source, status, admin_note, "
+                    "       contacted_at, signed_at, created_at "
+                    "FROM experience_partner_leads "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (limit,)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT id, org_name, contact_name, contact_email, contact_phone, "
+                    "       org_type, org_ico, message, source, status, admin_note, "
+                    "       contacted_at, signed_at, created_at "
+                    "FROM experience_partner_leads WHERE status = ? "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (status_filter, limit)
+                ).fetchall()
+    except Exception as e:
+        logger.error(f'admin_partners_leads: {e}', exc_info=True)
+        return jsonify({'success': False, 'error': 'DB error'}), 500
+
+    leads = []
+    for r in rows or []:
+        def gv(i, k):
+            return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+        leads.append({
+            'id': gv(0, 'id'),
+            'orgName': gv(1, 'org_name'),
+            'contactName': gv(2, 'contact_name'),
+            'contactEmail': gv(3, 'contact_email'),
+            'contactPhone': gv(4, 'contact_phone'),
+            'orgType': gv(5, 'org_type'),
+            'orgIco': gv(6, 'org_ico'),
+            'message': gv(7, 'message'),
+            'source': gv(8, 'source'),
+            'status': gv(9, 'status'),
+            'adminNote': gv(10, 'admin_note'),
+            'contactedAt': str(gv(11, 'contacted_at')) if gv(11, 'contacted_at') else None,
+            'signedAt': str(gv(12, 'signed_at')) if gv(12, 'signed_at') else None,
+            'createdAt': str(gv(13, 'created_at')) if gv(13, 'created_at') else None,
+        })
+
+    return jsonify({'success': True, 'leads': leads, 'count': len(leads)})
+
+
+@experience_bp.route('/api/admin/partners/leads/<int:lead_id>', methods=['PATCH'])
+def admin_partners_lead_update(lead_id):
+    """Update statusu leadu (např. po prvním hovoru, po MoU sent, atd.).
+
+    Body:
+      status: new|contacted|mou_sent|signed|rejected
+      adminNote: krátká poznámka admin
+    """
+    auth_err = _require_admin()
+    if auth_err:
+        return auth_err
+
+    data = request.get_json(silent=True) or {}
+    new_status = (data.get('status') or '').strip()[:30]
+    admin_note = (data.get('adminNote') or '').strip()[:1000]
+
+    allowed_statuses = {'new', 'contacted', 'mou_sent', 'signed', 'rejected'}
+    if new_status and new_status not in allowed_statuses:
+        return jsonify({'success': False, 'error': f'status must be one of {allowed_statuses}'}), 400
+
+    try:
+        with db_context(commit=True) as db:
+            # Build update dynamically
+            updates = []
+            params = []
+            if new_status:
+                updates.append("status = ?")
+                params.append(new_status)
+                if new_status == 'contacted':
+                    updates.append("contacted_at = COALESCE(contacted_at, CURRENT_TIMESTAMP)")
+                elif new_status == 'signed':
+                    updates.append("signed_at = COALESCE(signed_at, CURRENT_TIMESTAMP)")
+            if admin_note:
+                updates.append("admin_note = ?")
+                params.append(admin_note)
+            if not updates:
+                return jsonify({'success': False, 'error': 'nic ke změně'}), 400
+            params.append(lead_id)
+            db.execute(
+                f"UPDATE experience_partner_leads SET {', '.join(updates)} WHERE id = ?",
+                tuple(params)
+            )
+        logger.info(f'Lead {lead_id} updated: status={new_status} note={admin_note[:60]}')
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f'admin_partners_lead_update: {e}', exc_info=True)
+        return jsonify({'success': False, 'error': 'DB error'}), 500
+
+
+@experience_bp.route('/api/admin/partners/onboard', methods=['POST'])
+def admin_partners_onboard():
+    """Onboarding podepsaného partnera — vytvoří buyer + offers.
+
+    Body:
+      leadId:        id ze experience_partner_leads (volitelné, pokud onboard
+                     bez leadu)
+      orgName:       název partnera (povinný, pokud není leadId)
+      orgType:       'university'|'archive'|'research'|'ai_lab'|...
+      description:   krátký popis pro UI (max 500 znaků)
+      trustScore:    0-100 (KOLIBRI rozhoduje, jak Radim seniora upozorní)
+                     90+ = 🟢 zelená "doporučuji", 70-89 = 🟡 žlutá, <70 = 🔴
+      ethicsReviewUrl:  URL ke schválení etickou komisí
+      gdprComplianceUrl: URL k GDPR documentu partnera
+      offers:        array nabídek (volitelný, lze přidávat dodatečně):
+                     [{title, description, targetTheme, targetType, targetDepth,
+                       priceKc, royaltyYears, royaltyKcPerYear, seatsTotal}]
+                     targetTheme: 'family'|'skill'|'wisdom'|'historical'|'daily'
+                     targetType:  'story'|'recipe'|'lesson'|'memory'|'opinion'
+                     targetDepth: 1 (povrchní) | 2 (střední) | 3 (hluboké)
+
+    Returns:
+      buyer: vytvořený buyer s id
+      offers: vytvořené nabídky s id
+      leadStatus: pokud leadId zadáno, lead.status='signed'
+    """
+    auth_err = _require_admin()
+    if auth_err:
+        return auth_err
+    _init_schema()
+
+    data = request.get_json(silent=True) or {}
+    lead_id = data.get('leadId')
+    org_name = (data.get('orgName') or '').strip()[:200]
+    org_type = (data.get('orgType') or 'research').strip()[:50]
+    description = (data.get('description') or '').strip()[:500]
+    trust_score = int(data.get('trustScore', 80) or 80)
+    ethics_url = (data.get('ethicsReviewUrl') or '').strip()[:500]
+    gdpr_url = (data.get('gdprComplianceUrl') or '').strip()[:500]
+    offers_input = data.get('offers') or []
+
+    # Validace
+    trust_score = max(0, min(100, trust_score))
+    allowed_types = {'university', 'archive', 'research', 'ai_lab',
+                     'market_research', 'media', 'museum', 'foundation', 'other'}
+    if org_type not in allowed_types:
+        org_type = 'other'
+
+    # Pokud leadId, načti zájem a doplň defaults
+    lead_data = None
+    if lead_id:
+        try:
+            with db_context() as db:
+                row = db.execute(
+                    "SELECT org_name, org_type, message FROM experience_partner_leads WHERE id = ?",
+                    (lead_id,)
+                ).fetchone()
+                if row:
+                    lead_data = {
+                        'org_name': row[0] if isinstance(row, (list, tuple)) else row.get('org_name'),
+                        'org_type': row[1] if isinstance(row, (list, tuple)) else row.get('org_type'),
+                        'message': row[2] if isinstance(row, (list, tuple)) else row.get('message'),
+                    }
+        except Exception as e:
+            logger.warning(f'onboard: lead {lead_id} lookup: {e}')
+
+    if not org_name and lead_data:
+        org_name = lead_data.get('org_name', '')
+    if not org_name:
+        return jsonify({'success': False, 'error': 'Chybí orgName (a leadId neposkytuje)'}), 400
+    if not description and lead_data:
+        description = (lead_data.get('message') or '')[:500]
+
+    # Vytvoř buyer
+    try:
+        with db_context(commit=True) as db:
+            # Idempotence: pokud buyer se stejným jménem již existuje, vrať ho
+            existing = db.execute(
+                "SELECT id FROM experience_buyers WHERE LOWER(name) = LOWER(?)",
+                (org_name,)
+            ).fetchone()
+
+            if existing:
+                buyer_id = existing[0] if isinstance(existing, (list, tuple)) else existing.get('id')
+                # Reaktivace + aktualizace metadata
+                db.execute(
+                    "UPDATE experience_buyers SET active = ?, type = ?, "
+                    "       description = ?, trust_score = ?, "
+                    "       ethics_review_url = ?, gdpr_compliance_url = ? "
+                    "WHERE id = ?",
+                    (True if is_postgres() else 1,
+                     org_type, description, trust_score,
+                     ethics_url or None, gdpr_url or None, buyer_id)
+                )
+                logger.info(f'Buyer REACTIVATED: id={buyer_id} name={org_name}')
+            else:
+                if is_postgres():
+                    r = db.execute(
+                        "INSERT INTO experience_buyers "
+                        "(name, type, description, trust_score, "
+                        " ethics_review_url, gdpr_compliance_url, active) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                        (org_name, org_type, description, trust_score,
+                         ethics_url or None, gdpr_url or None, True)
+                    ).fetchone()
+                    buyer_id = r[0] if isinstance(r, (list, tuple)) else r.get('id')
+                else:
+                    cur = db.execute(
+                        "INSERT INTO experience_buyers "
+                        "(name, type, description, trust_score, "
+                        " ethics_review_url, gdpr_compliance_url, active) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (org_name, org_type, description, trust_score,
+                         ethics_url or None, gdpr_url or None, 1)
+                    )
+                    buyer_id = cur.lastrowid if hasattr(cur, 'lastrowid') else None
+                logger.info(f'Buyer CREATED: id={buyer_id} name={org_name} trust={trust_score}')
+    except Exception as e:
+        logger.error(f'admin_partners_onboard buyer create: {e}', exc_info=True)
+        return jsonify({'success': False, 'error': 'DB error při vytvoření buyer'}), 500
+
+    # Vytvoř offers
+    created_offers = []
+    if isinstance(offers_input, list) and offers_input:
+        try:
+            with db_context(commit=True) as db:
+                for o in offers_input[:10]:  # max 10 offers najednou
+                    title = (o.get('title') or '').strip()[:200]
+                    if not title:
+                        continue
+                    o_desc = (o.get('description') or '').strip()[:500]
+                    target_theme = (o.get('targetTheme') or 'wisdom').strip()[:50]
+                    target_type = (o.get('targetType') or 'memory').strip()[:50]
+                    target_depth = max(1, min(3, int(o.get('targetDepth', 2) or 2)))
+                    price_kc = max(50, int(o.get('priceKc', 800) or 800))  # min 50 Kč
+                    royalty_years = max(0, min(20, int(o.get('royaltyYears', 0) or 0)))
+                    royalty_kc = max(0, int(o.get('royaltyKcPerYear', 0) or 0))
+                    seats_total = max(1, int(o.get('seatsTotal', 100) or 100))
+
+                    if is_postgres():
+                        r = db.execute(
+                            "INSERT INTO experience_offers "
+                            "(buyer_id, title, description, target_theme, target_type, "
+                            " target_depth, price_kc, royalty_years, royalty_kc_per_year, "
+                            " status, seats_total, seats_filled) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                            (buyer_id, title, o_desc, target_theme, target_type,
+                             target_depth, price_kc, royalty_years, royalty_kc,
+                             'active', seats_total, 0)
+                        ).fetchone()
+                        offer_id = r[0] if isinstance(r, (list, tuple)) else r.get('id')
+                    else:
+                        cur = db.execute(
+                            "INSERT INTO experience_offers "
+                            "(buyer_id, title, description, target_theme, target_type, "
+                            " target_depth, price_kc, royalty_years, royalty_kc_per_year, "
+                            " status, seats_total, seats_filled) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (buyer_id, title, o_desc, target_theme, target_type,
+                             target_depth, price_kc, royalty_years, royalty_kc,
+                             'active', seats_total, 0)
+                        )
+                        offer_id = cur.lastrowid if hasattr(cur, 'lastrowid') else None
+
+                    created_offers.append({
+                        'id': offer_id,
+                        'title': title,
+                        'priceKc': price_kc,
+                        'royaltyYears': royalty_years,
+                        'royaltyKcPerYear': royalty_kc,
+                        'seatsTotal': seats_total,
+                        'targetTheme': target_theme,
+                        'targetType': target_type,
+                        'targetDepth': target_depth,
+                    })
+                    logger.info(f'Offer CREATED: id={offer_id} buyer={buyer_id} title={title} price={price_kc}')
+        except Exception as e:
+            logger.error(f'admin_partners_onboard offers: {e}', exc_info=True)
+            # buyer je vytvořen, ale offers selhaly — vrátíme partial success
+            return jsonify({
+                'success': True,
+                'buyer': {'id': buyer_id, 'name': org_name, 'active': True},
+                'offers': created_offers,
+                'warning': 'Některé offers se nepodařilo vytvořit. Zkuste je přidat samostatně přes /api/admin/partners/<id>/offers',
+            })
+
+    # Update lead status na 'signed' pokud byl zadán
+    lead_status_updated = False
+    if lead_id:
+        try:
+            with db_context(commit=True) as db:
+                db.execute(
+                    "UPDATE experience_partner_leads SET status = 'signed', "
+                    "       signed_at = COALESCE(signed_at, CURRENT_TIMESTAMP) "
+                    "WHERE id = ?",
+                    (lead_id,)
+                )
+            lead_status_updated = True
+        except Exception as e:
+            logger.warning(f'lead {lead_id} status update failed: {e}')
+
+    return jsonify({
+        'success': True,
+        'buyer': {
+            'id': buyer_id,
+            'name': org_name,
+            'type': org_type,
+            'trustScore': trust_score,
+            'active': True,
+        },
+        'offers': created_offers,
+        'leadStatusUpdated': lead_status_updated,
+        'message': f'Partner "{org_name}" je nyní aktivní s {len(created_offers)} nabídkami. '
+                   f'Senioři je uvidí v aplikaci do 5 minut (cache).'
+    })
+
+
+@experience_bp.route('/api/admin/partners/<int:buyer_id>/deactivate', methods=['POST'])
+def admin_partners_deactivate(buyer_id):
+    """Deaktivace partnera — schová ho ze seznamu nabídek pro seniory.
+    Existující kontrakty zůstávají, jen nové nemůžou vznikat.
+    """
+    auth_err = _require_admin()
+    if auth_err:
+        return auth_err
+
+    data = request.get_json(silent=True) or {}
+    reason = (data.get('reason') or '').strip()[:500]
+
+    try:
+        with db_context(commit=True) as db:
+            db.execute(
+                "UPDATE experience_buyers SET active = ? WHERE id = ?",
+                (False if is_postgres() else 0, buyer_id)
+            )
+            db.execute(
+                "UPDATE experience_offers SET status = 'inactive' "
+                "WHERE buyer_id = ? AND status = 'active'",
+                (buyer_id,)
+            )
+        logger.info(f'Partner DEACTIVATED: buyer_id={buyer_id} reason={reason[:80]}')
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f'admin_partners_deactivate: {e}', exc_info=True)
+        return jsonify({'success': False, 'error': 'DB error'}), 500
+
+
+@experience_bp.route('/api/admin/partners/<int:buyer_id>/offers', methods=['POST'])
+def admin_partners_add_offer(buyer_id):
+    """Přidat další nabídku k existujícímu partnerovi.
+
+    Body: stejný formát jako offers[] v onboard endpoint.
+    """
+    auth_err = _require_admin()
+    if auth_err:
+        return auth_err
+
+    o = request.get_json(silent=True) or {}
+    title = (o.get('title') or '').strip()[:200]
+    if not title:
+        return jsonify({'success': False, 'error': 'title je povinný'}), 400
+
+    o_desc = (o.get('description') or '').strip()[:500]
+    target_theme = (o.get('targetTheme') or 'wisdom').strip()[:50]
+    target_type = (o.get('targetType') or 'memory').strip()[:50]
+    target_depth = max(1, min(3, int(o.get('targetDepth', 2) or 2)))
+    price_kc = max(50, int(o.get('priceKc', 800) or 800))
+    royalty_years = max(0, min(20, int(o.get('royaltyYears', 0) or 0)))
+    royalty_kc = max(0, int(o.get('royaltyKcPerYear', 0) or 0))
+    seats_total = max(1, int(o.get('seatsTotal', 100) or 100))
+
+    try:
+        with db_context(commit=True) as db:
+            # Ověř buyer existuje a je aktivní
+            buyer_row = db.execute(
+                "SELECT id, active FROM experience_buyers WHERE id = ?",
+                (buyer_id,)
+            ).fetchone()
+            if not buyer_row:
+                return jsonify({'success': False, 'error': 'Buyer not found'}), 404
+            buyer_active = buyer_row[1] if isinstance(buyer_row, (list, tuple)) else buyer_row.get('active')
+            if not buyer_active:
+                return jsonify({
+                    'success': False,
+                    'error': 'Buyer je deaktivovaný. Nejdřív ho aktivujte.'
+                }), 400
+
+            if is_postgres():
+                r = db.execute(
+                    "INSERT INTO experience_offers "
+                    "(buyer_id, title, description, target_theme, target_type, "
+                    " target_depth, price_kc, royalty_years, royalty_kc_per_year, "
+                    " status, seats_total, seats_filled) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                    (buyer_id, title, o_desc, target_theme, target_type,
+                     target_depth, price_kc, royalty_years, royalty_kc,
+                     'active', seats_total, 0)
+                ).fetchone()
+                offer_id = r[0] if isinstance(r, (list, tuple)) else r.get('id')
+            else:
+                cur = db.execute(
+                    "INSERT INTO experience_offers "
+                    "(buyer_id, title, description, target_theme, target_type, "
+                    " target_depth, price_kc, royalty_years, royalty_kc_per_year, "
+                    " status, seats_total, seats_filled) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (buyer_id, title, o_desc, target_theme, target_type,
+                     target_depth, price_kc, royalty_years, royalty_kc,
+                     'active', seats_total, 0)
+                )
+                offer_id = cur.lastrowid if hasattr(cur, 'lastrowid') else None
+        logger.info(f'Offer ADDED: id={offer_id} buyer={buyer_id} title={title} price={price_kc}')
+        return jsonify({
+            'success': True,
+            'offer': {
+                'id': offer_id, 'buyerId': buyer_id, 'title': title,
+                'priceKc': price_kc, 'targetDepth': target_depth,
+            },
+        })
+    except Exception as e:
+        logger.error(f'admin_partners_add_offer: {e}', exc_info=True)
+        return jsonify({'success': False, 'error': 'DB error'}), 500
+
+
+@experience_bp.route('/api/admin/partners/list', methods=['GET'])
+def admin_partners_list():
+    """Seznam všech buyers + jejich offers — admin dashboard view."""
+    auth_err = _require_admin()
+    if auth_err:
+        return auth_err
+    _init_schema()
+
+    try:
+        with db_context() as db:
+            buyer_rows = db.execute(
+                "SELECT id, name, type, description, trust_score, active, "
+                "       ethics_review_url, gdpr_compliance_url, created_at "
+                "FROM experience_buyers ORDER BY active DESC, created_at DESC"
+            ).fetchall()
+            offer_rows = db.execute(
+                "SELECT id, buyer_id, title, description, target_theme, target_type, "
+                "       target_depth, price_kc, royalty_years, royalty_kc_per_year, "
+                "       status, seats_total, seats_filled "
+                "FROM experience_offers ORDER BY buyer_id, status, id"
+            ).fetchall()
+    except Exception as e:
+        logger.error(f'admin_partners_list: {e}', exc_info=True)
+        return jsonify({'success': False, 'error': 'DB error'}), 500
+
+    # Group offers by buyer_id
+    offers_by_buyer = {}
+    for r in offer_rows or []:
+        def gv(i, k):
+            return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+        bid = gv(1, 'buyer_id')
+        offers_by_buyer.setdefault(bid, []).append({
+            'id': gv(0, 'id'),
+            'title': gv(2, 'title'),
+            'description': gv(3, 'description'),
+            'targetTheme': gv(4, 'target_theme'),
+            'targetType': gv(5, 'target_type'),
+            'targetDepth': gv(6, 'target_depth'),
+            'priceKc': gv(7, 'price_kc'),
+            'royaltyYears': gv(8, 'royalty_years'),
+            'royaltyKcPerYear': gv(9, 'royalty_kc_per_year'),
+            'status': gv(10, 'status'),
+            'seatsTotal': gv(11, 'seats_total'),
+            'seatsFilled': gv(12, 'seats_filled'),
+        })
+
+    partners = []
+    for r in buyer_rows or []:
+        def gv(i, k):
+            return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+        bid = gv(0, 'id')
+        partners.append({
+            'id': bid,
+            'name': gv(1, 'name'),
+            'type': gv(2, 'type'),
+            'description': gv(3, 'description'),
+            'trustScore': gv(4, 'trust_score'),
+            'active': bool(gv(5, 'active')),
+            'ethicsReviewUrl': gv(6, 'ethics_review_url'),
+            'gdprComplianceUrl': gv(7, 'gdpr_compliance_url'),
+            'createdAt': str(gv(8, 'created_at')) if gv(8, 'created_at') else None,
+            'offers': offers_by_buyer.get(bid, []),
+            'offerCount': len(offers_by_buyer.get(bid, [])),
+            'activeOfferCount': sum(1 for o in offers_by_buyer.get(bid, []) if o['status'] == 'active'),
+        })
+
+    return jsonify({
+        'success': True,
+        'partners': partners,
+        'count': len(partners),
+        'activeCount': sum(1 for p in partners if p['active']),
+    })
+
+
 @experience_bp.route('/api/admin/payouts/mark-paid', methods=['POST'])
 def admin_payouts_mark_paid():
     """Po hromadné bankovní výplatě označí dané earnings záznamy
