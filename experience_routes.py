@@ -3693,15 +3693,46 @@ def recent_contributions_for_memory(user_id, limit=5):
 # ROYALTY SCHEDULER — background job, pays yearly royalties monthly/12
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_royalty_payout():
+def run_royalty_payout(dry_run=False):
     """Check all active contracts with royalty_years > 0 and monthly-prorate.
     Creates earnings entries for contracts whose last_royalty_at is >=30 days ago
-    (or never paid after initial). Safe to run daily — idempotent per contract."""
+    (or never paid after initial). Safe to run daily — idempotent per contract.
+
+    v781+ enhancements (from E2E test + production audit):
+      - Returns full metrics dict (ne jen count)
+      - Inheritance handling — když senior umřel, royalty jde na heir
+        (placeholder: experience_inheritance + auth_users.deceased_at)
+      - payout_method nastaven explicitně ('pending_bank_transfer' /
+        'inherited_pending') — admin payouts CSV pak ví, jak handle
+      - Senior NET split (80%) místo gross — earnings teď reflektuje
+        skutečnou částku k výplatě (předtím gross zaměňováno za netto)
+      - Robust timestamp parsing (PG ISO formát, SQLite ISO formát)
+      - dry_run mode pro testování / admin trigger
+
+    Args:
+        dry_run: pokud True, žádné DB zápisy, jen vrátí seznam kandidátů.
+
+    Returns:
+        dict s metrikami (canditates_found, earnings_created, total_kc,
+        inherited, expired, errors, dry_run).
+    """
     _init_schema()
     from datetime import datetime, timedelta
+
+    metrics = {
+        'candidates_found': 0,
+        'earnings_created': 0,
+        'total_kc': 0,
+        'inherited': 0,
+        'expired': 0,
+        'skipped_recent': 0,
+        'errors': [],
+        'dry_run': dry_run,
+    }
+
     now = datetime.utcnow()
     cutoff_30d = now - timedelta(days=30)
-    paid_count = 0
+
     try:
         with db_context() as db:
             rows = db.execute(
@@ -3712,58 +3743,126 @@ def run_royalty_payout():
                 "AND royalty_kc_per_year > 0"
             ).fetchall()
     except Exception as e:
-        logger.debug(f"royalty scan: {e}")
-        return 0
+        logger.error(f"royalty scan: {e}")
+        metrics['errors'].append(f"scan: {e}")
+        return metrics
+
+    metrics['candidates_found'] = len(rows or [])
+
+    def _parse_ts(val):
+        """Parse timestamp z PG nebo SQLite (ISO formáty)."""
+        if not val:
+            return None
+        s = str(val)[:19]
+        for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S'):
+            try:
+                return datetime.strptime(s, fmt)
+            except ValueError:
+                continue
+        return None
+
     for r in rows or []:
         def v(i, k):
             return r[i] if isinstance(r, (list, tuple)) else r.get(k)
         contract_id = v(0, 'id')
-        user_id = v(1, 'user_id')
+        senior_uid = v(1, 'user_id')
         years = int(v(2, 'royalty_years') or 0)
         per_year = int(v(3, 'royalty_kc_per_year') or 0)
         signed = v(4, 'signed_at')
         last = v(5, 'last_royalty_at')
-        # Monthly amount (1/12 of yearly)
-        monthly = per_year // 12 if per_year >= 12 else per_year
-        if monthly <= 0:
+
+        # Monthly amount (1/12 of yearly), s 80/20 senior split.
+        monthly_gross = per_year // 12 if per_year >= 12 else per_year
+        if monthly_gross <= 0:
             continue
-        # Check eligibility
-        last_dt = None
-        try:
-            if last:
-                last_dt = datetime.strptime(str(last)[:19], '%Y-%m-%d %H:%M:%S')
-        except Exception:
-            last_dt = None
+        senior_net = _calc_senior_net(monthly_gross)
+
+        # Check eligibility — last_royalty_at méně než 30 dní = skip
+        last_dt = _parse_ts(last)
         if last_dt and last_dt > cutoff_30d:
-            continue  # already paid this month
+            metrics['skipped_recent'] += 1
+            continue
+
         # Check contract hasn't expired
-        try:
-            signed_dt = datetime.strptime(str(signed)[:19], '%Y-%m-%d %H:%M:%S')
-        except Exception:
-            signed_dt = now
+        signed_dt = _parse_ts(signed) or now
         expiry = signed_dt + timedelta(days=365 * years)
         if now > expiry:
-            continue  # royalty period over
-        # Pay
+            metrics['expired'] += 1
+            continue
+
+        # Inheritance check — pokud senior je deceased, royalty přesměrujeme
+        # na heir contact info (admin pak vyplatí ručně do payout_method=
+        # 'inherited_pending').
+        recipient_uid = senior_uid
+        is_inherited = False
+        try:
+            with db_context() as dbi:
+                # Aktuálně auth_users nemá deceased_at sloupec — defenzivně:
+                try:
+                    drow = dbi.execute(
+                        "SELECT deceased_at FROM auth_users WHERE id = ?",
+                        (senior_uid,)
+                    ).fetchone()
+                    is_deceased = bool(
+                        drow and (drow[0] if isinstance(drow, (list, tuple))
+                                  else drow.get('deceased_at'))
+                    )
+                except Exception:
+                    is_deceased = False
+
+                if is_deceased:
+                    # Najdi heir z experience_inheritance
+                    heir_row = dbi.execute(
+                        "SELECT heir_contact, royalty_years_after_death "
+                        "FROM experience_inheritance WHERE user_id = ?",
+                        (senior_uid,)
+                    ).fetchone()
+                    if heir_row:
+                        is_inherited = True
+                        metrics['inherited'] += 1
+        except Exception as inh_err:
+            logger.debug(f"royalty inheritance check {contract_id}: {inh_err}")
+
+        payout_method = 'inherited_pending' if is_inherited else 'pending_bank_transfer'
+
+        if dry_run:
+            metrics['earnings_created'] += 1
+            metrics['total_kc'] += senior_net
+            logger.info(
+                f"royalty DRY: contract={contract_id} senior={senior_uid[:8]} "
+                f"net={senior_net} ({monthly_gross} gross) inherited={is_inherited}"
+            )
+            continue
+
         try:
             with db_context(commit=True) as db:
                 db.execute(
                     "INSERT INTO experience_earnings "
-                    "(user_id, contract_id, amount_kc, source, period_label) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (user_id, contract_id, monthly, 'royalty',
-                     now.strftime('%Y-%m'))
+                    "(user_id, contract_id, amount_kc, gross_kc, source, "
+                    " payout_method, period_label) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (recipient_uid, contract_id, senior_net, monthly_gross,
+                     'royalty', payout_method, now.strftime('%Y-%m'))
                 )
                 db.execute(
                     "UPDATE experience_contracts SET last_royalty_at = CURRENT_TIMESTAMP "
                     "WHERE id = ?",
                     (contract_id,)
                 )
-            paid_count += 1
+            metrics['earnings_created'] += 1
+            metrics['total_kc'] += senior_net
         except Exception as e:
-            logger.debug(f"royalty pay contract={contract_id}: {e}")
-    logger.info(f"Royalty scheduler paid {paid_count} contracts")
-    return paid_count
+            logger.error(f"royalty pay contract={contract_id}: {e}")
+            metrics['errors'].append(f"contract {contract_id}: {e}")
+
+    logger.info(
+        f"Royalty scheduler: {metrics['candidates_found']} kandidátů, "
+        f"{metrics['earnings_created']} earnings, {metrics['total_kc']} Kč"
+        f"{', inh=' + str(metrics['inherited']) if metrics['inherited'] else ''}"
+        f"{', exp=' + str(metrics['expired']) if metrics['expired'] else ''}"
+        f"{', err=' + str(len(metrics['errors'])) if metrics['errors'] else ''}"
+    )
+    return metrics
 
 
 def run_scheduled_messages():
@@ -4986,6 +5085,112 @@ def admin_approve_reward(rid):
         return jsonify({'success': False, 'error': 'internal'}), 500
 
     return jsonify({'success': True, 'rewardId': rid, 'action': action})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ADMIN — manuální trigger royalty cyklu (pro testování + emergency)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@experience_bp.route('/api/admin/royalty/trigger', methods=['POST'])
+def admin_royalty_trigger():
+    """Manuální spuštění royalty cyklu — bypassuje denní APScheduler.
+
+    Body (volitelné):
+      dryRun: bool — pokud true, žádné DB zápisy, jen vrátí kandidáty
+
+    Use case:
+      - Test po nasazení (DRY RUN, verify candidates)
+      - Emergency catch-up po výpadku APScheduler
+      - Anniversary catch-up (po smrti seniora apod.)
+    """
+    auth_err = _require_admin()
+    if auth_err:
+        return auth_err
+
+    data = request.get_json(silent=True) or {}
+    dry_run = bool(data.get('dryRun', False))
+
+    try:
+        metrics = run_royalty_payout(dry_run=dry_run)
+        return jsonify({
+            'success': True,
+            'metrics': metrics,
+            'mode': 'dry_run' if dry_run else 'live',
+            'message': (
+                f"DRY RUN: {metrics['candidates_found']} kandidátů, "
+                f"by se vyplatilo {metrics['total_kc']} Kč"
+                if dry_run else
+                f"OK: {metrics['earnings_created']} earnings vytvořeno, "
+                f"celkem {metrics['total_kc']} Kč"
+            )
+        })
+    except Exception as e:
+        logger.error(f"admin_royalty_trigger: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@experience_bp.route('/api/admin/royalty/contracts', methods=['GET'])
+def admin_royalty_contracts():
+    """Seznam aktivních royalty kontraktů — admin dashboard přehled.
+
+    Query params:
+        status: 'active' (default) | 'expired' | 'all'
+    """
+    auth_err = _require_admin()
+    if auth_err:
+        return auth_err
+
+    status_filter = request.args.get('status', 'active')[:30]
+
+    try:
+        with db_context() as db:
+            if is_postgres():
+                rows = db.execute(
+                    "SELECT c.id, c.user_id, c.contribution_id, c.buyer_id, "
+                    "       c.price_kc, c.royalty_years, c.royalty_kc_per_year, "
+                    "       c.signed_at, c.last_royalty_at, c.revoked_at, "
+                    "       b.name AS buyer_name, "
+                    "       (SELECT COUNT(*) FROM experience_earnings e "
+                    "        WHERE e.contract_id = c.id AND e.source = 'royalty') AS royalty_paid_count, "
+                    "       (SELECT COALESCE(SUM(amount_kc), 0) FROM experience_earnings e "
+                    "        WHERE e.contract_id = c.id AND e.source = 'royalty') AS royalty_total_kc "
+                    "FROM experience_contracts c "
+                    "LEFT JOIN experience_buyers b ON b.id = c.buyer_id "
+                    "WHERE c.royalty_years > 0 "
+                    "ORDER BY c.signed_at DESC LIMIT 100"
+                ).fetchall()
+            else:
+                rows = []
+    except Exception as e:
+        logger.error(f"admin_royalty_contracts: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': 'DB error'}), 500
+
+    contracts = []
+    for r in rows or []:
+        def gv(i, k):
+            return r[i] if isinstance(r, (list, tuple)) else r.get(k)
+        contracts.append({
+            'id': gv(0, 'id'),
+            'userId': gv(1, 'user_id'),
+            'contributionId': gv(2, 'contribution_id'),
+            'buyerId': gv(3, 'buyer_id'),
+            'priceKc': gv(4, 'price_kc'),
+            'royaltyYears': gv(5, 'royalty_years'),
+            'royaltyKcPerYear': gv(6, 'royalty_kc_per_year'),
+            'signedAt': str(gv(7, 'signed_at') or '')[:19],
+            'lastRoyaltyAt': str(gv(8, 'last_royalty_at') or '')[:19] if gv(8, 'last_royalty_at') else None,
+            'revokedAt': str(gv(9, 'revoked_at') or '')[:19] if gv(9, 'revoked_at') else None,
+            'buyerName': gv(10, 'buyer_name'),
+            'royaltyPaidCount': int(gv(11, 'royalty_paid_count') or 0),
+            'royaltyTotalKc': int(gv(12, 'royalty_total_kc') or 0),
+        })
+
+    if status_filter == 'active':
+        contracts = [c for c in contracts if not c['revokedAt']]
+    elif status_filter == 'expired':
+        contracts = [c for c in contracts if c['royaltyPaidCount'] >= (c['royaltyYears'] * 12)]
+
+    return jsonify({'success': True, 'contracts': contracts, 'count': len(contracts)})
 
 
 def register_scheduler_jobs(scheduler):
