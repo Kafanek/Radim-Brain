@@ -2601,12 +2601,16 @@ def earnings_receipt():
         }), 400
 
     # Načti všechny earnings za toto období + senior info
+    # Bug-fix (E2E test): odstraněn `e.bank_ref` — sloupec neexistuje
+    # v experience_earnings schematu (jen v experience_rewards). Pokud
+    # potřebujeme bank reference, lze ho přidat do schema migrate.
+    # Pro receipt stačí period_label který už identifikuje hromadnou výplatu.
     try:
         with db_context() as db:
             rows = db.execute(
                 "SELECT e.id, e.amount_kc, e.gross_kc, e.contract_id, "
                 "       e.created_at, e.paid_at, e.payout_method, "
-                "       e.bank_ref, e.source, c.signed_at, "
+                "       e.period_label, e.source, c.signed_at, "
                 "       b.name AS buyer_name "
                 "FROM experience_earnings e "
                 "LEFT JOIN experience_contracts c ON c.id = e.contract_id "
@@ -2658,7 +2662,7 @@ def earnings_receipt():
             'createdAt': str(gv(4, 'created_at') or '')[:10],
             'paidAt': str(gv(5, 'paid_at') or '')[:10] if gv(5, 'paid_at') else None,
             'payoutMethod': gv(6, 'payout_method'),
-            'bankRef': gv(7, 'bank_ref'),
+            'periodLabel': gv(7, 'period_label'),  # E2E fix: bank_ref → period_label
             'source': gv(8, 'source'),
             'buyerName': gv(10, 'buyer_name') or '—',
         })
