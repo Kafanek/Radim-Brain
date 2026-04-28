@@ -271,7 +271,7 @@ def get_scenario(scenario_id):
 @education_scenario_bp.route('/api/education/scenarios/<scenario_id>/answer', methods=['POST'])
 def answer_scenario(scenario_id):
     """Odpověď na scénář — vyhodnocení volby"""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     answer_id = data.get('answer')
     user_id = data.get('userId', 'anonymous')
 

@@ -86,7 +86,7 @@ class MedicationTracker:
 
 @agents_bp.route('/api/agents/medication/confirm', methods=['POST'])
 def medication_confirm():
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     user_id = data.get('user_id', '')
     confirmed = data.get('confirmed', True)
     if not user_id:
@@ -708,7 +708,7 @@ class EmergencyProtocol:
 @agents_bp.route('/api/agents/emergency/<user_id>', methods=['POST'])
 def emergency_trigger(user_id):
     """Manually trigger emergency protocol."""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     trigger = data.get('trigger', 'Manual emergency activation')
     # Verify admin or caregiver
     from flask import current_app
@@ -764,7 +764,7 @@ class LearningAgent:
 
 @agents_bp.route('/api/agents/feedback', methods=['POST'])
 def agent_feedback():
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     user_id = data.get('user_id', '')
     obs_type = data.get('observation_type', '')
     accurate = data.get('was_accurate', True)

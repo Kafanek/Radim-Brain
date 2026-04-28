@@ -90,7 +90,7 @@ def get_quiz(course_id, module_id):
 @education_assessment_bp.route('/api/education/courses/<course_id>/modules/<module_id>/quiz/submit', methods=['POST'])
 def submit_quiz(course_id, module_id):
     """Odeslat odpovědi na kvíz — vyhodnocení"""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     answers = data.get('answers', {})
     user_id = data.get('userId', 'anonymous')
 
@@ -201,7 +201,7 @@ def submit_quiz(course_id, module_id):
 @education_assessment_bp.route('/api/education/evaluate', methods=['POST'])
 def evaluate_user():
     """Celkové adaptivní vyhodnocení uživatele"""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     user_id = data.get('userId', 'anonymous')
 
     profile = get_adaptive_profile(user_id)

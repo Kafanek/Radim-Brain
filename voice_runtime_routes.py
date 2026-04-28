@@ -169,7 +169,7 @@ def compute_metrics():
     Output: {C, kappa, alpha, system_state, relevance, should_respond, tts_params}
     """
     try:
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
 
         session_id = data.get('session_id', 'default')
         sensors = data.get('sensors', {})
@@ -234,7 +234,7 @@ def update_state():
     Events: wake_detected, voice_valid, voice_invalid, timeout, speech_end, response_ready, tts_done
     """
     try:
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         session_id = data.get('session_id', 'default')
         event = data.get('event', '')
         event_data = data.get('data', {})
@@ -353,7 +353,7 @@ def voice_chat():
     """Hlasový chat optimalizovaný pro TTS.
     Integrates Anticipation Engine for adaptive speech parameters."""
     try:
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         messages = data.get('messages', [])
         session_id = data.get('session_id', 'default')
         sensors = data.get('sensors', {})

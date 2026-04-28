@@ -77,7 +77,7 @@ def fetch_news():
 
     Uses Gemini with web search context to get fresh Czech news.
     """
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     category = data.get('category', 'general')
     interests = data.get('interests', [])
     count = min(data.get('count', 5), 8)
@@ -132,7 +132,7 @@ def manage_interests():
         interests = _load_interests(user_id)
         return jsonify({'success': True, 'interests': interests})
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     user_id = data.get('user_id', '')
     interests = data.get('interests', [])
 
@@ -149,7 +149,7 @@ def track_read():
 
     Body: { "user_id": "...", "category": "health", "title": "..." }
     """
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     user_id = data.get('user_id', '')
     category = data.get('category', '')
 

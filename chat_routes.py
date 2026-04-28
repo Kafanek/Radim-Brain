@@ -122,7 +122,7 @@ def get_conversations(user_id):
 @optional_auth
 def create_conversation():
     try:
-        data = request.json
+        data = request.get_json(silent=True) or {}
         participants = data.get('participants', [])
         conv_type = data.get('type', 'direct' if len(participants) <= 2 else 'group')
         name = data.get('name')

@@ -133,7 +133,7 @@ def get_template_detail(template_id):
 @optional_auth
 def setup_senior_from_template():
     """Setup complete senior from diagnosis template."""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     senior_id = data.get('senior_id', '')
     template_id = data.get('template_id', '')
     senior_name = data.get('name', '')
@@ -182,7 +182,7 @@ def setup_senior_from_template():
 @optional_auth
 def invite_doctor():
     """Invite doctor to case — generates invitation."""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     senior_id = data.get('senior_id', '')
     doctor_email = data.get('email', '')
     role = data.get('role', 'general_practitioner')

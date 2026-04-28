@@ -426,7 +426,7 @@ def initiate_outgoing_call():
         return jsonify({"success": False, "error": "Twilio není nakonfigurováno"}), 503
 
     try:
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         to = data.get("to", "")
         caller_name = data.get("caller_name", "")
         greeting = data.get("greeting") or f"{_shared_get_greeting(with_emoji=False)}, volá vám Radim, asistent pro seniory."
@@ -490,7 +490,7 @@ def register_known_caller():
     if request.method == 'OPTIONS':
         return '', 204
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     phone = data.get("phone", "")
     name = data.get("name", "")
 
@@ -524,7 +524,7 @@ def send_call_invitation():
         return jsonify({"success": False, "error": "Twilio není nakonfigurováno"}), 503
 
     try:
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         to = data.get("to", "")
         caller_name = data.get("caller_name", "Váš blízký")
         room_code = data.get("room_code", "")
@@ -636,7 +636,7 @@ def video_call_request():
     if request.method == 'OPTIONS':
         return '', 204
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     senior_id = data.get('senior_id', '')
     caller_name = data.get('caller_name', 'Někdo')
     call_type = data.get('call_type', 'video')
@@ -703,7 +703,7 @@ def app_to_app_call():
     if request.method == 'OPTIONS':
         return '', 204
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     to_user_id = data.get('to_user_id', '')
     # Duplicate call prevention
     existing = _pending_calls.get(to_user_id)
@@ -795,7 +795,7 @@ def video_call_accept(senior_id):
 @twilio_bp.route('/video/reject/<senior_id>', methods=['POST'])
 def video_call_reject(senior_id):
     """Senior rejects or is busy for the incoming call."""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     reason = data.get('reason', 'rejected')  # 'rejected' or 'busy'
 
     call = _pending_calls.pop(senior_id, None)

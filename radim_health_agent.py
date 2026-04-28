@@ -1131,7 +1131,7 @@ def agent_chat():
     if ADMIN_SECRET and secret != ADMIN_SECRET and not auth.startswith('Bearer '):
         return jsonify({'error': 'Unauthorized'}), 401
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     message = data.get('message', '').strip()
     if not message:
         return jsonify({'error': 'Message required'}), 400

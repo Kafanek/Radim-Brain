@@ -226,7 +226,7 @@ def teacher_dashboard_student_detail(student_id):
 def teacher_assign_student():
     """Přiřadit studenta k učiteli (human teacher)"""
     teacher_id = get_teacher_id()
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     student_id = data.get('student_id', '').strip()
 
     if not student_id:

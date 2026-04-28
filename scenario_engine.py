@@ -430,7 +430,7 @@ scenario_bp = Blueprint('scenario_engine', __name__)
 @scenario_bp.route('/api/scenario/detect', methods=['POST'])
 def api_detect_scenario():
     """Detect scenario from message."""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     message = data.get('message', '')
     user_id = data.get('user_id', '')
 
@@ -467,7 +467,7 @@ def api_scenario_library():
 @scenario_bp.route('/api/scenario/feedback', methods=['POST'])
 def api_scenario_feedback():
     """Submit training feedback on scenario response."""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     user_id = data.get('user_id', '')
     scenario_id = data.get('scenario_id', '')
     feedback_type = data.get('feedback', 'correct')

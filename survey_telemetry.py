@@ -66,7 +66,7 @@ def log_telemetry():
         "data": { ... optional metadata }
     }
     """
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     user_id = data.get('user_id', '')
     event = data.get('event', '')
     meta = data.get('data', {})
@@ -105,7 +105,7 @@ def review_alert():
         "note": "optional caregiver note"
     }
     """
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     user_id = data.get('user_id', '')
     status = data.get('status', 'reviewed')
     feedback = data.get('feedback', '')

@@ -41,7 +41,7 @@ def teacher_create_task(student_id):
     if not verify_teacher_student(teacher_id, student_id):
         return jsonify({"success": False, "error": "Student vám není přiřazen"}), 403
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     title = data.get('title', '').strip()
     if not title:
         return jsonify({"success": False, "error": "title je vyžadováno"}), 400
@@ -149,7 +149,7 @@ def teacher_get_student_tasks(student_id):
 def teacher_grade_task(task_id):
     """Učitel ohodnotí odevzdaný úkol"""
     teacher_id = get_teacher_id()
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     grade = data.get('grade', '').strip()
     feedback = data.get('feedback', '').strip()
 
@@ -203,7 +203,7 @@ def teacher_grade_task(task_id):
 def teacher_update_task(task_id):
     """Učitel upraví úkol (title, description, due_date, task_type) — ne grading"""
     teacher_id = get_teacher_id()
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
 
     try:
         with db_context(commit=True) as db:
@@ -326,7 +326,7 @@ def student_submit_task(task_id):
     """Student odevzdá úkol"""
     user = getattr(g, 'auth_user', {})
     student_id = str(user.get('id', user.get('user_id', '')))
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     submission = data.get('submission', {})
 
     if not student_id:

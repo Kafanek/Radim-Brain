@@ -274,7 +274,7 @@ def get_senior(senior_id):
 @require_auth
 def create_senior():
     """Vytvoření nového seniora"""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     required = ['name', 'age', 'room']
     missing = [f for f in required if f not in data]
     if missing:
@@ -327,7 +327,7 @@ def update_senior(senior_id):
     if senior_id not in DEMO_SENIORS:
         return jsonify({"success": False, "error": f"Senior {senior_id} nenalezen"}), 404
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     senior = DEMO_SENIORS[senior_id]
 
     updatable = ['name', 'age', 'room', 'floor', 'status', 'care_level',

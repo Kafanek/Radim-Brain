@@ -31,7 +31,7 @@ def evaluate_input():
     Body: { "user_id": "...", "message": "Bolí mě hlava" }
     Returns: agent decision + unified response + audit trail
     """
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     user_id = data.get('user_id', '')
     message = data.get('message', '') or data.get('user_input', '')
 

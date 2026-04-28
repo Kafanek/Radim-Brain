@@ -86,7 +86,7 @@ def azure_tts_proxy():
     if not AZURE_TTS_KEY:
         return jsonify({'error': 'Azure TTS not configured (AZURE_TTS_KEY missing)'}), 503
     try:
-        data = request.json
+        data = request.get_json(silent=True) or {}
         if not data:
             return jsonify({'error': 'Chybi telo pozadavku (JSON)'}), 400
         text = data.get('text', '')
@@ -426,7 +426,7 @@ def elevenlabs_tts_preflight():
 def elevenlabs_tts_proxy():
     """ElevenLabs TTS Proxy"""
     try:
-        data = request.json
+        data = request.get_json(silent=True) or {}
         if not data:
             return jsonify({'error': 'Chybi telo pozadavku (JSON)'}), 400
         text = data.get('text', '')

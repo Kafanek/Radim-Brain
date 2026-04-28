@@ -185,7 +185,7 @@ def read_book(book_id):
 def handle_progress():
     """Sprava pokroku cteni"""
     if request.method == 'POST':
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         user_id = data.get('userId', 'anonymous')
         book_id = data.get('bookId')
         chapter_id = data.get('chapterId')

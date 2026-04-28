@@ -65,7 +65,7 @@ def synthesize_speech():
         return jsonify({'success': False, 'error': 'AZURE_SPEECH_KEY neni nastaven'}), 500
 
     try:
-        data = request.json
+        data = request.get_json(silent=True) or {}
         if not data:
             return jsonify({'success': False, 'error': 'Chybi telo pozadavku (JSON)'}), 400
         text = data.get('text', '')
@@ -189,7 +189,7 @@ def synthesize_stream():
         return jsonify({'success': False, 'error': 'Speech service not available'}), 500
 
     try:
-        data = request.json
+        data = request.get_json(silent=True) or {}
         if not data:
             return jsonify({'success': False, 'error': 'Chybi telo pozadavku (JSON)'}), 400
         text = data.get('text', '')

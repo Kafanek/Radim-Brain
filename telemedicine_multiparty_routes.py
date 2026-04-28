@@ -34,7 +34,7 @@ telemedicine_multiparty_bp = Blueprint('telemedicine_multiparty', __name__)
 def telemed_create_multiparty():
     """Create a multi-party consultation with invited specialists"""
     organizer_id = _get_teacher_id_local()
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
 
     patient_id = data.get('patient_id', '').strip()
     title = data.get('title', '').strip()[:MAX_TEXT]
@@ -134,7 +134,7 @@ def telemed_invite_participant(consultation_id):
     if consultation.get('status') in ('completed', 'cancelled', 'archived'):
         return jsonify({"success": False, "error": "Nelze pridavat ucastniky k ukoncene konzultaci"}), 400
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     user_id = str(data.get('user_id', '')).strip()
     role = data.get('role', 'specialist')
     specialty = data.get('specialty', 'other')
@@ -236,7 +236,7 @@ def telemed_list_participants(consultation_id):
 def telemed_respond_invitation(consultation_id):
     """Accept or decline a consultation invitation"""
     user_id = _get_user_id()
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     response = data.get('response', '').strip().lower()
 
     if response not in ('accepted', 'declined'):
@@ -278,7 +278,7 @@ def telemed_respond_invitation(consultation_id):
 def telemed_participant_notes(consultation_id):
     """Specialist submits their individual notes"""
     user_id = _get_teacher_id_local()
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     notes_contribution = data.get('notes_contribution', '').strip()[:MAX_TEXT]
 
     if not notes_contribution:

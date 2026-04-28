@@ -350,7 +350,7 @@ def get_team(senior_id):
 def add_team_member(senior_id):
     """Add a member to medical team."""
     _init_medical_schema()
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     role = data.get('role', 'family')
     name = data.get('name', '')
     email = data.get('email', '')
@@ -430,7 +430,7 @@ def medical_messages(senior_id):
             return jsonify({'success': True, 'messages': [], 'count': 0})
 
     elif request.method == 'POST':
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         message = data.get('message', '').strip()
         if not message:
             return jsonify({'success': False, 'error': 'Zpráva je povinná'}), 400
@@ -466,7 +466,7 @@ ALERT_STATES = ['new', 'acknowledged', 'in_progress', 'resolved', 'escalated']
 @require_auth
 def update_alert(senior_id):
     """Update alert state — acknowledge, resolve, escalate."""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     alert_id = data.get('alert_id')
     new_state = data.get('state')
     note = data.get('note', '')
@@ -809,7 +809,7 @@ def granular_consent(senior_id):
             return jsonify({'success': True, 'consents': [], 'data_types': CONSENT_DATA_TYPES, 'count': 0})
 
     elif request.method == 'POST':
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         user_id = data.get('user_id', '')
         role = data.get('role', '')
         data_type = data.get('data_type', '')
@@ -922,7 +922,7 @@ def consent(senior_id):
             return jsonify({'success': True, 'pending': [], 'approved': [], 'total': 0})
 
     elif request.method == 'POST':
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         member_id = data.get('member_id')
         action = data.get('action', 'approve')  # approve / revoke
 
@@ -983,7 +983,7 @@ def medical_photos(senior_id):
             return jsonify({'success': True, 'photos': [], 'count': 0})
 
     elif request.method == 'POST':
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         description = data.get('description', '')
         photo_url = data.get('photo_url', '')  # Base64 or URL
         auth = getattr(g, 'auth_user', {}) or {}
@@ -1260,7 +1260,7 @@ def clinical_notes(senior_id):
             return jsonify({'success': True, 'notes': [], 'count': 0})
 
     elif request.method == 'POST':
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         auth = getattr(g, 'auth_user', {}) or {}
 
         content = data.get('content', '').strip()
@@ -1373,7 +1373,7 @@ def care_plan(senior_id):
             return jsonify({'success': True, 'plan': {}})
 
     elif request.method == 'PUT':
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         auth = getattr(g, 'auth_user', {}) or {}
 
         try:
@@ -1418,7 +1418,7 @@ def care_plan(senior_id):
 @optional_auth
 def medical_video_call(senior_id):
     """Doctor initiates video call to senior from medical module."""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     auth = getattr(g, 'auth_user', None) or {}
     caller_name = data.get('name', auth.get('name', 'Lékař'))
     role = data.get('role', 'coordinator')

@@ -90,7 +90,7 @@ def radim_tasks():
         return jsonify({'success': True, 'tasks': tasks, 'count': len(tasks), 'user_id': user_id})
 
     elif request.method == 'POST':
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         task = _ts_create(
             user_id=user_id,
             title=data.get('title', 'Nový úkol'),
@@ -107,7 +107,7 @@ def radim_tasks():
         return jsonify({'success': False, 'error': 'Nepodařilo se vytvořit úkol'}), 500
 
     elif request.method == 'PUT':
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         task_id = data.get('task_id') or data.get('id')
         if not task_id:
             return jsonify({'success': False, 'error': 'task_id je povinné'}), 400
@@ -115,7 +115,7 @@ def radim_tasks():
         return jsonify({'success': ok, 'message': 'Úkol splněn ✅' if ok else 'Chyba při splnění'})
 
     elif request.method == 'DELETE':
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         task_id = data.get('task_id') or data.get('id')
         if not task_id:
             return jsonify({'success': False, 'error': 'task_id je povinné'}), 400
@@ -153,7 +153,7 @@ def radim_medications():
         })
 
     elif request.method == 'POST':
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         name = data.get('name', data.get('medication_name', ''))
         if not name:
             return jsonify({'success': False, 'error': 'Název léku je povinný'}), 400
@@ -177,8 +177,8 @@ def medications_confirm():
     if request.method == 'OPTIONS':
         return '', 204
     user_id = _extract_user_id(getattr(g, 'auth_user', None),
-                                (request.json or {}).get('user_id') if request.is_json else request.args.get('user_id'))
-    source = (request.json or {}).get('source', 'ui') if request.is_json else 'ui'
+                                (request.get_json(silent=True) or {}).get('user_id') if request.is_json else request.args.get('user_id'))
+    source = (request.get_json(silent=True) or {}).get('source', 'ui') if request.is_json else 'ui'
 
     try:
         from memory_helpers import db_load_profile
@@ -255,7 +255,7 @@ def radim_story_generate():
         return '', 204
 
     try:
-        data = request.json
+        data = request.get_json(silent=True) or {}
         template_id = data.get('template_id')
         fields = data.get('fields', {})
         platform = data.get('platform', 'instagram')
@@ -318,7 +318,7 @@ def radim_voice_speak():
         return jsonify({'success': False, 'error': 'Azure Speech není nakonfigurován'}), 503
 
     try:
-        data = request.json
+        data = request.get_json(silent=True) or {}
         text = data.get('text', '')
         voice = data.get('voice', 'cs-CZ-AntoninNeural')
         emotion = data.get('emotion', 'friendly')

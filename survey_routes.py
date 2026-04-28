@@ -208,7 +208,7 @@ def get_today_survey():
 def submit_response():
     """Submit survey response + award points."""
     user_id = _extract_user_id()
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     survey_id = data.get('survey_id', '')
     answers = data.get('answers', [])
     source = data.get('source', 'ui')  # 'ui' or 'voice'

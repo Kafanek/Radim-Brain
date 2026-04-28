@@ -166,7 +166,7 @@ def get_care_plan(senior_id):
 def update_care_plan(senior_id):
     """Update care plan (partial update — only provided fields)."""
     _init_care_plan_schema()
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     user_id = ''
     auth = getattr(g, 'auth_user', None)
     if auth:
@@ -218,7 +218,7 @@ def update_care_plan(senior_id):
 @optional_auth
 def add_goal(senior_id):
     """Add care goal."""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     text = data.get('text', '')
     priority = data.get('priority', 'medium')
     if not text:
@@ -244,7 +244,7 @@ def add_goal(senior_id):
 @optional_auth
 def add_risk(senior_id):
     """Add risk."""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     text = data.get('text', '')
     severity = data.get('severity', 'medium')
     mitigation = data.get('mitigation', '')
@@ -269,7 +269,7 @@ def add_risk(senior_id):
 @optional_auth
 def add_checkup(senior_id):
     """Schedule checkup."""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     doctor = data.get('doctor', '')
     date = data.get('date', '')
     note = data.get('note', '')

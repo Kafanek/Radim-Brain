@@ -91,7 +91,7 @@ def telemed_dashboard():
 def telemed_set_availability():
     """Set teacher availability slot"""
     teacher_id = _get_teacher_id_local()
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
 
     day_of_week = data.get('day_of_week')
     specific_date = data.get('specific_date')
@@ -303,7 +303,7 @@ def telemed_confirm(consultation_id):
 def telemed_teacher_cancel(consultation_id):
     """Teacher cancels a consultation"""
     teacher_id = _get_teacher_id_local()
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     reason = data.get('reason', '').strip()[:MAX_TEXT]
 
     try:
@@ -445,7 +445,7 @@ def telemed_complete(consultation_id):
 def telemed_notes(consultation_id):
     """Teacher records consultation notes"""
     teacher_id = _get_teacher_id_local()
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
 
     complaint = data.get('complaint', '').strip()[:MAX_TEXT]
     findings = data.get('findings', '').strip()[:MAX_TEXT]
@@ -493,7 +493,7 @@ def telemed_notes(consultation_id):
 def telemed_send_summary(consultation_id):
     """Send consultation summary via email"""
     teacher_id = _get_teacher_id_local()
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     to_email = data.get('to_email', '').strip()
 
     consultation = _get_consultation(consultation_id)
@@ -636,7 +636,7 @@ def telemed_audit_trail(consultation_id):
 def telemed_check_conflict():
     """Check if proposed time conflicts with existing consultations"""
     teacher_id = _get_teacher_id_local()
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
 
     scheduled_date = data.get('scheduled_date', '').strip()
     scheduled_time = data.get('scheduled_time', '').strip()

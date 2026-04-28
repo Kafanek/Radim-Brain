@@ -182,7 +182,7 @@ def get_ai_settings():
 def ai_chat():
     try:
         _, get_ai_response, _, _ = _get_app_helpers()
-        data = request.json
+        data = request.get_json(silent=True) or {}
         messages = data.get("messages", [])
         image_data = data.get("image")
         if not messages:
@@ -205,7 +205,7 @@ def ai_chat():
 def wp_login():
     try:
         _, _, get_wp_user, sync_wp_user = _get_app_helpers()
-        data = request.json
+        data = request.get_json(silent=True) or {}
         email = data.get('email')
         wp_user = get_wp_user(email)
         if wp_user:

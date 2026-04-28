@@ -1142,7 +1142,7 @@ def ha_action():
     if not uid:
         return jsonify({'success': False, 'error': 'unauthorized'}), 401
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     action = (data.get('action') or '').strip()
 
     # 1. Whitelist check
@@ -1250,7 +1250,7 @@ def ha_webhook():
     if not hmac.compare_digest(secret, HA_WEBHOOK_SECRET):
         return jsonify({'error': 'Unauthorized'}), 401
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     event_type = data.get('event_type', 'unknown')
     entity_id = data.get('entity_id', '')
     new_state = data.get('new_state', '')
@@ -1292,7 +1292,7 @@ def ha_mqtt_sensors():
 @_require_auth
 def ha_mqtt_publish():
     """Publish MQTT message (e.g., Zigbee2MQTT command)."""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     topic = data.get('topic', '')
     payload = data.get('payload', {})
     if not topic:
@@ -1346,7 +1346,7 @@ def ha_direct_kasa():
     if not _rate_limit_check(uid):
         return jsonify({'success': False, 'error': 'rate_limited'}), 429
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     ip = data.get('ip', '')
     action = data.get('action', 'toggle')
     if not ip:
@@ -1373,7 +1373,7 @@ def ha_direct_yeelight():
     if not _rate_limit_check(uid):
         return jsonify({'success': False, 'error': 'rate_limited'}), 429
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     ip = data.get('ip', '')
     action = data.get('action', 'toggle')
     params = data.get('params', {})

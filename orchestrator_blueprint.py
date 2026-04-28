@@ -180,7 +180,7 @@ def orchestrate():
     start_time = time.time()
     
     try:
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         action = data.get('action', 'health_all')
         target = data.get('target', 'all')
         params = data.get('params', {})

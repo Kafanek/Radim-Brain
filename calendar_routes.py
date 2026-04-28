@@ -74,7 +74,7 @@ def get_events():
 def create_event():
     """Create a calendar event."""
     try:
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         user_id = data.get('user_id', '')
         title = data.get('title', '').strip()
 
@@ -107,7 +107,7 @@ def create_event():
 def update_event(event_id):
     """Update a calendar event."""
     try:
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
 
         fields = []
         values = []

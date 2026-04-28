@@ -106,7 +106,7 @@ def telemed_my_request():
     if not student_id:
         return jsonify({"success": False, "error": "Neplatny uzivatel"}), 401
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     teacher_id = data.get('teacher_id')
     preferred_date = data.get('preferred_date', '').strip()
     preferred_time = data.get('preferred_time', '').strip()
@@ -209,7 +209,7 @@ def telemed_my_cancel(consultation_id):
     if not student_id:
         return jsonify({"success": False, "error": "Neplatny uzivatel"}), 401
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     reason = data.get('reason', '').strip()[:MAX_TEXT]
 
     try:

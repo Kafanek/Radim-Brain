@@ -189,7 +189,7 @@ def get_lesson(course_id, module_id, lesson_id):
 def handle_progress():
     """Uložit nebo získat progress uživatele"""
     if request.method == 'POST':
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         user_id = data.get('userId', 'anonymous')
         course_id = data.get('courseId')
         module_id = data.get('moduleId')
@@ -232,7 +232,7 @@ def handle_progress():
 @education_bp.route('/api/education/lesson-progress', methods=['POST'])
 def lesson_progress_sync():
     """Sync lesson-level progress from frontend (localStorage) with backend"""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     user_id = data.get('userId', 'anonymous')
     lessons = data.get('lessons', [])
 
@@ -342,7 +342,7 @@ def get_teacher_detail(teacher_id):
 @optional_auth
 def assign_teacher():
     """Přiřadit AI učitele k uživateli"""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     auth_user = getattr(g, 'auth_user', None)
     user_id = str(auth_user.get('id', '')) if auth_user else data.get('userId', 'anonymous')
     if not user_id:
@@ -367,7 +367,7 @@ def assign_teacher():
 @education_bp.route('/api/education/teacher/note', methods=['POST'])
 def add_teacher_note():
     """Učitel přidá poznámku k profilu studenta"""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     user_id = data.get('userId')
     note_text = data.get('note', '')
     teacher_id = data.get('teacherId', 'radim-tutor')

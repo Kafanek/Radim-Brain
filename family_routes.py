@@ -228,7 +228,7 @@ def update_remote_profile(user_id):
     Body: { "medications_list": [...], "contacts": [...], ... }
     Only whitelisted fields can be updated.
     """
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     ALLOWED_FIELDS = ['name', 'age_group', 'medications_list', 'medication_times',
                       'contacts', 'hearing', 'vision', 'memory']
 
@@ -276,7 +276,7 @@ def remote_settings(user_id):
                 return jsonify({'success': True, 'settings': settings})
 
             else:  # PUT
-                data = request.json or {}
+                data = request.get_json(silent=True) or {}
                 row = db.execute(
                     "SELECT data FROM memory_learning WHERE user_id = ?", (user_id,)
                 ).fetchone()
@@ -328,7 +328,7 @@ def share_photo():
     Body: { "user_id": "...", "photo_url": "...", "caption": "..." }
     Stores in DB + sends push to family contacts.
     """
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     user_id = data.get('user_id', '')
     photo_url = data.get('photo_url', '')
     caption = data.get('caption', '')

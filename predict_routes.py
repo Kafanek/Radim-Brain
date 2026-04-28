@@ -352,7 +352,7 @@ def predict_health_crisis():
     if request.method == 'OPTIONS':
         return '', 204
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     senior_id = data.get('senior_id')
     
     # Pokud není senior_id, predikce pro všechny
