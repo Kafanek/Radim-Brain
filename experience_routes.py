@@ -313,6 +313,30 @@ EXPERIENCE_SCHEMA = """
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- ── Pilot: partner leads (institutions interested in Radimův Odkaz) ─
+    -- Sbíráme zájem od kandidátních partnerů (univerzity, archivy, AI labs,
+    -- výzkum, marketing) PŘED tím, než publikujeme jejich nabídku v UI.
+    -- Žádný buyer se neaktivuje automaticky — manuální schválení adminem
+    -- po podpisu MoU + DPA.
+    CREATE TABLE IF NOT EXISTS experience_partner_leads (
+        id SERIAL PRIMARY KEY,
+        org_name TEXT NOT NULL,
+        contact_name TEXT NOT NULL,
+        contact_email TEXT NOT NULL,
+        contact_phone TEXT,
+        org_type TEXT,                       -- 'university'|'archive'|'research'|'ai_lab'|'market_research'|'media'|'other'
+        org_ico TEXT,                        -- IČO pro KYC
+        message TEXT,                        -- co partner zamýšlí
+        source TEXT DEFAULT 'app',           -- 'app'|'web'|'event_zivot90'|'event_cvut'|'direct'
+        status TEXT DEFAULT 'new',           -- 'new'|'contacted'|'mou_sent'|'signed'|'rejected'
+        admin_note TEXT,
+        contacted_at TIMESTAMP,
+        signed_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_exp_leads_status ON experience_partner_leads(status, created_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_exp_leads_email ON experience_partner_leads(LOWER(contact_email));
 """
 
 
@@ -350,7 +374,14 @@ def _init_schema():
         logger.debug(f"Experience schema init: {e}")
     if is_postgres():
         _migrate_schema_additive()
-    _seed_demo_buyers_if_empty()
+    # Pilot fix: NEpouštíme _seed_demo_buyers_if_empty.
+    # Demo buyers (Karlova univerzita, Národní archiv, Akademie věd...)
+    # neudělili souhlas se svými jmény. Pokud DB je prázdná, raději
+    # zobrazíme empty-state s "Hledáme prvního partnera" v UI než
+    # vystavit aplikaci právnímu riziku z fake offers.
+    # Reaktivovat můžeme po podpisu MoU s reálným partnerem přes
+    # admin endpoint POST /api/admin/partners/onboard.
+    # _seed_demo_buyers_if_empty()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1577,6 +1608,102 @@ def list_offers():
     return jsonify({'success': True, 'offers': offers, 'count': len(offers)})
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# PARTNER LEADS — pilot fáze, sběr zájmu od kandidátních partnerů
+# ─────────────────────────────────────────────────────────────────────────────
+
+@experience_bp.route('/api/experience/partner-interest', methods=['POST', 'OPTIONS'])
+def partner_interest():
+    """Lead capture: institucionální partner má zájem o pilot s Radimovým
+    Odkazem. Každý zápis se ručně reviewuje adminem před případným podpisem
+    MoU + DPA. Žádný auto-onboard.
+
+    Záměrně bez @require_auth — formulář musí jít vyplnit i z marketing
+    landing page bez login. Ochrana je jen rate-limit + email unique index.
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+    _init_schema()
+
+    data = request.get_json(silent=True) or {}
+    org_name = (data.get('orgName') or '').strip()[:200]
+    contact_name = (data.get('contactName') or '').strip()[:200]
+    contact_email = (data.get('contactEmail') or '').strip().lower()[:200]
+    contact_phone = (data.get('contactPhone') or '').strip()[:50]
+    org_type = (data.get('orgType') or 'other').strip()[:50]
+    org_ico = (data.get('orgIco') or '').strip()[:20]
+    message = (data.get('message') or '').strip()[:5000]
+    source = (data.get('source') or 'app').strip()[:50]
+
+    # Validace
+    if not org_name or not contact_name or not contact_email:
+        return jsonify({
+            'success': False,
+            'error': 'Vyplňte prosím název organizace, vaše jméno a e-mail.'
+        }), 400
+    if '@' not in contact_email or '.' not in contact_email.split('@')[-1]:
+        return jsonify({
+            'success': False,
+            'error': 'E-mail nevypadá platně. Zkontrolujte ho prosím.'
+        }), 400
+    allowed_types = {'university', 'archive', 'research', 'ai_lab',
+                     'market_research', 'media', 'museum', 'foundation', 'other'}
+    if org_type not in allowed_types:
+        org_type = 'other'
+
+    try:
+        with db_context(commit=True) as db:
+            # Idempotence: pokud stejný email už lead poslal, jen update message
+            existing = db.execute(
+                "SELECT id FROM experience_partner_leads WHERE LOWER(contact_email) = ?",
+                (contact_email,)
+            ).fetchone()
+            if existing:
+                lead_id = existing[0] if isinstance(existing, (list, tuple)) else list(existing.values())[0]
+                db.execute(
+                    "UPDATE experience_partner_leads "
+                    "SET org_name = ?, contact_name = ?, contact_phone = ?, "
+                    "    org_type = ?, org_ico = ?, message = ?, source = ? "
+                    "WHERE id = ?",
+                    (org_name, contact_name, contact_phone, org_type,
+                     org_ico, message, source, lead_id)
+                )
+                logger.info(f"Partner lead UPDATED: id={lead_id} email={contact_email} org={org_name}")
+            else:
+                if is_postgres():
+                    r = db.execute(
+                        "INSERT INTO experience_partner_leads "
+                        "(org_name, contact_name, contact_email, contact_phone, "
+                        " org_type, org_ico, message, source) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                        (org_name, contact_name, contact_email, contact_phone,
+                         org_type, org_ico, message, source)
+                    ).fetchone()
+                    lead_id = r[0] if isinstance(r, (list, tuple)) else r.get('id')
+                else:
+                    cur = db.execute(
+                        "INSERT INTO experience_partner_leads "
+                        "(org_name, contact_name, contact_email, contact_phone, "
+                        " org_type, org_ico, message, source) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (org_name, contact_name, contact_email, contact_phone,
+                         org_type, org_ico, message, source)
+                    )
+                    lead_id = cur.lastrowid if hasattr(cur, 'lastrowid') else None
+                logger.info(f"Partner lead CREATED: id={lead_id} email={contact_email} org={org_name} source={source}")
+    except Exception as e:
+        logger.error(f"partner_interest: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': 'Nepodařilo se uložit. Zkuste to prosím za chvíli, nebo napište přímo na kafanek@kafanek.com.'
+        }), 500
+
+    return jsonify({
+        'success': True,
+        'message': 'Děkujeme! Ozveme se vám do 48 hodin na uvedený e-mail.',
+    })
+
+
 @experience_bp.route('/api/experience/contribution/<int:cid>/accept-offer', methods=['POST'])
 @require_auth
 def accept_offer(cid):
@@ -1588,11 +1715,35 @@ def accept_offer(cid):
         return jsonify({'success': False, 'error': 'Moc rychle.',
                         'code': 'rate_limit'}), 429
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     offer_id = int(data.get('offerId') or 0)
     anonymized = _to_bool(data.get('anonymized'))
     if not offer_id:
         return jsonify({'success': False, 'error': 'Chybí offerId'}), 400
+
+    # Pilot-fix: během pilot fáze (žádný buyer ještě nemá podepsané MoU)
+    # nesmíme vytvářet právně závazné kontrakty. Pokud žádný aktivní buyer
+    # neexistuje, vracíme čistý 'pilot_phase' kód aby UI mohl zobrazit
+    # přátelské vysvětlení místo chyby.
+    try:
+        with db_context() as db:
+            active_count_row = db.execute(
+                "SELECT COUNT(*) FROM experience_buyers WHERE active = ?",
+                (True if is_postgres() else 1,)
+            ).fetchone()
+        active_count = int(
+            (active_count_row[0] if isinstance(active_count_row, (list, tuple))
+             else list(active_count_row.values())[0]) or 0
+        ) if active_count_row else 0
+    except Exception:
+        active_count = 0
+    if active_count == 0:
+        return jsonify({
+            'success': False,
+            'code': 'pilot_phase',
+            'error': 'Připravujeme prvního partnera. Kontrakt zatím nelze podepsat — '
+                     'vaše vzpomínka je v bezpečí, jakmile partner přijde, dáme vám vědět.',
+        }), 503
 
     # Verify contribution ownership + approved status + matches offer criteria
     try:
