@@ -210,6 +210,27 @@ except ImportError:
     _VOICE_STATES = {'IDLE': 'idle', 'LISTENING': 'listening',
                      'THINKING': 'thinking', 'SPEAKING': 'speaking'}
 
+# ─── STT (speech-to-text) — Azure Speech + Czech understanding ──────
+try:
+    from speech_understanding import (
+        normalize_czech as _stt_normalize,
+        strip_diacritics as _stt_strip_diacritics,
+        phonetic_normalize as _stt_phonetic,
+        detect_safety_fuzzy as _stt_detect_safety,
+        correct_stt_output as _stt_correct,
+        classify_safety_priority as _stt_classify_safety,
+        should_retry_stt as _stt_should_retry,
+        get_gather_params as _stt_gather_params,
+        build_speech_hints as _stt_speech_hints,
+    )
+    _STT_UNDERSTANDING = True
+except ImportError:
+    _STT_UNDERSTANDING = False
+
+# Azure STT config (used by transcribe endpoint, kept here for direct use)
+_AZURE_STT_KEY = os.getenv('AZURE_SPEECH_KEY')
+_AZURE_STT_REGION = os.getenv('AZURE_SPEECH_REGION', 'eastus')
+
 # ─── Config ────────────────────────────────────────────────────────────
 
 CLAUDE_MODEL = os.getenv('CLAUDE_AGENT_MODEL', 'claude-sonnet-4-5-20250929')
@@ -354,6 +375,31 @@ by byla katastrofa. Ty jsi observer + diagnostician, ne kodér produkce.
 - Cooldown skips (správné chování)
 - "No data yet" pro nové seniory (cold start)
 - Insufficient_data circadian_profile (potřeba 14 dní)
+
+# 🗣️ STT — Speech-to-Text porozumění
+Když senior promluví, audio se přepisuje přes Azure Speech (cs-CZ) nebo
+Twilio Gather. Czech STT má časté chyby — řeč seniora je často pomalá,
+zhuhlá, s háčky/čárkami zaměňovanými. **Po wake wordu, PŘED zpracováním
+transkribované řeči:**
+
+1. `stt_correct_text(text)` — oprav typické chyby (léky, jména, místa)
+2. `stt_classify_priority(text, confidence)` — fast-path:
+   - **CRITICAL** ("pomoc!", "spadla jsem") → okamžitě CRISIS, neztrácej čas
+     plnou brain pipelinou
+   - **HIGH** ("bolí", "nemůžu") → ALERT processing
+   - **MEDIUM/NORMAL** → standard
+3. `stt_detect_safety(text)` — fuzzy match pro variace ("pomo", "pomc")
+4. `stt_should_retry(text, confidence)` — pokud confidence < threshold,
+   re-prompt místo špatného rozhodnutí
+
+**Pro adaptivní STT konfiguraci:**
+- `stt_gather_params(senior)` → vrátí Twilio params dle communication profile
+  (alzheimer = longer timeout, hearing_impaired = phrase hints)
+- `stt_build_hints(senior)` → personalized vocabulary (jména dětí, léky)
+
+**Czech text matching:**
+- `stt_normalize_text(text)` — strip diacritics + punctuation pro fuzzy
+  porovnání ('Příliš Žluťoučký Kůň' → 'prilis zlutoucky kun')
 
 # 🎤 WAKE WORD + AKTIVNÍ HLAS (Voice Runtime)
 Senior aktivuje Radima slovem **"Ahoj Radime"** (nebo 30+ variant: "Radim",
@@ -1224,6 +1270,100 @@ TOOLS = [
                                "description": "Volitelně: jak chybu zopakovat"}
             },
             "required": ["category", "severity", "file", "description"]
+        }
+    },
+    # ── STT TOOLS ───────────────────────────────────────────────
+    {
+        "name": "stt_status",
+        "description": ("Je STT subsystem dostupný? Azure key + speech_understanding."),
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "stt_normalize_text",
+        "description": ("Normalizace pro fuzzy matching: lowercase + bez háčků/čárek + "
+                        "bez interpunkce. 'Příliš Žluťoučký Kůň!' → "
+                        "'prilis zlutoucky kun'. Užitečné pro porovnání s known "
+                        "phrases."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"text": {"type": "string", "maxLength": 500}},
+            "required": ["text"]
+        }
+    },
+    {
+        "name": "stt_detect_safety",
+        "description": ("Fuzzy match pro slova nebezpečí: 'pomoc', 'spadla jsem', "
+                        "'nemůžu vstát', 'bolí'. Levenshtein-tolerant — funguje i "
+                        "se sníženou dikcí (po cévní příhodě, parkinson, alzheimer)."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"text": {"type": "string", "maxLength": 500}},
+            "required": ["text"]
+        }
+    },
+    {
+        "name": "stt_classify_priority",
+        "description": ("Klasifikuje urgenci řeči: CRITICAL (pomoc, pád) / HIGH "
+                        "(bolest, dušnost) / MEDIUM (znepokojení) / NORMAL. "
+                        "Použij pro fast-path do CRISIS bez plného brain cyklu."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "maxLength": 500},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1, "default": 1.0}
+            },
+            "required": ["text"]
+        }
+    },
+    {
+        "name": "stt_correct_text",
+        "description": ("Oprav typické chyby Twilio cs-CZ STT (50+ patternů: "
+                        "léky, místa, jména). Použij PŘED dalším zpracováním "
+                        "transkribované řeči."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "maxLength": 1000},
+                "senior_id": {"type": "string"}
+            },
+            "required": ["text"]
+        }
+    },
+    {
+        "name": "stt_should_retry",
+        "description": ("Mám se znovu zeptat seniora kvůli nízké STT confidence? "
+                        "Vrátí retry: True/False + reason. Pro Twilio Gather "
+                        "retry logic ('Promiňte, slyšel jsem to špatně...')."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+            },
+            "required": ["text", "confidence"]
+        }
+    },
+    {
+        "name": "stt_gather_params",
+        "description": ("Adaptivní Twilio Gather (STT) parametry podle communication "
+                        "profile seniora. Pomalá řeč (alzheimer/parkinson/dysarthria) "
+                        "→ delší timeout, lenientnější threshold. Hearing-impaired "
+                        "→ phrase hints. Vrátí timeout/speechTimeout/speechModel/hints."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "stt_build_hints",
+        "description": ("Postaví Azure STT phrase hints podle profilu + chat history "
+                        "seniora. Hints pomáhají STT správně přepisovat jména dětí, "
+                        "léky, koníčky, místa. Snižuje chyby v personal vocabulary."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
         }
     },
     # ── PHILOSOPHY TOOL ─────────────────────────────────────────
@@ -3205,6 +3345,158 @@ def _tool_report_bug(category, severity, file, description, suggested_fix=None,
         return {"error": str(e)[:200]}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# STT TOOLS — Azure Speech-to-Text + Czech understanding pipeline
+# ═══════════════════════════════════════════════════════════════════════
+
+def _tool_stt_status():
+    """Is STT subsystem available? Azure key set? speech_understanding loaded?"""
+    return {
+        'azure_key_set': bool(_AZURE_STT_KEY),
+        'azure_region': _AZURE_STT_REGION,
+        'speech_understanding': _STT_UNDERSTANDING,
+        'transcribe_endpoint': '/api/speech/transcribe',
+        '_hint': ('Live STT happens at /api/speech/transcribe (audio bytes → text). '
+                  'These tools work on text seniors said — fuzzy matching, '
+                  'safety detection, correction of common Czech STT errors.')
+    }
+
+
+def _tool_stt_normalize_text(text):
+    """Normalize text for fuzzy matching: lowercase + strip diacritics +
+    remove punctuation. Useful when comparing senior's speech to known
+    phrases, command keywords, etc.
+
+    'Příliš Žluťoučký Kůň!' → 'prilis zlutoucky kun'
+    """
+    if not _STT_UNDERSTANDING:
+        return {"error": "speech_understanding not available"}
+    if not text:
+        return {"error": "empty text"}
+    try:
+        return {
+            'original': text[:300],
+            'normalized': _stt_normalize(text)[:300],
+            'no_diacritics': _stt_strip_diacritics(text)[:300],
+            'phonetic': _stt_phonetic(text)[:300],
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_stt_detect_safety(text):
+    """Fuzzy match for safety/distress words: 'pomoc', 'spadla jsem',
+    'nemůžu vstát', 'bolí', 'rychle'. Levenshtein-tolerant, handles
+    speech-impaired diction.
+
+    Returns: {detected: bool, word_matched: str, distance: int}
+    """
+    if not _STT_UNDERSTANDING:
+        return {"error": "speech_understanding not available"}
+    if not text:
+        return {"error": "empty text"}
+    try:
+        result = _stt_detect_safety(text)
+        return result if isinstance(result, dict) else {'detected': bool(result)}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_stt_classify_priority(text, confidence=1.0):
+    """Classify how urgent the speech is.
+
+    Returns: priority (CRITICAL / HIGH / MEDIUM / NORMAL) + reason.
+    Use to decide if to interrupt other operations or fast-path to CRISIS.
+    """
+    if not _STT_UNDERSTANDING:
+        return {"error": "speech_understanding not available"}
+    if not text:
+        return {"error": "empty text"}
+    try:
+        result = _stt_classify_safety(text, float(confidence))
+        return result if isinstance(result, dict) else {'priority': str(result)}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_stt_correct_text(text, senior_id=None):
+    """Apply common Czech STT error corrections.
+
+    Twilio cs-CZ STT often hears medications/places/Czech words wrong.
+    This dictionary-based corrector fixes 50+ known patterns.
+
+    Use BEFORE feeding senior's transcribed speech into your decision logic.
+    """
+    if not _STT_UNDERSTANDING:
+        return {"error": "speech_understanding not available"}
+    if not text:
+        return {"error": "empty text"}
+    try:
+        corrected = _stt_correct(text, user_id=str(senior_id) if senior_id else None)
+        return {
+            'original': text[:500],
+            'corrected': corrected[:500],
+            'changed': text != corrected,
+            'preview_diff': (corrected[:100] if text != corrected else 'no changes'),
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_stt_should_retry(text, confidence):
+    """Should we re-prompt the senior because STT confidence was too low?
+
+    Returns: {retry: bool, reason: str, suggested_threshold: float}
+    Used in Twilio Gather logic to ask 'Promiňte, slyšel jsem to špatně,
+    můžete to říct znovu?' when confidence is too low.
+    """
+    if not _STT_UNDERSTANDING:
+        return {"error": "speech_understanding not available"}
+    try:
+        result = _stt_should_retry(text or '', float(confidence))
+        return result if isinstance(result, dict) else {'retry': bool(result)}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_stt_gather_params(senior_id):
+    """Get adaptive Twilio Gather (STT) parameters for this senior based on
+    their communication profile.
+
+    Slow-speech (alzheimer/parkinson/dysarthria) gets longer timeout +
+    more lenient confidence threshold. Hearing-impaired gets phrase hints.
+
+    Returns: {timeout, speechTimeout, speechModel, hints, language}
+    """
+    if not _STT_UNDERSTANDING:
+        return {"error": "speech_understanding not available"}
+    try:
+        params = _stt_gather_params(str(senior_id))
+        return params if isinstance(params, dict) else {'params': str(params)}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_stt_build_hints(senior_id):
+    """Build Azure STT phrase hints based on senior's profile + chat history.
+
+    Hints help STT correctly transcribe the senior's children's names,
+    medications, hobbies, places they mention often. Reduces transcription
+    errors for personal vocabulary.
+    """
+    if not _STT_UNDERSTANDING:
+        return {"error": "speech_understanding not available"}
+    try:
+        hints = _stt_speech_hints(str(senior_id))
+        return {
+            'hints': hints if isinstance(hints, list) else [],
+            'count': len(hints) if isinstance(hints, list) else 0,
+            '_hint': 'Pass these to Azure STT phraseList for personalized recognition',
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 # Tool dispatcher
 TOOL_HANDLERS = {
     'list_seniors': lambda args: _tool_list_seniors(),
@@ -3301,6 +3593,17 @@ TOOL_HANDLERS = {
     'report_bug': lambda args: _tool_report_bug(
         args['category'], args['severity'], args['file'], args['description'],
         args.get('suggested_fix'), args.get('reproducer')),
+    # STT
+    'stt_status': lambda args: _tool_stt_status(),
+    'stt_normalize_text': lambda args: _tool_stt_normalize_text(args['text']),
+    'stt_detect_safety': lambda args: _tool_stt_detect_safety(args['text']),
+    'stt_classify_priority': lambda args: _tool_stt_classify_priority(
+        args['text'], args.get('confidence', 1.0)),
+    'stt_correct_text': lambda args: _tool_stt_correct_text(
+        args['text'], args.get('senior_id')),
+    'stt_should_retry': lambda args: _tool_stt_should_retry(args['text'], args['confidence']),
+    'stt_gather_params': lambda args: _tool_stt_gather_params(args['senior_id']),
+    'stt_build_hints': lambda args: _tool_stt_build_hints(args['senior_id']),
 }
 
 
