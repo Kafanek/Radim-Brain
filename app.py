@@ -1835,17 +1835,38 @@ def admin_agent_run():
 # ─── Claude Autonomous Agent admin endpoints ────────────────────────
 @app.route('/api/admin/claude-agent/run', methods=['POST', 'OPTIONS'])
 def admin_claude_agent_run():
-    """Manually trigger one Claude autonomous agent cycle."""
+    """Manually trigger one Claude autonomous agent cycle.
+
+    Runs asynchronously in a thread (Heroku has 30s HTTP timeout, agent can
+    take longer). Poll /api/admin/claude-agent/telemetry for results.
+    """
     if request.method == 'OPTIONS':
         return ('', 204)
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
     try:
+        import threading
         from claude_autonomous_agent import run_claude_agent
         body = request.get_json(silent=True) or {}
         force = bool(body.get('force', False))
-        result = run_claude_agent(app, trigger='manual', force=force)
-        return jsonify({'success': True, 'result': result}), 200
+        sync = bool(body.get('sync', False))  # sync=true blocks (max 25s)
+
+        if sync:
+            result = run_claude_agent(app, trigger='manual', force=force)
+            return jsonify({'success': True, 'result': result}), 200
+
+        def _bg():
+            try:
+                run_claude_agent(app, trigger='manual', force=force)
+            except Exception as e:
+                logger.exception(f"Claude agent BG run failed: {e}")
+
+        threading.Thread(target=_bg, daemon=True).start()
+        return jsonify({
+            'success': True,
+            'message': 'Agent started in background. Poll /api/admin/claude-agent/telemetry for results.',
+            'started_at': now_iso(),
+        }), 202
     except Exception as e:
         logger.exception("Claude agent manual run failed")
         return jsonify({'error': str(e)}), 500
