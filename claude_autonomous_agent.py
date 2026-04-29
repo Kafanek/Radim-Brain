@@ -196,6 +196,20 @@ try:
 except ImportError:
     _HA_TRIGGERS = False
 
+# ─── Voice runtime (wake word session + proactive speak) ────────────
+try:
+    from voice_runtime_engine import (
+        get_session as _get_voice_session,
+        save_session as _save_voice_session,
+        STATES as _VOICE_STATES,
+        sessions as _voice_sessions_cache,
+    )
+    _VOICE_RUNTIME = True
+except ImportError:
+    _VOICE_RUNTIME = False
+    _VOICE_STATES = {'IDLE': 'idle', 'LISTENING': 'listening',
+                     'THINKING': 'thinking', 'SPEAKING': 'speaking'}
+
 # ─── Config ────────────────────────────────────────────────────────────
 
 CLAUDE_MODEL = os.getenv('CLAUDE_AGENT_MODEL', 'claude-sonnet-4-5-20250929')
@@ -303,6 +317,28 @@ Systém má vlastní "srdeční tep" — synthetické vitály celé situace:
 3. Pokud parasympathetic → HARMONY (přirozený)
 4. `presence` blízko 1.0 = senior plně zaujatý → můžeš mluvit déle
 5. `warmth` (trust+safety)/2 nízká → zpomal, buduj důvěru
+
+# 🎤 WAKE WORD + AKTIVNÍ HLAS (Voice Runtime)
+Senior aktivuje Radima slovem **"Ahoj Radime"** (nebo 30+ variant: "Radim",
+"Radímku", "Pane Kafánek", ...). Aplikace má voice runtime se 4 stavy:
+
+- **IDLE** — senior je tichý, lze proaktivně promluvit
+- **WAKE_DETECTED / LISTENING** — senior právě mluví → **NERUŠ**
+- **THINKING** — Radim přemýšlí o odpovědi → **NERUŠ**
+- **SPEAKING** — Radim mluví → **NERUŠ**
+
+**Před proaktivní komunikací VŽDY:**
+1. `get_voice_session_state(senior)` → vrátí safe_to_speak (True/False)
+2. Pokud False → respektuj, použij `send_chat_message` (text), nebo
+   `emit_agent_message('context')` aby se to objevilo v dalším Eviném turn
+3. Pokud True → můžeš použít `speak_to_senior(message, mode)` —
+   Radim to řekne nahlas přes integrovaný TTS pipeline
+
+**force_interrupt=True POUZE v CRISIS** — přeruší aktivní konverzaci.
+Příklad legitimního použití: senior mluví s rodinou, ale gas detector
+začal pípat → přerušíš s "Pozor, plyn detector!".
+
+**Globální view:** `get_active_voice_seniors` → kdo právě mluví (audit dashboard).
 
 # 🏠 SMART HOME (Home Assistant)
 Senior má v domě senzory (motion, door, gas, smoke, water_leak, temperature)
@@ -1022,6 +1058,59 @@ TOOLS = [
             "properties": {"senior_id": {"type": "string"}},
             "required": ["senior_id"]
         }
+    },
+    # ── WAKE WORD + USER COMMUNICATION ──────────────────────────
+    {
+        "name": "get_voice_session_state",
+        "description": ("Co dělá senior PRÁVĚ TEĎ ve voice runtime? "
+                        "Stavy: IDLE (tichý, lze promluvit) / LISTENING / "
+                        "THINKING / SPEAKING / WAKE_DETECTED. Vrátí "
+                        "safe_to_speak=True/False. Použij PŘED proaktivní "
+                        "komunikací — neruš aktivní konverzaci."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "get_voice_conversation_history",
+        "description": ("Posledních N turn-by-turn voice exchanges. Liší se od "
+                        "get_recent_chat — to je textový chat. Tady hlasový."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "limit": {"type": "integer", "default": 10, "minimum": 1, "maximum": 50}
+            },
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "speak_to_senior",
+        "description": ("Proaktivně promluv k seniorovi přes voice runtime — "
+                        "integrovaný TTS pipeline (frontend SpeechOrchestrator "
+                        "to zachytí + zahraje). VŽDY napřed get_voice_session_state. "
+                        "force_interrupt=True POUZE v CRISIS (přerušíš aktivní "
+                        "konverzaci). Pro běžný chat (text) použij send_chat_message."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "message": {"type": "string", "maxLength": 500},
+                "mode": {"type": "string",
+                         "enum": ["HARMONY", "ALERT", "CRISIS", "POETRY", "NARRATION"]},
+                "force_interrupt": {"type": "boolean", "default": False}
+            },
+            "required": ["senior_id", "message"]
+        }
+    },
+    {
+        "name": "get_active_voice_seniors",
+        "description": ("Seznam VŠECH seniorů, kteří jsou právě v aktivní voice "
+                        "konverzaci (state != IDLE). Globální 'kdo teď mluví'. "
+                        "Jen z cache, takže jen aktivní sessions."),
+        "input_schema": {"type": "object", "properties": {}, "required": []}
     },
     # ── PHILOSOPHY TOOL ─────────────────────────────────────────
     {
@@ -2509,6 +2598,203 @@ def _tool_ha_behavioral_changes(senior_id):
         return {"error": str(e)[:200]}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# WAKE WORD + USER COMMUNICATION TOOLS
+# ═══════════════════════════════════════════════════════════════════════
+
+def _tool_get_voice_session_state(senior_id):
+    """Co dělá senior PRÁVĚ TEĎ ve voice runtime?
+
+    Stavy:
+    - IDLE — senior je tichý, lze proaktivně promluvit
+    - LISTENING — wake word právě zazněl, senior mluví → NERUŠ
+    - THINKING — Radim přemýšlí o odpovědi → NERUŠ
+    - SPEAKING — Radim právě mluví → NERUŠ
+    - WAKE_DETECTED — wake word zachycen, čeká se na řeč → NERUŠ
+
+    Použij PŘED proaktivní komunikací — pokud je senior v aktivní konverzaci,
+    nepřerušuj.
+    """
+    if not _VOICE_RUNTIME:
+        return {"error": "voice_runtime_engine not available"}
+    try:
+        # Use senior_id as session_id for proactive checks
+        session = _get_voice_session(str(senior_id))
+        state = session.get('state', 'idle')
+        is_active = state != _VOICE_STATES['IDLE']
+        return {
+            'session_id': senior_id,
+            'state': state,
+            'is_active': is_active,
+            'safe_to_speak': not is_active,
+            'C': session.get('C'),
+            'alpha': session.get('alpha'),
+            'kappa': session.get('kappa'),
+            'wake_count': session.get('wake_count', 0),
+            'last_tts_text_preview': (session.get('last_tts_text') or '')[:100],
+            'conversation_length': len(session.get('conversation', [])),
+            '_hint': ('safe_to_speak=True → můžeš proaktivně promluvit. '
+                      'False → respektuj probíhající konverzaci, počkej.'),
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_voice_conversation_history(senior_id, limit=10):
+    """Posledních N řádků voice konverzace (turn-by-turn).
+    Liší se od get_recent_chat — to je textový chat. Tady je hlas.
+    """
+    if not _VOICE_RUNTIME:
+        return {"error": "voice_runtime_engine not available"}
+    try:
+        session = _get_voice_session(str(senior_id))
+        conv = session.get('conversation', []) or []
+        # Most recent N
+        recent = conv[-int(limit):] if conv else []
+        return {
+            'session_id': senior_id,
+            'total_turns': len(conv),
+            'recent': [
+                {'role': t.get('role') if isinstance(t, dict) else 'unknown',
+                 'content': (t.get('content') if isinstance(t, dict) else str(t))[:300],
+                 'timestamp': t.get('timestamp') if isinstance(t, dict) else None}
+                for t in recent
+            ],
+            'last_radim_said': session.get('last_tts_text', '')[:300],
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_speak_to_senior(senior_id, message, mode=None, force_interrupt=False):
+    """Proaktivně promluv k seniorovi přes voice runtime.
+
+    Co se stane:
+    1. Zkontroluje voice session state (pokud aktivní + force_interrupt=False → skip)
+    2. Spočítá Ψ(t)-aware speech params (mode, rate, pause)
+    3. Přidá zprávu do conversation history seniora
+    4. Vygeneruje SSML + uloží jako last_tts_text
+    5. Senior to uslyší při dalším voice frame (frontend SpeechOrchestrator)
+
+    Pro INSTANT delivery použij send_chat_message + frontend ji TTSne.
+    Tato cesta je pro INTEGROVANÝ proaktivní hlas (jako radim_chat_internal).
+    """
+    if not _VOICE_RUNTIME:
+        return {"error": "voice_runtime_engine not available"}
+    if not message or not message.strip():
+        return {"error": "empty message"}
+    if not _check_action_cooldown(senior_id):
+        return {"skipped": "cooldown active for senior"}
+
+    try:
+        session = _get_voice_session(str(senior_id))
+        state = session.get('state', 'idle')
+        is_active = state != _VOICE_STATES['IDLE']
+
+        if is_active and not force_interrupt:
+            return {
+                "skipped": f"senior is in active session (state={state})",
+                "_hint": "set force_interrupt=true ONLY in CRISIS — use send_chat_message instead for non-crisis",
+            }
+
+        # Auto-pick mode from latest brain state if not given
+        if mode is None and _DB:
+            try:
+                with db_context() as db:
+                    row = db.execute(
+                        "SELECT mode FROM brain_states WHERE user_id = ? "
+                        "ORDER BY created_at DESC LIMIT 1",
+                        (str(senior_id),)
+                    ).fetchone()
+                if row:
+                    vals = _row_to_list(row)
+                    mode = vals[0] or 'HARMONY'
+            except Exception:
+                pass
+        mode = mode or 'HARMONY'
+
+        # Compose SSML preview (no audio, the voice runtime + frontend orchestrator does that)
+        ssml_preview = None
+        if _TTS_SSML:
+            try:
+                ssml_preview = _build_ssml(message[:500], mode=mode,
+                                           voice='cs-CZ-AntoninNeural',
+                                           user_id=str(senior_id))
+            except Exception:
+                pass
+
+        # Append to conversation as Radim's proactive turn
+        from datetime import datetime as _dt
+        turn = {
+            'role': 'assistant',
+            'content': message[:500],
+            'timestamp': _dt.utcnow().isoformat(),
+            'source': 'claude_agent_proactive',
+            'mode': mode,
+        }
+        session.setdefault('conversation', []).append(turn)
+        # Trim conversation to last 50 turns
+        if len(session['conversation']) > 50:
+            session['conversation'] = session['conversation'][-50:]
+        session['last_tts_text'] = message[:500]
+
+        # Persist
+        try:
+            _save_voice_session(str(senior_id))
+        except Exception as e:
+            logger.warning(f"voice session save failed: {e}")
+
+        # ALSO mirror into memory_history so chat module shows it (cross-channel)
+        try:
+            with db_context(commit=True) as db:
+                from database import db_insert
+                db_insert(db, 'memory_history',
+                          ['user_id', 'role', 'content'],
+                          [str(senior_id), 'assistant', message[:500]])
+        except Exception:
+            pass
+
+        return {
+            "spoken": True,
+            "channel": "voice_runtime",
+            "mode": mode,
+            "preview": message[:80],
+            "interrupted_active_session": (is_active and force_interrupt),
+            "ssml_built": bool(ssml_preview),
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_active_voice_seniors():
+    """Seznam seniorů, kteří JSOU PRÁVĚ v aktivní voice konverzaci
+    (state != IDLE). Užitečné pro globální view 'kdo právě mluví'.
+
+    Vrací jen z in-memory cache (nedotahuje DB) — to je OK, protože
+    aktivní sessions jsou vždy v cache.
+    """
+    if not _VOICE_RUNTIME:
+        return {"error": "voice_runtime_engine not available"}
+    try:
+        active = []
+        for sid, sess in _voice_sessions_cache.items():
+            state = sess.get('state', 'idle')
+            if state != _VOICE_STATES['IDLE']:
+                active.append({
+                    'session_id': sid,
+                    'state': state,
+                    'wake_count': sess.get('wake_count', 0),
+                    'C': sess.get('C'),
+                })
+        return {
+            'count': len(active),
+            'active_sessions': active,
+            'total_in_cache': len(_voice_sessions_cache),
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 # Tool dispatcher
 TOOL_HANDLERS = {
     'list_seniors': lambda args: _tool_list_seniors(),
@@ -2588,6 +2874,14 @@ TOOL_HANDLERS = {
         args.get('crisis_override', False), args.get('reason')),
     'ha_circadian_triggers': lambda args: _tool_ha_circadian_triggers(args['senior_id']),
     'ha_behavioral_changes': lambda args: _tool_ha_behavioral_changes(args['senior_id']),
+    # Wake word + voice runtime
+    'get_voice_session_state': lambda args: _tool_get_voice_session_state(args['senior_id']),
+    'get_voice_conversation_history': lambda args: _tool_get_voice_conversation_history(
+        args['senior_id'], args.get('limit', 10)),
+    'speak_to_senior': lambda args: _tool_speak_to_senior(
+        args['senior_id'], args['message'],
+        args.get('mode'), args.get('force_interrupt', False)),
+    'get_active_voice_seniors': lambda args: _tool_get_active_voice_seniors(),
 }
 
 
@@ -2682,7 +2976,8 @@ WRITE_TOOLS = {'send_chat_message', 'send_push', 'notify_family', 'initiate_call
                'record_voice_feedback', 'generate_voice_audio',
                'emit_agent_message',
                'send_whatsapp', 'send_sms_to_senior',
-               'ha_execute_action'}
+               'ha_execute_action',
+               'speak_to_senior'}
 
 
 def run_claude_agent(app=None, trigger='cron', force=False):
