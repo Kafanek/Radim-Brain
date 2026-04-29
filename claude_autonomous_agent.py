@@ -211,6 +211,60 @@ except ImportError:
                      'THINKING': 'thinking', 'SPEAKING': 'speaking'}
 
 # ─── STT (speech-to-text) — Azure Speech + Czech understanding ──────
+# ─── Quizzes + Games + Exercises ───────────────────────────────────
+# Frontend modules: quiz-module.js, exercises-module.js
+# Backend: claude_content_routes.generate_quiz, education_assessment_routes
+# Exercises catalog mirrors frontend ExercisesModule
+_EXERCISE_CATALOG = {
+    'breath': [
+        {'id': 'breath_478', 'name': '4-7-8 dýchání', 'duration_min': 3,
+         'mood': 'calm', 'difficulty': 'easy',
+         'description': 'Nádech 4s, zadržet 7s, výdech 8s — uklidňuje nervovou soustavu.'},
+        {'id': 'breath_box', 'name': 'Krabicové dýchání', 'duration_min': 4,
+         'mood': 'calm', 'difficulty': 'easy',
+         'description': 'Nádech 4s, zadržet 4s, výdech 4s, pauza 4s — pomáhá v úzkosti.'},
+        {'id': 'breath_belly', 'name': 'Břišní dýchání', 'duration_min': 5,
+         'mood': 'calm', 'difficulty': 'easy',
+         'description': 'Hluboké břišní dýchání pro relaxaci.'},
+    ],
+    'physical': [
+        {'id': 'shoulders', 'name': 'Krouživé pohyby ramen', 'duration_min': 3,
+         'mood': 'energizing', 'difficulty': 'easy',
+         'description': 'Uvolnění ramen + krku — pro sezení dlouho u stolu.'},
+        {'id': 'neck', 'name': 'Cvičení krku', 'duration_min': 2,
+         'mood': 'energizing', 'difficulty': 'easy',
+         'description': 'Pomalý pohyb hlavou — proti ztuhlosti.'},
+        {'id': 'hands', 'name': 'Cvičení rukou', 'duration_min': 3,
+         'mood': 'energizing', 'difficulty': 'easy',
+         'description': 'Prsty, zápěstí, paže — proti artróze.'},
+        {'id': 'walk_chair', 'name': 'Procházka kolem křesla', 'duration_min': 5,
+         'mood': 'energizing', 'difficulty': 'easy',
+         'description': 'Bezpečná procházka s opěrou křesla.'},
+    ],
+    'meditation': [
+        {'id': 'body_scan', 'name': 'Scan těla', 'duration_min': 8,
+         'mood': 'meditative', 'difficulty': 'easy',
+         'description': 'Postupné uvědomění si všech částí těla — pro spánek.'},
+        {'id': 'gratitude', 'name': 'Cvičení vděčnosti', 'duration_min': 5,
+         'mood': 'meditative', 'difficulty': 'easy',
+         'description': '3 věci dnes, za které jsem vděčný — pomáhá s depresí.'},
+    ],
+    'memory': [
+        {'id': 'pairs', 'name': 'Hledej dvojice', 'duration_min': 5,
+         'mood': 'cognitive', 'difficulty': 'easy',
+         'description': 'Klasická paměťová hra s obrázky — 6-12 párů.'},
+        {'id': 'colors', 'name': 'Sekvence barev', 'duration_min': 5,
+         'mood': 'cognitive', 'difficulty': 'medium',
+         'description': 'Zapamatuj si barevnou sekvenci a zopakuj — Simon-style.'},
+        {'id': 'math', 'name': 'Rychlé počty', 'duration_min': 5,
+         'mood': 'cognitive', 'difficulty': 'medium',
+         'description': 'Sčítání/odčítání pod časem — udržuje hbitost mysli.'},
+        {'id': 'categories', 'name': 'Kategorie', 'duration_min': 5,
+         'mood': 'cognitive', 'difficulty': 'easy',
+         'description': 'Roztřiď slova do kategorií (ovoce/zelenina/zvířata).'},
+    ],
+}
+
 # ─── TV + Music (české streamy, YouTube search, ambient) ────────────
 # Music stations sourced from mykolibri-academy-project/js/sections/music-module.js
 # Curated list — keeps in sync with frontend music module.
@@ -494,6 +548,43 @@ by byla katastrofa. Ty jsi observer + diagnostician, ne kodér produkce.
 - Cooldown skips (správné chování)
 - "No data yet" pro nové seniory (cold start)
 - Insufficient_data circadian_profile (potřeba 14 dní)
+
+# 🧠 KVÍZY + PAMĚŤOVÉ HRY + CVIČENÍ
+**Cílem je kognitivní + fyzické + emoční zdraví.** Všechno režimově citlivé.
+
+**Kategorie cvičení:**
+- `breath` — dýchací (4-7-8, krabicové, břišní) — pro úzkost/CRISIS
+- `physical` — fyzická (ramena, krk, ruce, procházka) — pro ranní rozcvičku
+- `meditation` — meditace + scan těla — pro večer před spánkem
+- `memory` — paměťové hry (pairs, colors, math, categories) — kognitivní fitness
+
+**Pravidla pro doporučení (recommend_exercise):**
+- CRISIS → breath_478 (vědecky ověřené uklidnění)
+- ALERT → breath_box nebo body_scan
+- HARMONY ráno (< 10h) → physical
+- HARMONY odpoledne (10-18h) → memory game (kognitivní fitness)
+- HARMONY večer (> 18h) → meditation
+
+**Brain games — pravidla:**
+- ALERT/CRISIS → **ŽÁDNÁ hra** (cognitive load = stres)
+- Cold start → `pairs` (nejjednodušší, klasická)
+- Po 3+ play → graduate na `colors` nebo `categories`
+
+**Kvízy:**
+- `generate_quiz(topic)` — AI vygeneruje (česká témata: dějiny/příroda/hudba/poezie)
+- `start_quiz_for_senior` — generuje + spouští via bus
+- `get_quiz_history` — vyhni se opakování
+
+**Workflow proaktivního zapojení:**
+1. Brain HARMONY + 4+ hodiny bez aktivity → `recommend_exercise` + start
+2. Senior říká "nudím se" → `recommend_brain_game` + start_quiz
+3. Senior říká "nemůžu spát" → `start_exercise(meditation)`
+4. ALERT mode + úzkost → `start_exercise(breath_478)`
+
+**Důležité:**
+- Hra je VOLITELNÁ — ne nutit
+- Voice session check (skip pokud LISTENING/SPEAKING)
+- Long-term: lessons_progress + quiz_history pomáhají sledovat kognitivní křivku
 
 # 📺🎵 TV + HUDBA (radio + ambient + YouTube)
 Aplikace má 8 českých rádií (Radiožurnál, Vltava, Blaník, ...) + 6 ambient
@@ -1999,6 +2090,105 @@ TOOLS = [
                 "senior_id": {"type": "string"},
                 "time_aware": {"type": "boolean", "default": True}
             },
+            "required": ["senior_id"]
+        }
+    },
+    # ── QUIZ + GAMES + EXERCISES TOOLS ──────────────────────────
+    {
+        "name": "get_exercises_catalog",
+        "description": ("Katalog cvičení: breath (dýchací) / physical (fyzická) "
+                        "/ meditation (meditace) / memory (paměťové hry). "
+                        "category=None vrátí vše."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "enum": ["breath","physical","meditation","memory"]}
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "recommend_exercise",
+        "description": ("Doporuč cvičení podle Ψ(t) + hodiny. CRISIS→breath_478 "
+                        "(uklidnění), ALERT→breath/meditation, HARMONY+ráno→"
+                        "physical, HARMONY+odpoledne→memory, HARMONY+večer→"
+                        "meditation. target přepíše."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "target": {"type": "string",
+                    "enum": ["calm","energize","cognitive","meditation","anxiety","memory","sleep"]}
+            },
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "start_exercise_for_senior",
+        "description": ("Spusť cvičení přes bus → frontend ExercisesModule. "
+                        "Respektuje voice session (skipne aktivní konverzaci)."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "exercise_id": {"type": "string"}
+            },
+            "required": ["senior_id", "exercise_id"]
+        }
+    },
+    {
+        "name": "generate_quiz",
+        "description": ("Vygeneruj AI kvíz na téma. Topics česky: 'dějiny', "
+                        "'příroda', 'česká hudba', 'poezie', 'jídlo a recepty'. "
+                        "difficulty: easy/medium/hard. count: 1-7."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "topic": {"type": "string", "maxLength": 100},
+                "difficulty": {"type": "string", "enum": ["easy","medium","hard"], "default": "easy"},
+                "count": {"type": "integer", "minimum": 1, "maximum": 7, "default": 5}
+            },
+            "required": ["topic"]
+        }
+    },
+    {
+        "name": "start_quiz_for_senior",
+        "description": ("Vygeneruj kvíz + spusť ho seniorovi přes bus. "
+                        "Frontend QuizModule zachytí a začne hru."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "topic": {"type": "string"},
+                "difficulty": {"type": "string", "enum": ["easy","medium","hard"], "default": "easy"},
+                "count": {"type": "integer", "minimum": 1, "maximum": 7, "default": 5}
+            },
+            "required": ["senior_id", "topic"]
+        }
+    },
+    {
+        "name": "get_quiz_history",
+        "description": ("Seniorova historie kvízů (topic, skóre, datum). "
+                        "Použij pro adaptive recommendations — vyhni se opakovaným "
+                        "tématům, zaměř se na slabé oblasti."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "days": {"type": "integer", "default": 30, "minimum": 1, "maximum": 365}
+            },
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "recommend_brain_game",
+        "description": ("Doporuč paměťovou hru. ALERT/CRISIS → ŽÁDNÁ hra. "
+                        "Cold start → pairs (nejjednodušší). Po 3+ pairs → "
+                        "graduate na colors/categories. Vše hráno → repeat se "
+                        "zvýšenou difficulty."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
             "required": ["senior_id"]
         }
     },
@@ -5625,6 +5815,391 @@ def _tool_recommend_tv_content(senior_id, time_aware=True):
         return {"error": str(e)[:200]}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# QUIZ + GAMES + EXERCISES TOOLS — kognitivní fitness pro seniory
+# ═══════════════════════════════════════════════════════════════════════
+
+def _tool_get_exercises_catalog(category=None):
+    """Catalog of exercises: dýchání / fyzická / meditace / paměť.
+
+    category: 'breath' / 'physical' / 'meditation' / 'memory' / None=all
+    """
+    if category and category not in _EXERCISE_CATALOG:
+        return {"error": f"category must be one of {list(_EXERCISE_CATALOG.keys())}"}
+    try:
+        if category:
+            return {
+                'category': category,
+                'count': len(_EXERCISE_CATALOG[category]),
+                'exercises': _EXERCISE_CATALOG[category],
+            }
+        return {
+            'categories': {c: len(items) for c, items in _EXERCISE_CATALOG.items()},
+            'total': sum(len(items) for items in _EXERCISE_CATALOG.values()),
+            'all': _EXERCISE_CATALOG,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_recommend_exercise(senior_id, target=None):
+    """Recommend an exercise based on senior's Ψ(t) state + voice memory.
+
+    target: 'calm' (anxiety/CRISIS) / 'energize' (lethargy/HARMONY morning)
+            / 'cognitive' (memory training) / 'meditation' (deep relaxation)
+
+    Logic:
+    - CRISIS → breath_478 (vědecky ověřené uklidnění)
+    - ALERT → breath_box nebo body_scan
+    - HARMONY ráno → physical (rozcvička)
+    - HARMONY odpoledne → memory game (kognitivní fitness)
+    - HARMONY večer → meditation (před spánkem)
+    """
+    try:
+        # Brain mode
+        mode = 'HARMONY'
+        if _DB:
+            try:
+                with db_context() as db:
+                    row = db.execute("""
+                        SELECT mode FROM brain_states WHERE user_id = ?
+                        ORDER BY created_at DESC LIMIT 1
+                    """, (str(senior_id),)).fetchone()
+                if row:
+                    vals = _row_to_list(row)
+                    mode = vals[0] or 'HARMONY'
+            except Exception:
+                pass
+
+        hour = datetime.now().hour
+
+        # Decide target
+        if target:
+            t = target.lower()
+            if t in ('calm', 'anxiety'):
+                cat = 'breath'
+            elif t in ('energize', 'morning'):
+                cat = 'physical'
+            elif t in ('cognitive', 'memory', 'mind'):
+                cat = 'memory'
+            elif t in ('meditation', 'deep_relax', 'sleep'):
+                cat = 'meditation'
+            else:
+                cat = 'breath'
+        elif mode == 'CRISIS':
+            cat = 'breath'  # vědecky ověřené uklidnění
+        elif mode == 'ALERT':
+            cat = 'breath' if hour > 18 else 'meditation'
+        elif hour < 10:
+            cat = 'physical'  # ranní rozcvička
+        elif hour < 18:
+            cat = 'memory'  # kognitivní fitness odpoledne
+        else:
+            cat = 'meditation'  # večerní zklidnění
+
+        candidates = _EXERCISE_CATALOG.get(cat, [])
+        if not candidates:
+            return {"info": "No exercises in target category"}
+
+        # Pick first (could be smarter — based on history)
+        top = candidates[0]
+        return {
+            'top_recommendation': top,
+            'reason': {
+                'brain_mode': mode,
+                'hour': hour,
+                'target_category': cat,
+                'target_override': target,
+            },
+            'alternatives': candidates[1:4],
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_start_exercise_for_senior(senior_id, exercise_id):
+    """Start an exercise via agent_messages bus.
+
+    Frontend ExercisesModule listens for kind='intent' topic='start_exercise'.
+    Respects voice session state.
+    """
+    if not _AGENT_BUS:
+        return {"error": "agent_bus not available"}
+
+    if _VOICE_RUNTIME:
+        try:
+            session = _get_voice_session(str(senior_id))
+            state = session.get('state', 'idle')
+            if state != _VOICE_STATES['IDLE']:
+                return {"skipped": f"voice session is {state} — won't interrupt"}
+        except Exception:
+            pass
+
+    # Find exercise
+    found = None
+    for cat, exercises in _EXERCISE_CATALOG.items():
+        for e in exercises:
+            if e['id'] == exercise_id:
+                found = {**e, '_category': cat}
+                break
+        if found:
+            break
+
+    if not found:
+        return {"error": f"exercise '{exercise_id}' not found"}
+
+    try:
+        msg_id = _bus_emit(
+            user_id=str(senior_id),
+            sender='claude_agent.exercise',
+            kind='intent',
+            severity='info',
+            topic='start_exercise',
+            payload={
+                'exercise_id': found['id'],
+                'name': found['name'],
+                'category': found['_category'],
+                'duration_min': found['duration_min'],
+                'difficulty': found['difficulty'],
+            },
+            ttl_minutes=10,
+        )
+        return {
+            'requested': True,
+            'exercise': found['name'],
+            'category': found['_category'],
+            'duration_min': found['duration_min'],
+            'bus_msg_id': msg_id,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_generate_quiz(topic, difficulty='easy', count=5):
+    """Generate AI quiz on topic for senior.
+
+    Topics work best in Czech: 'dějiny', 'příroda', 'česká hudba',
+    'poezie', 'jídlo a recepty', 'sport', 'film', 'geografie'.
+
+    difficulty: 'easy' / 'medium' / 'hard'
+    count: 1-7 (capped — Heroku 30s timeout)
+    """
+    if not topic or not topic.strip():
+        return {"error": "empty topic"}
+    valid_diff = {'easy', 'medium', 'hard'}
+    if difficulty not in valid_diff:
+        return {"error": f"difficulty must be {sorted(valid_diff)}"}
+    count = max(1, min(7, int(count)))
+
+    try:
+        # Use existing /api/kal/generate-quiz internal endpoint
+        BASE = os.getenv('SELF_BASE_URL', 'https://radim-brain-2025-be1cd52b04dc.herokuapp.com')
+        url = f'{BASE}/api/kal/generate-quiz'
+        body = json.dumps({
+            'topic': topic, 'difficulty': difficulty, 'count': count,
+        }).encode()
+        req = _urllib_request.Request(url, data=body,
+            headers={'Content-Type': 'application/json'})
+        try:
+            resp = _urllib_request.urlopen(req, timeout=25)
+            data = json.loads(resp.read().decode())
+            questions = data.get('questions', []) or []
+            return {
+                'topic': topic,
+                'difficulty': difficulty,
+                'count': len(questions),
+                'questions': [
+                    {
+                        'question': q.get('question'),
+                        'options': q.get('options', {}),
+                        'correct': q.get('correct'),
+                        'explanation': (q.get('explanation') or '')[:200],
+                    }
+                    for q in questions[:count]
+                ],
+            }
+        except Exception as e:
+            return {"error": f"quiz generation failed: {str(e)[:200]}"}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_start_quiz_for_senior(senior_id, topic, difficulty='easy', count=5):
+    """Generate quiz + push it to senior via bus.
+
+    Frontend QuizModule receives the questions and starts the game.
+    """
+    if not _AGENT_BUS:
+        return {"error": "agent_bus not available"}
+
+    # Voice session check
+    if _VOICE_RUNTIME:
+        try:
+            session = _get_voice_session(str(senior_id))
+            state = session.get('state', 'idle')
+            if state != _VOICE_STATES['IDLE']:
+                return {"skipped": f"voice session is {state} — won't interrupt"}
+        except Exception:
+            pass
+
+    # Generate quiz first
+    quiz = _tool_generate_quiz(topic, difficulty, count)
+    if quiz.get('error'):
+        return quiz
+
+    try:
+        msg_id = _bus_emit(
+            user_id=str(senior_id),
+            sender='claude_agent.quiz',
+            kind='intent',
+            severity='info',
+            topic='start_quiz',
+            payload={
+                'topic': topic,
+                'difficulty': difficulty,
+                'questions': quiz.get('questions', []),
+                'question_count': len(quiz.get('questions', [])),
+            },
+            ttl_minutes=15,
+        )
+        return {
+            'requested': True,
+            'quiz_topic': topic,
+            'difficulty': difficulty,
+            'questions_generated': len(quiz.get('questions', [])),
+            'bus_msg_id': msg_id,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_quiz_history(senior_id, days=30):
+    """Senior's quiz performance history.
+
+    Pulls from quiz_results table — shows topic, score, taken_at.
+    Use for adaptive recommendations (avoid repeated topics, target weak areas).
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    try:
+        with db_context() as db:
+            interval = (f"NOW() - INTERVAL '{int(days)} days'" if is_postgres()
+                        else f"datetime('now', '-{int(days)} day')")
+            rows = db.execute(f"""
+                SELECT course_id, module_id, score, correct, total, taken_at
+                FROM quiz_results WHERE user_id = ?
+                  AND taken_at > {interval}
+                ORDER BY taken_at DESC LIMIT 30
+            """, (str(senior_id),)).fetchall()
+
+            history = []
+            scores = []
+            topics_seen = {}
+            for r in rows:
+                v = _row_to_list(r)
+                topic = v[0] or 'unknown'
+                score = v[2]
+                history.append({
+                    'topic': topic,
+                    'module_id': v[1],
+                    'score': score,
+                    'correct': v[3],
+                    'total': v[4],
+                    'taken_at': str(v[5]) if v[5] else None,
+                })
+                if score is not None:
+                    scores.append(float(score))
+                topics_seen[topic] = topics_seen.get(topic, 0) + 1
+
+            if not history:
+                return {"info": "No quiz history yet"}
+
+            return {
+                'count': len(history),
+                'avg_score': round(sum(scores)/len(scores), 1) if scores else None,
+                'topics_attempted': topics_seen,
+                'recent': history[:10],
+                'window_days': days,
+            }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_recommend_brain_game(senior_id):
+    """Recommend a memory game based on senior's profile + history.
+
+    Logic:
+    - Brain ALERT/CRISIS → NO games (don't add cognitive load)
+    - First-time / cold start → 'pairs' (easiest, most familiar)
+    - Played 'pairs' 3+ times → graduate to 'colors' or 'categories'
+    - Played all 4 games → repeat with higher difficulty
+    """
+    try:
+        # Brain mode check
+        mode = 'HARMONY'
+        if _DB:
+            try:
+                with db_context() as db:
+                    row = db.execute("""
+                        SELECT mode FROM brain_states WHERE user_id = ?
+                        ORDER BY created_at DESC LIMIT 1
+                    """, (str(senior_id),)).fetchone()
+                if row:
+                    vals = _row_to_list(row)
+                    mode = vals[0] or 'HARMONY'
+            except Exception:
+                pass
+
+        if mode in ('ALERT', 'CRISIS'):
+            return {
+                'recommendation': None,
+                'reason': f'Brain mode={mode} — žádná kognitivní zátěž',
+                'alternative': 'Místo hry zkus dýchací cvičení (recommend_exercise target="calm")',
+            }
+
+        # Use quiz history as a proxy for game history (no game_results table yet)
+        played_topics = {}
+        if _DB:
+            try:
+                with db_context() as db:
+                    rows = db.execute("""
+                        SELECT course_id, COUNT(*) FROM quiz_results
+                        WHERE user_id = ? GROUP BY course_id
+                    """, (str(senior_id),)).fetchall()
+                for r in rows:
+                    v = _row_to_list(r)
+                    played_topics[v[0]] = v[1]
+            except Exception:
+                pass
+
+        # Memory games
+        memory_games = _EXERCISE_CATALOG.get('memory', [])
+        # Cold start → pairs (easiest)
+        if not played_topics:
+            top = memory_games[0]  # pairs
+            reason = 'cold_start'
+        else:
+            # Find a game not played recently
+            played_ids = set(played_topics.keys())
+            unplayed = [g for g in memory_games if g['id'] not in played_ids]
+            if unplayed:
+                top = unplayed[0]
+                reason = 'new_challenge'
+            else:
+                # Has played all — recommend pairs (safe, popular)
+                top = memory_games[0]
+                reason = 'familiar_repeat'
+
+        return {
+            'recommendation': top,
+            'reason': reason,
+            'brain_mode': mode,
+            'alternatives': [g for g in memory_games if g['id'] != top['id']][:3],
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 # Tool dispatcher
 TOOL_HANDLERS = {
     'list_seniors': lambda args: _tool_list_seniors(),
@@ -5794,6 +6369,20 @@ TOOL_HANDLERS = {
         args['query'], args.get('limit', 6)),
     'recommend_tv_content': lambda args: _tool_recommend_tv_content(
         args['senior_id'], args.get('time_aware', True)),
+    # Quiz + Games + Exercises
+    'get_exercises_catalog': lambda args: _tool_get_exercises_catalog(args.get('category')),
+    'recommend_exercise': lambda args: _tool_recommend_exercise(
+        args['senior_id'], args.get('target')),
+    'start_exercise_for_senior': lambda args: _tool_start_exercise_for_senior(
+        args['senior_id'], args['exercise_id']),
+    'generate_quiz': lambda args: _tool_generate_quiz(
+        args['topic'], args.get('difficulty', 'easy'), args.get('count', 5)),
+    'start_quiz_for_senior': lambda args: _tool_start_quiz_for_senior(
+        args['senior_id'], args['topic'],
+        args.get('difficulty', 'easy'), args.get('count', 5)),
+    'get_quiz_history': lambda args: _tool_get_quiz_history(
+        args['senior_id'], args.get('days', 30)),
+    'recommend_brain_game': lambda args: _tool_recommend_brain_game(args['senior_id']),
 }
 
 
@@ -5896,7 +6485,8 @@ WRITE_TOOLS = {'send_chat_message', 'send_push', 'notify_family', 'initiate_call
                'add_care_plan_goal', 'add_care_plan_risk',
                'send_caregiver_notification', 'caregiver_whisper',
                'mark_lesson_complete',
-               'play_music_for_senior', 'pause_music_for_senior'}
+               'play_music_for_senior', 'pause_music_for_senior',
+               'start_exercise_for_senior', 'start_quiz_for_senior'}
 
 
 # Per-senior event-trigger cooldown (anti-thrashing). Independent of
