@@ -211,6 +211,19 @@ except ImportError:
                      'THINKING': 'thinking', 'SPEAKING': 'speaking'}
 
 # ─── STT (speech-to-text) — Azure Speech + Czech understanding ──────
+# ─── Settings + Onboarding ─────────────────────────────────────────
+# Settings live across multiple tables:
+# - memory_profiles (voice_pref, quiet_hours, radim_mode, accessibility)
+# - notification_preferences (per-user notification rules)
+# - auth_users (subscription_status, email)
+# - onboarding tracking
+_SETTINGS_WRITABLE_PROFILE_KEYS = {
+    'voice_pref', 'quiet_hours', 'radim_mode', 'theme', 'font_size',
+    'high_contrast', 'large_buttons', 'reduce_motion', 'simplified_ui',
+    'preferred_channel', 'language', 'notification_sound',
+    'auto_greeting', 'rate_modifier', 'avatar',
+}
+
 # ─── Odkaz (legacy/experience monetization + inheritance) ──────────
 try:
     from legacy_engine import distill_legacy as _distill_legacy
@@ -572,6 +585,35 @@ by byla katastrofa. Ty jsi observer + diagnostician, ne kodér produkce.
 - Cooldown skips (správné chování)
 - "No data yet" pro nové seniory (cold start)
 - Insufficient_data circadian_profile (potřeba 14 dní)
+
+# ⚙️ NASTAVENÍ + ONBOARDING
+Senior má hluboký konfig. Klíčové **`radim_mode`** určuje VŠECHNY tvoje akce:
+
+- **observer** (passive) — jen pozoruj a loguj. **NEPROAKTIVUJ NIC.**
+  - Žádné chat zprávy
+  - Žádné push
+  - Žádné voice calls
+  - Pouze observations do DB
+- **guide** (default) — proaktivní suggestions, ale NO calls except CRISIS
+  - Chat + push messages OK
+  - Family alerts OK
+  - Voice calls JEN v CRISIS s reason
+- **guardian** (full) — full escalace včetně calls + family
+  - Vše povoleno
+
+**Před každou proaktivní akcí volej `get_radim_mode(senior)`** —
+respektuj radim_mode jako tvrdou hranici, ne suggestion.
+
+**Settings tools:**
+- `get_senior_settings(senior)` — komplexní view (profile + account + notifications + onboarding)
+- `update_setting(senior, key, value)` — whitelist updates
+- `get_onboarding_status(senior)` — kde je v onboarding flow
+
+**Adaptace podle accessibility:**
+- `font_size='large'` → kratší zprávy, jasnější struktura
+- `simplified_ui=True` → 1 myšlenka per zpráva
+- `high_contrast=True` → neusej emoji v textu (špatně se čtou v hi-con)
+- `reduce_motion=True` → žádné rychlé "rychle/teď"
 
 # 💎 ODKAZ (legacy + monetizace)
 **"Odkaz"** je dvouvrstvý systém:
@@ -2500,6 +2542,58 @@ TOOLS = [
                     "enum": ["family","historical","skill","love","place"], "default": "family"}
             },
             "required": ["senior_id", "topic", "transcript_summary"]
+        }
+    },
+    # ── SETTINGS + ONBOARDING ───────────────────────────────────
+    {
+        "name": "get_senior_settings",
+        "description": ("Komplexní pohled na nastavení seniora: profile (voice_pref, "
+                        "quiet_hours, radim_mode, theme, font_size, accessibility), "
+                        "account (subscription), notification_preferences, onboarding."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "update_setting",
+        "description": ("Aktualizuj jedno setting v profile. Whitelist klíčů: "
+                        "voice_pref, quiet_hours, radim_mode (observer/guide/guardian), "
+                        "theme, font_size, high_contrast, large_buttons, reduce_motion, "
+                        "simplified_ui, preferred_channel, language, notification_sound, "
+                        "auto_greeting, rate_modifier, avatar. Email/password/"
+                        "subscription je read-only."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "setting_key": {"type": "string"},
+                "value": {"description": "Nová hodnota"}
+            },
+            "required": ["senior_id", "setting_key", "value"]
+        }
+    },
+    {
+        "name": "get_radim_mode",
+        "description": ("Senior's interaction mode: observer (jen pozorování, žádný "
+                        "proaktivní kontakt) / guide (default — chat+push, calls jen "
+                        "v CRISIS) / guardian (plný eskalační režim). Claude MUSÍ "
+                        "respektovat — observer mode znamená NEKOMUNIKOVAT proaktivně."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "get_onboarding_status",
+        "description": ("Stav onboarding flow seniora — dokončené kroky, next step. "
+                        "Pokud není dokončeno → Claude může nabídnout pomoc."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
         }
     },
     # ── PHILOSOPHY TOOL ─────────────────────────────────────────
@@ -7441,6 +7535,233 @@ def _tool_record_experience_session(senior_id, topic, transcript_summary,
         return {"error": str(e)[:200]}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# SETTINGS + ONBOARDING TOOLS
+# ═══════════════════════════════════════════════════════════════════════
+
+def _tool_get_senior_settings(senior_id):
+    """Comprehensive settings view for senior.
+
+    Aggregates from: memory_profiles (voice_pref, quiet_hours, radim_mode,
+    accessibility), auth_users (email, subscription), notification_preferences,
+    onboarding state.
+    """
+    if not _DB or not _MEMORY_HELPERS:
+        return {"error": "DB or memory helpers not available"}
+    try:
+        result = {'senior_id': senior_id}
+
+        # Profile-level settings
+        profile = _load_profile(str(senior_id)) or {}
+        result['profile_settings'] = {
+            'voice_pref': profile.get('voice_pref'),
+            'quiet_hours': profile.get('quiet_hours'),
+            'radim_mode': profile.get('radim_mode', 'guide'),  # observer/guide/guardian
+            'preferred_channel': profile.get('preferred_channel'),
+            'language': profile.get('language', 'cs-CZ'),
+            'theme': profile.get('theme'),
+            'font_size': profile.get('font_size', 'large'),
+            'high_contrast': profile.get('high_contrast', False),
+            'large_buttons': profile.get('large_buttons', True),
+            'reduce_motion': profile.get('reduce_motion', False),
+            'simplified_ui': profile.get('simplified_ui', False),
+            'avatar': profile.get('avatar'),
+            'auto_greeting': profile.get('auto_greeting', True),
+        }
+
+        # Auth-level settings
+        with db_context() as db:
+            row = db.execute("""
+                SELECT email, role, subscription_status, subscription_expires,
+                       trial_started, last_active, created_at
+                FROM auth_users WHERE id = ? LIMIT 1
+            """, (str(senior_id),)).fetchone()
+            if row:
+                v = _row_to_list(row)
+                result['account'] = {
+                    'email': (v[0] or '')[:6] + '***' if v[0] else None,
+                    'role': v[1],
+                    'subscription_status': v[2],
+                    'subscription_expires': str(v[3]) if v[3] else None,
+                    'trial_started': str(v[4]) if v[4] else None,
+                    'last_active': str(v[5]) if v[5] else None,
+                    'account_age_days': None,
+                }
+                if v[6]:
+                    try:
+                        from datetime import datetime as _dt
+                        if isinstance(v[6], str):
+                            created = _dt.fromisoformat(v[6].replace('Z', '+00:00'))
+                        else:
+                            created = v[6]
+                        result['account']['account_age_days'] = (
+                            _dt.utcnow() - created.replace(tzinfo=None)
+                        ).days
+                    except Exception:
+                        pass
+
+            # Notification preferences
+            try:
+                row = db.execute("""
+                    SELECT data FROM notification_preferences WHERE user_id = ?
+                """, (str(senior_id),)).fetchone()
+                if row:
+                    notif_data = _row_to_list(row)[0]
+                    if isinstance(notif_data, str):
+                        try:
+                            notif_data = json.loads(notif_data)
+                        except Exception:
+                            notif_data = {}
+                    result['notification_preferences'] = notif_data
+                else:
+                    result['notification_preferences'] = None
+            except Exception:
+                pass
+
+            # Onboarding state
+            try:
+                row = db.execute("""
+                    SELECT data FROM onboarding_state WHERE user_id = ?
+                """, (str(senior_id),)).fetchone()
+                if row:
+                    ob = _row_to_list(row)[0]
+                    if isinstance(ob, str):
+                        try:
+                            ob = json.loads(ob)
+                        except Exception:
+                            ob = {}
+                    result['onboarding'] = {
+                        'completed_steps': ob.get('completed_steps', []) if isinstance(ob, dict) else [],
+                        'pilot_completed': bool(ob.get('pilot_completed_at')) if isinstance(ob, dict) else False,
+                        'finished': ob.get('finished', False) if isinstance(ob, dict) else False,
+                    }
+                else:
+                    result['onboarding'] = {'completed_steps': [], 'finished': False}
+            except Exception:
+                result['onboarding'] = None
+
+        return result
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_update_setting(senior_id, setting_key, value):
+    """Update a single profile-level setting.
+
+    Whitelist: voice_pref, quiet_hours, radim_mode (observer/guide/guardian),
+    theme, font_size, high_contrast, large_buttons, reduce_motion,
+    simplified_ui, preferred_channel, language, notification_sound,
+    auto_greeting, rate_modifier, avatar.
+
+    For sensitive settings (email, password, subscription), use the
+    auth flow — Claude can't change those.
+    """
+    if not _MEMORY_HELPERS:
+        return {"error": "memory_helpers not available"}
+    if setting_key not in _SETTINGS_WRITABLE_PROFILE_KEYS:
+        return {"error": f"setting '{setting_key}' is read-only — only "
+                f"{sorted(_SETTINGS_WRITABLE_PROFILE_KEYS)} are writable"}
+
+    # Validate radim_mode
+    if setting_key == 'radim_mode':
+        if value not in ('observer', 'guide', 'guardian'):
+            return {"error": "radim_mode must be 'observer', 'guide', or 'guardian'"}
+
+    try:
+        profile = _load_profile(str(senior_id)) or {}
+        old_value = profile.get(setting_key)
+        profile[setting_key] = value
+        _save_profile(str(senior_id), profile)
+        return {
+            'updated': True,
+            'setting_key': setting_key,
+            'old_value': old_value,
+            'new_value': value,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_radim_mode(senior_id):
+    """Get senior's chosen Radim interaction mode.
+
+    observer (passive observation only — Radim only logs)
+    guide (default — proactive suggestions, no calls unless CRISIS)
+    guardian (full escalation — calls family, calls senior when needed)
+
+    Claude MUST respect this — observer mode = no proactive contact.
+    """
+    if not _MEMORY_HELPERS:
+        return {"error": "memory_helpers not available"}
+    try:
+        profile = _load_profile(str(senior_id)) or {}
+        mode = profile.get('radim_mode', 'guide')
+        return {
+            'radim_mode': mode,
+            'allows_proactive_chat': mode in ('guide', 'guardian'),
+            'allows_proactive_call': mode == 'guardian',
+            'allows_family_escalation': mode in ('guide', 'guardian'),
+            '_meaning': {
+                'observer': 'Passive — Radim only observes + logs',
+                'guide': 'Proactive — chat/push suggestions, no calls except CRISIS',
+                'guardian': 'Full — calls senior + family when needed',
+            }.get(mode, 'unknown'),
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_onboarding_status(senior_id):
+    """Where is senior in onboarding flow?
+
+    Returns: completed_steps (list), finished (bool), pilot_completed,
+    next_recommended_step.
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    try:
+        with db_context() as db:
+            row = db.execute("""
+                SELECT data FROM onboarding_state WHERE user_id = ?
+            """, (str(senior_id),)).fetchone()
+            if not row:
+                return {
+                    'started': False,
+                    'completed_steps': [],
+                    'finished': False,
+                    'pilot_completed': False,
+                    'next_recommended_step': 'profile',
+                }
+            ob = _row_to_list(row)[0]
+            if isinstance(ob, str):
+                try:
+                    ob = json.loads(ob)
+                except Exception:
+                    ob = {}
+            if not isinstance(ob, dict):
+                ob = {}
+
+            completed = ob.get('completed_steps', []) or []
+            ALL_STEPS = ['profile', 'voice', 'family', 'preferences',
+                         'first_chat', 'pilot']
+            next_step = next((s for s in ALL_STEPS if s not in completed), None)
+
+            return {
+                'started': True,
+                'completed_steps': completed,
+                'finished': ob.get('finished', False),
+                'pilot_completed': bool(ob.get('pilot_completed_at')),
+                'pilot_completed_at': ob.get('pilot_completed_at'),
+                'next_recommended_step': next_step,
+                'progress_pct': round(len(completed) / len(ALL_STEPS) * 100, 0) if ALL_STEPS else 0,
+            }
+    except Exception as e:
+        # Table may not exist yet
+        if 'does not exist' in str(e) or 'no such table' in str(e):
+            return {"info": "onboarding_state table not created yet"}
+        return {"error": str(e)[:200]}
+
+
 # Tool dispatcher
 TOOL_HANDLERS = {
     'list_seniors': lambda args: _tool_list_seniors(),
@@ -7656,6 +7977,12 @@ TOOL_HANDLERS = {
     'record_experience_session': lambda args: _tool_record_experience_session(
         args['senior_id'], args['topic'], args['transcript_summary'],
         args.get('contribution_type', 'story'), args.get('theme', 'family')),
+    # Settings + Onboarding
+    'get_senior_settings': lambda args: _tool_get_senior_settings(args['senior_id']),
+    'update_setting': lambda args: _tool_update_setting(
+        args['senior_id'], args['setting_key'], args['value']),
+    'get_radim_mode': lambda args: _tool_get_radim_mode(args['senior_id']),
+    'get_onboarding_status': lambda args: _tool_get_onboarding_status(args['senior_id']),
 }
 
 
@@ -7762,7 +8089,8 @@ WRITE_TOOLS = {'send_chat_message', 'send_push', 'notify_family', 'initiate_call
                'start_exercise_for_senior', 'start_quiz_for_senior',
                'create_medical_alert', 'request_consultation',
                'emergency_call_doctor',
-               'trigger_legacy_distillation', 'record_experience_session'}
+               'trigger_legacy_distillation', 'record_experience_session',
+               'update_setting'}
 
 
 # Per-senior event-trigger cooldown (anti-thrashing). Independent of
