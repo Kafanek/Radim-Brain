@@ -1098,6 +1098,22 @@ try:
     else:
         logger.info("ℹ️ Claude agent disabled (set CLAUDE_AGENT_ENABLED=1 to enable)")
 
+    # Autonomous Fix Loop — rule-based micro-bug auto-repair, every 8h
+    # Gated by env var AUTONOMOUS_FIX_ENABLED=1 (off by default for safety)
+    if os.getenv('AUTONOMOUS_FIX_ENABLED', '0') == '1':
+        try:
+            from autonomous_fix_loop import run_autonomous_fix_cycle
+            scheduler.add_job(run_autonomous_fix_cycle,
+                              'interval', hours=8,
+                              id='autonomous_fix', max_instances=1,
+                              misfire_grace_time=600)
+            logger.info("✅ Autonomous fix loop registered (every 8h)")
+        except ImportError as e:
+            logger.warning(f"⚠️ Autonomous fix loop not available: {e}")
+    else:
+        logger.info("ℹ️ Autonomous fix loop disabled "
+                    "(set AUTONOMOUS_FIX_ENABLED=1 to enable)")
+
     # v10.40: SOS escalation engine — every 10 s walks unresolved events through stages
     try:
         from sos_escalator import run_escalator_tick, is_enabled as sos_enabled
@@ -1941,6 +1957,23 @@ def admin_claude_agent_telemetry():
     except Exception as e:
         logger.exception("Claude agent telemetry failed")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/autonomous-fix/run', methods=['POST', 'OPTIONS'])
+def admin_autonomous_fix_run():
+    """Manually trigger one autonomous fix cycle. Returns summary dict."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        from autonomous_fix_loop import run_autonomous_fix_cycle
+        # Run synchronously (cycle should be < 5 min)
+        summary = run_autonomous_fix_cycle()
+        return jsonify({'success': True, 'summary': summary}), 200
+    except Exception as e:
+        logger.exception("Autonomous fix manual run failed")
+        return jsonify({'error': str(e)[:300]}), 500
 
 
 @app.route('/api/admin/claude-agent/dashboard', methods=['GET', 'OPTIONS'])
