@@ -1307,6 +1307,32 @@ try:
 
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
+
+    # Heroku R12 fix: explicit SIGTERM handler. atexit alone doesn't fire on
+    # signal-driven shutdown (gunicorn worker exits before atexit runs),
+    # which causes scheduler threads to keep running and Heroku R12 timeout
+    # at 30s SIGTERM → SIGKILL. Register a handler that shuts scheduler
+    # cleanly within Heroku's graceful window.
+    import signal as _sig
+    def _graceful_shutdown(signum, frame):
+        logger.info(f"🛑 Received signal {signum} — shutting down scheduler gracefully")
+        try:
+            scheduler.shutdown(wait=False)
+            logger.info("✅ Scheduler shut down")
+        except Exception as e:
+            logger.warning(f"Scheduler shutdown error: {e}")
+        # Re-raise default behavior so gunicorn worker exits
+        _sig.signal(signum, _sig.SIG_DFL)
+        os.kill(os.getpid(), signum)
+    try:
+        _sig.signal(_sig.SIGTERM, _graceful_shutdown)
+        # SIGINT (Ctrl-C) too for local dev
+        _sig.signal(_sig.SIGINT, _graceful_shutdown)
+    except (ValueError, AttributeError):
+        # Signal handlers can only be set in main thread — gunicorn workers
+        # may run in eventlet greenlets. Falls back to atexit only.
+        pass
+
     logger.info("✅ APScheduler started: 9 jobs")
 
 except ImportError:
