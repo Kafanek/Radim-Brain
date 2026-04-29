@@ -5992,9 +5992,9 @@ def _tool_generate_quiz(topic, difficulty='easy', count=5):
     count = max(1, min(7, int(count)))
 
     try:
-        # Use existing /api/kal/generate-quiz internal endpoint
+        # Use existing /api/claude/quiz internal endpoint (claude_content_routes)
         BASE = os.getenv('SELF_BASE_URL', 'https://radim-brain-2025-be1cd52b04dc.herokuapp.com')
-        url = f'{BASE}/api/kal/generate-quiz'
+        url = f'{BASE}/api/claude/quiz'
         body = json.dumps({
             'topic': topic, 'difficulty': difficulty, 'count': count,
         }).encode()
@@ -6085,12 +6085,19 @@ def _tool_get_quiz_history(senior_id, days=30):
         with db_context() as db:
             interval = (f"NOW() - INTERVAL '{int(days)} days'" if is_postgres()
                         else f"datetime('now', '-{int(days)} day')")
-            rows = db.execute(f"""
-                SELECT course_id, module_id, score, correct, total, taken_at
-                FROM quiz_results WHERE user_id = ?
-                  AND taken_at > {interval}
-                ORDER BY taken_at DESC LIMIT 30
-            """, (str(senior_id),)).fetchall()
+            try:
+                rows = db.execute(f"""
+                    SELECT course_id, module_id, score, correct, total, taken_at
+                    FROM quiz_results WHERE user_id = ?
+                      AND taken_at > {interval}
+                    ORDER BY taken_at DESC LIMIT 30
+                """, (str(senior_id),)).fetchall()
+            except Exception as table_err:
+                # Table may not exist yet (lazy init on first quiz)
+                if 'does not exist' in str(table_err) or 'no such table' in str(table_err):
+                    return {"info": "Senior has no quiz history yet (table not yet created)",
+                            "count": 0, "recent": []}
+                raise
 
             history = []
             scores = []
