@@ -5098,26 +5098,31 @@ def _tool_recommend_scenario(senior_id, situation_keywords):
 
         kw_tokens = set(kw_norm.split())
 
-        # Score scenarios by keyword overlap with title + situation
+        # COMMUNICATION_SCENARIOS structure: {course_id: [scenario_dict, ...]}
+        # Flatten across all courses
         scored = []
-        scenarios = _EDU_SCENARIOS if isinstance(_EDU_SCENARIOS, dict) else {}
-        for sid, scenario in scenarios.items():
-            if not isinstance(scenario, dict):
+        scenarios_dict = _EDU_SCENARIOS if isinstance(_EDU_SCENARIOS, dict) else {}
+        for course_id, scenario_list in scenarios_dict.items():
+            if not isinstance(scenario_list, list):
                 continue
-            text_blob = (
-                (scenario.get('title') or '') + ' ' +
-                (scenario.get('situation') or '') + ' ' +
-                (scenario.get('description') or '')
-            ).lower()
-            if _STT_UNDERSTANDING:
-                try:
-                    text_blob = _stt_normalize(text_blob)
-                except Exception:
-                    pass
-            text_tokens = set(text_blob.split())
-            overlap = len(kw_tokens & text_tokens)
-            if overlap > 0:
-                scored.append((overlap, sid, scenario))
+            for idx, scenario in enumerate(scenario_list):
+                if not isinstance(scenario, dict):
+                    continue
+                sid = scenario.get('id', f'{course_id}_s{idx}')
+                text_blob = (
+                    (scenario.get('title') or '') + ' ' +
+                    (scenario.get('situation') or '') + ' ' +
+                    (scenario.get('description') or '')
+                ).lower()
+                if _STT_UNDERSTANDING:
+                    try:
+                        text_blob = _stt_normalize(text_blob)
+                    except Exception:
+                        pass
+                text_tokens = set(text_blob.split())
+                overlap = len(kw_tokens & text_tokens)
+                if overlap > 0:
+                    scored.append((overlap, sid, {**scenario, '_course': course_id}))
 
         scored.sort(reverse=True, key=lambda x: x[0])
         if not scored:
