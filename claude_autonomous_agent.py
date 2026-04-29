@@ -877,31 +877,32 @@ def _tool_compute_brain_state(senior_id, C, alpha, voice_tone=0.5, hrv=0.5, spee
 
     Useful for "what would Eva's state look like if C rose to 20?"
     Returns full vector (C, E, R, S) + mode + speech adaptation + coherence.
-    Does NOT save to DB unless senior_id provided in optional persist mode.
+    Ephemeral — does NOT save to DB.
     """
     if not _BRAIN_CORE:
         return {"error": "brain_core not available"}
     try:
-        # Compute (no DB save — pass user_id=None to skip persistence)
         result = _compute_psi(
             float(C), float(alpha),
             voice_tone=float(voice_tone), hrv=float(hrv),
             speech_tempo=float(speech_tempo),
-            user_id=None,  # ephemeral — Claude is exploring, not persisting
+            user_id=None,  # ephemeral
         )
-        # Strip any non-serializable bits
+        psi = result.get('psi', {}) or {}
         return {
-            'C': result.get('C'),
-            'E': result.get('E'),
-            'R': result.get('R'),
-            'S': result.get('S'),
+            'C': psi.get('C'),
+            'E': psi.get('E'),
+            'R': psi.get('R'),
+            'S': psi.get('S'),
             'alpha': result.get('alpha'),
             'mode': result.get('mode'),
             'coherence': result.get('coherence'),
             'phi_index': result.get('phi_index'),
-            'stability': result.get('stability'),
+            'rho_stability': result.get('rho_stability'),
+            'thresholds': result.get('thresholds'),
             'speech': result.get('speech'),
-            'rhythm': result.get('rhythm'),
+            'response_style': result.get('response_style'),
+            'rhythm_return': result.get('rhythm_return'),
             '_for_senior': str(senior_id),
         }
     except Exception as e:
