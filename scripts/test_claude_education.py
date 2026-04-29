@@ -61,12 +61,17 @@ print('━━━ 4. get_lesson_content ━━━')
 courses = _tool_get_education_courses()
 if courses.get('courses'):
     cid = courses['courses'][0]['course_id']
-    # Get first module from this course
+    # Get first module from this course (handle both dict and list)
     from education_data import EDUCATION_COURSES
     course = EDUCATION_COURSES.get(cid, {})
     modules = course.get('modules', {})
-    if modules:
+    if isinstance(modules, list) and modules:
+        mid = modules[0].get('id', modules[0].get('module_id', 'm0'))
+    elif isinstance(modules, dict) and modules:
         mid = list(modules.keys())[0]
+    else:
+        mid = None
+    if mid:
         l = _tool_get_lesson_content(cid, mid)
         if isinstance(l, dict) and not l.get('error'):
             print(f'  course: {cid} module: {mid}')

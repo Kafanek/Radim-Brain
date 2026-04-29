@@ -4783,6 +4783,17 @@ def _tool_caregiver_whisper(senior_id, text, priority='normal'):
 # EDUCATION TOOLS — lessons, scenarios, progress, assignments
 # ═══════════════════════════════════════════════════════════════════════
 
+def _modules_iter(course):
+    """Normalize modules collection — could be dict {id: module} or list of modules."""
+    mods = course.get('modules') or {}
+    if isinstance(mods, dict):
+        return list(mods.items())  # [(id, module), ...]
+    if isinstance(mods, list):
+        return [(m.get('id', m.get('module_id', f'm{i}')), m)
+                for i, m in enumerate(mods) if isinstance(m, dict)]
+    return []
+
+
 def _tool_get_education_courses(filter_type=None):
     """Catalog of available education courses.
 
@@ -4796,7 +4807,7 @@ def _tool_get_education_courses(filter_type=None):
         for cid, c in _EDU_COURSES.items():
             if filter_type and filter_type.lower() not in cid.lower():
                 continue
-            modules = c.get('modules', {}) or {}
+            modules = _modules_iter(c)
             courses.append({
                 'course_id': cid,
                 'title': c.get('title', cid),
@@ -4886,30 +4897,26 @@ def _tool_get_recommended_lessons(senior_id, limit=5):
             c = _EDU_COURSES.get(cid)
             if c:
                 done_modules = (progress.get(cid) or {}).get('completed_modules', []) or []
-                next_module = None
-                for mid in (c.get('modules', {}) or {}):
+                modules = _modules_iter(c)
+                for mid, m in modules:
                     if mid not in done_modules:
-                        next_module = mid
+                        recs.append({
+                            'course_id': cid,
+                            'module_id': mid,
+                            'title': m.get('title', mid),
+                            'level': c.get('level'),
+                            'reason': 'recommended_by_adaptive_profile',
+                        })
                         break
-                if next_module:
-                    m = c['modules'][next_module]
-                    recs.append({
-                        'course_id': cid,
-                        'module_id': next_module,
-                        'title': m.get('title', next_module),
-                        'level': c.get('level'),
-                        'reason': 'recommended_by_adaptive_profile',
-                    })
 
         # 2. Match by communication_needs (e.g., alzheimer_middle → caregiver courses)
         for need in senior_needs:
             need_lower = need.lower()
             for cid, c in _EDU_COURSES.items():
-                if any(any(kw in cid.lower() for kw in need_lower.split('_')) for _ in [0]):
+                if any(kw in cid.lower() for kw in need_lower.split('_')):
                     if not any(r['course_id'] == cid for r in recs):
-                        # First incomplete module
                         done = (progress.get(cid) or {}).get('completed_modules', []) or []
-                        for mid, m in (c.get('modules', {}) or {}).items():
+                        for mid, m in _modules_iter(c):
                             if mid not in done:
                                 recs.append({
                                     'course_id': cid,
@@ -4944,7 +4951,11 @@ def _tool_get_lesson_content(course_id, module_id):
         c = _EDU_COURSES.get(course_id)
         if not c:
             return {"error": f"course '{course_id}' not found"}
-        m = (c.get('modules', {}) or {}).get(module_id)
+        m = None
+        for mid, candidate in _modules_iter(c):
+            if mid == module_id:
+                m = candidate
+                break
         if not m:
             return {"error": f"module '{module_id}' not found in '{course_id}'"}
         # Trim verbose content for token economy
