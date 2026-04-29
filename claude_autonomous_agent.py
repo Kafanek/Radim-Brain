@@ -7039,7 +7039,6 @@ def _tool_get_senior_experiences(senior_id, limit=10):
                        audio_url, duration_sec, created_at
                 FROM experience_contributions
                 WHERE user_id = ?
-                  AND (deleted_at IS NULL)
                 ORDER BY created_at DESC LIMIT ?
             """, (str(senior_id), int(limit))).fetchall()
 
@@ -7079,7 +7078,7 @@ def _tool_get_active_offers(senior_id, limit=10):
             # Pull senior's themes first (filter offers by relevance)
             theme_rows = db.execute("""
                 SELECT DISTINCT theme FROM experience_contributions
-                WHERE user_id = ? AND deleted_at IS NULL
+                WHERE user_id = ?
             """, (str(senior_id),)).fetchall()
             senior_themes = [_row_to_list(r)[0] for r in theme_rows if r]
 
@@ -7383,13 +7382,16 @@ def _tool_record_experience_session(senior_id, topic, transcript_summary,
         return {"error": f"theme must be {sorted(valid_themes)}"}
     try:
         word_count = len(transcript_summary.split())
-        # Depth based on word count
+        # Depth as integer (1=short, 2=medium, 3=long)
         if word_count < 500:
-            depth = 'short'
+            depth = 1
+            depth_label = 'short'
         elif word_count < 1500:
-            depth = 'medium'
+            depth = 2
+            depth_label = 'medium'
         else:
-            depth = 'long'
+            depth = 3
+            depth_label = 'long'
 
         with db_context(commit=True) as db:
             from database import db_insert
@@ -7406,6 +7408,7 @@ def _tool_record_experience_session(senior_id, topic, transcript_summary,
             'type': contribution_type,
             'theme': theme,
             'depth': depth,
+            'depth_label': depth_label,
             'word_count': word_count,
             'privacy': 'draft',
             '_hint': ('Draft only — senior must explicitly change privacy '
