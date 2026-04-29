@@ -317,9 +317,22 @@ def batch_load_user_data(user_id):
 
             if row:
                 import json
+                # JSONB columns return parsed dict/list directly; TEXT columns return string.
+                # Handle both — only json.loads when value is a string.
+                def _maybe(v, default):
+                    if v is None:
+                        return default
+                    if isinstance(v, (dict, list)):
+                        return v
+                    if isinstance(v, str):
+                        try:
+                            return json.loads(v)
+                        except (json.JSONDecodeError, TypeError):
+                            return default
+                    return default
                 return {
-                    'profile': json.loads(row[0]) if row[0] else {},
-                    'learning': json.loads(row[1]) if row[1] else {},
+                    'profile': _maybe(row[0], {}),
+                    'learning': _maybe(row[1], {}),
                     'last_c': float(row[2]) if row[2] else 5.0,
                     'brain_ts': row[3]
                 }

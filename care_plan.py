@@ -60,6 +60,21 @@ def _init_care_plan_schema():
         pass
 
 
+def _maybe_json(value, default):
+    """Tolerant JSON load: PostgreSQL JSONB returns parsed dict/list directly,
+    SQLite returns TEXT (string). Handle both — decode only if string."""
+    if value is None:
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value or json.dumps(default))
+        except (json.JSONDecodeError, TypeError):
+            return default
+    return default
+
+
 def _get_plan(senior_id):
     """Get or create care plan for senior."""
     _init_care_plan_schema()
@@ -74,13 +89,13 @@ def _get_plan(senior_id):
 
         if row:
             return {
-                'goals': json.loads(row[0] or '[]'),
-                'daily_routine': json.loads(row[1] or '{}'),
-                'medications': json.loads(row[2] or '[]'),
-                'monitored_metrics': json.loads(row[3] or '[]'),
-                'risks': json.loads(row[4] or '[]'),
-                'responsibilities': json.loads(row[5] or '[]'),
-                'checkups': json.loads(row[6] or '[]'),
+                'goals': _maybe_json(row[0], []),
+                'daily_routine': _maybe_json(row[1], {}),
+                'medications': _maybe_json(row[2], []),
+                'monitored_metrics': _maybe_json(row[3], []),
+                'risks': _maybe_json(row[4], []),
+                'responsibilities': _maybe_json(row[5], []),
+                'checkups': _maybe_json(row[6], []),
                 'notes': row[7] or '',
                 'updated_by': row[8] or '',
                 'updated_at': str(row[9]) if row[9] else '',
