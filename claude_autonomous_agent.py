@@ -318,6 +318,43 @@ Systém má vlastní "srdeční tep" — synthetické vitály celé situace:
 4. `presence` blízko 1.0 = senior plně zaujatý → můžeš mluvit déle
 5. `warmth` (trust+safety)/2 nízká → zpomal, buduj důvěru
 
+# 🔬 SELF-DIAGNOSIS (autonomní hledání chyb)
+Můžeš ověřovat zdraví aplikace a sebe sama. **Aplikuješ tuhle vrstvu na konci
+běhu (1× za den), pokud máš zbývající tool calls.**
+
+**Sekvence:**
+1. `analyze_self_health` — jak zdravé jsou MOJE poslední běhy?
+   - health_score < 50 → nahlas SELF jako alert
+2. `detect_app_errors(24)` — error vzorce napříč aplikací
+3. Pokud najdeš podezřelou věc → `read_source_file('soubor.py')` pro kontext
+4. Pokud chceš ověřit subsystem → `run_diagnostic_test('tts'/'ha'/...)`
+5. `report_bug(category, severity, file, description, suggested_fix?)`
+
+**KRITICKÝ PRINCIP:**
+Tvoje úloha je **DETEKOVAT, DIAGNOSTIKOVAT, REPORTOVAT** — ne fixovat.
+Bug reports se zobrazí v admin-claude dashboardu. Supervised dev workflow
+(Claude Code lokálně, nebo CI/CD pipeline s human review) je aplikuje.
+
+Tohle je úmyslné: AI hallucination v produkčním kódu se seniory uvnitř
+by byla katastrofa. Ty jsi observer + diagnostician, ne kodér produkce.
+
+**Bezpečné hranice `read_source_file`:**
+- Jen relativní cesty v app rootu
+- Jen .py / .md / .txt / .json / .html / .js / .css
+- Blokuje .env / secrets / credentials / .ssh / .git
+
+**Kdy reportovat bug:**
+- Health score klesne pod 80
+- Error vzorce v telemetrii (>10% failure rate)
+- Tool returning {error: ...} opakovaně
+- CRISIS observation pro stejného seniora opakovaně bez akce
+- Performance regression (avg duration > 2× baseline)
+
+**Co NEreportovat jako bug:**
+- Cooldown skips (správné chování)
+- "No data yet" pro nové seniory (cold start)
+- Insufficient_data circadian_profile (potřeba 14 dní)
+
 # 🎤 WAKE WORD + AKTIVNÍ HLAS (Voice Runtime)
 Senior aktivuje Radima slovem **"Ahoj Radime"** (nebo 30+ variant: "Radim",
 "Radímku", "Pane Kafánek", ...). Aplikace má voice runtime se 4 stavy:
@@ -1111,6 +1148,83 @@ TOOLS = [
                         "konverzaci (state != IDLE). Globální 'kdo teď mluví'. "
                         "Jen z cache, takže jen aktivní sessions."),
         "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    # ── SELF-DIAGNOSTIC TOOLS ───────────────────────────────────
+    {
+        "name": "detect_app_errors",
+        "description": ("Sken posledních N hodin observation logu + claude_agent_telemetry "
+                        "pro error vzorce napříč celou aplikací. Vrátí strukturované "
+                        "kategorie chyb. Použij na začátku self-diagnostic cyklu."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "hours": {"type": "integer", "default": 24, "minimum": 1, "maximum": 168}
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "analyze_self_health",
+        "description": ("Self-introspection: jak zdravé jsou MOJE poslední běhy? "
+                        "Failure rate, avg cost, avg duration, tool call efficiency. "
+                        "Vrátí health_score (0-100) + warnings."),
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "read_source_file",
+        "description": ("Přečti zdrojový soubor aplikace pro self-diagnosis. "
+                        "BEZPEČNOST: jen relativní cesty v app rootu, blokuje "
+                        "secrets/env/credentials. Max 500KB. Použij pro "
+                        "analýzu reportované chyby."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Relativní cesta od /app, např. 'voice_filter.py'"},
+                "start_line": {"type": "integer", "default": 1},
+                "num_lines": {"type": "integer", "default": 80, "maximum": 300}
+            },
+            "required": ["file_path"]
+        }
+    },
+    {
+        "name": "run_diagnostic_test",
+        "description": ("Spusť whitelisted diagnostický test a zachyť výsledek. "
+                        "Tests: tools/tts/brain_memory/agents_beat/komunikace/ha/"
+                        "voice_runtime. Read-only ověření, žádné mutace."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "test_name": {"type": "string",
+                              "enum": ["tools", "tts", "brain_memory", "agents_beat",
+                                       "komunikace", "ha", "voice_runtime"]}
+            },
+            "required": ["test_name"]
+        }
+    },
+    {
+        "name": "report_bug",
+        "description": ("Vytvoř strukturovaný bug report. Uloží se jako "
+                        "observation_type='bug_report' + bus message. "
+                        "Devs ho uvidí v admin-claude dashboard. "
+                        "DŮLEŽITÉ: Toto NEAPLIKUJE FIX — jen reportuje. "
+                        "Patche aplikuje supervised dev workflow (Claude Code "
+                        "lokálně nebo CI/CD)."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string",
+                             "enum": ["crash","logic","performance","security","ux","config","flaky"]},
+                "severity": {"type": "string",
+                             "enum": ["INFO","WARNING","ALERT","CRISIS"]},
+                "file": {"type": "string", "description": "Soubor/modul kde je bug"},
+                "description": {"type": "string", "maxLength": 1000},
+                "suggested_fix": {"type": "string", "maxLength": 1000,
+                                  "description": "Volitelně: navrhovaná oprava"},
+                "reproducer": {"type": "string", "maxLength": 500,
+                               "description": "Volitelně: jak chybu zopakovat"}
+            },
+            "required": ["category", "severity", "file", "description"]
+        }
     },
     # ── PHILOSOPHY TOOL ─────────────────────────────────────────
     {
@@ -2795,6 +2909,302 @@ def _tool_get_active_voice_seniors():
         return {"error": str(e)[:200]}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# SELF-DIAGNOSTIC TOOLS — bug detection + structured reporting
+# ═══════════════════════════════════════════════════════════════════════
+#
+# DESIGN PHILOSOPHY: Production Claude agent OBSERVES, DIAGNOSES, REPORTS.
+# It does NOT modify production code at runtime — that's reserved for a
+# supervised dev workflow (Claude Code locally, or CI/CD with human review).
+# This separation prevents AI hallucination from breaking the live app
+# with seniors using it.
+#
+# Bug reports are stored as agent_observations with observation_type='bug_report'
+# so they're visible in the dashboard and reviewable before action.
+
+def _tool_detect_app_errors(hours=24):
+    """Scan recent agent observations + claude_agent_telemetry for error
+    patterns across the application.
+
+    Returns: structured list of error categories with frequencies.
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    try:
+        errors = {}
+        with db_context() as db:
+            interval = (f"NOW() - INTERVAL '{int(hours)} hours'" if is_postgres()
+                        else f"datetime('now', '-{int(hours)} hour')")
+
+            # 1. Errors logged via claude_agent_telemetry
+            rows = db.execute(f"""
+                SELECT error, COUNT(*) as cnt FROM claude_agent_telemetry
+                WHERE error IS NOT NULL AND error != ''
+                  AND run_at > {interval}
+                GROUP BY error ORDER BY cnt DESC LIMIT 10
+            """).fetchall()
+            errors['claude_agent_failures'] = [
+                {'error': (_row_to_list(r)[0] or '')[:200], 'count': _row_to_list(r)[1]}
+                for r in rows
+            ]
+
+            # 2. CRISIS observations (by any source)
+            rows = db.execute(f"""
+                SELECT observation_type, COUNT(*) as cnt FROM agent_observations
+                WHERE severity = 'CRISIS' AND created_at > {interval}
+                GROUP BY observation_type ORDER BY cnt DESC LIMIT 10
+            """).fetchall()
+            errors['crisis_events'] = [
+                {'type': _row_to_list(r)[0], 'count': _row_to_list(r)[1]}
+                for r in rows
+            ]
+
+            # 3. Tool errors from recent runs (parsed from summaries)
+            rows = db.execute(f"""
+                SELECT COUNT(*) FROM claude_agent_telemetry
+                WHERE actions_taken = 0 AND tool_calls > 5
+                  AND run_at > {interval}
+            """).fetchone()
+            zero_action_runs = _row_to_list(rows)[0] if rows else 0
+            errors['runs_no_actions'] = zero_action_runs
+
+        return {
+            'window_hours': hours,
+            'errors': errors,
+            'has_issues': bool(errors['claude_agent_failures'] or errors['crisis_events']),
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_analyze_self_health():
+    """Self-introspection: are MY recent runs healthy?
+
+    Looks at claude_agent_telemetry for: failure rate, avg cost, avg
+    duration, tool call efficiency. Detects degradation.
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    try:
+        with db_context() as db:
+            # Last 20 runs
+            rows = db.execute("""
+                SELECT cost_usd, duration_seconds, tool_calls,
+                       seniors_evaluated, actions_taken, error
+                FROM claude_agent_telemetry
+                ORDER BY run_at DESC LIMIT 20
+            """).fetchall()
+            if not rows:
+                return {"info": "No telemetry data"}
+            total = len(rows)
+            failures = sum(1 for r in rows if _row_to_list(r)[5])
+            costs = [float(_row_to_list(r)[0] or 0) for r in rows]
+            durations = [float(_row_to_list(r)[1] or 0) for r in rows]
+            tool_calls = [_row_to_list(r)[2] or 0 for r in rows]
+            actions = [_row_to_list(r)[4] or 0 for r in rows]
+
+            avg_cost = sum(costs) / total
+            avg_duration = sum(durations) / total
+            avg_tool_calls = sum(tool_calls) / total
+            zero_action_pct = sum(1 for a in actions if a == 0) / total * 100
+
+            health_score = 100
+            warnings = []
+            if failures / total > 0.1:
+                health_score -= 30
+                warnings.append(f"{failures}/{total} runs failed ({failures/total*100:.0f}%)")
+            if avg_cost > 0.40:
+                health_score -= 15
+                warnings.append(f"Avg cost ${avg_cost:.3f} above $0.40 threshold")
+            if avg_duration > 120:
+                health_score -= 10
+                warnings.append(f"Avg duration {avg_duration:.0f}s above 120s threshold")
+            if zero_action_pct > 80:
+                health_score -= 5
+                warnings.append(f"{zero_action_pct:.0f}% of runs took zero actions")
+
+            return {
+                'health_score': max(0, health_score),
+                'health_label': ('healthy' if health_score >= 80 else
+                                 'degraded' if health_score >= 50 else 'unhealthy'),
+                'last_20_runs': {
+                    'failures': failures,
+                    'avg_cost_usd': round(avg_cost, 4),
+                    'avg_duration_s': round(avg_duration, 1),
+                    'avg_tool_calls': round(avg_tool_calls, 1),
+                    'zero_action_pct': round(zero_action_pct, 1),
+                },
+                'warnings': warnings,
+            }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_read_source_file(file_path, start_line=1, num_lines=80):
+    """Read a Python source file from the deployed application — for
+    self-diagnosis when investigating a bug.
+
+    SAFETY: Only reads files within the app directory. Refuses absolute
+    paths going outside. Refuses .env, secrets, credentials.
+    """
+    import os
+    BLOCKED_PATTERNS = {'.env', 'secret', 'credentials', 'token', 'key.pem',
+                        'password', '.git/'}
+    BLOCKED_PATHS = {'/etc/', '/root/', '/home/', '/.ssh/', '/proc/'}
+
+    # Normalize and validate
+    if not file_path or not isinstance(file_path, str):
+        return {"error": "file_path required"}
+    norm = os.path.normpath(file_path)
+    if norm.startswith('/') or norm.startswith('..'):
+        return {"error": "absolute paths and parent traversal forbidden"}
+    if any(p in norm.lower() for p in BLOCKED_PATTERNS):
+        return {"error": f"path matches blocked pattern (secrets/env files)"}
+    if any(p in norm for p in BLOCKED_PATHS):
+        return {"error": f"path in blocked directory"}
+    if not norm.endswith(('.py', '.md', '.txt', '.json', '.html', '.js', '.css')):
+        return {"error": "only .py/.md/.txt/.json/.html/.js/.css files readable"}
+
+    try:
+        # Resolve relative to app root (Heroku /app)
+        full = os.path.join(os.getcwd(), norm)
+        if not os.path.exists(full):
+            return {"error": f"file not found: {norm}"}
+        if os.path.getsize(full) > 500_000:
+            return {"error": f"file too large (>500KB) — narrow with start_line/num_lines"}
+
+        with open(full, 'r', encoding='utf-8') as f:
+            all_lines = f.readlines()
+        total = len(all_lines)
+        start = max(1, int(start_line))
+        end = min(total, start + int(num_lines) - 1)
+        snippet = ''.join(all_lines[start-1:end])
+        return {
+            'file': norm,
+            'total_lines': total,
+            'showing': f'{start}-{end}',
+            'content': snippet[:8000],
+            'truncated': len(snippet) > 8000,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_run_diagnostic_test(test_name):
+    """Run one of the registered diagnostic test scripts (read-only checks)
+    and report results.
+
+    Whitelisted tests:
+    - 'tools' — verify all Claude tools work (test_claude_tools.py)
+    - 'tts' — verify TTS layer (test_claude_tts.py)
+    - 'brain_memory' — verify brain+memory tools
+    - 'agents_beat' — verify agent bus + RTCF beat
+    - 'komunikace' — verify communication module
+    - 'ha' — verify Home Assistant tools
+    - 'voice_runtime' — verify wake word + voice tools
+
+    Returns first 100 lines of stdout + exit code.
+    """
+    import subprocess
+    TEST_MAP = {
+        'tools': 'scripts/test_claude_tools.py',
+        'tts': 'scripts/test_claude_tts.py',
+        'brain_memory': 'scripts/test_claude_brain_memory.py',
+        'agents_beat': 'scripts/test_claude_agents_beat.py',
+        'komunikace': 'scripts/test_claude_komunikace.py',
+        'ha': 'scripts/test_claude_ha.py',
+        'voice_runtime': 'scripts/test_claude_voice_runtime.py',
+    }
+    if test_name not in TEST_MAP:
+        return {"error": f"unknown test — choose from {sorted(TEST_MAP.keys())}"}
+
+    script = TEST_MAP[test_name]
+    try:
+        result = subprocess.run(
+            ['python3', script],
+            capture_output=True, text=True, timeout=120,
+        )
+        # Last 100 lines is more useful than first
+        out_lines = (result.stdout or '').splitlines()
+        return {
+            'test': test_name,
+            'exit_code': result.returncode,
+            'success': result.returncode == 0,
+            'stdout_tail': '\n'.join(out_lines[-100:])[:5000],
+            'stderr_tail': (result.stderr or '')[-1000:],
+        }
+    except subprocess.TimeoutExpired:
+        return {"error": f"test '{test_name}' timed out (>120s)"}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_report_bug(category, severity, file, description, suggested_fix=None,
+                     reproducer=None):
+    """File a structured bug report. Stored as observation_type='bug_report'.
+
+    Reports appear in the admin dashboard for human review. A separate dev
+    workflow (Claude Code with full edit permissions, or CI/CD pipeline)
+    picks them up and applies fixes under supervision.
+
+    The autonomous agent does NOT modify production code at runtime.
+
+    category: 'crash' / 'logic' / 'performance' / 'security' / 'ux' / 'config'
+    severity: 'INFO' / 'WARNING' / 'ALERT' / 'CRISIS'
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    valid_categories = {'crash', 'logic', 'performance', 'security', 'ux', 'config', 'flaky'}
+    if category not in valid_categories:
+        return {"error": f"category must be one of {sorted(valid_categories)}"}
+    valid_severities = {'INFO', 'WARNING', 'ALERT', 'CRISIS'}
+    if severity not in valid_severities:
+        return {"error": f"severity must be one of {sorted(valid_severities)}"}
+
+    try:
+        report = {
+            'category': category,
+            'file': file[:200],
+            'description': description[:1000],
+            'suggested_fix': (suggested_fix or '')[:1000],
+            'reproducer': (reproducer or '')[:500],
+            'reported_at': datetime.utcnow().isoformat(),
+        }
+        # Store as agent observation with the bug report payload
+        with db_context(commit=True) as db:
+            from database import db_insert
+            db_insert(db, 'agent_observations',
+                      ['user_id', 'observation_type', 'severity',
+                       'message', 'details'],
+                      ['system', 'bug_report', severity,
+                       f'{category}: {description[:500]}',
+                       json.dumps(report, ensure_ascii=False)])
+        # Also push to agent bus so devs / dashboards see it immediately
+        if _AGENT_BUS:
+            try:
+                _bus_emit(
+                    user_id='system',
+                    sender='claude_agent.self_diagnostic',
+                    kind='observation',
+                    severity=severity.lower(),
+                    topic=f'bug_report.{category}',
+                    payload=report,
+                    ttl_minutes=10080,  # 7 days
+                )
+            except Exception:
+                pass
+        return {
+            'reported': True,
+            'category': category,
+            'severity': severity,
+            '_hint': ('Bug report stored. Visible in admin-claude dashboard. '
+                      'A dev workflow will pick it up. The autonomous agent '
+                      'does NOT auto-apply fixes to production code.'),
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 # Tool dispatcher
 TOOL_HANDLERS = {
     'list_seniors': lambda args: _tool_list_seniors(),
@@ -2882,6 +3292,15 @@ TOOL_HANDLERS = {
         args['senior_id'], args['message'],
         args.get('mode'), args.get('force_interrupt', False)),
     'get_active_voice_seniors': lambda args: _tool_get_active_voice_seniors(),
+    # Self-diagnostic
+    'detect_app_errors': lambda args: _tool_detect_app_errors(args.get('hours', 24)),
+    'analyze_self_health': lambda args: _tool_analyze_self_health(),
+    'read_source_file': lambda args: _tool_read_source_file(
+        args['file_path'], args.get('start_line', 1), args.get('num_lines', 80)),
+    'run_diagnostic_test': lambda args: _tool_run_diagnostic_test(args['test_name']),
+    'report_bug': lambda args: _tool_report_bug(
+        args['category'], args['severity'], args['file'], args['description'],
+        args.get('suggested_fix'), args.get('reproducer')),
 }
 
 
@@ -2977,7 +3396,8 @@ WRITE_TOOLS = {'send_chat_message', 'send_push', 'notify_family', 'initiate_call
                'emit_agent_message',
                'send_whatsapp', 'send_sms_to_senior',
                'ha_execute_action',
-               'speak_to_senior'}
+               'speak_to_senior',
+               'report_bug'}
 
 
 def run_claude_agent(app=None, trigger='cron', force=False):
