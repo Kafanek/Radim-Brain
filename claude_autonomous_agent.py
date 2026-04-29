@@ -211,6 +211,29 @@ except ImportError:
                      'THINKING': 'thinking', 'SPEAKING': 'speaking'}
 
 # ─── STT (speech-to-text) — Azure Speech + Czech understanding ──────
+# ─── Education subsystem (lessons, scenarios, progress) ────────────
+try:
+    from education_helpers import (
+        db_get_progress as _edu_get_progress,
+        get_adaptive_profile as _edu_get_profile,
+        db_save_progress as _edu_save_progress,
+        evaluate_and_adapt as _edu_evaluate,
+    )
+    _EDUCATION = True
+except ImportError:
+    _EDUCATION = False
+
+try:
+    from education_data import (
+        EDUCATION_COURSES as _EDU_COURSES,
+        COMMUNICATION_SCENARIOS as _EDU_SCENARIOS,
+    )
+    _EDU_DATA = True
+except ImportError:
+    _EDU_COURSES = {}
+    _EDU_SCENARIOS = {}
+    _EDU_DATA = False
+
 # ─── Caregiver + care plan + relationship engine ────────────────────
 try:
     from care_plan import _get_plan as _get_care_plan
@@ -411,6 +434,28 @@ by byla katastrofa. Ty jsi observer + diagnostician, ne kodér produkce.
 - Cooldown skips (správné chování)
 - "No data yet" pro nové seniory (cold start)
 - Insufficient_data circadian_profile (potřeba 14 dní)
+
+# 🎓 LEKCE + VZDĚLÁVÁNÍ
+Aplikace má **rich edu obsah** — kurzy se zaměřují na komunikační poruchy
+(disfázie, dysartrie) a péči. Senioři + pečovatelé se učí postupně.
+
+**Struktura:** Course → Module → Lesson + Quiz + Scenario.
+Adaptive engine učí level (beginner/intermediate/advanced) z quiz score.
+
+**Tvoje role:**
+1. `get_lesson_progress(senior)` na začátku týdenního briefu
+2. Pokud senior nedělal lekci 7+ dní → motivační push
+3. `get_recommended_lessons` → vyber 1 doporučenou (nepřetlač)
+4. `get_lesson_content` → vlož snippet do chatu jako pozvánku
+5. Pokud je situace v reálném životě (alzheimer agitace, pád rodičů…)
+   → `recommend_scenario` najdi odpovídající scénář pro pečovatele
+6. `mark_lesson_complete` po dokončení (auto-update level)
+
+**Důležité:**
+- Lekce je VOLITELNÁ podpora, ne povinnost. Buď jemný.
+- Senior s ALERT/CRISIS brain mode NEDOSTANE žádné lekce — to je
+  unfair stress.
+- Učení = pozitivní engagement → pomáhá zvyšovat C směrem k HARMONY.
 
 # 👥 PEČOVATELÉ + CARE PLAN
 Senior má **pečovatele** a **rodinu** — v aplikaci jsou jeden model
@@ -1691,6 +1736,99 @@ TOOLS = [
                 "priority": {"type": "string", "enum": ["low","normal","high"], "default": "normal"}
             },
             "required": ["senior_id", "text"]
+        }
+    },
+    # ── EDUCATION TOOLS ─────────────────────────────────────────
+    {
+        "name": "get_education_courses",
+        "description": ("Katalog vzdělávacích kurzů (dysphasia/komunikace/... )s "
+                        "moduly a lekcemi. filter_type filtruje (např. 'dysphasia')."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"filter_type": {"type": "string"}},
+            "required": []
+        }
+    },
+    {
+        "name": "get_lesson_progress",
+        "description": ("Progress seniora ve vzdělávání: level, badges, completion %, "
+                        "průměrné quiz skóre, recommended_courses. Pro pochopení, jak "
+                        "se senior učí."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "get_recommended_lessons",
+        "description": ("Personalizované doporučení lekcí podle adaptivního profilu + "
+                        "communication_needs. Vrátí list of {course_id, module_id, "
+                        "title, reason}. Reason ukazuje proč."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "limit": {"type": "integer", "default": 5, "minimum": 1, "maximum": 10}
+            },
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "get_lesson_content",
+        "description": ("Plný obsah lekce (HTML article + key_points + quiz info + "
+                        "scenario flag). Použij pro doručení lekce seniorovi nebo "
+                        "vložení do chatu."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "course_id": {"type": "string"},
+                "module_id": {"type": "string"}
+            },
+            "required": ["course_id", "module_id"]
+        }
+    },
+    {
+        "name": "mark_lesson_complete",
+        "description": ("Označ lekci jako dokončenou (volitelně se score). Score "
+                        "triggernuje adaptive evaluation (level/badges update)."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "course_id": {"type": "string"},
+                "module_id": {"type": "string"},
+                "score": {"type": "number", "minimum": 0, "maximum": 100}
+            },
+            "required": ["senior_id", "course_id", "module_id"]
+        }
+    },
+    {
+        "name": "get_assignments",
+        "description": ("Active education task assignments od učitelů. status: "
+                        "active / completed / overdue / all. Použij pro připomenutí "
+                        "blížících se deadlinů."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "status": {"type": "string", "enum": ["active","completed","overdue","all"], "default": "active"}
+            },
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "recommend_scenario",
+        "description": ("Doporuč komunikační scénář podle klíčových slov situace. "
+                        "Klíčová slova: 'alzheimer agitace', 'samota deprese', "
+                        "'odmítá léky'. Vrátí top scenario s options."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "situation_keywords": {"type": "string", "maxLength": 200}
+            },
+            "required": ["senior_id", "situation_keywords"]
         }
     },
     # ── PHILOSOPHY TOOL ─────────────────────────────────────────
@@ -4641,6 +4779,358 @@ def _tool_caregiver_whisper(senior_id, text, priority='normal'):
         return {"error": str(e)[:200]}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# EDUCATION TOOLS — lessons, scenarios, progress, assignments
+# ═══════════════════════════════════════════════════════════════════════
+
+def _tool_get_education_courses(filter_type=None):
+    """Catalog of available education courses.
+
+    Each course has modules → lessons + quizzes.
+    filter_type: 'dysphasia' / 'dysartria' / etc. (matches course key).
+    """
+    if not _EDU_DATA:
+        return {"error": "education_data not available"}
+    try:
+        courses = []
+        for cid, c in _EDU_COURSES.items():
+            if filter_type and filter_type.lower() not in cid.lower():
+                continue
+            modules = c.get('modules', {}) or {}
+            courses.append({
+                'course_id': cid,
+                'title': c.get('title', cid),
+                'description': (c.get('description') or '')[:200],
+                'level': c.get('level', 'beginner'),
+                'modules_count': len(modules),
+                'duration_min': c.get('duration_min'),
+            })
+        return {
+            'count': len(courses),
+            'courses': courses[:30],  # cap to avoid token blowout
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_lesson_progress(senior_id):
+    """Senior's overall education progress: completion %, scores, level.
+
+    Returns: per-course completion + adaptive level + badges + last activity.
+    """
+    if not _EDUCATION:
+        return {"error": "education_helpers not available"}
+    try:
+        progress = _edu_get_progress(str(senior_id)) or {}
+        profile = _edu_get_profile(str(senior_id)) or {}
+
+        # Aggregate
+        total_completed = 0
+        total_lessons = 0
+        avg_scores = []
+        per_course = {}
+        for course_id, data in progress.items():
+            if not isinstance(data, dict):
+                continue
+            completed = len(data.get('completed_modules', []) or [])
+            scores = data.get('quiz_scores', {}) or {}
+            avg = (sum(scores.values()) / len(scores)) if scores else 0
+            per_course[course_id] = {
+                'completed_modules': completed,
+                'avg_quiz_score': round(avg, 1) if avg else None,
+                'last_activity': data.get('last_activity'),
+            }
+            total_completed += completed
+            avg_scores.extend(scores.values())
+
+        return {
+            'level': profile.get('level', 'beginner'),
+            'badges': profile.get('badges', []) or [],
+            'recommended_courses': profile.get('recommended_courses', []) or [],
+            'overall_avg_score': round(sum(avg_scores)/len(avg_scores), 1) if avg_scores else None,
+            'total_modules_completed': total_completed,
+            'courses_active': len(per_course),
+            'per_course': per_course,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_recommended_lessons(senior_id, limit=5):
+    """Personalized lesson recommendations based on senior's adaptive profile.
+
+    Uses: communication_needs from profile + education progress + level.
+    Returns: list of {course_id, module_id, title, reason}.
+    """
+    if not _EDUCATION or not _EDU_DATA:
+        return {"error": "education subsystem incomplete"}
+    try:
+        profile = _edu_get_profile(str(senior_id)) or {}
+        progress = _edu_get_progress(str(senior_id)) or {}
+
+        # Senior's communication needs (from memory profile, if available)
+        senior_needs = []
+        if _MEMORY_HELPERS:
+            try:
+                p = _load_profile(str(senior_id)) or {}
+                needs = p.get('communication_needs', [])
+                if isinstance(needs, str):
+                    needs = [n.strip() for n in needs.split(',') if n.strip()]
+                senior_needs = needs
+            except Exception:
+                pass
+
+        recs = []
+        # 1. Recommended from adaptive profile (existing recommendations)
+        for cid in (profile.get('recommended_courses') or [])[:limit]:
+            c = _EDU_COURSES.get(cid)
+            if c:
+                done_modules = (progress.get(cid) or {}).get('completed_modules', []) or []
+                next_module = None
+                for mid in (c.get('modules', {}) or {}):
+                    if mid not in done_modules:
+                        next_module = mid
+                        break
+                if next_module:
+                    m = c['modules'][next_module]
+                    recs.append({
+                        'course_id': cid,
+                        'module_id': next_module,
+                        'title': m.get('title', next_module),
+                        'level': c.get('level'),
+                        'reason': 'recommended_by_adaptive_profile',
+                    })
+
+        # 2. Match by communication_needs (e.g., alzheimer_middle → caregiver courses)
+        for need in senior_needs:
+            need_lower = need.lower()
+            for cid, c in _EDU_COURSES.items():
+                if any(any(kw in cid.lower() for kw in need_lower.split('_')) for _ in [0]):
+                    if not any(r['course_id'] == cid for r in recs):
+                        # First incomplete module
+                        done = (progress.get(cid) or {}).get('completed_modules', []) or []
+                        for mid, m in (c.get('modules', {}) or {}).items():
+                            if mid not in done:
+                                recs.append({
+                                    'course_id': cid,
+                                    'module_id': mid,
+                                    'title': m.get('title', mid),
+                                    'level': c.get('level'),
+                                    'reason': f'matches_communication_need:{need}',
+                                })
+                                break
+                        break
+            if len(recs) >= int(limit):
+                break
+
+        return {
+            'count': len(recs[:int(limit)]),
+            'recommendations': recs[:int(limit)],
+            'senior_level': profile.get('level', 'beginner'),
+            'senior_needs': senior_needs,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_lesson_content(course_id, module_id):
+    """Full lesson content (article HTML, key points, quiz_id if exists).
+
+    Use to deliver lesson content to senior or insert into chat.
+    """
+    if not _EDU_DATA:
+        return {"error": "education_data not available"}
+    try:
+        c = _EDU_COURSES.get(course_id)
+        if not c:
+            return {"error": f"course '{course_id}' not found"}
+        m = (c.get('modules', {}) or {}).get(module_id)
+        if not m:
+            return {"error": f"module '{module_id}' not found in '{course_id}'"}
+        # Trim verbose content for token economy
+        content = (m.get('content') or '')[:3000]
+        return {
+            'course_id': course_id,
+            'module_id': module_id,
+            'title': m.get('title'),
+            'content': content,
+            'duration_min': m.get('duration_min'),
+            'key_points': m.get('key_points', [])[:10],
+            'quiz_questions_count': len(m.get('quiz', []) or []),
+            'has_scenario': bool(m.get('scenario')),
+            'level': c.get('level'),
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_mark_lesson_complete(senior_id, course_id, module_id, score=None):
+    """Mark a lesson as completed for senior, optionally with quiz score.
+
+    Triggers adaptive evaluation if score provided (updates level/badges).
+    """
+    if not _EDUCATION:
+        return {"error": "education_helpers not available"}
+    try:
+        # Save progress event
+        _edu_save_progress(
+            str(senior_id),
+            course_id=course_id,
+            module_id=module_id,
+            action='complete_lesson',
+            score=float(score) if score is not None else None,
+        )
+        # Trigger adaptive update if score given
+        if score is not None:
+            try:
+                _edu_evaluate(str(senior_id), course_id, module_id, float(score))
+            except Exception:
+                pass
+        return {
+            'completed': True,
+            'course_id': course_id,
+            'module_id': module_id,
+            'score': score,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_assignments(senior_id, status='active'):
+    """Active education task assignments for senior (from teachers).
+
+    status: 'active' / 'completed' / 'overdue' / 'all'
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    valid = {'active', 'completed', 'overdue', 'all'}
+    if status not in valid:
+        return {"error": f"status must be one of {sorted(valid)}"}
+    try:
+        with db_context() as db:
+            if status == 'all':
+                rows = db.execute("""
+                    SELECT id, title, description, task_type, course_id, module_id,
+                           due_date, status, grade, created_at
+                    FROM education_teacher_tasks
+                    WHERE student_id = ?
+                    ORDER BY created_at DESC LIMIT 30
+                """, (str(senior_id),)).fetchall()
+            elif status == 'overdue':
+                now = "NOW()" if is_postgres() else "datetime('now')"
+                rows = db.execute(f"""
+                    SELECT id, title, description, task_type, course_id, module_id,
+                           due_date, status, grade, created_at
+                    FROM education_teacher_tasks
+                    WHERE student_id = ? AND status != 'completed'
+                      AND due_date < {now}
+                    ORDER BY due_date LIMIT 30
+                """, (str(senior_id),)).fetchall()
+            else:
+                rows = db.execute("""
+                    SELECT id, title, description, task_type, course_id, module_id,
+                           due_date, status, grade, created_at
+                    FROM education_teacher_tasks
+                    WHERE student_id = ? AND status = ?
+                    ORDER BY due_date NULLS LAST, created_at DESC LIMIT 30
+                """ if is_postgres() else """
+                    SELECT id, title, description, task_type, course_id, module_id,
+                           due_date, status, grade, created_at
+                    FROM education_teacher_tasks
+                    WHERE student_id = ? AND status = ?
+                    ORDER BY due_date, created_at DESC LIMIT 30
+                """, (str(senior_id), status)).fetchall()
+
+        assignments = []
+        for r in rows:
+            v = _row_to_list(r)
+            assignments.append({
+                'id': v[0],
+                'title': v[1],
+                'description': (v[2] or '')[:300],
+                'task_type': v[3],
+                'course_id': v[4],
+                'module_id': v[5],
+                'due_date': str(v[6]) if v[6] else None,
+                'status': v[7],
+                'grade': v[8],
+                'created_at': str(v[9]) if v[9] else None,
+            })
+        return {
+            'count': len(assignments),
+            'status_filter': status,
+            'assignments': assignments,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_recommend_scenario(senior_id, situation_keywords):
+    """Recommend a communication scenario based on situation keywords.
+
+    situation_keywords: 'alzheimer agitace' / 'samota deprese' / etc.
+    Returns: top matching scenario with options + score guidance.
+    """
+    if not _EDU_DATA:
+        return {"error": "education_data not available"}
+    if not situation_keywords or not situation_keywords.strip():
+        return {"error": "empty situation_keywords"}
+    try:
+        # Normalize keywords for matching
+        if _STT_UNDERSTANDING:
+            try:
+                kw_norm = _stt_normalize(situation_keywords)
+            except Exception:
+                kw_norm = situation_keywords.lower()
+        else:
+            kw_norm = situation_keywords.lower()
+
+        kw_tokens = set(kw_norm.split())
+
+        # Score scenarios by keyword overlap with title + situation
+        scored = []
+        scenarios = _EDU_SCENARIOS if isinstance(_EDU_SCENARIOS, dict) else {}
+        for sid, scenario in scenarios.items():
+            if not isinstance(scenario, dict):
+                continue
+            text_blob = (
+                (scenario.get('title') or '') + ' ' +
+                (scenario.get('situation') or '') + ' ' +
+                (scenario.get('description') or '')
+            ).lower()
+            if _STT_UNDERSTANDING:
+                try:
+                    text_blob = _stt_normalize(text_blob)
+                except Exception:
+                    pass
+            text_tokens = set(text_blob.split())
+            overlap = len(kw_tokens & text_tokens)
+            if overlap > 0:
+                scored.append((overlap, sid, scenario))
+
+        scored.sort(reverse=True, key=lambda x: x[0])
+        if not scored:
+            return {"info": "No matching scenarios", "keywords": situation_keywords}
+
+        top = scored[0]
+        scenario = top[2]
+        return {
+            'scenario_id': top[1],
+            'title': scenario.get('title'),
+            'situation': (scenario.get('situation') or '')[:500],
+            'options_count': len(scenario.get('options', []) or []),
+            'options_preview': [
+                {'text': (o.get('text') or '')[:120],
+                 'score': o.get('score')}
+                for o in (scenario.get('options', []) or [])[:4]
+            ],
+            'match_score': top[0],
+            'total_candidates': len(scored),
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 # Tool dispatcher
 TOOL_HANDLERS = {
     'list_seniors': lambda args: _tool_list_seniors(),
@@ -4785,6 +5275,19 @@ TOOL_HANDLERS = {
     'get_relationship': lambda args: _tool_get_relationship(args['senior_id']),
     'caregiver_whisper': lambda args: _tool_caregiver_whisper(
         args['senior_id'], args['text'], args.get('priority', 'normal')),
+    # Education
+    'get_education_courses': lambda args: _tool_get_education_courses(args.get('filter_type')),
+    'get_lesson_progress': lambda args: _tool_get_lesson_progress(args['senior_id']),
+    'get_recommended_lessons': lambda args: _tool_get_recommended_lessons(
+        args['senior_id'], args.get('limit', 5)),
+    'get_lesson_content': lambda args: _tool_get_lesson_content(
+        args['course_id'], args['module_id']),
+    'mark_lesson_complete': lambda args: _tool_mark_lesson_complete(
+        args['senior_id'], args['course_id'], args['module_id'], args.get('score')),
+    'get_assignments': lambda args: _tool_get_assignments(
+        args['senior_id'], args.get('status', 'active')),
+    'recommend_scenario': lambda args: _tool_recommend_scenario(
+        args['senior_id'], args['situation_keywords']),
 }
 
 
@@ -4885,7 +5388,8 @@ WRITE_TOOLS = {'send_chat_message', 'send_push', 'notify_family', 'initiate_call
                'add_calendar_reminder', 'flag_email_to_family',
                'send_email_to_family',
                'add_care_plan_goal', 'add_care_plan_risk',
-               'send_caregiver_notification', 'caregiver_whisper'}
+               'send_caregiver_notification', 'caregiver_whisper',
+               'mark_lesson_complete'}
 
 
 # Per-senior event-trigger cooldown (anti-thrashing). Independent of
