@@ -1901,7 +1901,7 @@ def admin_claude_agent_telemetry():
                     'seniors_evaluated': r[6],
                     'actions_taken': r[7],
                     'duration_seconds': float(r[8]) if r[8] is not None else 0,
-                    'summary': (r[9] or '')[:300],
+                    'summary': (r[9] or '')[:5000],
                     'error': r[10],
                 })
         spent_today = _today_cost_usd()
