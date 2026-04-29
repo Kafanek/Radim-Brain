@@ -180,6 +180,22 @@ try:
 except ImportError:
     _WHATSAPP_AVAILABLE = False
 
+# ─── Home Assistant (smart home / IoT actions) ──────────────────────
+try:
+    from home_assistant import get_ha_client as _get_ha_client
+    _HA_AVAILABLE = True
+except ImportError:
+    _HA_AVAILABLE = False
+
+try:
+    from circadian_engine import (
+        check_proactive_triggers as _ha_proactive_triggers,
+        detect_behavioral_changes as _ha_behavioral_changes,
+    )
+    _HA_TRIGGERS = True
+except ImportError:
+    _HA_TRIGGERS = False
+
 # ─── Config ────────────────────────────────────────────────────────────
 
 CLAUDE_MODEL = os.getenv('CLAUDE_AGENT_MODEL', 'claude-sonnet-4-5-20250929')
@@ -287,6 +303,40 @@ Systém má vlastní "srdeční tep" — synthetické vitály celé situace:
 3. Pokud parasympathetic → HARMONY (přirozený)
 4. `presence` blízko 1.0 = senior plně zaujatý → můžeš mluvit déle
 5. `warmth` (trust+safety)/2 nízká → zpomal, buduj důvěru
+
+# 🏠 SMART HOME (Home Assistant)
+Senior má v domě senzory (motion, door, gas, smoke, water_leak, temperature)
++ aktoři (lights, switches, climate, locks, alarm). Claude tomu rozumí
+přes Home Assistant.
+
+**Začni `ha_status`** — pokud HA není připojen, žádný HA tool nezavolej.
+
+**Pozorování (read):**
+- `ha_get_sensors` → grouped: motion/door/temp/humidity/battery/...
+- `ha_home_status` → aggregate (kolik světel, dveří, locks, low-battery)
+- `ha_get_device_state(entity_id)` → konkrétní zařízení
+- `ha_get_devices_by_room` → seznam po místnostech
+- `ha_circadian_triggers(senior)` → pre-built scénáře (noční pohyb, ...)
+- `ha_behavioral_changes(senior)` → změny vs. baseline
+
+**Akce (write):** `ha_execute_action(action, entity_id, params)`
+- **SAFE** (běžné použití): light_on/off/brightness, switch_on/off,
+  cover_open/close, climate_set/off, media_pause, get_*
+- **CRISIS-only** (vyžaduje crisis_override=True + reason):
+  - `unlock` — pro EMS access při vážné krizi
+  - `alarm_disarm` — aby rodina mohla vejít
+- **FORBIDDEN** (Claude NIKDY): `lock` (mohl bys uzamknout seniora),
+  `alarm_arm` (false alarms = stres)
+
+**Příklady kdy je HA užitečné:**
+- Noční pád (motion v 3:00 v koupelně + žádný response na chat)
+  → ha_execute_action('light_on', 'light.koupelna') + initiate_call
+- Senior usnul na pohovce ve dne
+  → ha_get_sensors detekuje motion=0 + bright světlo, navrhni "půjdeme do postele?"
+- Plyn detector triggers
+  → ha_get_sensors zachytí gas alert, NUTNÉ → notify_family('high') + call
+- Studený pokoj při ALERT brain mode
+  → ha_execute_action('climate_set', 'climate.loznice', {temperature: 22})
 
 # 💬 KOMUNIKAČNÍ PROFIL (modul Komunikace)
 Každý senior má **specifické komunikační potřeby**. Aplikace má 29 strategií.
@@ -888,6 +938,89 @@ TOOLS = [
                 "text": {"type": "string", "maxLength": 300}
             },
             "required": ["senior_id", "text"]
+        }
+    },
+    # ── HOME ASSISTANT TOOLS ────────────────────────────────────
+    {
+        "name": "ha_status",
+        "description": ("Je Home Assistant připojen? Vždy začni tímhle, "
+                        "jinak ostatní HA tooly selžou. Vrátí connected=True/False."),
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "ha_get_sensors",
+        "description": ("Všechny HA senzory grouped: temperature, humidity, "
+                        "motion, door, light_level, air_quality, battery, "
+                        "low_battery. Použij pro situational awareness — "
+                        "vidíš pohyb ve 3 ráno? Otevřené dveře? Studený pokoj?"),
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "ha_home_status",
+        "description": ("Aggregate status domu: kolik světel svítí, otevřených "
+                        "dveří, zámky, indoor temperature, low-battery zařízení. "
+                        "One-shot view PŘED rozhodnutím (jdi spát? krize?)."),
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "ha_get_device_state",
+        "description": ("Stav konkrétního HA zařízení podle entity_id "
+                        "(např. 'light.kuchyne', 'binary_sensor.dvere_vchod', "
+                        "'climate.loznice')."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"entity_id": {"type": "string", "description": "domain.name format"}},
+            "required": ["entity_id"]
+        }
+    },
+    {
+        "name": "ha_get_devices_by_room",
+        "description": ("Všechna HA zařízení po místnostech (obyvak, kuchyne, "
+                        "loznice, ...). Užitečné pro 'zhasni v obyváku'."),
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "ha_execute_action",
+        "description": ("Vykonej HA akci. SAFE: light_on/off/brightness, "
+                        "switch_on/off, cover_open/close, climate_set/off, "
+                        "media_pause, get_temperature/humidity/status. "
+                        "CRISIS-only (vyžaduje crisis_override=true + reason): "
+                        "unlock, alarm_disarm. FORBIDDEN: lock, alarm_arm."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string"},
+                "entity_id": {"type": "string"},
+                "params": {"type": "object",
+                           "description": "např. {brightness: 80, temperature: 22}"},
+                "crisis_override": {"type": "boolean", "default": False},
+                "reason": {"type": "string", "description": "Vyžadováno pro crisis akce"}
+            },
+            "required": ["action"]
+        }
+    },
+    {
+        "name": "ha_circadian_triggers",
+        "description": ("Pre-built proaktivní scénáře z HA + cirkadiánního profilu: "
+                        "noční pohyb, vynechané vstávání, otevřené dveře v "
+                        "neobvyklou dobu, studený pokoj. Vrátí list s navrženou "
+                        "zprávou + tts_mode + severity. Claude může použít jako "
+                        "template nebo ignorovat."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "ha_behavioral_changes",
+        "description": ("Významné změny chování seniora vs. baseline: "
+                        "shift času vstávání (>1h), pokles aktivity (>30%), "
+                        "disrupce rutiny. Vrátí changes + stability."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
         }
     },
     # ── PHILOSOPHY TOOL ─────────────────────────────────────────
@@ -2153,6 +2286,229 @@ def _tool_send_sms_to_senior(senior_id, text):
         return {"error": str(e)[:200]}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# HOME ASSISTANT TOOLS — smart home (lights, doors, sensors, scenes)
+# ═══════════════════════════════════════════════════════════════════════
+
+# Whitelist of HA actions Claude can execute. Action names map to
+# home_assistant.execute_agent_action() dispatcher. Anything not on
+# the list is rejected.
+_HA_SAFE_ACTIONS = {
+    'light_on', 'light_off', 'light_brightness',
+    'switch_on', 'switch_off',
+    'cover_open', 'cover_close',
+    'climate_set', 'climate_off',
+    'media_pause',  # safe to interrupt audio
+    'get_temperature', 'get_humidity', 'get_status',
+}
+
+# DANGEROUS actions Claude can ONLY call in CRISIS context, with explicit reason:
+_HA_CRISIS_ACTIONS = {
+    'unlock',     # senior locked out, EMS access in CRISIS
+    'alarm_disarm',  # let family/EMS in
+}
+
+# NEVER allowed for autonomous agent:
+_HA_FORBIDDEN_ACTIONS = {
+    'lock',         # don't lock senior in
+    'alarm_arm',    # don't trigger alarm autonomously
+}
+
+
+def _tool_ha_status():
+    """Check if Home Assistant is connected + reachable.
+    Always start here — if not connected, no point calling other HA tools.
+    """
+    if not _HA_AVAILABLE:
+        return {"error": "Home Assistant module not available"}
+    try:
+        client = _get_ha_client()
+        if not getattr(client, 'connected', False):
+            return {"connected": False,
+                    "_hint": "HA client exists but not connected — check HA_URL + HA_TOKEN env vars"}
+        return {
+            "connected": True,
+            "url_configured": bool(getattr(client, 'url', None)),
+            "client_type": type(client).__name__,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_ha_get_sensors():
+    """Read all HA sensor states grouped by category.
+
+    Returns:
+    - temperature: list of {name, value, unit, entity_id}
+    - humidity, motion, door, light_level, air_quality, battery
+    - low_battery: list of devices needing battery replacement
+
+    Use this for SITUATIONAL AWARENESS — do you see motion at 3am?
+    Door open while senior should be sleeping? Cold room?
+    """
+    if not _HA_AVAILABLE:
+        return {"error": "Home Assistant not available"}
+    try:
+        client = _get_ha_client()
+        if not getattr(client, 'connected', False):
+            return {"error": "HA not connected"}
+        summary = client.get_sensors_summary()
+        # Limit list sizes to keep token cost down
+        for key in list(summary.keys()):
+            if isinstance(summary[key], list) and len(summary[key]) > 15:
+                summary[key] = summary[key][:15] + [{'_truncated': len(summary[key]) - 15}]
+        return summary
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_ha_home_status():
+    """Aggregate home status: lights on/off counts, doors open, locks,
+    indoor temperature, low-battery devices. One-shot situational view.
+
+    Use this BEFORE deciding to send a senior to bed (lights still on?)
+    or before crisis (doors locked? alarm armed?).
+    """
+    if not _HA_AVAILABLE:
+        return {"error": "Home Assistant not available"}
+    try:
+        client = _get_ha_client()
+        if not getattr(client, 'connected', False):
+            return {"error": "HA not connected"}
+        result = client.execute_agent_action('get_status')
+        return result.get('data', result) if isinstance(result, dict) else result
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_ha_get_device_state(entity_id):
+    """State of a specific HA device by entity_id (e.g. 'light.kitchen',
+    'binary_sensor.front_door', 'climate.bedroom')."""
+    if not _HA_AVAILABLE:
+        return {"error": "Home Assistant not available"}
+    if not entity_id or '.' not in entity_id:
+        return {"error": "invalid entity_id (must be like 'domain.name')"}
+    try:
+        client = _get_ha_client()
+        if not getattr(client, 'connected', False):
+            return {"error": "HA not connected"}
+        state = client.get_state(entity_id)
+        if not state:
+            return {"error": f"entity {entity_id} not found"}
+        return state
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_ha_get_devices_by_room():
+    """All HA devices grouped by room. Useful for 'turn off all lights
+    in living room' type decisions."""
+    if not _HA_AVAILABLE:
+        return {"error": "Home Assistant not available"}
+    try:
+        client = _get_ha_client()
+        if not getattr(client, 'connected', False):
+            return {"error": "HA not connected"}
+        result = client.get_devices_by_room()
+        # Trim per-room device lists
+        for room, info in result.items():
+            if isinstance(info, dict) and isinstance(info.get('devices'), list):
+                if len(info['devices']) > 10:
+                    info['devices'] = info['devices'][:10]
+                    info['_truncated'] = True
+        return result
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_ha_execute_action(action, entity_id=None, params=None,
+                            crisis_override=False, reason=None):
+    """Execute a Home Assistant action.
+
+    SAFE actions (always allowed): light_on/off/brightness, switch_on/off,
+    cover_open/close, climate_set/off, media_pause, get_temperature/humidity/status.
+
+    CRISIS actions (require crisis_override=True + reason): unlock, alarm_disarm.
+
+    FORBIDDEN (never allowed): lock, alarm_arm.
+
+    params: dict like {brightness: 80, color_temp: 3000, temperature: 22}
+    """
+    if not _HA_AVAILABLE:
+        return {"error": "Home Assistant not available"}
+    if not action:
+        return {"error": "action required"}
+
+    if action in _HA_FORBIDDEN_ACTIONS:
+        return {"error": f"action '{action}' is forbidden for autonomous agent",
+                "_hint": "lock/alarm_arm need human action to avoid lock-out"}
+
+    if action in _HA_CRISIS_ACTIONS:
+        if not crisis_override or not reason:
+            return {"error": f"action '{action}' requires crisis_override=true AND reason",
+                    "_hint": "set crisis_override=true and explain why (e.g. 'EMS access for fall')"}
+
+    if action not in _HA_SAFE_ACTIONS and action not in _HA_CRISIS_ACTIONS:
+        return {"error": f"unknown action '{action}'",
+                "_hint": f"valid actions: {sorted(_HA_SAFE_ACTIONS | _HA_CRISIS_ACTIONS)}"}
+
+    try:
+        client = _get_ha_client()
+        if not getattr(client, 'connected', False):
+            return {"error": "HA not connected"}
+        full_params = dict(params or {})
+        if entity_id:
+            full_params['entity_id'] = entity_id
+        result = client.execute_agent_action(action, full_params)
+        # Audit log on dangerous actions
+        if action in _HA_CRISIS_ACTIONS:
+            logger.warning(
+                f"[claude_agent] HA CRISIS action: {action} on {entity_id} — reason={reason}"
+            )
+        return result
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_ha_circadian_triggers(senior_id):
+    """Check HA + circadian profile for proactive scenarios:
+    - Night motion (23:00-05:00) → restlessness check
+    - Oversleep (no morning motion) → wellness check
+    - Door open at unusual time
+    - Cold room at night
+
+    Returns list of triggers with suggested message + tts_mode + severity.
+    These are pre-built; Claude can use them as templates or ignore.
+    """
+    if not _HA_TRIGGERS:
+        return {"error": "circadian_engine not available"}
+    try:
+        triggers = _ha_proactive_triggers(str(senior_id))
+        return {
+            'count': len(triggers) if triggers else 0,
+            'triggers': triggers or [],
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_ha_behavioral_changes(senior_id):
+    """Detect significant behavioral changes vs. baseline:
+    - Wake time shift (>1h different from usual)
+    - Activity decline (>30% drop in motion events)
+    - Routine disruption
+
+    Returns: {changes: [...], stability: 'stable|disrupted', change_count: N}
+    """
+    if not _HA_TRIGGERS:
+        return {"error": "circadian_engine not available"}
+    try:
+        result = _ha_behavioral_changes(str(senior_id))
+        return result
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 # Tool dispatcher
 TOOL_HANDLERS = {
     'list_seniors': lambda args: _tool_list_seniors(),
@@ -2221,6 +2577,17 @@ TOOL_HANDLERS = {
     'get_senior_communication_profile': lambda args: _tool_get_senior_communication_profile(args['senior_id']),
     'send_whatsapp': lambda args: _tool_send_whatsapp(args['senior_id'], args['text']),
     'send_sms_to_senior': lambda args: _tool_send_sms_to_senior(args['senior_id'], args['text']),
+    # Home Assistant
+    'ha_status': lambda args: _tool_ha_status(),
+    'ha_get_sensors': lambda args: _tool_ha_get_sensors(),
+    'ha_home_status': lambda args: _tool_ha_home_status(),
+    'ha_get_device_state': lambda args: _tool_ha_get_device_state(args['entity_id']),
+    'ha_get_devices_by_room': lambda args: _tool_ha_get_devices_by_room(),
+    'ha_execute_action': lambda args: _tool_ha_execute_action(
+        args['action'], args.get('entity_id'), args.get('params'),
+        args.get('crisis_override', False), args.get('reason')),
+    'ha_circadian_triggers': lambda args: _tool_ha_circadian_triggers(args['senior_id']),
+    'ha_behavioral_changes': lambda args: _tool_ha_behavioral_changes(args['senior_id']),
 }
 
 
@@ -2314,7 +2681,8 @@ WRITE_TOOLS = {'send_chat_message', 'send_push', 'notify_family', 'initiate_call
                'update_learning', 'update_profile',
                'record_voice_feedback', 'generate_voice_audio',
                'emit_agent_message',
-               'send_whatsapp', 'send_sms_to_senior'}
+               'send_whatsapp', 'send_sms_to_senior',
+               'ha_execute_action'}
 
 
 def run_claude_agent(app=None, trigger='cron', force=False):
