@@ -3657,6 +3657,9 @@ def _tool_detect_topic_mood(text):
             entertainment, technology, emotions, general.
     Moods: happy, sad, anxious, neutral.
 
+    Wrapper auto-strips diacritics (keywords are diacritic-free in
+    communication_needs but real Czech text has háčky/čárky).
+
     Use this on incoming senior message to route response strategy.
     """
     if not _COMMUNICATION:
@@ -3664,12 +3667,32 @@ def _tool_detect_topic_mood(text):
     if not text or not text.strip():
         return {"error": "empty text"}
     try:
-        topic = _detect_topic(text)
-        mood = _detect_mood(text)
+        # Normalize for matching — strip diacritics so 'bolí' matches 'bol'
+        text_normalized = text
+        if _STT_UNDERSTANDING:
+            try:
+                text_normalized = _stt_strip_diacritics(text)
+            except Exception:
+                pass
+
+        topic = _detect_topic(text_normalized)
+        mood = _detect_mood(text_normalized)
+
+        # Fallback: if both came back default, try the original text
+        # (in case diacritic-stripping missed something)
+        if topic == 'general' and mood == 'neutral' and text != text_normalized:
+            t2 = _detect_topic(text)
+            m2 = _detect_mood(text)
+            if t2 != 'general':
+                topic = t2
+            if m2 != 'neutral':
+                mood = m2
+
         return {
             'topic': topic,
             'mood': mood,
             'text_preview': text[:100],
+            '_normalized': text_normalized != text,
         }
     except Exception as e:
         return {"error": str(e)[:200]}

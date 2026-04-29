@@ -38,27 +38,29 @@ if strat.get('instructions'):
 else:
     print(f'  ✗ FAIL: {strat}')
 
-# Layered (multiple needs)
-print('\n━━━ 3. layered strategy alzheimer_middle + hearing_loss ━━━')
-strat = _tool_get_communication_strategy('alzheimer_middle,hearing_loss')
+# Layered (multiple needs) — use ACTUAL keys: hearing_impaired (not hearing_loss)
+print('\n━━━ 3. layered strategy alzheimer_middle + hearing_impaired ━━━')
+strat = _tool_get_communication_strategy('alzheimer_middle,hearing_impaired')
 if strat.get('instructions'):
-    has_alz = 'Alzheimer' in strat['instructions']
-    has_hear = 'sluch' in strat['instructions'].lower() or 'hearing' in strat['instructions'].lower()
+    text_lower = strat['instructions'].lower()
+    has_alz = 'alzheimer' in text_lower
+    has_hear = 'slu' in text_lower or 'sluch' in text_lower or 'hluč' in text_lower
     print(f'  ✓ Combined ({strat["length"]} chars) — alzheimer:{"✓" if has_alz else "✗"} hearing:{"✓" if has_hear else "✗"}')
 print()
 
-# 4. Topic + mood detection
-print('━━━ 4. detect_topic_mood ━━━')
+# 4. Topic + mood detection (with + without diacritics)
+print('━━━ 4. detect_topic_mood (diacritics-aware) ━━━')
 samples = [
-    'Jsem smutny a osamely, chybi mi manzel',
-    'Nemuzu spat, mam strach',
-    'Dnes jsem mela krasny den s vnoucaty',
-    'Bolí mě záda, musím k lékaři',
+    'Jsem smutný a osamělý, chybí mi manžel',          # diacritic
+    'Jsem smutny a osamely, chybi mi manzel',          # no diacritic
+    'Nemůžu spát, mám strach',                          # diacritic
+    'Dnes jsem měla krásný den s vnoučaty',             # diacritic happy
+    'Bolí mě záda, musím k lékaři',                     # diacritic health
+    'Boli me zada, musim k lekari',                     # no diacritic health
 ]
 for s in samples:
     r = _tool_detect_topic_mood(s)
-    print(f'  "{s[:50]}…"')
-    print(f'    → topic={r.get("topic"):12s} mood={r.get("mood")}')
+    print(f'  "{s[:50]:50s}" → topic={r.get("topic"):12s} mood={r.get("mood"):8s} normalized={r.get("_normalized")}')
 print()
 
 # 5. Senior communication profile
