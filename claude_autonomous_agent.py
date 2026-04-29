@@ -129,6 +129,31 @@ except ImportError:
     _TTS_LEARNING = False
     _DEFAULT_VOICE_PREFS = {}
 
+# ─── Agent bus (shared intelligence with other app agents) ──────────
+try:
+    from agent_bus import (
+        emit as _bus_emit,
+        recent as _bus_recent,
+        context as _bus_context,
+        dedupe as _bus_dedupe,
+    )
+    _AGENT_BUS = True
+except ImportError:
+    _AGENT_BUS = False
+
+# ─── RTCF Beat Engine (Radim's heartbeat) ───────────────────────────
+try:
+    from rtcf_beat import compute_beat_state as _compute_beat
+    _RTCF_BEAT = True
+except ImportError:
+    _RTCF_BEAT = False
+
+try:
+    from rtcf_bridge import enhance_with_rtcf as _enhance_rtcf
+    _RTCF_BRIDGE = True
+except ImportError:
+    _RTCF_BRIDGE = False
+
 # ─── Config ────────────────────────────────────────────────────────────
 
 CLAUDE_MODEL = os.getenv('CLAUDE_AGENT_MODEL', 'claude-sonnet-4-5-20250929')
@@ -178,25 +203,64 @@ Tvoje rozhodování je **kvantifikovatelné** přes Ψ(t) stav každého seniora
 - ρ = 2.016 (Radim balance constant)
 
 # 🎯 ROZHODOVACÍ PROTOKOL (každý senior, kterého kontroluješ detailně)
+**Začni týmově — nejsi sám!**
+0. `get_agent_messages(hours=24)` — co OSTATNÍ agenti za 24h pozorovali. Sleep_agent možná viděl insomnii, predictive_agent dlouhodobý trend. NEOPAKUJ jejich práci.
 1. `get_brain_state` — kde teď je (current Ψ(t))
-2. `get_anticipation_forecast` — KAM míří (předpověď > stav!)
-3. `get_observations(7)` — co jsem už dělal (krátkodobá paměť)
-4. `get_learning_state` — týdenní/měsíční vzorce (long-term paměť)
-5. `get_full_profile` — KDO to je (jméno, příběh, koníčky, preference)
-6. Pokud chceš poslat zprávu/akci:
+2. `get_beat_state` — Radimův rytmus (BPM, HRV, autonomic_mode). Sympathetic = senior je horký, opatrně.
+3. `get_anticipation_forecast` — KAM míří (předpověď > stav!)
+4. `get_observations(7)` — co JÁ jsem už dělal (vlastní paměť)
+5. `get_learning_state` — týdenní/měsíční vzorce
+6. `get_full_profile` — KDO to je (jméno, příběh, koníčky)
+7. **PŘED akcí ověř:** `check_agent_dedup(topic, 15min)` — neraisni alert, který už jiný agent raisnul.
+8. Pokud chceš poslat zprávu/akci:
    - `get_circadian_profile` — neposílej v quiet_hours
-   - `get_voice_memory` — co seniorovi funguje hlasem (rate, pauzy, melody)
-   - `get_speech_adaptation` — jaké tempo/pauzy mu nyní vyhovuje (Ψ(t))
-7. Pokud potřebuješ zprávu řečí (CRISIS hovor, neslyší dobře):
-   - `compose_ssml` (cheap) — ZKONTROLUJ, jak bude znít, než utratíš za audio
-   - `generate_voice_audio` (Azure $$) — vytvoř MP3, max 5×/run
-8. **Personalizuj** zprávu podle profilu (oslovení jménem, odkaz na koníček)
-9. Aplikuj hodnoty (empatie/trpělivost/srozumitelnost) na text
-10. Pošli zprávu (chat/push/voice/call dle situace)
-11. `record_voice_feedback` po předchozí TTS — pokud jsi viděl reakci (positive/no_response/barge_in)
-12. `create_observation` — ulož krátkodobou paměť
-13. Pokud zjistíš novou pravdu o seniorovi → `update_learning`
-14. Pokud závažná změna preference → `update_profile`
+   - `get_voice_memory` — co seniorovi funguje hlasem
+   - `get_speech_adaptation` — tempo/pauzy podle Ψ(t)
+9. Pokud potřebuješ řečí (CRISIS, sluchové potíže):
+   - `compose_ssml` (cheap) → `generate_voice_audio` (Azure $$, max 5×/run)
+10. **Personalizuj** zprávu (jméno, koníček, hodnoty)
+11. Pošli (chat/push/voice/call podle eskalace)
+12. `record_voice_feedback` po reakci seniora
+13. **Sdílej s týmem:** `emit_agent_message('observation'/'context')` — chat brain a další agenti to uvidí
+14. `create_observation` — vlastní krátkodobá paměť
+15. Pokud nová pravda o seniorovi → `update_learning`
+16. Pokud změna preference → `update_profile`
+
+# 🤝 TÝMOVÁ INTELIGENCE (jsi v týmu, ne sólo)
+V systému běží 9 agentů — ty jsi jeden z nich:
+- **agent_loop** (rule-based, 5 min) — C trend, vital anomaly, silence
+- **predictive_agent** — 7-day risk forecasting
+- **sleep_agent** — quality + timing of sleep
+- **social_isolation_agent** — call frequency, engagement
+- **medication_tracker** — compliance
+- **emergency_protocol** — fall/unresponsive/vitals OOB → CRISIS
+- **safety_agent** — chat-time content safety
+- **weather_agent** — environmental impact
+- **claude_agent** (TY) — holistický pohled napříč vším
+
+**Sdílený bus** (`agent_messages` table) — všichni vidí navzájem.
+- `get_agent_messages` PŘED rozhodnutím — co ostatní viděli
+- `check_agent_dedup` PŘED alertem — neopakuj
+- `emit_agent_message` PO rozhodnutí — chat brain a ostatní budou vědět
+
+**Korelace:** Pokud reaguješ na cizí zprávu, použij `correlates_with=msg_id` —
+vytvoříš thread (např. emergency_protocol → ack od claude_agent).
+
+# 💓 RADIMŮV RYTMUS (Beat / RTCF)
+Systém má vlastní "srdeční tep" — synthetické vitály celé situace:
+- **BPM** (50-110): rychlost rytmu (vyšší = napětí)
+- **HRV** (0-1): variabilita (vyšší = klid, nižší = stres)
+- **autonomic_mode**:
+  - `parasympathetic` → klid, zotavení → můžeš být přirozený
+  - `balanced` → rovnováha → standard
+  - `sympathetic` → fight/flight → ZPOMAL, delší pauzy, mode CRISIS
+
+**Když chystáš zprávu/hovor:**
+1. `get_beat_state` → autonomic_mode
+2. Pokud sympathetic → použij CRISIS voice mode (rate-20%, pause 1200ms)
+3. Pokud parasympathetic → HARMONY (přirozený)
+4. `presence` blízko 1.0 = senior plně zaujatý → můžeš mluvit déle
+5. `warmth` (trust+safety)/2 nízká → zpomal, buduj důvěru
 
 # 🎙️ HLASOVÁ PRAVIDLA (TTS)
 - **Mode-matching:** Ψ(t).mode VŽDY určuje TTS mode:
@@ -592,6 +656,108 @@ TOOLS = [
                                "description": "Mode použitý při dané zprávě (audit)"}
             },
             "required": ["senior_id", "event_type"]
+        }
+    },
+    # ── AGENT BUS TOOLS (shared intelligence) ──────────────────
+    {
+        "name": "get_agent_inventory",
+        "description": ("Katalog VŠECH agentů v aplikaci (agent_loop, predictive_agent, "
+                        "sleep_agent, social_isolation, weather, medication, "
+                        "emergency_protocol, safety_agent, ...) + jejich role + "
+                        "dostupný message bus."),
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "get_agent_messages",
+        "description": ("Přečti, co OSTATNÍ agenti napozorovali u tohoto seniora. "
+                        "Sleep_agent možná viděl insomnii, predictive_agent dlouhodobý "
+                        "trend, isolation_agent málo hovorů. Synthesizuj jejich pohled "
+                        "PŘED rozhodnutím — neopakuj jejich práci."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "hours": {"type": "integer", "default": 24, "minimum": 1, "maximum": 168},
+                "severity_min": {"type": "string", "enum": ["info","warning","alert","crisis"], "default": "info"},
+                "kinds": {"type": "array", "items": {"type": "string"},
+                          "description": "Volitelně: ['observation','context','decision']"}
+            },
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "check_agent_dedup",
+        "description": ("PŘED zvýšením alertu zkontroluj, jestli jiný agent už "
+                        "stejný topic neraisl. Brání duplicitním alarmům. "
+                        "Vrátí duplicate=True/False + kdo to byl."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "topic": {"type": "string", "description": "Topic tag (např. 'isolation', 'sleep_drop', 'crisis')"},
+                "within_minutes": {"type": "integer", "default": 15},
+                "severity_min": {"type": "string", "enum": ["info","warning","alert","crisis"], "default": "warning"}
+            },
+            "required": ["senior_id", "topic"]
+        }
+    },
+    {
+        "name": "emit_agent_message",
+        "description": ("Pošli zprávu na sdílený bus — chat brain a ostatní agenti "
+                        "ji uvidí v dalším cyklu. Použij pro:\n"
+                        "- 'context' když máš info, které by chat měl vědět\n"
+                        "- 'observation' formální pozorování pro inbox\n"
+                        "- 'decision' pro audit eskalací\n"
+                        "- 'ack' pro potvrzení jiné agentí zprávy (correlates_with)"),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "kind": {"type": "string",
+                         "enum": ["user_input", "context", "observation", "intent", "decision", "ack"]},
+                "severity": {"type": "string",
+                             "enum": ["info", "warning", "alert", "crisis"]},
+                "topic": {"type": "string", "maxLength": 120},
+                "message": {"type": "string", "maxLength": 1000},
+                "correlates_with": {"type": "integer",
+                                    "description": "msg_id z get_agent_messages, který acknowledguješ/navazuješ"}
+            },
+            "required": ["senior_id", "kind", "severity", "topic", "message"]
+        }
+    },
+    # ── BEAT / RTCF TOOLS (Radimův rytmus) ─────────────────────
+    {
+        "name": "get_beat_state",
+        "description": ("Aktuální RTCF Beat State seniora — synthetický srdeční tep "
+                        "systému. Vrátí bpm (50-110), hrv (0-1), autonomic_mode "
+                        "(parasympathetic/balanced/sympathetic), arousal, stability, "
+                        "warmth, presence. Sympathetic = senior je 'horký' → "
+                        "zpomal, dej delší pauzy. Parasympathetic = klid → "
+                        "můžeš být přirozený."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "compute_custom_beat",
+        "description": ("Spočítej beat state na hypotetických vstupech (vše 0-1). "
+                        "Pro simulace 'co když threat=0.9?' (panika) nebo "
+                        "'co když trust=0.2 po no_response?' (nízké zaujetí)."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "risk": {"type": "number", "minimum": 0, "maximum": 1, "default": 0},
+                "pain": {"type": "number", "minimum": 0, "maximum": 1, "default": 0},
+                "intuition": {"type": "number", "minimum": 0, "maximum": 1, "default": 0},
+                "load": {"type": "number", "minimum": 0, "maximum": 1, "default": 0},
+                "recovery": {"type": "number", "minimum": 0, "maximum": 1, "default": 0},
+                "threat": {"type": "number", "minimum": 0, "maximum": 1, "default": 0},
+                "trust": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.7},
+                "safety": {"type": "number", "minimum": 0, "maximum": 1, "default": 1.0}
+            },
+            "required": []
         }
     },
     # ── PHILOSOPHY TOOL ─────────────────────────────────────────
@@ -1423,6 +1589,266 @@ def _tool_record_voice_feedback(senior_id, event_type, voice_mode=None):
         return {"error": str(e)[:200]}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# AGENT BUS TOOLS — shared intelligence with other app agents
+# ═══════════════════════════════════════════════════════════════════════
+
+# Catalog of registered agents in the application (for Claude awareness)
+_APP_AGENTS = {
+    'agent_loop': {
+        'role': 'rule-based proactive monitor (every 5 min)',
+        'detects': 'C trend, activity drop, vital anomaly, interaction silence',
+        'severities': ['INFO', 'WARNING', 'ALERT', 'CRISIS'],
+    },
+    'predictive_agent': {
+        'role': 'risk forecasting on 7-day window',
+        'detects': 'C trend, activity drop, sleep quality, med compliance, isolation, survey risk',
+        'severities': ['warning', 'alert'],
+    },
+    'sleep_agent': {
+        'role': 'sleep quality analysis',
+        'detects': 'dropped hours, poor quality, timing shifts',
+        'severities': ['alert'],
+    },
+    'social_isolation_agent': {
+        'role': 'isolation detection',
+        'detects': 'call frequency, visitor patterns, engagement drops',
+        'severities': ['warning'],
+    },
+    'weather_agent': {
+        'role': 'environmental impact',
+        'detects': 'cold/heat/weather affecting mood',
+        'severities': ['info'],
+    },
+    'medication_tracker': {
+        'role': 'compliance monitoring',
+        'detects': 'missed doses, timing deviations',
+        'severities': ['alert'],
+    },
+    'emergency_protocol': {
+        'role': 'crisis escalation',
+        'detects': 'fall, unresponsiveness, vitals OOB',
+        'severities': ['crisis'],
+    },
+    'safety_agent': {
+        'role': 'chat-time safety check',
+        'detects': 'concerning content in user messages',
+        'severities': ['warning', 'alert'],
+    },
+    'claude_agent': {
+        'role': 'Claude Sonnet 4.5 autonomous agent (THIS — you)',
+        'detects': 'holistic patterns across brain/memory/math/philosophy',
+        'severities': ['INFO', 'WARNING', 'ALERT', 'CRISIS'],
+    },
+}
+
+
+def _tool_get_agent_inventory():
+    """Catalog of all agents running in the system + their roles.
+    Use this to understand what other agents are watching, so you don't
+    duplicate their work."""
+    return {
+        'total': len(_APP_AGENTS),
+        'agents': _APP_AGENTS,
+        'message_bus': {
+            'available': _AGENT_BUS,
+            'description': 'Shared message bus (agent_messages table) — all agents read/write here',
+            'kinds': ['user_input', 'context', 'observation', 'intent', 'decision', 'ack'],
+            'severities': ['info', 'warning', 'alert', 'crisis'],
+        },
+    }
+
+
+def _tool_get_agent_messages(senior_id, hours=24, severity_min='info', kinds=None):
+    """Read what OTHER agents have observed for this senior recently.
+
+    This is shared intelligence — predictive_agent might have seen sleep
+    issues, sleep_agent might have seen restlessness, social_isolation
+    might have seen no calls. Claude reads them all and synthesizes.
+
+    severity_min: info / warning / alert / crisis (filter)
+    kinds: optional list to filter ['observation', 'context', 'decision', ...]
+    """
+    if not _AGENT_BUS:
+        return {"error": "agent_bus not available"}
+    try:
+        # Convert hours → minutes for bus.recent()
+        minutes_back = int(hours) * 60
+        msgs = _bus_recent(
+            str(senior_id),
+            since=minutes_back,
+            kinds=kinds,
+            severity_min=severity_min,
+            limit=30,
+        )
+        return {
+            'count': len(msgs),
+            'window_hours': hours,
+            'messages': [{
+                'id': m.get('id'),
+                'sender': m.get('sender'),
+                'kind': m.get('kind'),
+                'severity': m.get('severity'),
+                'topic': m.get('topic'),
+                'message': (m.get('payload', {}) or {}).get('message', '')[:300],
+                'created_at': m.get('created_at'),
+            } for m in msgs],
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_check_agent_dedup(senior_id, topic, within_minutes=15, severity_min='warning'):
+    """Before raising an alert, check if ANOTHER agent already raised same
+    topic recently. Prevents duplicate alarms cascading.
+
+    Returns: {duplicate: True/False, recent_emitter: 'sleep_agent', ...}
+    """
+    if not _AGENT_BUS:
+        return {"error": "agent_bus not available"}
+    try:
+        is_dup = _bus_dedupe(
+            str(senior_id),
+            topic=topic,
+            within_minutes=int(within_minutes),
+            any_sender=True,  # check across all agents
+            severity_min=severity_min,
+        )
+        result = {'duplicate': bool(is_dup), 'topic': topic, 'window_min': within_minutes}
+        if is_dup:
+            # Show who already raised it
+            recent = _bus_recent(str(senior_id), since=int(within_minutes),
+                                 topics=[topic], severity_min=severity_min, limit=3)
+            result['recent_emitters'] = [
+                {'sender': m.get('sender'), 'severity': m.get('severity'),
+                 'created_at': m.get('created_at')}
+                for m in recent
+            ]
+        return result
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_emit_agent_message(senior_id, kind, severity, topic, message,
+                             correlates_with=None):
+    """Publish a message to the shared agent bus — visible to all other
+    agents (chat coordinator, anticipation, sleep_agent, ...).
+
+    Use when:
+    - You want chat brain to see your observation in next conversation
+    - You're adding context other agents should know
+    - You're correlating with another agent's earlier message (correlates_with=msg_id)
+
+    kind: user_input / context / observation / intent / decision / ack
+    severity: info / warning / alert / crisis
+    """
+    if not _AGENT_BUS:
+        return {"error": "agent_bus not available"}
+    valid_kinds = {'user_input', 'context', 'observation', 'intent', 'decision', 'ack'}
+    if kind not in valid_kinds:
+        return {"error": f"invalid kind — must be {sorted(valid_kinds)}"}
+    valid_severities = {'info', 'warning', 'alert', 'crisis'}
+    if severity not in valid_severities:
+        return {"error": f"invalid severity — must be {sorted(valid_severities)}"}
+    try:
+        msg_id = _bus_emit(
+            user_id=str(senior_id),
+            sender='claude_agent',
+            kind=kind,
+            severity=severity,
+            topic=topic[:120],
+            payload={'message': message[:1000]},
+            correlates_with=correlates_with,
+        )
+        return {'emitted': True, 'msg_id': msg_id, 'kind': kind, 'severity': severity}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# RTCF BEAT TOOLS — Radim's heartbeat / autonomic state
+# ═══════════════════════════════════════════════════════════════════════
+
+def _tool_get_beat_state(senior_id):
+    """Compute current RTCF Beat State (BPM, HRV, autonomic mode) from
+    senior's latest Ψ(t) state via the brain → beat mapping.
+
+    Returns:
+    - bpm (50-110): synthetic heart rate of system
+    - hrv (0-1): heart rate variability (1=calm, 0=stressed)
+    - autonomic_mode: parasympathetic / balanced / sympathetic
+    - arousal, stability, warmth, presence (0-1 each)
+
+    Use this for TIMING decisions — sympathetic = senior is hot, slow down.
+    """
+    if not _RTCF_BEAT or not _BRAIN_CORE:
+        return {"error": "RTCF beat engine not available"}
+    try:
+        # Pull latest brain state
+        if not _DB:
+            return {"error": "DB not available"}
+        with db_context() as db:
+            row = db.execute("""
+                SELECT c, alpha, mode FROM brain_states
+                WHERE user_id = ? ORDER BY created_at DESC LIMIT 1
+            """, (str(senior_id),)).fetchone()
+        if not row:
+            # No brain state — compute neutral beat
+            beat = _compute_beat()
+            return {**beat, '_source': 'default_neutral', 'senior_id': senior_id}
+
+        vals = _row_to_list(row)
+        c, alpha, mode = float(vals[0] or 0), float(vals[1] or 0.5), str(vals[2] or 'HARMONY')
+
+        # Map brain state → beat inputs (heuristic mapping consistent with rtcf_bridge)
+        risk = min(1.0, c / 30.0)         # C drives risk
+        load = min(1.0, c / 25.0)
+        recovery = max(0.0, 1.0 - c / 30.0)
+        threat = 1.0 if mode == 'CRISIS' else (0.5 if mode == 'ALERT' else 0.0)
+        trust = 0.7  # baseline trust assumption
+        safety = 1.0 - threat
+        intuition = abs(alpha - 0.5)
+        pain = 0.0  # not measured directly
+
+        beat = _compute_beat(
+            risk=risk, pain=pain, intuition=intuition, load=load,
+            recovery=recovery, threat=threat, trust=trust, safety=safety,
+        )
+        return {
+            **beat,
+            '_inputs': {
+                'C': c, 'alpha': alpha, 'mode': mode,
+                'derived_risk': round(risk, 3),
+                'derived_load': round(load, 3),
+                'derived_threat': round(threat, 3),
+            },
+            'senior_id': senior_id,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_compute_custom_beat(risk=0.0, pain=0.0, intuition=0.0, load=0.0,
+                              recovery=0.0, threat=0.0, trust=0.7, safety=1.0):
+    """Compute beat state from explicit inputs — for hypothetical scenarios.
+
+    All inputs are normalized [0, 1]. Use this to simulate:
+    - 'What would beat look like if threat=0.9?' (panic state)
+    - 'What if trust drops to 0.2 after no_response?' (low engagement)
+    """
+    if not _RTCF_BEAT:
+        return {"error": "RTCF beat not available"}
+    try:
+        beat = _compute_beat(
+            risk=float(risk), pain=float(pain), intuition=float(intuition),
+            load=float(load), recovery=float(recovery), threat=float(threat),
+            trust=float(trust), safety=float(safety),
+        )
+        return beat
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 # Tool dispatcher
 TOOL_HANDLERS = {
     'list_seniors': lambda args: _tool_list_seniors(),
@@ -1467,6 +1893,23 @@ TOOL_HANDLERS = {
         args['senior_id'], args['text'], args.get('mode')),
     'record_voice_feedback': lambda args: _tool_record_voice_feedback(
         args['senior_id'], args['event_type'], args.get('voice_mode')),
+    # Agent bus
+    'get_agent_inventory': lambda args: _tool_get_agent_inventory(),
+    'get_agent_messages': lambda args: _tool_get_agent_messages(
+        args['senior_id'], args.get('hours', 24),
+        args.get('severity_min', 'info'), args.get('kinds')),
+    'check_agent_dedup': lambda args: _tool_check_agent_dedup(
+        args['senior_id'], args['topic'],
+        args.get('within_minutes', 15), args.get('severity_min', 'warning')),
+    'emit_agent_message': lambda args: _tool_emit_agent_message(
+        args['senior_id'], args['kind'], args['severity'],
+        args['topic'], args['message'], args.get('correlates_with')),
+    # Beat / RTCF
+    'get_beat_state': lambda args: _tool_get_beat_state(args['senior_id']),
+    'compute_custom_beat': lambda args: _tool_compute_custom_beat(
+        args.get('risk', 0), args.get('pain', 0), args.get('intuition', 0),
+        args.get('load', 0), args.get('recovery', 0), args.get('threat', 0),
+        args.get('trust', 0.7), args.get('safety', 1.0)),
 }
 
 
@@ -1558,7 +2001,8 @@ def _record_run(input_tokens, output_tokens, tool_calls, seniors, actions, durat
 
 WRITE_TOOLS = {'send_chat_message', 'send_push', 'notify_family', 'initiate_call',
                'update_learning', 'update_profile',
-               'record_voice_feedback', 'generate_voice_audio'}
+               'record_voice_feedback', 'generate_voice_audio',
+               'emit_agent_message'}
 
 
 def run_claude_agent(app=None, trigger='cron', force=False):
