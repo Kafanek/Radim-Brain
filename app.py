@@ -1917,6 +1917,180 @@ def admin_claude_agent_telemetry():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/admin/claude-agent/dashboard', methods=['GET', 'OPTIONS'])
+def admin_claude_agent_dashboard():
+    """Single endpoint that returns the FULL dashboard view for the frontend.
+
+    Pattern: OPTIONS = public (CORS bypass for read-only public dashboard),
+    GET = admin secret required for full sensitive data.
+
+    Returns:
+      - status: agent enabled? interval? next run?
+      - budget: spent_today, daily_budget, remaining
+      - latest_run: {id, time, cost, tools, seniors, actions, summary, mode}
+      - recent_runs: last 10
+      - recent_observations: last 30 claude_agent observations across seniors
+      - per_senior: aggregated view per senior (mode, last obs, last action)
+      - tool_inventory: count of registered tools
+    """
+    is_options = request.method == 'OPTIONS'
+    is_admin = _check_admin() if not is_options else False
+    # OPTIONS returns a redacted public view; GET+admin returns full
+    public_only = is_options or not is_admin
+
+    try:
+        from claude_autonomous_agent import (
+            _today_cost_usd, DAILY_BUDGET_USD, TOOLS, CLAUDE_MODEL,
+            MAX_TOOL_CALLS_PER_RUN, SENIOR_ACTION_COOLDOWN_MIN,
+        )
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'agent not available: {e}'}), 503
+
+    result = {
+        'success': True,
+        'timestamp': now_iso(),
+        'status': {
+            'enabled': os.getenv('CLAUDE_AGENT_ENABLED', '0') == '1',
+            'model': CLAUDE_MODEL,
+            'interval_min': int(os.getenv('CLAUDE_AGENT_INTERVAL_MIN', '60')),
+            'cooldown_min': SENIOR_ACTION_COOLDOWN_MIN,
+            'max_tool_calls_per_run': MAX_TOOL_CALLS_PER_RUN,
+        },
+        'tool_inventory': {
+            'total': len(TOOLS),
+            'names': sorted([t['name'] for t in TOOLS]),
+        },
+    }
+
+    # Budget
+    try:
+        spent = _today_cost_usd()
+        result['budget'] = {
+            'spent_today_usd': round(spent, 4),
+            'daily_budget_usd': DAILY_BUDGET_USD,
+            'remaining_usd': round(DAILY_BUDGET_USD - spent, 4),
+            'pct_used': round(spent / DAILY_BUDGET_USD * 100, 1) if DAILY_BUDGET_USD else 0,
+        }
+    except Exception as e:
+        result['budget'] = {'error': str(e)[:100]}
+
+    # Recent runs + observations
+    try:
+        with db_context() as db:
+            rows = db.execute("""
+                SELECT id, run_at, cost_usd, tool_calls, seniors_evaluated,
+                       actions_taken, duration_seconds, summary, error,
+                       input_tokens, output_tokens
+                FROM claude_agent_telemetry
+                ORDER BY run_at DESC LIMIT 10
+            """).fetchall()
+            runs = []
+            for r in rows:
+                run = {
+                    'id': r[0],
+                    'run_at': str(r[1]) if r[1] else None,
+                    'cost_usd': float(r[2]) if r[2] is not None else 0,
+                    'tool_calls': r[3],
+                    'seniors_evaluated': r[4],
+                    'actions_taken': r[5],
+                    'duration_seconds': float(r[6]) if r[6] is not None else 0,
+                    'has_error': bool(r[8]),
+                }
+                # Summary only for admin (full reasoning is sensitive)
+                if not public_only:
+                    run['summary'] = (r[7] or '')[:3000]
+                    run['error'] = r[8]
+                    run['input_tokens'] = r[9]
+                    run['output_tokens'] = r[10]
+                runs.append(run)
+            result['recent_runs'] = runs
+            result['latest_run'] = runs[0] if runs else None
+
+            # Recent observations from claude_agent
+            obs_rows = db.execute("""
+                SELECT id, user_id, severity, message, created_at
+                FROM agent_observations
+                WHERE observation_type = 'claude_agent'
+                ORDER BY created_at DESC LIMIT 30
+            """).fetchall()
+            observations = []
+            for r in obs_rows:
+                obs = {
+                    'id': r[0],
+                    'user_id': str(r[1]),
+                    'severity': r[2],
+                    'created_at': str(r[4]) if r[4] else None,
+                }
+                # Message redacted on public
+                if not public_only:
+                    obs['message'] = (r[3] or '')[:500]
+                else:
+                    obs['message_preview'] = (r[3] or '')[:80] + ('…' if len(r[3] or '') > 80 else '')
+                observations.append(obs)
+            result['recent_observations'] = observations
+
+            # Per-senior aggregation: severity counts + latest brain state
+            per_senior_map = {}
+            for o in observations:
+                uid = o['user_id']
+                if uid not in per_senior_map:
+                    per_senior_map[uid] = {
+                        'user_id': uid,
+                        'observation_count': 0,
+                        'severities': {},
+                        'latest_severity': None,
+                        'latest_at': None,
+                    }
+                ps = per_senior_map[uid]
+                ps['observation_count'] += 1
+                sev = o['severity']
+                ps['severities'][sev] = ps['severities'].get(sev, 0) + 1
+                if not ps['latest_at'] or (o['created_at'] or '') > (ps['latest_at'] or ''):
+                    ps['latest_severity'] = sev
+                    ps['latest_at'] = o['created_at']
+
+            # Enrich with brain state + name
+            for uid, ps in per_senior_map.items():
+                try:
+                    brain = db.execute("""
+                        SELECT c, mode, created_at FROM brain_states
+                        WHERE user_id = ? ORDER BY created_at DESC LIMIT 1
+                    """, (uid,)).fetchone()
+                    if brain:
+                        bv = list(brain.values()) if hasattr(brain, 'values') else list(brain)
+                        ps['brain_C'] = bv[0]
+                        ps['brain_mode'] = bv[1]
+                        ps['brain_at'] = str(bv[2]) if bv[2] else None
+                except Exception:
+                    pass
+                # Name from auth_users
+                try:
+                    name_row = db.execute("""
+                        SELECT COALESCE(name, email) FROM auth_users
+                        WHERE id::text = ? LIMIT 1
+                    """, (uid,)).fetchone() if is_postgres() else db.execute("""
+                        SELECT COALESCE(name, email) FROM auth_users WHERE id = ? LIMIT 1
+                    """, (uid,)).fetchone()
+                    if name_row:
+                        nv = list(name_row.values()) if hasattr(name_row, 'values') else list(name_row)
+                        ps['name'] = nv[0]
+                except Exception:
+                    pass
+
+            result['per_senior'] = sorted(per_senior_map.values(),
+                                          key=lambda x: x.get('latest_at') or '',
+                                          reverse=True)
+    except Exception as e:
+        logger.exception("Claude dashboard query failed")
+        result['data_error'] = str(e)[:200]
+        result['recent_runs'] = []
+        result['recent_observations'] = []
+        result['per_senior'] = []
+
+    result['_view'] = 'public' if public_only else 'admin'
+    return jsonify(result), 200
+
+
 @app.route('/api/admin/agent-bus/<user_id>', methods=['GET', 'OPTIONS'])
 def admin_agent_bus(user_id):
     """Sprint AG.4: inspect the agent message bus for one user.
