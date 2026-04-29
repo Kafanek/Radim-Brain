@@ -23,8 +23,17 @@ print(f'✓ list_seniors → {len(seniors)} entries')
 print(f'  First: {json.dumps(seniors[0], default=str, ensure_ascii=False)[:200]}')
 print()
 
-# Test on first 3 seniors to catch edge cases
-for senior in seniors[:3]:
+# Find seniors with most data — sort by recent activity
+seniors_with_data = sorted(seniors, key=lambda s: s.get('last_active') or '', reverse=True)
+
+# Test on first 3 + senior #268 (Anna, has alerts) if exists
+test_set = seniors_with_data[:3]
+for s in seniors:
+    if s['id'] == '268' and s not in test_set:
+        test_set.append(s)
+        break
+
+for senior in test_set:
     sid = senior['id']
     print(f'━━━ Senior #{sid} ({senior.get("name", "?")}) ━━━')
     for name, fn in [
