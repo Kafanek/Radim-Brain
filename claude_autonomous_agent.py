@@ -57,6 +57,8 @@ SENIOR_ACTION_COOLDOWN_MIN = 15  # min between actions on same senior
 # Pricing (USD per 1M tokens) — Sonnet 4.5
 PRICE_INPUT_PER_M = 3.0
 PRICE_OUTPUT_PER_M = 15.0
+PRICE_CACHE_WRITE_PER_M = 3.75   # 25% premium on writes
+PRICE_CACHE_READ_PER_M = 0.30    # 90% discount on reads
 
 # ─── System prompt ─────────────────────────────────────────────────────
 
@@ -277,56 +279,68 @@ def _tool_get_brain_state(senior_id):
     try:
         with db_context() as db:
             row = db.execute("""
-                SELECT chaos, alpha, valence, arousal, mode, created_at
+                SELECT "C", "E", "R", "S", alpha, mode, coherence, source, created_at
                 FROM brain_states WHERE user_id = ?
                 ORDER BY created_at DESC LIMIT 1
             """, (str(senior_id),)).fetchone()
             if not row:
                 return {"info": "No brain state recorded yet"}
-            keys = ['chaos', 'alpha', 'valence', 'arousal', 'mode', 'created_at']
-            return {k: (str(v) if isinstance(v, datetime) else v) for k, v in zip(keys, row)}
+            keys = ['C', 'E', 'R', 'S', 'alpha', 'mode', 'coherence', 'source', 'created_at']
+            result = {k: (str(v) if isinstance(v, datetime) else v) for k, v in zip(keys, row)}
+            # Add interpretation hint
+            c_val = result.get('C')
+            if isinstance(c_val, (int, float)):
+                if c_val < 12: result['_hint'] = 'HARMONY (C<12)'
+                elif c_val < 27: result['_hint'] = 'ALERT (12≤C<27)'
+                else: result['_hint'] = 'CRISIS (C≥27)'
+            return result
     except Exception as e:
         return {"error": str(e)[:200]}
 
 
 def _tool_get_vitals(senior_id):
+    """Vitals via iot_devices.user_id → iot_sensor_data.device_id join."""
     if not _DB:
         return {"error": "DB not available"}
     try:
         with db_context() as db:
             interval = "NOW() - INTERVAL '24 hours'" if is_postgres() else "datetime('now', '-1 day')"
             rows = db.execute(f"""
-                SELECT sensor_type, value, recorded_at
-                FROM iot_sensor_data
-                WHERE user_id = ? AND recorded_at > {interval}
-                  AND sensor_type IN ('heart_rate', 'temperature', 'motion', 'spo2')
-                ORDER BY recorded_at DESC LIMIT 30
+                SELECT s.sensor_type, s.value, s.unit, s.recorded_at, d.name
+                FROM iot_sensor_data s
+                JOIN iot_devices d ON d.device_id = s.device_id
+                WHERE d.user_id = ? AND s.recorded_at > {interval}
+                  AND s.sensor_type IN ('heart_rate', 'temperature', 'spo2', 'blood_pressure', 'weight')
+                ORDER BY s.recorded_at DESC LIMIT 30
             """, (str(senior_id),)).fetchall()
             if not rows:
                 return {"info": "No vitals in last 24h"}
-            return [{'type': r[0], 'value': r[1],
-                     'at': str(r[2]) if r[2] else None} for r in rows]
+            return [{'type': r[0], 'value': r[1], 'unit': r[2],
+                     'at': str(r[3]) if r[3] else None, 'device': r[4]} for r in rows]
     except Exception as e:
         return {"error": str(e)[:200]}
 
 
 def _tool_get_iot_status(senior_id):
+    """IoT events (door/motion/gas/etc) via iot_devices join."""
     if not _DB:
         return {"error": "DB not available"}
     try:
         with db_context() as db:
             interval = "NOW() - INTERVAL '24 hours'" if is_postgres() else "datetime('now', '-1 day')"
             rows = db.execute(f"""
-                SELECT sensor_type, value, recorded_at
-                FROM iot_sensor_data
-                WHERE user_id = ? AND recorded_at > {interval}
-                  AND sensor_type IN ('door', 'motion', 'gas', 'smoke', 'water_leak')
-                ORDER BY recorded_at DESC LIMIT 50
+                SELECT s.sensor_type, s.value, s.recorded_at, d.name, d.room_id
+                FROM iot_sensor_data s
+                JOIN iot_devices d ON d.device_id = s.device_id
+                WHERE d.user_id = ? AND s.recorded_at > {interval}
+                  AND s.sensor_type IN ('door', 'motion', 'gas', 'smoke', 'water_leak', 'occupancy')
+                ORDER BY s.recorded_at DESC LIMIT 50
             """, (str(senior_id),)).fetchall()
             if not rows:
                 return {"info": "No IoT events in last 24h"}
             return [{'type': r[0], 'value': r[1],
-                     'at': str(r[2]) if r[2] else None} for r in rows]
+                     'at': str(r[2]) if r[2] else None,
+                     'device': r[3], 'room': r[4]} for r in rows]
     except Exception as e:
         return {"error": str(e)[:200]}
 
@@ -566,11 +580,14 @@ def _today_cost_usd():
         return 0.0
 
 
-def _record_run(input_tokens, output_tokens, tool_calls, seniors, actions, duration, summary, error=None):
+def _record_run(input_tokens, output_tokens, tool_calls, seniors, actions, duration,
+                summary, error=None, cache_write=0, cache_read=0):
     if not _DB:
         return
     cost = (input_tokens / 1_000_000 * PRICE_INPUT_PER_M +
-            output_tokens / 1_000_000 * PRICE_OUTPUT_PER_M)
+            output_tokens / 1_000_000 * PRICE_OUTPUT_PER_M +
+            cache_write / 1_000_000 * PRICE_CACHE_WRITE_PER_M +
+            cache_read / 1_000_000 * PRICE_CACHE_READ_PER_M)
     try:
         with db_context(commit=True) as db:
             from database import db_insert
@@ -630,6 +647,8 @@ def run_claude_agent(app=None, trigger='cron', force=False):
 
     total_input = 0
     total_output = 0
+    total_cache_write = 0
+    total_cache_read = 0
     tool_calls_made = 0
     actions_taken = 0
     seniors_seen = set()
@@ -642,16 +661,24 @@ def run_claude_agent(app=None, trigger='cron', force=False):
             ctx.__enter__()
 
         for iteration in range(MAX_TOOL_CALLS_PER_RUN):
+            # System prompt + tools cached for cheaper subsequent iterations
+            # (90% input discount on cache hits, 5min TTL)
             response = client.messages.create(
                 model=CLAUDE_MODEL,
                 max_tokens=MAX_TOKENS_PER_RESPONSE,
-                system=SYSTEM_PROMPT,
+                system=[{
+                    "type": "text",
+                    "text": SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }],
                 tools=TOOLS,
                 messages=messages,
             )
 
             total_input += response.usage.input_tokens
             total_output += response.usage.output_tokens
+            total_cache_write += getattr(response.usage, 'cache_creation_input_tokens', 0) or 0
+            total_cache_read += getattr(response.usage, 'cache_read_input_tokens', 0) or 0
 
             # Collect text + tool uses from response
             assistant_content = []
@@ -708,7 +735,8 @@ def run_claude_agent(app=None, trigger='cron', force=False):
     duration = time.time() - started
     cost = _record_run(total_input, total_output, tool_calls_made,
                        len(seniors_seen), actions_taken, duration,
-                       final_text[:2000], error)
+                       final_text[:2000], error,
+                       cache_write=total_cache_write, cache_read=total_cache_read)
 
     summary = {
         'trigger': trigger,
@@ -719,6 +747,8 @@ def run_claude_agent(app=None, trigger='cron', force=False):
         'actions_taken': actions_taken,
         'input_tokens': total_input,
         'output_tokens': total_output,
+        'cache_write_tokens': total_cache_write,
+        'cache_read_tokens': total_cache_read,
         'cost_usd': round(cost or 0, 4),
         'final_text': final_text[:500],
         'error': error,
