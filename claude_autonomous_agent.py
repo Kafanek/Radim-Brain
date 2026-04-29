@@ -211,6 +211,66 @@ except ImportError:
                      'THINKING': 'thinking', 'SPEAKING': 'speaking'}
 
 # ─── STT (speech-to-text) — Azure Speech + Czech understanding ──────
+# ─── TV + Music (české streamy, YouTube search, ambient) ────────────
+# Music stations sourced from mykolibri-academy-project/js/sections/music-module.js
+# Curated list — keeps in sync with frontend music module.
+_MUSIC_STATIONS = {
+    # České rádia (veřejné MP3 streamy)
+    'czech': [
+        {'id': 'radiozurnal', 'name': 'Radiožurnál', 'category': 'zprávy',
+         'url': 'https://rozhlas.stream/radiozurnal_mp3_128.mp3', 'mood': 'informative'},
+        {'id': 'dvojka', 'name': 'ČRo Dvojka', 'category': 'zábava',
+         'url': 'https://rozhlas.stream/dvojka_mp3_128.mp3', 'mood': 'cheerful'},
+        {'id': 'vltava', 'name': 'ČRo Vltava', 'category': 'kultura/klasika',
+         'url': 'https://rozhlas.stream/vltava_mp3_128.mp3', 'mood': 'calm'},
+        {'id': 'plus', 'name': 'ČRo Plus', 'category': 'zprávy',
+         'url': 'https://rozhlas.stream/plus_mp3_128.mp3', 'mood': 'informative'},
+        {'id': 'blanik', 'name': 'Blaník', 'category': 'české hity',
+         'url': 'https://ice.abradio.cz/blanikcz128.mp3', 'mood': 'nostalgic'},
+        {'id': 'impuls', 'name': 'Impuls', 'category': 'pop',
+         'url': 'https://icecast4.play.cz/impuls128.mp3', 'mood': 'upbeat'},
+        {'id': 'country', 'name': 'Country Radio', 'category': 'country',
+         'url': 'https://icecast4.play.cz/country128.mp3', 'mood': 'cheerful'},
+        {'id': 'kiss', 'name': 'Kiss', 'category': 'pop',
+         'url': 'https://icecast4.play.cz/kiss128.mp3', 'mood': 'upbeat'},
+    ],
+    # Tématická / mezinárodní (ambient)
+    'thematic': [
+        {'id': 'drone', 'name': 'Meditace', 'category': 'ambient',
+         'url': 'https://ice1.somafm.com/dronezone-128-mp3', 'mood': 'meditative'},
+        {'id': 'lush', 'name': 'Relaxace', 'category': 'chill',
+         'url': 'https://ice1.somafm.com/lush-128-mp3', 'mood': 'calm'},
+        {'id': 'deepspace', 'name': 'Deep Space', 'category': 'ambient',
+         'url': 'https://ice1.somafm.com/deepspaceone-128-mp3', 'mood': 'meditative'},
+        {'id': 'groovesalad', 'name': 'Groove Salad', 'category': 'downtempo',
+         'url': 'https://ice1.somafm.com/groovesalad-128-mp3', 'mood': 'calm'},
+        {'id': 'paradise', 'name': 'Radio Paradise', 'category': 'eklektik',
+         'url': 'https://stream.radioparadise.com/mp3-192', 'mood': 'cheerful'},
+        {'id': 'classical', 'name': 'Klasika 24/7', 'category': 'klasika',
+         'url': 'https://classicalking.streamguys1.com/king-fm-aac-128k', 'mood': 'calm'},
+    ],
+    # Relaxation streams
+    'relax': [
+        {'id': 'nature', 'name': 'Ambient', 'category': 'příroda',
+         'url': 'https://ice1.somafm.com/dronezone-128-mp3', 'mood': 'meditative'},
+        {'id': 'rain', 'name': 'Atmosféra', 'category': 'déšť',
+         'url': 'https://ice1.somafm.com/lush-128-mp3', 'mood': 'meditative'},
+        {'id': 'piano', 'name': 'Klasika', 'category': 'klavír',
+         'url': 'https://classicalking.streamguys1.com/king-fm-aac-128k', 'mood': 'calm'},
+        {'id': 'ocean', 'name': 'Deep Space', 'category': 'oceán',
+         'url': 'https://ice1.somafm.com/deepspaceone-128-mp3', 'mood': 'meditative'},
+    ],
+}
+
+# YouTube search via tv_proxy_routes
+try:
+    import urllib.request as _urllib_request
+    import urllib.parse as _urllib_parse
+    _TV_AVAILABLE = True
+except ImportError:
+    _TV_AVAILABLE = False
+
+
 # ─── Education subsystem (lessons, scenarios, progress) ────────────
 try:
     from education_helpers import (
@@ -434,6 +494,35 @@ by byla katastrofa. Ty jsi observer + diagnostician, ne kodér produkce.
 - Cooldown skips (správné chování)
 - "No data yet" pro nové seniory (cold start)
 - Insufficient_data circadian_profile (potřeba 14 dní)
+
+# 📺🎵 TV + HUDBA (radio + ambient + YouTube)
+Aplikace má 8 českých rádií (Radiožurnál, Vltava, Blaník, ...) + 6 ambient
+streamů (klasika, meditace, příroda) + YouTube search.
+
+**Mode-aware doporučení (recommend_music):**
+- CRISIS → meditative (Drone, Klasika, Lush)
+- ALERT → calm (Vltava, Lush, Klasika)
+- HARMONY ráno → informative (Radiožurnál, Plus)
+- HARMONY odpoledne → cheerful (Dvojka, Blaník, Country)
+- HARMONY večer → calm (Vltava, Klasika)
+
+**Voice memory:** Pokud `response_to_melody < 0.3` → vyhni se zpěvavým
+stanicím, drž se ambient/zpráv.
+
+**Workflow:**
+1. `recommend_music(senior)` → top stanice
+2. `play_music_for_senior(senior, station_id)` → bus event → frontend přehraje
+3. Tool respektuje voice session — neruší aktivní konverzaci
+4. `pause_music_for_senior` na konci
+
+**TV/YouTube:**
+- `recommend_tv_content(senior)` → seznam doporučení podle hodiny
+- `youtube_search(query)` → konkrétní hledání (česká pohádka, koncert, ...)
+
+**Důležité:**
+- Hudba/TV je VOLITELNÁ pomoc, ne náhrada za interakci.
+- Spouštěj jen pokud senior projevil zájem nebo je v ALERT bez kontaktu
+  (= ambient zvuk pomáhá s úzkostí, není to spam).
 
 # 🎓 LEKCE + VZDĚLÁVÁNÍ
 Aplikace má **rich edu obsah** — kurzy se zaměřují na komunikační poruchy
@@ -1829,6 +1918,88 @@ TOOLS = [
                 "situation_keywords": {"type": "string", "maxLength": 200}
             },
             "required": ["senior_id", "situation_keywords"]
+        }
+    },
+    # ── TV + MUSIC TOOLS ────────────────────────────────────────
+    {
+        "name": "get_music_stations",
+        "description": ("Katalog českých rádií + ambient/relax streamů. "
+                        "group: czech (8 stanic) / thematic (6 ambient) / "
+                        "relax (4 nature) / None=všechno."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "group": {"type": "string", "enum": ["czech", "thematic", "relax"]}
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "recommend_music",
+        "description": ("Doporuč rádio podle aktuálního Ψ(t) stavu seniora "
+                        "+ hodiny + voice memory. CRISIS→meditative, ALERT→calm, "
+                        "HARMONY+ráno→informative, HARMONY+odpoledne→cheerful, "
+                        "HARMONY+večer→calm. mood_override přepíše logiku."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "mood_override": {"type": "string",
+                    "enum": ["calm", "cheerful", "meditative", "informative", "upbeat", "nostalgic"]},
+                "time_aware": {"type": "boolean", "default": True}
+            },
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "play_music_for_senior",
+        "description": ("Spusť rádio přes agent_messages bus → frontend "
+                        "MusicModule. Respektuje voice session — neruší "
+                        "aktivní konverzaci. station_id z get_music_stations()."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "station_id": {"type": "string"}
+            },
+            "required": ["senior_id", "station_id"]
+        }
+    },
+    {
+        "name": "pause_music_for_senior",
+        "description": ("Zastav přehrávání hudby seniorovi (bus event)."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "youtube_search",
+        "description": ("Vyhledej YouTube videa (přes scraper, no API key). "
+                        "Pro koncerty, pohádky, zprávy, sport. Vrátí list "
+                        "{id, title, thumbnail, duration}."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "maxLength": 200},
+                "limit": {"type": "integer", "default": 6, "minimum": 1, "maximum": 20}
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "recommend_tv_content",
+        "description": ("Doporuč TV/video obsah podle hodiny + Ψ(t). Ráno = "
+                        "zprávy/rádio. Odpoledne = dokumenty/písničky. Večer "
+                        "= klasika/pohádky. CRISIS = jen tichá ambient hudba."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "time_aware": {"type": "boolean", "default": True}
+            },
+            "required": ["senior_id"]
         }
     },
     # ── PHILOSOPHY TOOL ─────────────────────────────────────────
@@ -5147,6 +5318,313 @@ def _tool_recommend_scenario(senior_id, situation_keywords):
         return {"error": str(e)[:200]}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# TV + MUSIC TOOLS — radio stations, ambient, YouTube search
+# ═══════════════════════════════════════════════════════════════════════
+
+def _tool_get_music_stations(group=None):
+    """Catalog of available radio + ambient streams.
+
+    group: 'czech' / 'thematic' / 'relax' / None (all).
+    Returns: list of stations grouped + total counts.
+    """
+    if group and group not in _MUSIC_STATIONS:
+        return {"error": f"group must be one of {list(_MUSIC_STATIONS.keys())}"}
+    try:
+        if group:
+            return {
+                'group': group,
+                'count': len(_MUSIC_STATIONS[group]),
+                'stations': _MUSIC_STATIONS[group],
+            }
+        return {
+            'groups': {g: len(s) for g, s in _MUSIC_STATIONS.items()},
+            'total': sum(len(s) for s in _MUSIC_STATIONS.values()),
+            'all_stations': _MUSIC_STATIONS,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_recommend_music(senior_id, mood_override=None, time_aware=True):
+    """Recommend a station based on senior's current Ψ(t) state, hour
+    of day, voice memory preferences.
+
+    Logic:
+    - CRISIS mode → meditative/calm only (Vltava, Klasika, Drone)
+    - ALERT mode → calm or meditative (Vltava, Lush, Klasika)
+    - HARMONY mode + morning → informative (Radiožurnál)
+    - HARMONY mode + afternoon → cheerful or upbeat (Dvojka, Blaník, Impuls)
+    - HARMONY mode + evening → calm or nostalgic (Vltava, Blaník)
+
+    mood_override: 'calm' / 'cheerful' / 'meditative' / 'informative' / 'upbeat'
+    """
+    try:
+        # Get current brain mode
+        mode = 'HARMONY'
+        if _DB:
+            try:
+                with db_context() as db:
+                    row = db.execute("""
+                        SELECT mode FROM brain_states WHERE user_id = ?
+                        ORDER BY created_at DESC LIMIT 1
+                    """, (str(senior_id),)).fetchone()
+                if row:
+                    vals = _row_to_list(row)
+                    mode = vals[0] or 'HARMONY'
+            except Exception:
+                pass
+
+        # Decide mood from brain mode + hour (unless override)
+        hour = datetime.now().hour
+        if mood_override:
+            target_mood = mood_override.lower()
+        elif mode == 'CRISIS':
+            target_mood = 'meditative'
+        elif mode == 'ALERT':
+            target_mood = 'calm'
+        elif time_aware:
+            if hour < 10:
+                target_mood = 'informative'
+            elif hour < 18:
+                target_mood = 'cheerful'
+            else:
+                target_mood = 'calm'
+        else:
+            target_mood = 'cheerful'
+
+        # Find matching stations across all groups
+        candidates = []
+        for grp, stations in _MUSIC_STATIONS.items():
+            for s in stations:
+                if s['mood'] == target_mood:
+                    candidates.append({**s, '_group': grp})
+
+        if not candidates:
+            # Fallback: just pick first czech station
+            candidates = [{**_MUSIC_STATIONS['czech'][0], '_group': 'czech'}]
+
+        # If voice memory says 'singing_negative' → avoid upbeat
+        if _TTS_LEARNING:
+            try:
+                prefs = _get_voice_prefs(str(senior_id))
+                if prefs.get('response_to_melody', 0.5) < 0.3:
+                    # Senior dislikes melodic stuff — prefer ambient/news
+                    candidates = [c for c in candidates if c.get('mood') in ('calm', 'meditative', 'informative')]
+            except Exception:
+                pass
+
+        # Top recommendation
+        top = candidates[0] if candidates else None
+        return {
+            'top_recommendation': top,
+            'reason': {
+                'brain_mode': mode,
+                'hour': hour,
+                'target_mood': target_mood,
+                'mood_override_applied': bool(mood_override),
+            },
+            'alternatives': candidates[1:5],
+            'total_matches': len(candidates),
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_play_music_for_senior(senior_id, station_id):
+    """Trigger music playback for senior. Emits to agent_messages bus
+    with kind='intent' + topic='play_music' + payload {station_id, url}.
+
+    Frontend MusicModule.startPlayback() listens for this and starts the
+    stream. Respects voice session state (won't interrupt active conversation).
+
+    Returns: which station was selected, URL, group.
+    """
+    if not _AGENT_BUS:
+        return {"error": "agent_bus not available — can't broadcast play intent"}
+
+    # Check voice session state — don't interrupt active conversation
+    if _VOICE_RUNTIME:
+        try:
+            session = _get_voice_session(str(senior_id))
+            state = session.get('state', 'idle')
+            if state != _VOICE_STATES['IDLE']:
+                return {"skipped": f"voice session is {state} — won't interrupt"}
+        except Exception:
+            pass
+
+    # Find station
+    found = None
+    for grp, stations in _MUSIC_STATIONS.items():
+        for s in stations:
+            if s['id'] == station_id:
+                found = {**s, '_group': grp}
+                break
+        if found:
+            break
+    if not found:
+        return {"error": f"station '{station_id}' not found",
+                "_hint": "use get_music_stations() to see valid IDs"}
+
+    try:
+        msg_id = _bus_emit(
+            user_id=str(senior_id),
+            sender='claude_agent.music',
+            kind='intent',
+            severity='info',
+            topic='play_music',
+            payload={
+                'station_id': found['id'],
+                'station_name': found['name'],
+                'url': found['url'],
+                'category': found['category'],
+                'mood': found['mood'],
+                'group': found['_group'],
+            },
+            ttl_minutes=5,  # Short TTL — frontend should pick up quickly
+        )
+        return {
+            'requested': True,
+            'station': found['name'],
+            'station_id': found['id'],
+            'mood': found['mood'],
+            'bus_msg_id': msg_id,
+            '_hint': 'Frontend MusicModule reads bus, starts playback. Audio plays through senior\'s device.',
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_pause_music_for_senior(senior_id):
+    """Stop currently playing music. Emits 'intent' with topic='pause_music'."""
+    if not _AGENT_BUS:
+        return {"error": "agent_bus not available"}
+    try:
+        msg_id = _bus_emit(
+            user_id=str(senior_id),
+            sender='claude_agent.music',
+            kind='intent',
+            severity='info',
+            topic='pause_music',
+            payload={'action': 'pause'},
+            ttl_minutes=2,
+        )
+        return {'requested': True, 'bus_msg_id': msg_id}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_youtube_search(query, limit=6):
+    """Search YouTube videos via tv_proxy_routes scraper (no API key).
+
+    For seniors who like to watch concerts, sports highlights, news clips,
+    Czech folk songs. Returns video ID + title + thumbnail.
+    """
+    if not _TV_AVAILABLE:
+        return {"error": "urllib not available"}
+    if not query or not query.strip():
+        return {"error": "empty query"}
+    try:
+        # Use existing internal endpoint to leverage scraper
+        BASE = os.getenv('SELF_BASE_URL', 'https://radim-brain-2025-be1cd52b04dc.herokuapp.com')
+        url = f'{BASE}/api/tv/youtube/search?q={_urllib_parse.quote(query)}&limit={int(limit)}'
+        try:
+            resp = _urllib_request.urlopen(url, timeout=15)
+            data = json.loads(resp.read().decode())
+            videos = data.get('videos', []) or []
+            return {
+                'query': query,
+                'count': len(videos),
+                'videos': [
+                    {
+                        'id': v.get('id'),
+                        'title': (v.get('title') or '')[:200],
+                        'thumbnail': v.get('thumbnail'),
+                        'duration': v.get('duration'),
+                    }
+                    for v in videos[:int(limit)]
+                ],
+            }
+        except Exception as e:
+            return {"error": f"YouTube search failed: {str(e)[:200]}"}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_recommend_tv_content(senior_id, time_aware=True):
+    """Time + Ψ(t) aware TV/video content recommendations for senior.
+
+    Morning → ČT24 zprávy, ranní pohádky
+    Afternoon → ČT2 dokumenty, koncerty
+    Evening → klidnější obsah, klasika
+    Crisis → nic, nebo jen tichá hudba
+    """
+    try:
+        # Brain mode
+        mode = 'HARMONY'
+        if _DB:
+            try:
+                with db_context() as db:
+                    row = db.execute("""
+                        SELECT mode FROM brain_states WHERE user_id = ?
+                        ORDER BY created_at DESC LIMIT 1
+                    """, (str(senior_id),)).fetchone()
+                if row:
+                    vals = _row_to_list(row)
+                    mode = vals[0] or 'HARMONY'
+            except Exception:
+                pass
+
+        if mode == 'CRISIS':
+            return {
+                'recommendation': None,
+                'reason': 'CRISIS — žádné video doporučení, jen tichá ambient hudba',
+                'fallback': _MUSIC_STATIONS['relax'][0],
+            }
+
+        hour = datetime.now().hour
+        recs = []
+        if time_aware:
+            if 6 <= hour < 10:
+                recs = [
+                    {'category': 'zprávy', 'query': 'ČT24 ranní zprávy česky',
+                     'reason': 'Ráno – aktualní zpravodajství'},
+                    {'category': 'rádio', 'station_id': 'radiozurnal',
+                     'reason': 'Ranní rádio'},
+                ]
+            elif 10 <= hour < 14:
+                recs = [
+                    {'category': 'dokument', 'query': 'česká příroda dokument',
+                     'reason': 'Klidný dopolední dokument'},
+                    {'category': 'koncert', 'query': 'česká filharmonie koncert',
+                     'reason': 'Klasická hudba'},
+                ]
+            elif 14 <= hour < 18:
+                recs = [
+                    {'category': 'zábava', 'query': 'české písničky šedesátá léta',
+                     'reason': 'Odpolední nostalgie'},
+                    {'category': 'rádio', 'station_id': 'blanik',
+                     'reason': 'České hity'},
+                ]
+            else:  # evening
+                recs = [
+                    {'category': 'klasika', 'station_id': 'classical',
+                     'reason': 'Večerní klasická hudba'},
+                    {'category': 'pohádka', 'query': 'česká pohádka klasická',
+                     'reason': 'Klidný večer'},
+                ]
+
+        return {
+            'brain_mode': mode,
+            'hour': hour,
+            'recommendations': recs[:3],
+            '_hint': ('Use youtube_search() for query-type recs, or '
+                      'play_music_for_senior() for station_id recs.'),
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 # Tool dispatcher
 TOOL_HANDLERS = {
     'list_seniors': lambda args: _tool_list_seniors(),
@@ -5304,6 +5782,18 @@ TOOL_HANDLERS = {
         args['senior_id'], args.get('status', 'active')),
     'recommend_scenario': lambda args: _tool_recommend_scenario(
         args['senior_id'], args['situation_keywords']),
+    # TV + Music
+    'get_music_stations': lambda args: _tool_get_music_stations(args.get('group')),
+    'recommend_music': lambda args: _tool_recommend_music(
+        args['senior_id'], args.get('mood_override'),
+        args.get('time_aware', True)),
+    'play_music_for_senior': lambda args: _tool_play_music_for_senior(
+        args['senior_id'], args['station_id']),
+    'pause_music_for_senior': lambda args: _tool_pause_music_for_senior(args['senior_id']),
+    'youtube_search': lambda args: _tool_youtube_search(
+        args['query'], args.get('limit', 6)),
+    'recommend_tv_content': lambda args: _tool_recommend_tv_content(
+        args['senior_id'], args.get('time_aware', True)),
 }
 
 
@@ -5405,7 +5895,8 @@ WRITE_TOOLS = {'send_chat_message', 'send_push', 'notify_family', 'initiate_call
                'send_email_to_family',
                'add_care_plan_goal', 'add_care_plan_risk',
                'send_caregiver_notification', 'caregiver_whisper',
-               'mark_lesson_complete'}
+               'mark_lesson_complete',
+               'play_music_for_senior', 'pause_music_for_senior'}
 
 
 # Per-senior event-trigger cooldown (anti-thrashing). Independent of
