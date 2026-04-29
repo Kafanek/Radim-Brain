@@ -68,12 +68,16 @@ def _evict_oldest_sessions():
 
 
 def _load_session_from_db(session_id):
-    """Load session from DB, return dict or None."""
+    """Load session from DB, return dict or None.
+
+    PostgreSQL folds unquoted identifiers to lowercase — actual column is `c`,
+    not `"C"`. Use lowercase consistently across both backends.
+    """
     try:
         from database import db_context
         with db_context() as db:
             row = db.execute(
-                'SELECT state, "C", kappa, alpha, last_tts_text, conversation, wake_count, created_at '
+                'SELECT state, c, kappa, alpha, last_tts_text, conversation, wake_count, created_at '
                 'FROM voice_sessions WHERE session_id = ?',
                 (session_id,)
             ).fetchone()
@@ -83,7 +87,7 @@ def _load_session_from_db(session_id):
                     conv = json.loads(conv)
                 return {
                     'state': row['state'] or STATES['IDLE'],
-                    'C': float(row['C'] or 5.0),
+                    'C': float(row['c'] or 5.0),
                     'kappa': float(row['kappa'] or 0.8),
                     'alpha': float(row['alpha'] or 0.0),
                     'last_tts_text': row['last_tts_text'] or '',
@@ -107,10 +111,10 @@ def save_session(session_id):
         with db_context(commit=True) as db:
             if is_postgres():
                 db.execute(
-                    'INSERT INTO voice_sessions (session_id, state, "C", kappa, alpha, last_tts_text, conversation, wake_count, updated_at) '
+                    'INSERT INTO voice_sessions (session_id, state, c, kappa, alpha, last_tts_text, conversation, wake_count, updated_at) '
                     'VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) '
                     'ON CONFLICT (session_id) DO UPDATE SET '
-                    'state=EXCLUDED.state, "C"=EXCLUDED."C", kappa=EXCLUDED.kappa, alpha=EXCLUDED.alpha, '
+                    'state=EXCLUDED.state, c=EXCLUDED.c, kappa=EXCLUDED.kappa, alpha=EXCLUDED.alpha, '
                     'last_tts_text=EXCLUDED.last_tts_text, conversation=EXCLUDED.conversation, '
                     'wake_count=EXCLUDED.wake_count, updated_at=CURRENT_TIMESTAMP',
                     (session_id, session['state'], session['C'], session['kappa'],
