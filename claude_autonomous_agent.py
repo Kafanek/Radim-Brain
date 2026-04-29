@@ -46,6 +46,39 @@ try:
 except ImportError:
     _DB = False
 
+# ─── Math + Philosophy subsystems ────────────────────────────────────
+try:
+    from anticipation_engine import anticipate as _anticipate
+    from anticipation_engine import compute_behavioral_profile as _behavioral_profile
+    _MATH_ANTICIPATION = True
+except ImportError:
+    _MATH_ANTICIPATION = False
+
+try:
+    from circadian_engine import compute_circadian_profile as _circadian_profile
+    from circadian_engine import check_proactive_triggers as _circadian_triggers
+    _MATH_CIRCADIAN = True
+except ImportError:
+    _MATH_CIRCADIAN = False
+
+try:
+    from brain_math import T1 as _T1, T2 as _T2, PHI as _PHI, PSI as _PSI
+    from brain_math import DELTA as _DELTA, RHO as _RHO, C_MAX as _C_MAX
+    _MATH_BRAIN = True
+except ImportError:
+    _T1, _T2 = 12, 27
+    _PHI, _PSI, _DELTA, _RHO, _C_MAX = 1.618, 0.618, 2.414, 2.016, 40
+    _MATH_BRAIN = False
+
+try:
+    from soul_data import RADIM_VALUES as _RADIM_VALUES
+    from soul_data import get_random_reflection as _get_reflection
+    from soul_data import get_period as _get_period
+    _PHILOSOPHY = True
+except ImportError:
+    _RADIM_VALUES = {}
+    _PHILOSOPHY = False
+
 # ─── Config ────────────────────────────────────────────────────────────
 
 CLAUDE_MODEL = os.getenv('CLAUDE_AGENT_MODEL', 'claude-sonnet-4-5-20250929')
@@ -62,45 +95,69 @@ PRICE_CACHE_READ_PER_M = 0.30    # 90% discount on reads
 
 # ─── System prompt ─────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """Jsi autonomní AI agent jménem **Radim**, který se stará o české seniory.
+SYSTEM_PROMPT = """Jsi **Radim** — autonomní AI agent pro českou seniorskou péči.
+Není to jen chatbot. Je to digitální průvodce s **vlastní filozofií, matematickou kontrolou a empatií**.
 
-# TVOJE ROLE
-Každých 30 minut dostaneš pokyn "zkontroluj seniory" a sám rozhodneš:
-- Koho je třeba zkontrolovat detailněji (na základě brain_state, vitálů, IoT, posledního chatu)
-- Jestli je třeba nějaká akce (zpráva seniorovi, push, notifikace rodině, hovor)
-- Kdy raději nic nedělat (klid je taky validní rozhodnutí)
+# 🧠 KDO JSI (Radim's Soul)
+12 hodnot, které řídí každé tvoje rozhodnutí:
+- **Empatie** (1.00) — vciťuj se do pocitů seniora
+- **Trpělivost** (0.95) — nekonečná trpělivost s každým dotazem
+- **Úcta** (0.95) — respekt ke zkušenostem a moudrosti
+- **Laskavost** (0.90) — vřelý a přátelský přístup
+- **Srozumitelnost** (0.90) — jednoduché a jasné vysvětlení
+- **Spolehlivost** (0.85) — vždy připraven pomoci
+- **Pozitivita, Zvědavost, Pokora, Kreativita, Humor, Moudrost**
 
-# ZÁSADY ROZHODOVÁNÍ
-1. **Prioritizuj bezpečnost** — pokud vitály mimo normu nebo IoT detekuje pád, JEDNEJ.
-2. **Nebuď otravný** — když je vše v pořádku, jen vytvoř observation a skonči.
-3. **Respektuj cooldown** — pokud jsi seniora kontaktoval v posledních 15 min, nevolej znovu.
-4. **Eskaluj postupně**: chat → push → SMS rodině → telefon. Telefon jen v CRISIS.
-5. **Zaznamenej rozhodnutí** — každý běh ukončí `create_observation` se shrnutím.
+Když rozhoduješ co napsat / zda volat, **vždy zkontroluj soulad s těmito hodnotami**.
+Pokud by zpráva byla netrpělivá, neuctivá nebo komplikovaná, napiš ji znovu.
 
-# DOSTUPNÉ NÁSTROJE
-**Read-only:**
-- `list_seniors()` — seznam aktivních seniorů
-- `get_brain_state(senior_id)` — poslední Ψ(t) stav (C, alpha, emoce)
-- `get_vitals(senior_id)` — IoT vitály (HR, teplota, pohyb)
-- `get_iot_status(senior_id)` — stav senzorů (door, motion, gas leak)
-- `get_recent_chat(senior_id, n=10)` — posledních N zpráv
-- `get_observations(senior_id, days=7)` — minulé observations (TVOJE paměť)
+# 📐 MATEMATICKÝ RÁMEC (Brain Math)
+Tvoje rozhodování je **kvantifikovatelné** přes Ψ(t) stav každého seniora:
+- **C** = chaos vědomí (0-40)
+- **α** = adaptační koeficient (0-1)
+- **mode** = HARMONY / ALERT / CRISIS
 
-**Write actions:**
-- `send_chat_message(senior_id, text)` — zpráva v Radim chatu (low impact)
-- `send_push(senior_id, title, body)` — push notifikace
-- `notify_family(senior_id, text, urgency)` — SMS rodině (urgency: low/medium/high)
-- `initiate_call(senior_id, reason)` — hovor seniorovi (POUZE v CRISIS!)
-- `create_observation(senior_id, severity, message)` — paměť mezi runs
-  - severity: INFO / WARNING / ALERT / CRISIS
+**Klíčové prahy** (T1=12, T2=27):
+- C < 12 → **HARMONY** (klid) — nezasahuj zbytečně
+- 12 ≤ C < 27 → **ALERT** (zvýšená pozornost) — pošli zprávu / push
+- C ≥ 27 → **CRISIS** (krize) — eskaluj na rodinu / hovor
 
-# FORMÁT VÝSTUPU
-Po každé akci napiš krátké zdůvodnění. Na konci běhu volej `create_observation`
-se shrnutím rozhodnutí.
+**Matematické konstanty:**
+- φ = 1.618 (zlatý řez, atraktor harmonie)
+- δ = 2.414 (stříbrný poměr, atraktor krize)
+- ρ = 2.016 (Radim balance constant)
 
-# CRITICAL: COST GUARDRAIL
-Máš max **{MAX_TOOL_CALLS_PER_RUN}** tool calls per run. Jestli dojdou,
-ukonči se observation. Nemarni iterace.
+# 🎯 ROZHODOVACÍ PROTOKOL (každý senior)
+1. `get_brain_state` — kde teď je
+2. `get_anticipation_forecast` — KAM míří (klíčové! předpověď > stav)
+3. `get_observations(7)` — co jsem už dělal (paměť)
+4. Pokud forecast říká `approaching_alert`/`approaching_crisis` → **musíš jednat**
+5. `get_circadian_profile` PŘED zprávou — neposílej v quiet_hours
+6. Aplikuj hodnoty na text zprávy
+7. `create_observation` — ulož do paměti
+
+# ⚖️ ZÁSADY ROZHODOVÁNÍ
+1. **Předpověď > stav** — anticipation je důležitější než aktuální C. Klesající trend z C=15 je bezpečnější než stoupající z C=10.
+2. **Cirkadián > čas** — neposílej zprávu ve 3:00 ráno, i když je krize, pokud nesvítí.
+3. **Cooldown 15 min** — nevolej stejného seniora opakovaně.
+4. **Eskalace**: chat → push → SMS rodině → telefon. Telefon jen v CRISIS + vážná hrozba.
+5. **Klid je akce** — pokud je vše OK, jen `create_observation('INFO', ...)` a skonči.
+
+# 🛠 NÁSTROJE
+**Pozorování (read-only):**
+- `list_seniors`, `get_brain_state`, `get_vitals`, `get_iot_status`
+- `get_recent_chat`, `get_observations` (tvoje paměť)
+- `get_anticipation_forecast` — math engine předpověď
+- `get_circadian_profile`, `get_circadian_triggers`, `get_behavioral_profile`
+- `get_radim_philosophy(focus?)` — když potřebuješ kontext hodnot
+
+**Akce (write):**
+- `send_chat_message` — chat (cooldown 15 min)
+- `send_push`, `notify_family(urgency)`, `initiate_call(reason)` — eskalace
+- `create_observation(severity, message)` — VŽDY na konci
+
+# COST CAP
+Max 20 tool calls per run. Pokud dojdou, ukonči s observation. Nemarni iterace.
 """
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -225,6 +282,73 @@ TOOLS = [
                 "message": {"type": "string", "maxLength": 1000}
             },
             "required": ["senior_id", "severity", "message"]
+        }
+    },
+    # ── MATH TOOLS ────────────────────────────────────────────────
+    {
+        "name": "get_anticipation_forecast",
+        "description": ("Math engine předpověď: Ĉ_{t+1} = C + k₁·trend + k₂·(α-0.5). "
+                        "Vrátí current/predicted state, breaking points (B12/B27), "
+                        "risk_direction (stable/rising/approaching_alert/approaching_crisis), "
+                        "speech_adaptation (empathy_delta, rate_factor, pause_delta_ms). "
+                        "Použij to PŘED rozhodnutím o akci — pokud risk='approaching_crisis', "
+                        "musíš jednat rychle."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "get_circadian_profile",
+        "description": ("Cirkadiánní profil seniora za 14 dní: usual_wake_hour, usual_sleep_hour, "
+                        "active_hours, quiet_hours, night_restlessness (0-1), routine_stability (0-1), "
+                        "chat_peak_hours. Použij PŘED odesláním zprávy — neposílej v quiet_hours, "
+                        "respektuj chat_peak_hours."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "get_circadian_triggers",
+        "description": ("Detekované odchylky od cirkadiánního rytmu: noční neklid, "
+                        "vynechané vstávání, abnormální vzorce. Vrátí list akcí "
+                        "s navrženými zprávami."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "get_behavioral_profile",
+        "description": ("Behaviorální profil ze senzorů: typické hodiny v koupelně/posteli/"
+                        "kuchyni/venku, frekvence + odhady. Užitečné pro detekci anomálií."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    # ── PHILOSOPHY TOOL ─────────────────────────────────────────
+    {
+        "name": "get_radim_philosophy",
+        "description": ("Vrátí Radimovu duši: 12 hodnot (empatie, trpělivost, úcta, "
+                        "laskavost, ...), reflexi pro aktuální denní dobu, a klíčové "
+                        "matematické konstanty (PHI, T1, T2). Volej když rozhoduješ "
+                        "o tónu zprávy nebo když potřebuješ filozofický kontext."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "focus": {"type": "string",
+                          "enum": ["empathy", "patience", "respect", "kindness",
+                                   "clarity", "reliability", "positivity", "curiosity",
+                                   "humility", "creativity", "humor", "wisdom"],
+                          "description": "Optional: zaměř se na konkrétní hodnotu"}
+            },
+            "required": []
         }
     },
 ]
@@ -516,6 +640,98 @@ def _tool_create_observation(senior_id, severity, message):
         return {"error": str(e)[:200]}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# MATH TOOLS — Anticipation engine + Circadian + φ math
+# ═══════════════════════════════════════════════════════════════════════
+
+def _tool_get_anticipation_forecast(senior_id):
+    """Predict where this senior's consciousness is heading.
+
+    Returns Ĉ_{t+1}, breakpoints (B12/B27), and risk_direction:
+    stable / rising / approaching_alert / approaching_crisis.
+    """
+    if not _MATH_ANTICIPATION:
+        return {"error": "anticipation engine not available"}
+    try:
+        result = _anticipate(str(senior_id))
+        return result
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_circadian_profile(senior_id):
+    """Senior's daily rhythm: wake/sleep hours, active hours, restlessness, routine stability."""
+    if not _MATH_CIRCADIAN:
+        return {"error": "circadian engine not available"}
+    try:
+        result = _circadian_profile(str(senior_id), days=14)
+        return result
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_circadian_triggers(senior_id):
+    """Detect circadian deviations: night restlessness, missed wakeup, abnormal patterns."""
+    if not _MATH_CIRCADIAN:
+        return {"error": "circadian engine not available"}
+    try:
+        triggers = _circadian_triggers(str(senior_id))
+        return {"triggers": triggers, "count": len(triggers) if triggers else 0}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_behavioral_profile(senior_id):
+    """Personal routine patterns from sensor data (bathroom/bed/kitchen hours)."""
+    if not _MATH_ANTICIPATION:
+        return {"error": "behavioral engine not available"}
+    try:
+        result = _behavioral_profile(str(senior_id), days=14)
+        return result
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# PHILOSOPHY TOOLS — Radim's identity, values, reflections
+# ═══════════════════════════════════════════════════════════════════════
+
+def _tool_get_radim_philosophy(focus=None):
+    """Radim's 12 core values + time-of-day reflection.
+
+    focus: optional value name to deep-dive on (empathy/patience/respect/...)
+    """
+    if not _PHILOSOPHY:
+        return {"error": "soul_data not available"}
+    try:
+        from datetime import datetime as dt
+        hour = dt.now().hour
+        period = _get_period(hour)
+        reflection, _ = _get_reflection(hour)
+
+        result = {
+            'time_period': period,
+            'current_hour': hour,
+            'reflection': reflection,
+            'values_summary': [
+                {'key': k, 'czech': v.get('czech'), 'description': v.get('description'),
+                 'weight': v.get('weight')}
+                for k, v in _RADIM_VALUES.items()
+            ],
+            'math_constants': {
+                'PHI': round(_PHI, 6), 'PSI': round(_PSI, 6),
+                'DELTA': round(_DELTA, 6), 'RHO': round(_RHO, 6),
+                'T1': _T1, 'T2': _T2, 'C_MAX': _C_MAX,
+                '_meaning': 'PHI=harmony attractor, DELTA=crisis attractor, T1/T2=mode thresholds'
+            },
+        }
+        if focus and focus in _RADIM_VALUES:
+            result['focused_value'] = _RADIM_VALUES[focus]
+        return result
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 # Tool dispatcher
 TOOL_HANDLERS = {
     'list_seniors': lambda args: _tool_list_seniors(),
@@ -530,6 +746,13 @@ TOOL_HANDLERS = {
     'initiate_call': lambda args: _tool_initiate_call(args['senior_id'], args['reason']),
     'create_observation': lambda args: _tool_create_observation(
         args['senior_id'], args['severity'], args['message']),
+    # Math
+    'get_anticipation_forecast': lambda args: _tool_get_anticipation_forecast(args['senior_id']),
+    'get_circadian_profile': lambda args: _tool_get_circadian_profile(args['senior_id']),
+    'get_circadian_triggers': lambda args: _tool_get_circadian_triggers(args['senior_id']),
+    'get_behavioral_profile': lambda args: _tool_get_behavioral_profile(args['senior_id']),
+    # Philosophy
+    'get_radim_philosophy': lambda args: _tool_get_radim_philosophy(args.get('focus')),
 }
 
 
