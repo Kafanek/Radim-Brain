@@ -79,6 +79,28 @@ except ImportError:
     _RADIM_VALUES = {}
     _PHILOSOPHY = False
 
+# ─── Brain Core (Ψ(t) computation) ──────────────────────────────────
+try:
+    from brain_core import compute_psi_state as _compute_psi
+    from brain_core import compute_unified_speech as _compute_speech
+    from brain_math import compute_empathy as _compute_empathy
+    _BRAIN_CORE = True
+except ImportError:
+    _BRAIN_CORE = False
+
+# ─── Memory helpers (profile + learning) ────────────────────────────
+try:
+    from memory_helpers import (
+        db_load_profile as _load_profile,
+        db_save_profile as _save_profile,
+        db_load_learning as _load_learning,
+        db_save_learning as _save_learning,
+        default_learning as _default_learning,
+    )
+    _MEMORY_HELPERS = True
+except ImportError:
+    _MEMORY_HELPERS = False
+
 # ─── Config ────────────────────────────────────────────────────────────
 
 CLAUDE_MODEL = os.getenv('CLAUDE_AGENT_MODEL', 'claude-sonnet-4-5-20250929')
@@ -127,14 +149,20 @@ Tvoje rozhodování je **kvantifikovatelné** přes Ψ(t) stav každého seniora
 - δ = 2.414 (stříbrný poměr, atraktor krize)
 - ρ = 2.016 (Radim balance constant)
 
-# 🎯 ROZHODOVACÍ PROTOKOL (každý senior)
-1. `get_brain_state` — kde teď je
-2. `get_anticipation_forecast` — KAM míří (klíčové! předpověď > stav)
-3. `get_observations(7)` — co jsem už dělal (paměť)
-4. Pokud forecast říká `approaching_alert`/`approaching_crisis` → **musíš jednat**
-5. `get_circadian_profile` PŘED zprávou — neposílej v quiet_hours
-6. Aplikuj hodnoty na text zprávy
-7. `create_observation` — ulož do paměti
+# 🎯 ROZHODOVACÍ PROTOKOL (každý senior, kterého kontroluješ detailně)
+1. `get_brain_state` — kde teď je (current Ψ(t))
+2. `get_anticipation_forecast` — KAM míří (předpověď > stav!)
+3. `get_observations(7)` — co jsem už dělal (krátkodobá paměť)
+4. `get_learning_state` — týdenní/měsíční vzorce (long-term paměť)
+5. `get_full_profile` — KDO to je (jméno, příběh, koníčky, preference)
+6. Pokud chceš poslat zprávu/akci:
+   - `get_circadian_profile` — neposílej v quiet_hours
+   - `get_speech_adaptation` — jaké tempo/pauzy seniorovi vyhovuje
+7. **Personalizuj** zprávu podle profilu (oslovení jménem, odkaz na koníček)
+8. Aplikuj hodnoty (empatie/trpělivost/srozumitelnost) na text
+9. `create_observation` — ulož krátkodobou paměť
+10. Pokud zjistíš novou pravdu o seniorovi (nálada, zájem, styl) — `update_learning`
+11. Pokud je to závažná změna preference → `update_profile`
 
 # ⚖️ ZÁSADY ROZHODOVÁNÍ
 1. **Předpověď > stav** — anticipation je důležitější než aktuální C. Klesající trend z C=15 je bezpečnější než stoupající z C=10.
@@ -144,17 +172,23 @@ Tvoje rozhodování je **kvantifikovatelné** přes Ψ(t) stav každého seniora
 5. **Klid je akce** — pokud je vše OK, jen `create_observation('INFO', ...)` a skonči.
 
 # 🛠 NÁSTROJE
-**Pozorování (read-only):**
+**🔍 Pozorování (read-only):**
 - `list_seniors`, `get_brain_state`, `get_vitals`, `get_iot_status`
-- `get_recent_chat`, `get_observations` (tvoje paměť)
-- `get_anticipation_forecast` — math engine předpověď
+- `get_recent_chat`, `get_observations` (krátkodobá paměť)
+- `get_full_profile`, `get_learning_state` (kdo to je, dlouhodobé vzorce)
+- `get_anticipation_forecast` (math engine předpověď)
 - `get_circadian_profile`, `get_circadian_triggers`, `get_behavioral_profile`
-- `get_radim_philosophy(focus?)` — když potřebuješ kontext hodnot
+- `get_speech_adaptation` (rate/pitch/pause pro tohoto seniora)
+- `compute_brain_state(C, alpha)` (simulace 'co kdyby?')
+- `compute_empathy(voice, hrv, tempo)` (kvantifikace empatie)
+- `get_radim_philosophy(focus?)` (kontext hodnot)
 
-**Akce (write):**
+**✏️ Akce (write):**
 - `send_chat_message` — chat (cooldown 15 min)
 - `send_push`, `notify_family(urgency)`, `initiate_call(reason)` — eskalace
-- `create_observation(severity, message)` — VŽDY na konci
+- `update_learning(key, value)` — zapiš poznatek do dlouhodobé paměti
+- `update_profile(key, value)` — aktualizuj profil (jen whitelisted klíče)
+- `create_observation(severity, message)` — krátkodobá paměť, VŽDY na konci
 
 # COST CAP
 Max 20 tool calls per run. Pokud dojdou, ukonči s observation. Nemarni iterace.
@@ -330,6 +364,108 @@ TOOLS = [
             "type": "object",
             "properties": {"senior_id": {"type": "string"}},
             "required": ["senior_id"]
+        }
+    },
+    # ── BRAIN TOOLS ─────────────────────────────────────────────
+    {
+        "name": "compute_brain_state",
+        "description": ("Spočítej Ψ(t)=(C,E,R,S) na hypotetických vstupech. "
+                        "Použij když chceš simulovat 'co kdyby C stoupla na 20?' "
+                        "nebo když máš senzorová data a chceš vidět predikovaný stav. "
+                        "Nezapisuje do DB, jen počítá."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string", "description": "Pro koho počítáš (audit)"},
+                "C": {"type": "number", "minimum": 0, "maximum": 40,
+                      "description": "Chaos vědomí (0-40)"},
+                "alpha": {"type": "number", "minimum": 0, "maximum": 1,
+                          "description": "Adaptační koeficient (0-1)"},
+                "voice_tone": {"type": "number", "default": 0.5},
+                "hrv": {"type": "number", "default": 0.5},
+                "speech_tempo": {"type": "number", "default": 0.5},
+            },
+            "required": ["senior_id", "C", "alpha"]
+        }
+    },
+    {
+        "name": "compute_empathy",
+        "description": ("Spočítej empatii E z hlasu/HRV/tempa řeči. "
+                        "Voice/HRV/tempo: 0=klidné, 0.5=neutrální, 1=vyhrocené."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "voice_tone": {"type": "number"},
+                "hrv": {"type": "number"},
+                "speech_tempo": {"type": "number"}
+            },
+            "required": ["voice_tone", "hrv", "speech_tempo"]
+        }
+    },
+    {
+        "name": "get_speech_adaptation",
+        "description": ("Vrátí konfigurace hlasu (rate, pitch, pause_ms) pro tohoto "
+                        "seniora podle aktuálního Ψ(t) stavu. Použij PŘED tím, než "
+                        "rozhodneš o tónu zprávy nebo zda iniciovat hovor."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    # ── MEMORY TOOLS ────────────────────────────────────────────
+    {
+        "name": "get_full_profile",
+        "description": ("Plný profil seniora: jméno, věk, rodina, preference, koníčky, "
+                        "emergency_contacts (maskováno), zdravotní poznámky, životní příběh. "
+                        "Bohatý kontext pro personalizaci zprávy."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "get_learning_state",
+        "description": ("Dlouhodobé learning data: topics, last_mood, interaction_count, "
+                        "C_history (vstup pro anticipation), successful_interactions, "
+                        "crisis_count. Vidíš týdenní/měsíční vzorce."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "update_learning",
+        "description": ("Zapiš poznatek do dlouhodobé paměti. Klíče jako last_mood, "
+                        "topics, communication_style, successful_interactions. "
+                        "C_history a anticipation pole jsou read-only (řídí je engine)."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "key": {"type": "string", "description":
+                        "last_mood/topics/communication_style/preferred_length/successful_interactions/crisis_count"},
+                "value": {"description": "Hodnota — string, number, dict, list"}
+            },
+            "required": ["senior_id", "key", "value"]
+        }
+    },
+    {
+        "name": "update_profile",
+        "description": ("Aktualizuj profilové pole seniora. Whitelist: preferences, "
+                        "notes, mood_log, last_topic, favorite_topics, hobbies, "
+                        "communication_style, comfort_words. Telefon/email/kontakty "
+                        "rodiny jsou read-only."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "key": {"type": "string"},
+                "value": {"description": "Hodnota"}
+            },
+            "required": ["senior_id", "key", "value"]
         }
     },
     # ── PHILOSOPHY TOOL ─────────────────────────────────────────
@@ -732,6 +868,177 @@ def _tool_get_radim_philosophy(focus=None):
         return {"error": str(e)[:200]}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# BRAIN TOOLS — Ψ(t) computation, empathy, speech adaptation
+# ═══════════════════════════════════════════════════════════════════════
+
+def _tool_compute_brain_state(senior_id, C, alpha, voice_tone=0.5, hrv=0.5, speech_tempo=0.5):
+    """Run brain math to compute full Ψ(t) on hypothetical or sensor inputs.
+
+    Useful for "what would Eva's state look like if C rose to 20?"
+    Returns full vector (C, E, R, S) + mode + speech adaptation + coherence.
+    Does NOT save to DB unless senior_id provided in optional persist mode.
+    """
+    if not _BRAIN_CORE:
+        return {"error": "brain_core not available"}
+    try:
+        # Compute (no DB save — pass user_id=None to skip persistence)
+        result = _compute_psi(
+            float(C), float(alpha),
+            voice_tone=float(voice_tone), hrv=float(hrv),
+            speech_tempo=float(speech_tempo),
+            user_id=None,  # ephemeral — Claude is exploring, not persisting
+        )
+        # Strip any non-serializable bits
+        return {
+            'C': result.get('C'),
+            'E': result.get('E'),
+            'R': result.get('R'),
+            'S': result.get('S'),
+            'alpha': result.get('alpha'),
+            'mode': result.get('mode'),
+            'coherence': result.get('coherence'),
+            'phi_index': result.get('phi_index'),
+            'stability': result.get('stability'),
+            'speech': result.get('speech'),
+            'rhythm': result.get('rhythm'),
+            '_for_senior': str(senior_id),
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_compute_empathy(voice_tone=0.5, hrv=0.5, speech_tempo=0.5):
+    """Compute empathy E from voice/HRV/tempo signals.
+    Useful when Claude wants to know what empathy weight to use.
+    """
+    if not _BRAIN_CORE:
+        return {"error": "brain_math not available"}
+    try:
+        result = _compute_empathy(float(voice_tone), float(hrv), float(speech_tempo))
+        return result
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_speech_adaptation(senior_id):
+    """What voice config (rate, pitch, pause) should Radim use NOW for this senior?
+    Pulls latest brain state and returns the speech adaptation params.
+    """
+    if not _BRAIN_CORE or not _DB:
+        return {"error": "brain_core or DB not available"}
+    try:
+        with db_context() as db:
+            row = db.execute("""
+                SELECT c, alpha, mode FROM brain_states
+                WHERE user_id = ? ORDER BY created_at DESC LIMIT 1
+            """, (str(senior_id),)).fetchone()
+        if not row:
+            return {"info": "No brain state — using HARMONY defaults",
+                    "speech": _compute_speech(5.0, 0.5, "HARMONY")}
+        vals = _row_to_list(row)
+        c, alpha, mode = vals[0], vals[1], vals[2]
+        speech = _compute_speech(float(c), float(alpha), str(mode), user_id=str(senior_id))
+        return {'senior_id': senior_id, 'mode': mode, 'C': c, 'alpha': alpha, 'speech': speech}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# MEMORY TOOLS — profile + long-term learning
+# ═══════════════════════════════════════════════════════════════════════
+
+# Whitelist of profile keys Claude is allowed to update.
+# Critical fields like phone, email, password are excluded — these need human
+# verification, not autonomous AI changes.
+_PROFILE_WRITABLE_KEYS = {
+    'preferences', 'notes', 'mood_log', 'last_topic', 'favorite_topics',
+    'communication_style', 'preferred_length', 'comfort_words',
+    'reminders_consent', 'hobbies', 'family_summary', 'health_notes_brief',
+}
+
+
+def _tool_get_full_profile(senior_id):
+    """Full memory_profiles JSON: name, age, family, preferences, hobbies,
+    emergency_contacts, medical notes, life story — everything Radim knows."""
+    if not _MEMORY_HELPERS:
+        return {"error": "memory_helpers not available"}
+    try:
+        profile = _load_profile(str(senior_id)) or {}
+        # Truncate large fields to keep token count sane
+        if isinstance(profile.get('chat_history_full'), list):
+            profile['chat_history_full'] = f'[{len(profile["chat_history_full"])} messages omitted]'
+        # Mask phone for privacy unless needed
+        if profile.get('phone'):
+            profile['phone'] = profile['phone'][:6] + '***'
+        return profile if profile else {"info": "No profile yet"}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_learning_state(senior_id):
+    """Long-term learning: topics, mood, interaction_count, C_history (math
+    engine input), successful_interactions, crisis_count.
+    This is the data anticipation_engine uses internally — Claude can read it
+    to understand patterns over weeks/months."""
+    if not _MEMORY_HELPERS:
+        return {"error": "memory_helpers not available"}
+    try:
+        learning = _load_learning(str(senior_id))
+        # Truncate C_history to last 30 entries to save tokens
+        c_hist = learning.get('C_history', [])
+        if len(c_hist) > 30:
+            learning['C_history'] = ['...']*1 + c_hist[-30:]
+            learning['_C_history_truncated'] = f'showing last 30 of {len(c_hist)}'
+        return learning
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_update_learning(senior_id, key, value):
+    """Write a learning insight back to long-term memory.
+
+    Examples:
+    - update_learning('282', 'last_mood', 'lonely')
+    - update_learning('282', 'topics', {...})  # full dict
+    - update_learning('282', 'crisis_count', 3)
+
+    Cannot overwrite C_history or alpha_history (those come from brain engine).
+    """
+    if not _MEMORY_HELPERS:
+        return {"error": "memory_helpers not available"}
+    PROTECTED = {'C_history', 'alpha_history', 'trend_C', 'trend_alpha',
+                 'circadian_profile', 'behavioral_profile'}
+    if key in PROTECTED:
+        return {"error": f"key '{key}' is managed by brain/anticipation engine — read-only"}
+    try:
+        learning = _load_learning(str(senior_id)) or _default_learning()
+        learning[key] = value
+        _save_learning(str(senior_id), learning)
+        return {"updated": True, "key": key, "value_preview": str(value)[:100]}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_update_profile(senior_id, key, value):
+    """Update a single field in senior's profile JSON.
+
+    Only whitelisted fields (preferences, notes, hobbies, ...) can be modified.
+    Critical fields (phone, email, emergency_contacts) require human action.
+    """
+    if not _MEMORY_HELPERS:
+        return {"error": "memory_helpers not available"}
+    if key not in _PROFILE_WRITABLE_KEYS:
+        return {"error": f"key '{key}' is read-only — only {sorted(_PROFILE_WRITABLE_KEYS)} are writable"}
+    try:
+        profile = _load_profile(str(senior_id)) or {}
+        profile[key] = value
+        _save_profile(str(senior_id), profile)
+        return {"updated": True, "key": key, "value_preview": str(value)[:100]}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 # Tool dispatcher
 TOOL_HANDLERS = {
     'list_seniors': lambda args: _tool_list_seniors(),
@@ -753,6 +1060,20 @@ TOOL_HANDLERS = {
     'get_behavioral_profile': lambda args: _tool_get_behavioral_profile(args['senior_id']),
     # Philosophy
     'get_radim_philosophy': lambda args: _tool_get_radim_philosophy(args.get('focus')),
+    # Brain
+    'compute_brain_state': lambda args: _tool_compute_brain_state(
+        args['senior_id'], args['C'], args['alpha'],
+        args.get('voice_tone', 0.5), args.get('hrv', 0.5), args.get('speech_tempo', 0.5)),
+    'compute_empathy': lambda args: _tool_compute_empathy(
+        args['voice_tone'], args['hrv'], args['speech_tempo']),
+    'get_speech_adaptation': lambda args: _tool_get_speech_adaptation(args['senior_id']),
+    # Memory
+    'get_full_profile': lambda args: _tool_get_full_profile(args['senior_id']),
+    'get_learning_state': lambda args: _tool_get_learning_state(args['senior_id']),
+    'update_learning': lambda args: _tool_update_learning(
+        args['senior_id'], args['key'], args['value']),
+    'update_profile': lambda args: _tool_update_profile(
+        args['senior_id'], args['key'], args['value']),
 }
 
 
@@ -842,7 +1163,8 @@ def _record_run(input_tokens, output_tokens, tool_calls, seniors, actions, durat
 # AGENT LOOP
 # ═══════════════════════════════════════════════════════════════════════
 
-WRITE_TOOLS = {'send_chat_message', 'send_push', 'notify_family', 'initiate_call'}
+WRITE_TOOLS = {'send_chat_message', 'send_push', 'notify_family', 'initiate_call',
+               'update_learning', 'update_profile'}
 
 
 def run_claude_agent(app=None, trigger='cron', force=False):
