@@ -211,6 +211,17 @@ except ImportError:
                      'THINKING': 'thinking', 'SPEAKING': 'speaking'}
 
 # ─── STT (speech-to-text) — Azure Speech + Czech understanding ──────
+# ─── Medical Team + Telemedicine ───────────────────────────────────
+try:
+    from telemedicine_audit import (
+        check_join_eligibility as _telemed_check_eligibility,
+        generate_join_token as _telemed_gen_token,
+        log_event as _telemed_log_event,
+    )
+    _TELEMED_AUDIT = True
+except ImportError:
+    _TELEMED_AUDIT = False
+
 # ─── Quizzes + Games + Exercises ───────────────────────────────────
 # Frontend modules: quiz-module.js, exercises-module.js
 # Backend: claude_content_routes.generate_quiz, education_assessment_routes
@@ -548,6 +559,39 @@ by byla katastrofa. Ty jsi observer + diagnostician, ne kodér produkce.
 - Cooldown skips (správné chování)
 - "No data yet" pro nové seniory (cold start)
 - Insufficient_data circadian_profile (potřeba 14 dní)
+
+# 🩺 ZDRAVOTNÍ TÝM + TELEMEDICÍNA
+Senior má **medical team** s 6 rolemi: koordinátor (PCP), kardiolog,
+dermatolog, vaskulární, pečovatel, rodina. Každá role má **role-based
+filtering** (kardiolog vidí jen HR/BP alerts, rodina vidí mood/aktivitu).
+
+**Workflow pro zdravotní situace:**
+1. `get_medical_team(senior)` — kdo je v týmu, kdo má consent
+2. `get_medical_history(senior, 30)` — symptoms (pain/mood/sleep/appetite/energy 0-10),
+   appointments, brain mode distribuce. **Použij PŘED rozhodnutím o eskalaci.**
+3. `get_medical_alerts(senior, days=7)` — co se dělo nedávno
+4. Pokud detekuješ problém:
+   - `create_medical_alert(type, severity, message, routed_to)` →
+     auto-routing (hr_anomaly→cardiologist, fall→family+coordinator)
+
+**Telemedicína:**
+- `get_upcoming_consultations(senior)` — co je naplánované
+- `request_consultation(senior, doctor, date, time, complaint, type)` —
+   typy: video/phone/in_person. Status='requested', doktor potvrdí.
+- `get_consultation_join_link(consultation_id, user_id)` — Jitsi URL +
+   30-min token
+
+**EMERGENCY CALL — `emergency_call_doctor(senior, reason, 'crisis')`:**
+Použij JEN když:
+- Pád + neresponzivní 5+ min
+- Vital crisis (BP > 200/120, SpO2 < 88, HR > 150)
+- ALERT brain mode + senior říká "umírám"/"nemůžu dýchat"
+
+**Důležité:**
+- Telemedicína je VOLITELNÁ — pro běžné zdravotní rady stačí chat s Radim
+- Konzultace stojí čas doktora — request jen pro skutečné problémy
+- Pokud senior nemá medical_team naplněný → fallback na 155 SOS
+  (notify_family s urgency='high' + initiate_call)
 
 # 🧠 KVÍZY + PAMĚŤOVÉ HRY + CVIČENÍ
 **Cílem je kognitivní + fyzické + emoční zdraví.** Všechno režimově citlivé.
@@ -2190,6 +2234,126 @@ TOOLS = [
             "type": "object",
             "properties": {"senior_id": {"type": "string"}},
             "required": ["senior_id"]
+        }
+    },
+    # ── MEDICAL TEAM + TELEMEDICINE ─────────────────────────────
+    {
+        "name": "get_medical_team",
+        "description": ("Seznam zdravotního týmu seniora: koordinátor (PCP), "
+                        "kardiolog, dermatolog, vaskulární specialista, pečovatel, "
+                        "rodina. Každý má consent_given flag."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "get_medical_alerts",
+        "description": ("Medical alerts seniora za N dní (HR anomaly, BP spike, "
+                        "missed med, fall). Filtruje podle severity_min."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "days": {"type": "integer", "default": 7, "minimum": 1, "maximum": 90},
+                "severity_min": {"type": "string", "enum": ["info","warning","alert","crisis"], "default": "info"}
+            },
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "create_medical_alert",
+        "description": ("Vytvoř medical alert. routed_to default podle alert_type: "
+                        "hr_anomaly→[coordinator,cardiologist], fall→[coordinator,"
+                        "family,caregiver], missed_med→[coordinator,caregiver]. "
+                        "Pushne notifikaci celému týmu."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "alert_type": {"type": "string",
+                    "examples": ["hr_anomaly","bp_spike","missed_med","fall","pain_high","mood_low","sleep_issue"]},
+                "severity": {"type": "string", "enum": ["info","warning","alert","crisis"]},
+                "message": {"type": "string", "maxLength": 1000},
+                "routed_to": {"type": "array", "items": {"type": "string"}}
+            },
+            "required": ["senior_id", "alert_type", "severity", "message"]
+        }
+    },
+    {
+        "name": "get_upcoming_consultations",
+        "description": ("Naplánované telemedicínské konzultace seniora "
+                        "(requested/confirmed/in_progress) v dalších N dnech."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "days": {"type": "integer", "default": 30, "minimum": 1, "maximum": 90}
+            },
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "request_consultation",
+        "description": ("Senior (nebo Claude jeho jménem) zažádá o konzultaci. "
+                        "Status začíná 'requested' — lékař musí potvrdit. "
+                        "scheduled_date=YYYY-MM-DD, scheduled_time=HH:MM. "
+                        "type: video/phone/in_person."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "doctor_user_id": {"type": "string"},
+                "scheduled_date": {"type": "string"},
+                "scheduled_time": {"type": "string"},
+                "complaint": {"type": "string", "maxLength": 1000},
+                "consultation_type": {"type": "string", "enum": ["video","phone","in_person"], "default": "video"}
+            },
+            "required": ["senior_id", "doctor_user_id", "scheduled_date", "scheduled_time", "complaint"]
+        }
+    },
+    {
+        "name": "get_consultation_join_link",
+        "description": ("Získej Jitsi join URL + 30-min token pro confirmed "
+                        "consultation. Validuje eligibility + status + window."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "consultation_id": {"type": "integer"},
+                "user_id": {"type": "string"}
+            },
+            "required": ["consultation_id", "user_id"]
+        }
+    },
+    {
+        "name": "get_medical_history",
+        "description": ("Aggregate view zdravotní historie seniora za N dní: "
+                        "symptoms log (pain/mood/sleep avg), appointments, "
+                        "brain_modes distribuce. Pro doktorský brief."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "days": {"type": "integer", "default": 30, "minimum": 1, "maximum": 90}
+            },
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "emergency_call_doctor",
+        "description": ("EMERGENCY: alert ALL coordinators + urgent consultation "
+                        "type='emergency'. severity musí být 'alert' nebo 'crisis'. "
+                        "Použij JEN když: fall + 5+ min ticho, vital crisis, "
+                        "neresponzivní senior s ALERT brain mode."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "reason": {"type": "string", "maxLength": 500},
+                "severity": {"type": "string", "enum": ["alert","crisis"]}
+            },
+            "required": ["senior_id", "reason"]
         }
     },
     # ── PHILOSOPHY TOOL ─────────────────────────────────────────
@@ -6207,6 +6371,517 @@ def _tool_recommend_brain_game(senior_id):
         return {"error": str(e)[:200]}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# MEDICAL TEAM + TELEMEDICINE TOOLS
+# ═══════════════════════════════════════════════════════════════════════
+
+def _tool_get_medical_team(senior_id):
+    """Senior's medical team — doctors, specialists, caregivers, family.
+
+    Roles: coordinator (primary care), cardiologist, dermatologist,
+    vascular, caregiver, family. Each has consent_given flag.
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    try:
+        with db_context() as db:
+            rows = db.execute("""
+                SELECT id, user_id, role, name, email, active,
+                       consent_given, created_at
+                FROM medical_team
+                WHERE senior_id = ? AND active = TRUE
+                ORDER BY role, name
+            """ if is_postgres() else """
+                SELECT id, user_id, role, name, email, active,
+                       consent_given, created_at
+                FROM medical_team
+                WHERE senior_id = ? AND active = 1
+                ORDER BY role, name
+            """, (str(senior_id),)).fetchall()
+
+        team = []
+        roles_seen = {}
+        for r in rows:
+            v = _row_to_list(r)
+            role = v[2]
+            roles_seen[role] = roles_seen.get(role, 0) + 1
+            team.append({
+                'id': v[0],
+                'user_id': v[1],
+                'role': role,
+                'name': v[3],
+                'email': (v[4] or '')[:6] + '***' if v[4] else None,
+                'consent_given': bool(v[6]),
+                'created_at': str(v[7]) if v[7] else None,
+            })
+        return {
+            'count': len(team),
+            'roles_breakdown': roles_seen,
+            'team': team,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_medical_alerts(senior_id, days=7, severity_min='info'):
+    """Medical alerts for senior (HR anomaly, BP spike, missed med, fall).
+
+    Filters by severity_min: info / warning / alert / crisis.
+    Returns: routed_to (which roles), acknowledged status.
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    valid_sev = {'info', 'warning', 'alert', 'crisis'}
+    if severity_min not in valid_sev:
+        return {"error": f"severity must be {sorted(valid_sev)}"}
+    try:
+        with db_context() as db:
+            interval = (f"NOW() - INTERVAL '{int(days)} days'" if is_postgres()
+                        else f"datetime('now', '-{int(days)} day')")
+            rows = db.execute(f"""
+                SELECT id, alert_type, severity, message, routed_to,
+                       acknowledged_by, created_at
+                FROM medical_alerts
+                WHERE senior_id = ? AND created_at > {interval}
+                ORDER BY created_at DESC LIMIT 30
+            """, (str(senior_id),)).fetchall()
+
+            sev_order = {'info': 0, 'warning': 1, 'alert': 2, 'crisis': 3}
+            min_level = sev_order.get(severity_min.lower(), 0)
+            alerts = []
+            for r in rows:
+                v = _row_to_list(r)
+                sev_lower = (v[2] or 'info').lower()
+                if sev_order.get(sev_lower, 0) < min_level:
+                    continue
+                routed = v[4]
+                if isinstance(routed, str):
+                    try:
+                        routed = json.loads(routed)
+                    except Exception:
+                        routed = []
+                alerts.append({
+                    'id': v[0],
+                    'type': v[1],
+                    'severity': v[2],
+                    'message': (v[3] or '')[:300],
+                    'routed_to': routed if isinstance(routed, list) else [],
+                    'acknowledged': bool(v[5]),
+                    'created_at': str(v[6]) if v[6] else None,
+                })
+            return {
+                'count': len(alerts),
+                'window_days': days,
+                'severity_min': severity_min,
+                'alerts': alerts,
+            }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_create_medical_alert(senior_id, alert_type, severity, message,
+                                routed_to=None):
+    """Create a new medical alert. Routes to relevant team members.
+
+    severity: info / warning / alert / crisis
+    routed_to: list of roles (e.g., ['coordinator', 'cardiologist']).
+               If None, defaults based on alert_type.
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    valid_sev = {'info', 'warning', 'alert', 'crisis'}
+    if severity.lower() not in valid_sev:
+        return {"error": f"severity must be {sorted(valid_sev)}"}
+
+    # Default routing by alert type
+    if not routed_to:
+        DEFAULT_ROUTING = {
+            'hr_anomaly': ['coordinator', 'cardiologist'],
+            'bp_spike': ['coordinator', 'cardiologist'],
+            'missed_med': ['coordinator', 'caregiver'],
+            'fall': ['coordinator', 'family', 'caregiver'],
+            'pain_high': ['coordinator'],
+            'mood_low': ['coordinator', 'family'],
+            'sleep_issue': ['coordinator'],
+        }
+        routed_to = DEFAULT_ROUTING.get(alert_type, ['coordinator'])
+
+    try:
+        with db_context(commit=True) as db:
+            from database import db_insert
+            alert_id = db_insert(db, 'medical_alerts',
+                ['senior_id', 'alert_type', 'severity', 'message', 'routed_to'],
+                [str(senior_id), alert_type[:50], severity.lower(),
+                 message[:1000], json.dumps(routed_to, ensure_ascii=False)])
+
+        # Push notification to medical_team members
+        notified = 0
+        try:
+            with db_context() as db:
+                team = db.execute("""
+                    SELECT user_id FROM medical_team
+                    WHERE senior_id = ? AND role = ANY(?) AND active = TRUE
+                """ if is_postgres() else """
+                    SELECT user_id FROM medical_team
+                    WHERE senior_id = ? AND active = 1
+                """, (str(senior_id), routed_to) if is_postgres()
+                else (str(senior_id),)).fetchall()
+            for r in team:
+                v = _row_to_list(r)
+                if v[0] and _AGENT_BUS:
+                    try:
+                        _bus_emit(
+                            user_id=v[0],
+                            sender='claude_agent.medical',
+                            kind='observation',
+                            severity=severity.lower(),
+                            topic=f'medical_alert.{alert_type}',
+                            payload={'message': message, 'senior_id': str(senior_id),
+                                     'alert_id': alert_id},
+                            ttl_minutes=4320,  # 3 days
+                        )
+                        notified += 1
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        return {
+            'created': True,
+            'alert_id': alert_id,
+            'severity': severity,
+            'routed_to': routed_to,
+            'team_notified': notified,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_upcoming_consultations(senior_id, days=30):
+    """Senior's upcoming telemedicine consultations.
+
+    Returns: scheduled date/time, doctor, status, type, complaint.
+    Statuses: requested / confirmed / in_progress.
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    try:
+        with db_context() as db:
+            interval = (f"NOW() + INTERVAL '{int(days)} days'" if is_postgres()
+                        else f"datetime('now', '+{int(days)} day')")
+            now = ("NOW()" if is_postgres() else "datetime('now')")
+            rows = db.execute(f"""
+                SELECT id, teacher_id, scheduled_date, scheduled_time, status,
+                       consultation_type, complaint, title
+                FROM telemedicine_consultations
+                WHERE student_id = ?
+                  AND status IN ('requested', 'confirmed', 'in_progress')
+                  AND (scheduled_date::timestamp BETWEEN {now}::timestamp
+                       AND {interval}::timestamp
+                       OR scheduled_date IS NULL)
+                ORDER BY scheduled_date, scheduled_time
+                LIMIT 20
+            """ if is_postgres() else f"""
+                SELECT id, teacher_id, scheduled_date, scheduled_time, status,
+                       consultation_type, complaint, title
+                FROM telemedicine_consultations
+                WHERE student_id = ?
+                  AND status IN ('requested', 'confirmed', 'in_progress')
+                ORDER BY scheduled_date, scheduled_time
+                LIMIT 20
+            """, (str(senior_id),)).fetchall()
+
+            consultations = []
+            for r in rows:
+                v = _row_to_list(r)
+                consultations.append({
+                    'id': v[0],
+                    'doctor_id': v[1],
+                    'date': str(v[2]) if v[2] else None,
+                    'time': str(v[3]) if v[3] else None,
+                    'status': v[4],
+                    'type': v[5],
+                    'complaint': (v[6] or '')[:300],
+                    'title': v[7],
+                })
+            return {
+                'count': len(consultations),
+                'consultations': consultations,
+            }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_request_consultation(senior_id, doctor_user_id, scheduled_date,
+                                scheduled_time, complaint, consultation_type='video'):
+    """Senior (or Claude on senior's behalf) requests a consultation.
+
+    Status starts as 'requested' — doctor must confirm.
+    consultation_type: 'video' / 'phone' / 'in_person'
+    scheduled_date: 'YYYY-MM-DD', scheduled_time: 'HH:MM'
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    if not complaint or not complaint.strip():
+        return {"error": "complaint required"}
+    valid_types = {'video', 'phone', 'in_person'}
+    if consultation_type not in valid_types:
+        return {"error": f"type must be {sorted(valid_types)}"}
+    try:
+        with db_context(commit=True) as db:
+            from database import db_insert
+            cid = db_insert(db, 'telemedicine_consultations',
+                ['student_id', 'teacher_id', 'scheduled_date', 'scheduled_time',
+                 'status', 'consultation_type', 'complaint'],
+                [str(senior_id), str(doctor_user_id), scheduled_date,
+                 scheduled_time, 'requested', consultation_type,
+                 complaint[:1000]])
+
+        # Audit log
+        if _TELEMED_AUDIT:
+            try:
+                _telemed_log_event(
+                    consultation_id=cid,
+                    event_type='consultation_requested',
+                    actor_user_id=str(senior_id),
+                    old_status=None,
+                    new_status='requested',
+                    reason='Requested by Claude agent on behalf of senior',
+                    metadata={'source': 'claude_agent'},
+                )
+            except Exception:
+                pass
+
+        # Push to bus so doctor sees in inbox
+        if _AGENT_BUS:
+            try:
+                _bus_emit(
+                    user_id=str(doctor_user_id),
+                    sender='claude_agent.telemed',
+                    kind='intent',
+                    severity='info',
+                    topic='consultation_request',
+                    payload={'consultation_id': cid,
+                             'senior_id': str(senior_id),
+                             'complaint': complaint[:300],
+                             'date': scheduled_date,
+                             'time': scheduled_time,
+                             'type': consultation_type},
+                    ttl_minutes=10080,  # 7 days
+                )
+            except Exception:
+                pass
+
+        return {
+            'requested': True,
+            'consultation_id': cid,
+            'status': 'requested',
+            'date': scheduled_date,
+            'time': scheduled_time,
+            'doctor_id': doctor_user_id,
+            '_hint': 'Doctor must confirm before consultation can start',
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_consultation_join_link(consultation_id, user_id):
+    """Get Jitsi join URL + 30min token for confirmed consultation.
+
+    Validates: user is participant + consultation is in valid window
+    + status is confirmed/in_progress.
+    """
+    if not _TELEMED_AUDIT:
+        return {"error": "telemedicine_audit not available"}
+    try:
+        eligibility = _telemed_check_eligibility(int(consultation_id), str(user_id))
+        if not eligibility.get('eligible'):
+            return {"error": eligibility.get('reason', 'not eligible to join')}
+
+        token_data = _telemed_gen_token(int(consultation_id), str(user_id))
+        if not token_data:
+            return {"error": "couldn't generate join token"}
+
+        # Get jitsi URL from consultation
+        jitsi_url = None
+        if _DB:
+            try:
+                with db_context() as db:
+                    row = db.execute("""
+                        SELECT jitsi_url, room_code, status
+                        FROM telemedicine_consultations
+                        WHERE id = ?
+                    """, (int(consultation_id),)).fetchone()
+                if row:
+                    v = _row_to_list(row)
+                    jitsi_url = v[0]
+            except Exception:
+                pass
+
+        return {
+            'consultation_id': consultation_id,
+            'token': token_data.get('token') if isinstance(token_data, dict) else None,
+            'expires_at': token_data.get('expires_at') if isinstance(token_data, dict) else None,
+            'jitsi_url': jitsi_url,
+            'eligible': True,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_medical_history(senior_id, days=30):
+    """Senior's recent medical history: symptoms log, appointments,
+    medications taken, vitals patterns.
+
+    Aggregate view for chat coordinator + doctor briefing.
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    try:
+        result = {}
+        with db_context() as db:
+            interval = (f"NOW() - INTERVAL '{int(days)} days'" if is_postgres()
+                        else f"datetime('now', '-{int(days)} day')")
+
+            # Symptoms log
+            try:
+                rows = db.execute(f"""
+                    SELECT pain, mood, sleep, appetite, energy, note, created_at
+                    FROM medical_symptoms WHERE senior_id = ?
+                      AND created_at > {interval}
+                    ORDER BY created_at DESC LIMIT 14
+                """, (str(senior_id),)).fetchall()
+                symptoms = []
+                pain_avg, mood_avg = [], []
+                for r in rows:
+                    v = _row_to_list(r)
+                    symptoms.append({
+                        'pain': v[0], 'mood': v[1], 'sleep': v[2],
+                        'appetite': v[3], 'energy': v[4],
+                        'note': (v[5] or '')[:100],
+                        'at': str(v[6]) if v[6] else None,
+                    })
+                    if v[0] is not None:
+                        pain_avg.append(v[0])
+                    if v[1] is not None:
+                        mood_avg.append(v[1])
+                result['symptoms'] = {
+                    'count': len(symptoms),
+                    'avg_pain': round(sum(pain_avg)/len(pain_avg), 1) if pain_avg else None,
+                    'avg_mood': round(sum(mood_avg)/len(mood_avg), 1) if mood_avg else None,
+                    'recent': symptoms[:5],
+                }
+            except Exception as e:
+                result['symptoms'] = {'error': str(e)[:80]}
+
+            # Appointments
+            try:
+                rows = db.execute(f"""
+                    SELECT id, when_at, mode, reason, cancelled_at
+                    FROM medical_appointments WHERE senior_id = ?
+                      AND when_at > {interval}
+                    ORDER BY when_at DESC LIMIT 10
+                """, (str(senior_id),)).fetchall()
+                appts = []
+                for r in rows:
+                    v = _row_to_list(r)
+                    appts.append({
+                        'id': v[0],
+                        'when': str(v[1]) if v[1] else None,
+                        'mode': v[2],
+                        'reason': (v[3] or '')[:100],
+                        'cancelled': bool(v[4]),
+                    })
+                result['appointments'] = {
+                    'count': len(appts),
+                    'recent': appts[:5],
+                }
+            except Exception as e:
+                result['appointments'] = {'error': str(e)[:80]}
+
+            # Brain states summary
+            try:
+                rows = db.execute(f"""
+                    SELECT mode, COUNT(*) FROM brain_states WHERE user_id = ?
+                      AND created_at > {interval}
+                    GROUP BY mode
+                """, (str(senior_id),)).fetchall()
+                modes = {}
+                for r in rows:
+                    v = _row_to_list(r)
+                    modes[v[0]] = v[1]
+                result['brain_modes'] = modes
+            except Exception:
+                pass
+
+        result['window_days'] = days
+        return result
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_emergency_call_doctor(senior_id, reason, severity='crisis'):
+    """Emergency: bypass scheduling, alert ALL coordinators + create urgent
+    consultation_type='emergency' for fastest possible response.
+
+    severity must be 'alert' or 'crisis'.
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    if severity.lower() not in ('alert', 'crisis'):
+        return {"error": "emergency requires severity='alert' or 'crisis'"}
+
+    try:
+        # 1. Create high-severity medical alert
+        alert_result = _tool_create_medical_alert(
+            senior_id, 'emergency_call_required', severity, reason,
+            routed_to=['coordinator', 'cardiologist', 'family', 'caregiver']
+        )
+        if alert_result.get('error'):
+            return alert_result
+
+        # 2. Find coordinator
+        coordinator_id = None
+        with db_context() as db:
+            row = db.execute("""
+                SELECT user_id FROM medical_team
+                WHERE senior_id = ? AND role = 'coordinator' AND active = TRUE
+                LIMIT 1
+            """ if is_postgres() else """
+                SELECT user_id FROM medical_team
+                WHERE senior_id = ? AND role = 'coordinator' AND active = 1
+                LIMIT 1
+            """, (str(senior_id),)).fetchone()
+            if row:
+                coordinator_id = _row_to_list(row)[0]
+
+        consultation_id = None
+        if coordinator_id:
+            # 3. Create emergency consultation request
+            req = _tool_request_consultation(
+                senior_id, coordinator_id,
+                scheduled_date=datetime.now().strftime('%Y-%m-%d'),
+                scheduled_time=datetime.now().strftime('%H:%M'),
+                complaint=f'EMERGENCY: {reason}',
+                consultation_type='video',
+            )
+            consultation_id = req.get('consultation_id')
+
+        return {
+            'emergency_dispatched': True,
+            'severity': severity,
+            'alert_id': alert_result.get('alert_id'),
+            'consultation_id': consultation_id,
+            'coordinator_id': coordinator_id,
+            'team_notified': alert_result.get('team_notified', 0),
+            'has_coordinator': bool(coordinator_id),
+            '_hint': ('All coordinators notified via medical_alerts + bus. '
+                      'If has_coordinator=False, only alert was created.'),
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 # Tool dispatcher
 TOOL_HANDLERS = {
     'list_seniors': lambda args: _tool_list_seniors(),
@@ -6390,6 +7065,25 @@ TOOL_HANDLERS = {
     'get_quiz_history': lambda args: _tool_get_quiz_history(
         args['senior_id'], args.get('days', 30)),
     'recommend_brain_game': lambda args: _tool_recommend_brain_game(args['senior_id']),
+    # Medical Team + Telemedicine
+    'get_medical_team': lambda args: _tool_get_medical_team(args['senior_id']),
+    'get_medical_alerts': lambda args: _tool_get_medical_alerts(
+        args['senior_id'], args.get('days', 7), args.get('severity_min', 'info')),
+    'create_medical_alert': lambda args: _tool_create_medical_alert(
+        args['senior_id'], args['alert_type'], args['severity'],
+        args['message'], args.get('routed_to')),
+    'get_upcoming_consultations': lambda args: _tool_get_upcoming_consultations(
+        args['senior_id'], args.get('days', 30)),
+    'request_consultation': lambda args: _tool_request_consultation(
+        args['senior_id'], args['doctor_user_id'],
+        args['scheduled_date'], args['scheduled_time'],
+        args['complaint'], args.get('consultation_type', 'video')),
+    'get_consultation_join_link': lambda args: _tool_get_consultation_join_link(
+        args['consultation_id'], args['user_id']),
+    'get_medical_history': lambda args: _tool_get_medical_history(
+        args['senior_id'], args.get('days', 30)),
+    'emergency_call_doctor': lambda args: _tool_emergency_call_doctor(
+        args['senior_id'], args['reason'], args.get('severity', 'crisis')),
 }
 
 
@@ -6493,7 +7187,9 @@ WRITE_TOOLS = {'send_chat_message', 'send_push', 'notify_family', 'initiate_call
                'send_caregiver_notification', 'caregiver_whisper',
                'mark_lesson_complete',
                'play_music_for_senior', 'pause_music_for_senior',
-               'start_exercise_for_senior', 'start_quiz_for_senior'}
+               'start_exercise_for_senior', 'start_quiz_for_senior',
+               'create_medical_alert', 'request_consultation',
+               'emergency_call_doctor'}
 
 
 # Per-senior event-trigger cooldown (anti-thrashing). Independent of
