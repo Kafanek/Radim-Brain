@@ -211,6 +211,25 @@ except ImportError:
                      'THINKING': 'thinking', 'SPEAKING': 'speaking'}
 
 # ─── STT (speech-to-text) — Azure Speech + Czech understanding ──────
+# ─── Calendar + Email subsystems ─────────────────────────────────────
+try:
+    from calendar_routes import _parse_event_gemini, _parse_event_rule_based
+    _CALENDAR_PARSE = True
+except ImportError:
+    _CALENDAR_PARSE = False
+
+try:
+    from email_security_routes import _scan_heuristics as _email_scan_heur
+    try:
+        from email_security_routes import _scan_with_ai as _email_scan_ai
+        _EMAIL_SCAN_AI = True
+    except ImportError:
+        _EMAIL_SCAN_AI = False
+    _EMAIL_SECURITY = True
+except ImportError:
+    _EMAIL_SECURITY = False
+    _EMAIL_SCAN_AI = False
+
 try:
     from speech_understanding import (
         normalize_czech as _stt_normalize,
@@ -375,6 +394,36 @@ by byla katastrofa. Ty jsi observer + diagnostician, ne kodér produkce.
 - Cooldown skips (správné chování)
 - "No data yet" pro nové seniory (cold start)
 - Insufficient_data circadian_profile (potřeba 14 dní)
+
+# 📅 KALENDÁŘ
+Senior má `calendar_events` table — události typu doktor / léky / návštěva /
+narozeniny / svátek. APScheduler `calendar_reminder_cron` pošle 24h + 1h push
+před událostí.
+
+**Jak to používat:**
+- `get_upcoming_events(senior, hours=24)` na začátku ranního briefu
+- Pokud má dnes doktora a je to ALERT mode → osobní empatická zpráva navíc
+- Pokud chceš naplánovat (např. rodina chce hovor) → `find_free_slots(senior, days=7)`
+- Pokud event nemá reminder → `add_calendar_reminder(senior, event_id)`
+- Pokud senior říká 'zítra v 14 doktor' → `parse_event_text` → review → potvrď
+
+# 📧 E-MAIL
+Senior má IMAP účet (Seznam/email.cz/centrum/iCloud, ...) napojený přes
+`email_accounts` tabulku. Spam/phishing je velký problém pro seniory.
+
+**Bezpečnostní workflow:**
+1. `get_unread_emails(senior)` — kdo psal
+2. Pro každý suspektní: `scan_email_risk(subject, body, from_email)` — skóre 0-100
+3. Pokud `risky=True` AND `score >= 70`:
+   - `flag_email_to_family` → notifikace rodině
+   - VYHNI SE radit seniorovi reagovat — nech rodinu rozhodnout
+4. Pro substantive update rodině (zdraví, plány): `send_email_to_family(urgency)`
+   — POMALÉ vůči SMS, použij jen pro non-urgent
+
+**Důležité:**
+- Email čtení je READ-ONLY z bezpečnosti (cookies/credentials nikdy)
+- Phishing pravidla v scan: urgency, money, credentials, brand impersonation
+- Senior se snadno nechá podvést — buď paranoidní
 
 # 🗣️ STT — Speech-to-Text porozumění
 Když senior promluví, audio se přepisuje přes Azure Speech (cs-CZ) nebo
@@ -1364,6 +1413,124 @@ TOOLS = [
             "type": "object",
             "properties": {"senior_id": {"type": "string"}},
             "required": ["senior_id"]
+        }
+    },
+    # ── CALENDAR TOOLS ──────────────────────────────────────────
+    {
+        "name": "get_upcoming_events",
+        "description": ("Nadcházející události seniora v dalších N hodinách "
+                        "(doktor, léky, návštěva, narozeniny). Použij pro "
+                        "proaktivní 'nezapomeňte na...' zprávy."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "hours": {"type": "integer", "default": 24, "minimum": 1, "maximum": 168}
+            },
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "find_free_slots",
+        "description": ("Najdi 3 volné časové sloty v dalších N dnech. "
+                        "Preferuje pracovní dny + dopolední/odpolední časy. "
+                        "Použij pro plánování (např. 'kdy může mít rodina hovor?')."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "days": {"type": "integer", "default": 7, "minimum": 1, "maximum": 30}
+            },
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "add_calendar_reminder",
+        "description": ("Zapni 24h + 1h push reminder pro existující "
+                        "calendar event. (calendar_reminder_cron je pošle automaticky.)"),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "event_id": {"type": "integer"}
+            },
+            "required": ["senior_id", "event_id"]
+        }
+    },
+    {
+        "name": "parse_event_text",
+        "description": ("Parsuj český text na strukturovanou událost: "
+                        "'Zítra v 14 doktor' → {title, date, time, type}. "
+                        "Nezapisuje do DB — Claude může review před založením."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"text": {"type": "string", "maxLength": 500}},
+            "required": ["text"]
+        }
+    },
+    # ── EMAIL TOOLS ─────────────────────────────────────────────
+    {
+        "name": "get_unread_emails",
+        "description": ("Nepřečtené e-maily seniora (live IMAP). Vrátí UID + odesílatele "
+                        "+ subject. Read-only. Pro daily briefing nebo když senior "
+                        "říká 'kdo mi psal?'"),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "limit": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100}
+            },
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "scan_email_risk",
+        "description": ("Skóruj phishing/scam riziko e-mailu. score 0-100, "
+                        "≥70 = risky. use_ai=True invokuje Gemini second opinion."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "subject": {"type": "string", "maxLength": 500},
+                "body": {"type": "string", "maxLength": 5000},
+                "from_email": {"type": "string"},
+                "from_name": {"type": "string"},
+                "use_ai": {"type": "boolean", "default": False}
+            },
+            "required": ["subject", "body", "from_email"]
+        }
+    },
+    {
+        "name": "flag_email_to_family",
+        "description": ("Označ podezřelý e-mail pro rodinu. Uloží do email_family_flags "
+                        "+ pushne rodině notifikaci. Použij když scan_email_risk vrátí "
+                        "risky=True + score≥70."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "subject": {"type": "string", "maxLength": 500},
+                "body_snippet": {"type": "string", "maxLength": 1000},
+                "from_email": {"type": "string"},
+                "from_name": {"type": "string"},
+                "reasons": {"type": "array", "items": {"type": "string"}}
+            },
+            "required": ["senior_id", "subject", "body_snippet", "from_email"]
+        }
+    },
+    {
+        "name": "send_email_to_family",
+        "description": ("Pošli e-mail rodině (substantive update). "
+                        "Pro urgentní zprávy použij notify_family (SMS) — to je rychlejší. "
+                        "urgency: low/normal/high (ovlivňuje subject prefix)."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "subject": {"type": "string", "maxLength": 200},
+                "body": {"type": "string", "maxLength": 5000},
+                "urgency": {"type": "string", "enum": ["low", "normal", "high"], "default": "normal"}
+            },
+            "required": ["senior_id", "subject", "body"]
         }
     },
     # ── PHILOSOPHY TOOL ─────────────────────────────────────────
@@ -3526,6 +3693,447 @@ def _tool_stt_build_hints(senior_id):
         return {"error": str(e)[:200]}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# CALENDAR TOOLS — events, reminders, scheduling
+# ═══════════════════════════════════════════════════════════════════════
+
+def _tool_get_upcoming_events(senior_id, hours=24):
+    """Senior's upcoming calendar events in the next N hours.
+
+    Returns events with: title, date, time, type (event/medication/visit),
+    location, reminder flag. Use for proactive "Don't forget about X
+    today/tomorrow" messages.
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    try:
+        with db_context() as db:
+            interval = (f"NOW() + INTERVAL '{int(hours)} hours'" if is_postgres()
+                        else f"datetime('now', '+{int(hours)} hour')")
+            now = ("NOW()" if is_postgres() else "datetime('now')")
+            rows = db.execute(f"""
+                SELECT id, title, date, time, type, description, location,
+                       reminder, repeat_type
+                FROM calendar_events
+                WHERE user_id = ?
+                  AND (date || 'T' || COALESCE(time, '00:00') || ':00')::timestamp
+                    BETWEEN {now} AND {interval}
+                ORDER BY date, time
+                LIMIT 30
+            """ if is_postgres() else f"""
+                SELECT id, title, date, time, type, description, location,
+                       reminder, repeat_type
+                FROM calendar_events
+                WHERE user_id = ?
+                  AND datetime(date || ' ' || COALESCE(time, '00:00') || ':00')
+                    BETWEEN {now} AND {interval}
+                ORDER BY date, time
+                LIMIT 30
+            """, (str(senior_id),)).fetchall()
+
+            events = []
+            for r in rows:
+                vals = _row_to_list(r)
+                events.append({
+                    'id': vals[0],
+                    'title': vals[1],
+                    'date': str(vals[2]) if vals[2] else None,
+                    'time': vals[3],
+                    'type': vals[4],
+                    'description': (vals[5] or '')[:200],
+                    'location': vals[6],
+                    'has_reminder': bool(vals[7]),
+                    'repeat_type': vals[8],
+                })
+            return {
+                'count': len(events),
+                'window_hours': hours,
+                'events': events,
+            }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_find_free_slots(senior_id, days=7, start_hour=8, end_hour=18):
+    """Find 3 free time slots in the next N days, weekdays preferred.
+
+    Useful when scheduling new events: 'When can senior accommodate a
+    family video call?' Returns slots that don't conflict with existing
+    calendar events.
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    try:
+        # Pull existing events
+        with db_context() as db:
+            interval = (f"NOW() + INTERVAL '{int(days)} days'" if is_postgres()
+                        else f"datetime('now', '+{int(days)} day')")
+            rows = db.execute(f"""
+                SELECT date, time FROM calendar_events
+                WHERE user_id = ? AND date::text >= ?
+                  AND date::text <= (CURRENT_DATE + INTERVAL '{int(days)} days')::text
+                ORDER BY date, time
+            """ if is_postgres() else f"""
+                SELECT date, time FROM calendar_events
+                WHERE user_id = ? AND date >= date('now')
+                  AND date <= date('now', '+{int(days)} day')
+                ORDER BY date, time
+            """, (str(senior_id), datetime.now().strftime('%Y-%m-%d'))
+            if is_postgres() else (str(senior_id),)).fetchall()
+
+        busy = set()
+        for r in rows:
+            v = _row_to_list(r)
+            busy.add(f"{v[0]}T{v[1] or '00:00'}")
+
+        # Czech weekday names
+        WEEKDAYS = ['Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'Pátek', 'Sobota', 'Neděle']
+        slots = []
+        from datetime import timedelta
+        # Try mornings first (10:00) then afternoons (14:00) for next N days
+        for day_offset in range(1, int(days) + 1):
+            for hour_choice in (10, 14, 16):
+                if not (int(start_hour) <= hour_choice <= int(end_hour)):
+                    continue
+                target = datetime.now() + timedelta(days=day_offset)
+                # Prefer weekdays first pass
+                if len(slots) < 3 and target.weekday() < 5:  # 0=Mon..4=Fri
+                    date_s = target.strftime('%Y-%m-%d')
+                    time_s = f'{hour_choice:02d}:00'
+                    key = f'{date_s}T{time_s}'
+                    if key not in busy:
+                        slots.append({
+                            'date': date_s,
+                            'time': time_s,
+                            'weekday': WEEKDAYS[target.weekday()],
+                            'label': f'{WEEKDAYS[target.weekday()]} {target.strftime("%-d.%-m.")} v {time_s}',
+                        })
+                if len(slots) >= 3:
+                    break
+            if len(slots) >= 3:
+                break
+
+        return {
+            'slots': slots,
+            'count': len(slots),
+            'busy_count': len(busy),
+            'window_days': days,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_add_calendar_reminder(senior_id, event_id):
+    """Enable reminders (24h + 1h push) for an existing calendar event."""
+    if not _DB:
+        return {"error": "DB not available"}
+    try:
+        with db_context(commit=True) as db:
+            # Verify event belongs to senior + reset flags so reminders re-fire
+            rows = db.execute("""
+                UPDATE calendar_events
+                SET reminder = 1, reminder_24h_sent = NULL, reminder_1h_sent = NULL
+                WHERE user_id = ? AND id = ?
+            """, (str(senior_id), int(event_id)))
+            rowcount = getattr(rows, 'rowcount', None)
+            if rowcount == 0:
+                return {"error": "event not found or not owned by this senior"}
+            return {
+                'updated': True,
+                'event_id': event_id,
+                'reminder_enabled': True,
+                '_hint': '24h + 1h push reminders will fire (calendar_reminder_cron every 10min)',
+            }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_parse_event_text(text):
+    """Parse Czech free-form text into structured calendar event.
+
+    'Zítra v 14 doktor' → {title: 'Doktor', date: '2026-04-30', time: '14:00', type: 'visit'}
+
+    Tries Gemini first (better understanding), falls back to rule-based.
+    No DB write — Claude can review before creating.
+    """
+    if not _CALENDAR_PARSE:
+        return {"error": "calendar_routes parsers not available"}
+    if not text or not text.strip():
+        return {"error": "empty text"}
+    try:
+        # Try Gemini first
+        result = None
+        try:
+            result = _parse_event_gemini(text)
+            if result:
+                result['_source'] = 'gemini'
+        except Exception:
+            pass
+        if not result:
+            try:
+                result = _parse_event_rule_based(text)
+                if result:
+                    result['_source'] = 'rule_based'
+            except Exception:
+                pass
+        if not result:
+            return {"error": "couldn't parse — try clearer Czech format"}
+        return result
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# EMAIL TOOLS — read inbox, send, security scan, family flags
+# ═══════════════════════════════════════════════════════════════════════
+
+def _tool_get_unread_emails(senior_id, limit=20):
+    """Senior's recent unread emails (live IMAP read).
+
+    Returns: list of {uid, from_name, from_email, subject, date}.
+    Read-only — doesn't mark as read. Use for daily briefing.
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    try:
+        # Check senior has email account configured
+        with db_context() as db:
+            row = db.execute("""
+                SELECT email_address, last_sync_at FROM email_accounts
+                WHERE user_id = ? LIMIT 1
+            """, (str(senior_id),)).fetchone()
+        if not row:
+            return {"info": "Senior has no email account configured"}
+        vals = _row_to_list(row)
+        email_addr = vals[0]
+        last_sync = vals[1]
+
+        # Use email_inbox helpers
+        try:
+            from email_inbox_routes import _load_account, _open_imap, _decode_header, _parse_from
+            account = _load_account(str(senior_id))
+            if not account:
+                return {"error": "couldn't load encrypted credentials"}
+
+            mail = _open_imap(account)
+            mail.select('INBOX')
+            status, data = mail.search(None, 'UNSEEN')
+            if status != 'OK':
+                return {"error": f"IMAP search failed: {status}"}
+
+            unread_uids = data[0].split()
+            recent_uids = unread_uids[-int(limit):]
+            messages = []
+            for uid in reversed(recent_uids):  # newest first
+                try:
+                    status, msg_data = mail.fetch(uid, '(RFC822.HEADER)')
+                    if status != 'OK':
+                        continue
+                    import email as _email
+                    msg = _email.message_from_bytes(msg_data[0][1])
+                    from_name, from_email = _parse_from(msg.get('From', ''))
+                    messages.append({
+                        'uid': uid.decode('utf-8'),
+                        'from_name': from_name,
+                        'from_email': from_email,
+                        'subject': _decode_header(msg.get('Subject', '')),
+                        'date': msg.get('Date', ''),
+                    })
+                except Exception as e:
+                    logger.debug(f"email parse skip: {e}")
+            try:
+                mail.logout()
+            except Exception:
+                pass
+
+            return {
+                'email_account': email_addr,
+                'unread_count': len(unread_uids),
+                'showing': len(messages),
+                'last_sync': str(last_sync) if last_sync else None,
+                'messages': messages,
+            }
+        except ImportError:
+            return {"error": "email_inbox_routes helpers unavailable"}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_scan_email_risk(subject, body, from_email, from_name=None,
+                          use_ai=False):
+    """Score an email for phishing/scam risk.
+
+    Returns: {risky: bool, score: 0-100, reasons: [...]}.
+    score≥70 = risky (recommend flag_email_to_family).
+
+    use_ai=True invokes Gemini second opinion (more accurate but $).
+    """
+    if not _EMAIL_SECURITY:
+        return {"error": "email_security not available"}
+    try:
+        # Heuristic scan (free, fast)
+        heur = _email_scan_heur(
+            subject or '', body or '',
+            from_email or '', from_name or '',
+        )
+        result = {
+            'risky': bool(heur.get('risky', False)),
+            'score': heur.get('score', 0),
+            'reasons': heur.get('reasons', [])[:10],
+            'source': 'heuristic',
+        }
+        # Optional AI second opinion
+        if use_ai and _EMAIL_SCAN_AI:
+            try:
+                ai = _email_scan_ai(subject or '', body or '',
+                                    from_email or '', from_name or '')
+                if ai:
+                    # Combine — weighted average
+                    h_score = result['score']
+                    a_score = ai.get('score', 0)
+                    combined = round((h_score * 0.4) + (a_score * 0.6))
+                    result['score'] = combined
+                    result['risky'] = combined >= 60
+                    result['reasons'] = list(set(result['reasons'] + ai.get('reasons', [])))[:10]
+                    result['source'] = 'combined'
+                    result['ai_score'] = a_score
+                    result['heuristic_score'] = h_score
+            except Exception:
+                pass
+        return result
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_flag_email_to_family(senior_id, subject, body_snippet, from_email,
+                               from_name=None, reasons=None):
+    """Flag suspicious email to senior's family for review.
+
+    Stores in email_family_flags table + pushes notification to all
+    confirmed family links. Use when scan_email_risk returns risky=True
+    and score≥70.
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    try:
+        # Verify senior has linked family
+        with db_context() as db:
+            family = db.execute("""
+                SELECT family_user_id FROM senior_family_links
+                WHERE senior_id = ? AND confirmed = TRUE LIMIT 5
+            """ if is_postgres() else """
+                SELECT family_user_id FROM senior_family_links
+                WHERE senior_id = ? AND confirmed = 1 LIMIT 5
+            """, (str(senior_id),)).fetchall()
+        if not family:
+            return {"info": "No confirmed family links — flag has nowhere to go"}
+
+        # Insert flag
+        reasons_json = json.dumps(reasons or [], ensure_ascii=False)
+        snippet = (body_snippet or '')[:500]
+        with db_context(commit=True) as db:
+            from database import db_insert
+            flag_id = db_insert(db, 'email_family_flags',
+                ['user_id', 'subject', 'from_email', 'from_name',
+                 'snippet', 'reasons', 'sent_at', 'flagged_at'],
+                [str(senior_id), (subject or '')[:200],
+                 (from_email or '')[:120], (from_name or '')[:120],
+                 snippet, reasons_json,
+                 datetime.utcnow(), datetime.utcnow()])
+
+        # Push to family via notification_helpers if available
+        notified = 0
+        try:
+            from notification_helpers import notify_senior_family
+            notify_senior_family(
+                str(senior_id),
+                title='⚠️ Podezřelý e-mail',
+                body=f'{senior_id} obdržel email od {from_email}: {(subject or "")[:80]}',
+            )
+            notified = len(family)
+        except (ImportError, Exception) as e:
+            logger.debug(f"notify_senior_family fallback: {e}")
+
+        return {
+            'flag_id': flag_id,
+            'flagged': True,
+            'family_links': len(family),
+            'family_notified': notified,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_send_email_to_family(senior_id, subject, body, urgency='normal'):
+    """Send an email update to senior's family (via SMTP).
+
+    Use sparingly — for substantive updates, not spam. SMS via notify_family
+    is faster for urgent things.
+
+    urgency: 'low' / 'normal' / 'high' — affects subject prefix.
+    """
+    try:
+        # Resolve family email addresses from profile
+        family_emails = []
+        if _MEMORY_HELPERS:
+            with db_context() as db:
+                rows = db.execute("""
+                    SELECT family_user_id FROM senior_family_links
+                    WHERE senior_id = ? AND confirmed = TRUE LIMIT 5
+                """ if is_postgres() else """
+                    SELECT family_user_id FROM senior_family_links
+                    WHERE senior_id = ? AND confirmed = 1 LIMIT 5
+                """, (str(senior_id),)).fetchall()
+            for r in rows:
+                fp = _load_profile(str(_row_to_list(r)[0])) or {}
+                if fp.get('email'):
+                    family_emails.append(fp['email'])
+        if not family_emails:
+            return {"info": "No family email addresses on file"}
+
+        prefix = {'high': '🚨 NALÉHAVÉ — ', 'normal': '', 'low': 'ℹ️ '}.get(urgency, '')
+        full_subject = f'{prefix}{subject[:200]}'
+
+        # Use email_routes.send_email helper
+        try:
+            from email_routes import get_smtp_config
+            cfg = get_smtp_config()
+            if not cfg or not cfg.get('host'):
+                return {"error": "SMTP not configured (SMTP_HOST env missing)"}
+        except ImportError:
+            return {"error": "email_routes not available"}
+
+        sent = 0
+        import smtplib
+        from email.mime.text import MIMEText
+        try:
+            for to_email in family_emails:
+                msg = MIMEText(body[:5000], 'plain', 'utf-8')
+                msg['Subject'] = full_subject
+                msg['From'] = cfg.get('from_addr', cfg['user'])
+                msg['To'] = to_email
+
+                if cfg.get('use_ssl'):
+                    server = smtplib.SMTP_SSL(cfg['host'], cfg['port'], timeout=15)
+                else:
+                    server = smtplib.SMTP(cfg['host'], cfg['port'], timeout=15)
+                    server.starttls()
+                server.login(cfg['user'], cfg['password'])
+                server.send_message(msg)
+                server.quit()
+                sent += 1
+        except Exception as e:
+            return {"error": f"SMTP send failed: {str(e)[:200]}"}
+
+        return {
+            'sent': sent,
+            'recipients': [e[:6] + '***' for e in family_emails],
+            'urgency': urgency,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 # Tool dispatcher
 TOOL_HANDLERS = {
     'list_seniors': lambda args: _tool_list_seniors(),
@@ -3633,6 +4241,27 @@ TOOL_HANDLERS = {
     'stt_should_retry': lambda args: _tool_stt_should_retry(args['text'], args['confidence']),
     'stt_gather_params': lambda args: _tool_stt_gather_params(args['senior_id']),
     'stt_build_hints': lambda args: _tool_stt_build_hints(args['senior_id']),
+    # Calendar
+    'get_upcoming_events': lambda args: _tool_get_upcoming_events(
+        args['senior_id'], args.get('hours', 24)),
+    'find_free_slots': lambda args: _tool_find_free_slots(
+        args['senior_id'], args.get('days', 7),
+        args.get('start_hour', 8), args.get('end_hour', 18)),
+    'add_calendar_reminder': lambda args: _tool_add_calendar_reminder(
+        args['senior_id'], args['event_id']),
+    'parse_event_text': lambda args: _tool_parse_event_text(args['text']),
+    # Email
+    'get_unread_emails': lambda args: _tool_get_unread_emails(
+        args['senior_id'], args.get('limit', 20)),
+    'scan_email_risk': lambda args: _tool_scan_email_risk(
+        args['subject'], args['body'], args['from_email'],
+        args.get('from_name'), args.get('use_ai', False)),
+    'flag_email_to_family': lambda args: _tool_flag_email_to_family(
+        args['senior_id'], args['subject'], args['body_snippet'],
+        args['from_email'], args.get('from_name'), args.get('reasons')),
+    'send_email_to_family': lambda args: _tool_send_email_to_family(
+        args['senior_id'], args['subject'], args['body'],
+        args.get('urgency', 'normal')),
 }
 
 
@@ -3729,7 +4358,9 @@ WRITE_TOOLS = {'send_chat_message', 'send_push', 'notify_family', 'initiate_call
                'send_whatsapp', 'send_sms_to_senior',
                'ha_execute_action',
                'speak_to_senior',
-               'report_bug'}
+               'report_bug',
+               'add_calendar_reminder', 'flag_email_to_family',
+               'send_email_to_family'}
 
 
 # Per-senior event-trigger cooldown (anti-thrashing). Independent of
