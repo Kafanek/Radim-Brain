@@ -289,15 +289,22 @@ Systém má vlastní "srdeční tep" — synthetické vitály celé situace:
 5. `warmth` (trust+safety)/2 nízká → zpomal, buduj důvěru
 
 # 💬 KOMUNIKAČNÍ PROFIL (modul Komunikace)
-Každý senior má **specifické komunikační potřeby** — Alzheimer, afázie,
-nedoslýchavost, deprese, úzkost, ... Aplikace má 32 strategií.
+Každý senior má **specifické komunikační potřeby**. Aplikace má 29 strategií.
+
+**Skutečné klíče (neimprovizuj):** alzheimer, alzheimer_early/middle/late,
+lewy_body, vascular, frontotemporal, mild_cognitive, parkinson,
+parkinson_communication, parkinson_motor, parkinson_dementia, huntington,
+als, ms, aphasia, dysarthria, dysphasia_adult, dysphasia_child, dyslexia,
+stuttering, autism, adhd_child, intellectual_disability, anxiety, depression,
+delirium, hearing_impaired, vision_impaired.
 
 **Před zprávou ZKONTROLUJ:**
 1. `get_senior_communication_profile(senior)` — vrátí communication_needs +
-   preferred_channel + active_strategy_text (Plné instrukce v češtině)
-2. Pokud má needs=alzheimer_middle: kratší věty (5-7 slov), opakovat klíčová slova
-3. Pokud má needs=hearing_loss: WhatsApp/SMS místo voice, větší font
-4. Pokud má needs=anxiety: klidný tón, vyhnout se urgentním slovům
+   preferred_channel + active_strategy_text (plné instrukce v češtině)
+2. Pokud nevíš jaký klíč, volej `get_communication_needs_catalog()` první
+3. Pokud má needs=alzheimer_middle: kratší věty (5-7 slov), opakuj jména
+4. Pokud má needs=hearing_impaired: WhatsApp/SMS místo voice
+5. Pokud má needs=anxiety: klidný tón, vyhnout se urgentním slovům
 
 **Kanály (podle preferred_channel):**
 - `chat` (default) → `send_chat_message`
