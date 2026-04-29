@@ -1084,6 +1084,20 @@ try:
     except ImportError:
         logger.warning("⚠️ agent_loop not available — proactive agent disabled")
 
+    # Claude Autonomous Agent — Sonnet 4.5 + tool use, every 30 min
+    if os.getenv('ANTHROPIC_API_KEY') and os.getenv('CLAUDE_AGENT_ENABLED', '0') == '1':
+        try:
+            from claude_autonomous_agent import run_claude_agent
+            interval_min = int(os.getenv('CLAUDE_AGENT_INTERVAL_MIN', '30'))
+            scheduler.add_job(lambda: run_claude_agent(app, trigger='cron'),
+                              'interval', minutes=interval_min,
+                              id='claude_agent', max_instances=1, misfire_grace_time=300)
+            logger.info(f"✅ Claude autonomous agent registered (every {interval_min} min)")
+        except ImportError as e:
+            logger.warning(f"⚠️ Claude agent not available: {e}")
+    else:
+        logger.info("ℹ️ Claude agent disabled (set CLAUDE_AGENT_ENABLED=1 to enable)")
+
     # v10.40: SOS escalation engine — every 10 s walks unresolved events through stages
     try:
         from sos_escalator import run_escalator_tick, is_enabled as sos_enabled
@@ -1817,6 +1831,70 @@ def admin_agent_run():
     except Exception as e:
         logger.error(f"Agent run error: {e}")
         return jsonify({'error': str(e)}), 500
+
+# ─── Claude Autonomous Agent admin endpoints ────────────────────────
+@app.route('/api/admin/claude-agent/run', methods=['POST', 'OPTIONS'])
+def admin_claude_agent_run():
+    """Manually trigger one Claude autonomous agent cycle."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        from claude_autonomous_agent import run_claude_agent
+        body = request.get_json(silent=True) or {}
+        force = bool(body.get('force', False))
+        result = run_claude_agent(app, trigger='manual', force=force)
+        return jsonify({'success': True, 'result': result}), 200
+    except Exception as e:
+        logger.exception("Claude agent manual run failed")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/claude-agent/telemetry', methods=['GET', 'OPTIONS'])
+def admin_claude_agent_telemetry():
+    """Show recent runs + total cost today."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        from claude_autonomous_agent import _today_cost_usd, DAILY_BUDGET_USD
+        with db_context() as db:
+            rows = db.execute("""
+                SELECT id, run_at, input_tokens, output_tokens, cost_usd,
+                       tool_calls, seniors_evaluated, actions_taken,
+                       duration_seconds, summary, error
+                FROM claude_agent_telemetry
+                ORDER BY run_at DESC LIMIT 20
+            """).fetchall()
+            runs = []
+            for r in rows:
+                runs.append({
+                    'id': r[0],
+                    'run_at': str(r[1]) if r[1] else None,
+                    'input_tokens': r[2],
+                    'output_tokens': r[3],
+                    'cost_usd': float(r[4]) if r[4] is not None else 0,
+                    'tool_calls': r[5],
+                    'seniors_evaluated': r[6],
+                    'actions_taken': r[7],
+                    'duration_seconds': float(r[8]) if r[8] is not None else 0,
+                    'summary': (r[9] or '')[:300],
+                    'error': r[10],
+                })
+        spent_today = _today_cost_usd()
+        return jsonify({
+            'success': True,
+            'spent_today_usd': round(spent_today, 4),
+            'daily_budget_usd': DAILY_BUDGET_USD,
+            'budget_remaining_usd': round(DAILY_BUDGET_USD - spent_today, 4),
+            'recent_runs': runs,
+        }), 200
+    except Exception as e:
+        logger.exception("Claude agent telemetry failed")
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/admin/agent-bus/<user_id>', methods=['GET', 'OPTIONS'])
 def admin_agent_bus(user_id):
