@@ -7086,22 +7086,22 @@ def _tool_get_active_offers(senior_id, limit=10):
             rows = db.execute("""
                 SELECT o.id, o.title, o.target_theme, o.price_kc,
                        o.royalty_years, o.seats_total, o.seats_filled,
-                       b.name, b.type, b.trust_score, o.deadline
+                       b.name, b.type, b.trust_score, o.expires_at
                 FROM experience_offers o
                 LEFT JOIN experience_buyers b ON b.id = o.buyer_id
-                WHERE o.active = TRUE
+                WHERE o.status = 'active'
                   AND (o.seats_total IS NULL OR o.seats_filled < o.seats_total)
-                  AND (o.deadline IS NULL OR o.deadline > CURRENT_DATE)
+                  AND (o.expires_at IS NULL OR o.expires_at > NOW())
                 ORDER BY o.created_at DESC LIMIT ?
             """ if is_postgres() else """
                 SELECT o.id, o.title, o.target_theme, o.price_kc,
                        o.royalty_years, o.seats_total, o.seats_filled,
-                       b.name, b.type, b.trust_score, o.deadline
+                       b.name, b.type, b.trust_score, o.expires_at
                 FROM experience_offers o
                 LEFT JOIN experience_buyers b ON b.id = o.buyer_id
-                WHERE o.active = 1
+                WHERE o.status = 'active'
                   AND (o.seats_total IS NULL OR o.seats_filled < o.seats_total)
-                  AND (o.deadline IS NULL OR o.deadline > date('now'))
+                  AND (o.expires_at IS NULL OR o.expires_at > datetime('now'))
                 ORDER BY o.created_at DESC LIMIT ?
             """, (int(limit),)).fetchall()
 
@@ -7121,7 +7121,7 @@ def _tool_get_active_offers(senior_id, limit=10):
                     'buyer_name': v[7],
                     'buyer_type': v[8],
                     'buyer_trust_score': v[9],
-                    'deadline': str(v[10]) if v[10] else None,
+                    'expires_at': str(v[10]) if v[10] else None,
                     'relevant_to_senior': relevant,
                 })
             return {
