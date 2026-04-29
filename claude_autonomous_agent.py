@@ -237,20 +237,36 @@ def _tool_list_seniors():
     if not _DB:
         return {"error": "DB not available"}
     try:
+        from memory_helpers import db_load_profile
+        seniors = []
         with db_context() as db:
             rows = db.execute("""
-                SELECT u.id, COALESCE(p.full_name, u.email) AS name,
-                       p.age, u.last_active_at, u.email
-                FROM auth_users u
-                LEFT JOIN memory_profiles p ON p.user_id = u.id::text
-                WHERE u.role IN ('senior', 'user') AND u.deceased_at IS NULL
-                ORDER BY u.last_active_at DESC NULLS LAST
+                SELECT id, email, COALESCE(name, '') AS name,
+                       role, last_active, created_at
+                FROM auth_users
+                WHERE role IN ('senior', 'user', 'subscriber')
+                ORDER BY COALESCE(last_active, created_at) DESC
                 LIMIT 20
             """).fetchall()
-            return [dict(r) if hasattr(r, 'keys') else
-                    {'id': r[0], 'name': r[1], 'age': r[2],
-                     'last_active': str(r[3]) if r[3] else None, 'email': r[4]}
-                    for r in rows]
+            for r in rows:
+                uid = str(r[0])
+                name = r[2] or r[1] or f'user-{uid}'
+                last_active = str(r[4]) if r[4] else (str(r[5]) if r[5] else None)
+                # Pull age/preferred name from memory_profiles JSON
+                try:
+                    profile = db_load_profile(uid) or {}
+                    full_name = profile.get('full_name') or profile.get('name') or name
+                    age = profile.get('age')
+                except Exception:
+                    full_name, age = name, None
+                seniors.append({
+                    'id': uid,
+                    'name': full_name,
+                    'age': age,
+                    'last_active': last_active,
+                    'role': r[3],
+                })
+        return seniors
     except Exception as e:
         return {"error": str(e)[:200]}
 
@@ -400,55 +416,60 @@ def _tool_send_push(senior_id, title, body):
 
 def _tool_notify_family(senior_id, text, urgency):
     try:
-        # Find family contacts
-        with db_context() as db:
-            rows = db.execute("""
-                SELECT family_user_id FROM senior_family_links
-                WHERE senior_id = ? LIMIT 5
-            """, (str(senior_id),)).fetchall()
-        if not rows:
-            return {"info": "No family contacts linked"}
+        from memory_helpers import db_load_profile
+        # Try senior's emergency_contacts in their profile (most reliable source)
+        profile = db_load_profile(str(senior_id)) or {}
+        contacts = profile.get('emergency_contacts', []) or []
 
-        sent = 0
-        for r in rows:
-            family_id = r[0]
+        # Fallback: senior_family_links → family user's profile phone
+        if not contacts:
             try:
                 with db_context() as db:
-                    contact = db.execute("""
-                        SELECT phone FROM auth_users WHERE id = ? LIMIT 1
-                    """, (family_id,)).fetchone()
-                if contact and contact[0]:
-                    from twilio_voice_helpers import send_sms
-                    prefix = {"low": "ℹ️", "medium": "⚠️", "high": "🚨"}.get(urgency, "ℹ️")
-                    send_sms(contact[0], f"{prefix} Radim: {text[:280]}")
-                    sent += 1
-            except Exception as e:
-                logger.warning(f"notify_family contact {family_id}: {e}")
+                    rows = db.execute("""
+                        SELECT family_user_id FROM senior_family_links
+                        WHERE senior_id = ? LIMIT 5
+                    """, (str(senior_id),)).fetchall()
+                for r in rows:
+                    fp = db_load_profile(str(r[0])) or {}
+                    if fp.get('phone'):
+                        contacts.append({'phone': fp['phone'], 'name': fp.get('name', 'Family')})
+            except Exception:
+                pass
 
-        return {"family_sms_sent": sent, "urgency": urgency}
+        if not contacts:
+            return {"info": "No family contacts on file"}
+
+        sent = 0
+        from twilio_voice_helpers import send_sms
+        prefix = {"low": "ℹ️", "medium": "⚠️", "high": "🚨"}.get(urgency, "ℹ️")
+        for c in contacts[:5]:
+            phone = c.get('phone') if isinstance(c, dict) else None
+            if not phone:
+                continue
+            try:
+                send_sms(phone, f"{prefix} Radim: {text[:280]}")
+                sent += 1
+            except Exception as e:
+                logger.warning(f"notify_family sms to {phone[:6]}***: {e}")
+
+        return {"family_sms_sent": sent, "urgency": urgency, "contacts_found": len(contacts)}
     except Exception as e:
         return {"error": str(e)[:200]}
 
 
 def _tool_initiate_call(senior_id, reason):
     try:
-        with db_context() as db:
-            row = db.execute("""
-                SELECT phone, COALESCE(p.full_name, u.email)
-                FROM auth_users u
-                LEFT JOIN memory_profiles p ON p.user_id = u.id::text
-                WHERE u.id = ? LIMIT 1
-            """, (str(senior_id),)).fetchone()
-        if not row or not row[0]:
-            return {"error": "No phone on file"}
+        from twilio_voice_helpers import get_senior_phone, initiate_proactive_call
+        phone = get_senior_phone(str(senior_id))
+        if not phone:
+            return {"error": "No phone on file in memory_profiles"}
 
-        from twilio_voice_helpers import initiate_proactive_call
         greeting = f"Dobrý den, tady Radim. Chtěl jsem se ujistit, že jste v pořádku. {reason[:100]}"
-        result = initiate_proactive_call(row[0], greeting,
+        result = initiate_proactive_call(phone, greeting,
                                          user_id=str(senior_id),
                                          reason='claude_agent_crisis',
                                          voice_mode='CRISIS')
-        return {"call_initiated": bool(result), "to": row[1] or 'senior'}
+        return {"call_initiated": bool(result), "phone": phone[:6] + '***'}
     except Exception as e:
         return {"error": str(e)[:200]}
 
