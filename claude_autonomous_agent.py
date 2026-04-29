@@ -274,12 +274,15 @@ def _tool_list_seniors():
 
 
 def _tool_get_brain_state(senior_id):
+    """Read latest Ψ(t) state. PostgreSQL folds unquoted identifiers to
+    lowercase, so the actual column names are c/e/r/s, not C/E/R/S.
+    """
     if not _DB:
         return {"error": "DB not available"}
     try:
         with db_context() as db:
             row = db.execute("""
-                SELECT "C", "E", "R", "S", alpha, mode, coherence, source, created_at
+                SELECT c, e, r, s, alpha, mode, coherence, source, created_at
                 FROM brain_states WHERE user_id = ?
                 ORDER BY created_at DESC LIMIT 1
             """, (str(senior_id),)).fetchone()
@@ -287,7 +290,7 @@ def _tool_get_brain_state(senior_id):
                 return {"info": "No brain state recorded yet"}
             keys = ['C', 'E', 'R', 'S', 'alpha', 'mode', 'coherence', 'source', 'created_at']
             result = {k: (str(v) if isinstance(v, datetime) else v) for k, v in zip(keys, row)}
-            # Add interpretation hint
+            # Add interpretation hint based on T1=12 / T2=27 thresholds
             c_val = result.get('C')
             if isinstance(c_val, (int, float)):
                 if c_val < 12: result['_hint'] = 'HARMONY (C<12)'
