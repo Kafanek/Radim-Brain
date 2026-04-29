@@ -211,6 +211,19 @@ except ImportError:
                      'THINKING': 'thinking', 'SPEAKING': 'speaking'}
 
 # ─── STT (speech-to-text) — Azure Speech + Czech understanding ──────
+# ─── Odkaz (legacy/experience monetization + inheritance) ──────────
+try:
+    from legacy_engine import distill_legacy as _distill_legacy
+    _LEGACY_DISTILL = True
+except ImportError:
+    _LEGACY_DISTILL = False
+
+try:
+    from experience_routes import _calc_senior_net as _exp_calc_net
+    _EXP_HELPERS = True
+except ImportError:
+    _EXP_HELPERS = False
+
 # ─── Medical Team + Telemedicine ───────────────────────────────────
 try:
     from telemedicine_audit import (
@@ -559,6 +572,40 @@ by byla katastrofa. Ty jsi observer + diagnostician, ne kodér produkce.
 - Cooldown skips (správné chování)
 - "No data yet" pro nové seniory (cold start)
 - Insufficient_data circadian_profile (potřeba 14 dní)
+
+# 💎 ODKAZ (legacy + monetizace)
+**"Odkaz"** je dvouvrstvý systém:
+
+**1. Monetizace** — Senior licencuje životní zkušenosti (příběhy, dovednosti,
+moudrost) institucionálním partnerům (univerzity, archivy, výzkum).
+70% výtěžku seniorovi, 20% platforma, 5% Radim fond, 5% společenský fond.
+
+**2. Dědictví** — AI distiluje 5 kategorií z konverzací:
+- `life_principles` — životní zásady
+- `memories` — vzpomínky
+- `family_attitudes` — postoje k rodině
+- `practical_wisdom` — praktická moudrost
+- `fears_hopes` — obavy a naděje (citlivé, jen opt-in)
+
+**Použití:**
+- `get_senior_experiences(senior)` — co už senior nasdílel
+- `get_active_offers(senior)` — partner nabídky pro jeho témata
+- `get_earnings_summary(senior)` — kolik vydělal
+- `get_legacy_status(senior)` — kolik distilovaných záznamů, kdo dědí
+- `get_inheritance_settings(senior)` — masked contact, royalty years
+
+**Akce (POZOR — citlivá oblast):**
+- `record_experience_session` — vytvoří DRAFT (ne publikuje)
+- `trigger_legacy_distillation(categories?)` — spustí AI curation,
+  ale senior musí approve KAŽDÝ záznam před doručením rodině
+
+**Důležité:**
+- **NIKDY nemonetizuj autonomně** — vždy senior musí podepsat smlouvu sám
+- Cooling-off 72h chrání seniora před manipulací
+- Cognitive brake: pokud mood drop >25% nebo interaction decline >40%
+  → contracts vyžadují family co-sign
+- Inheritance contact je MASKOVANÝ v get_inheritance_settings
+- Nic z odkazu se nepublikuje bez explicitního souhlasu seniora
 
 # 🩺 ZDRAVOTNÍ TÝM + TELEMEDICÍNA
 Senior má **medical team** s 6 rolemi: koordinátor (PCP), kardiolog,
@@ -2354,6 +2401,105 @@ TOOLS = [
                 "severity": {"type": "string", "enum": ["alert","crisis"]}
             },
             "required": ["senior_id", "reason"]
+        }
+    },
+    # ── ODKAZ (legacy/experience) TOOLS ─────────────────────────
+    {
+        "name": "get_senior_experiences",
+        "description": ("Seniorovy příspěvky (life stories, skills, wisdom). "
+                        "Type: story/skill/wisdom/witness/data. Theme: family/"
+                        "historical/skill/love/place. Privacy: draft/family/"
+                        "research/public."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "limit": {"type": "integer", "default": 10, "minimum": 1, "maximum": 50}
+            },
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "get_active_offers",
+        "description": ("Aktivní partnerské nabídky (univerzity, archivy, výzkum) "
+                        "matching senior's themes. Vrátí title, buyer, price_kc, "
+                        "royalty_years, relevant_to_senior flag."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "limit": {"type": "integer", "default": 10, "minimum": 1, "maximum": 30}
+            },
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "get_earnings_summary",
+        "description": ("Přehled výdělků seniora: this_month_kc, all_time_kc, "
+                        "active_contracts, monthly_breakdown za 12 měsíců, "
+                        "bank_info status."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "get_legacy_status",
+        "description": ("Stav digitálního odkazu — kolik AI distilovaných záznamů "
+                        "v 5 kategoriích (life_principles, memories, family_attitudes, "
+                        "practical_wisdom, fears_hopes), kdy naposledy curated, "
+                        "kdo je dědicem."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "trigger_legacy_distillation",
+        "description": ("Spusť AI distilaci legacy z konverzační historie. "
+                        "Kategorie: life_principles, memories, family_attitudes, "
+                        "practical_wisdom, fears_hopes. None = všechny 5. "
+                        "Senior musí approve před doručením rodině."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "categories": {"type": "array", "items": {"type": "string"}}
+            },
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "get_inheritance_settings",
+        "description": ("Konfigurace dědictví: heir, royalty_years po smrti, "
+                        "unlock family archive, public memorial. Contact je MASKOVANÝ "
+                        "(privacy)."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "record_experience_session",
+        "description": ("Vytvoř nový contribution v DRAFT stavu. Senior musí "
+                        "explicitně schválit privacy change před publikací. "
+                        "Type: story/skill/wisdom/witness/data. Theme: family/"
+                        "historical/skill/love/place."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "topic": {"type": "string", "maxLength": 200},
+                "transcript_summary": {"type": "string", "maxLength": 10000},
+                "contribution_type": {"type": "string",
+                    "enum": ["story","skill","wisdom","witness","data"], "default": "story"},
+                "theme": {"type": "string",
+                    "enum": ["family","historical","skill","love","place"], "default": "family"}
+            },
+            "required": ["senior_id", "topic", "transcript_summary"]
         }
     },
     # ── PHILOSOPHY TOOL ─────────────────────────────────────────
@@ -6873,6 +7019,402 @@ def _tool_emergency_call_doctor(senior_id, reason, severity='crisis'):
         return {"error": str(e)[:200]}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# ODKAZ TOOLS — legacy monetization + inheritance
+# ═══════════════════════════════════════════════════════════════════════
+
+def _tool_get_senior_experiences(senior_id, limit=10):
+    """List senior's contributed experiences (life stories, skills, wisdom).
+
+    Each experience has type (story/skill/wisdom/witness/data), theme
+    (family/historical/skill/love/place), privacy level, word count.
+    Used to track what senior has shared and what's eligible for monetization.
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    try:
+        with db_context() as db:
+            rows = db.execute("""
+                SELECT id, type, title, theme, depth, privacy, word_count,
+                       audio_url, duration_sec, created_at
+                FROM experience_contributions
+                WHERE user_id = ?
+                  AND (deleted_at IS NULL)
+                ORDER BY created_at DESC LIMIT ?
+            """, (str(senior_id), int(limit))).fetchall()
+
+            experiences = []
+            for r in rows:
+                v = _row_to_list(r)
+                experiences.append({
+                    'id': v[0],
+                    'type': v[1],
+                    'title': (v[2] or '')[:120],
+                    'theme': v[3],
+                    'depth': v[4],
+                    'privacy': v[5],
+                    'word_count': v[6],
+                    'has_audio': bool(v[7]),
+                    'duration_sec': v[8],
+                    'created_at': str(v[9]) if v[9] else None,
+                })
+            return {
+                'count': len(experiences),
+                'experiences': experiences,
+            }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_active_offers(senior_id, limit=10):
+    """Live partner offers matching senior's contribution themes.
+
+    Partners (universities, archives, research labs) post buy offers.
+    Returns: title, buyer name, price_kc, royalty_years, theme, seats remaining.
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    try:
+        with db_context() as db:
+            # Pull senior's themes first (filter offers by relevance)
+            theme_rows = db.execute("""
+                SELECT DISTINCT theme FROM experience_contributions
+                WHERE user_id = ? AND deleted_at IS NULL
+            """, (str(senior_id),)).fetchall()
+            senior_themes = [_row_to_list(r)[0] for r in theme_rows if r]
+
+            # Active offers (seats remaining)
+            rows = db.execute("""
+                SELECT o.id, o.title, o.target_theme, o.price_kc,
+                       o.royalty_years, o.seats_total, o.seats_filled,
+                       b.name, b.type, b.trust_score, o.deadline
+                FROM experience_offers o
+                LEFT JOIN experience_buyers b ON b.id = o.buyer_id
+                WHERE o.active = TRUE
+                  AND (o.seats_total IS NULL OR o.seats_filled < o.seats_total)
+                  AND (o.deadline IS NULL OR o.deadline > CURRENT_DATE)
+                ORDER BY o.created_at DESC LIMIT ?
+            """ if is_postgres() else """
+                SELECT o.id, o.title, o.target_theme, o.price_kc,
+                       o.royalty_years, o.seats_total, o.seats_filled,
+                       b.name, b.type, b.trust_score, o.deadline
+                FROM experience_offers o
+                LEFT JOIN experience_buyers b ON b.id = o.buyer_id
+                WHERE o.active = 1
+                  AND (o.seats_total IS NULL OR o.seats_filled < o.seats_total)
+                  AND (o.deadline IS NULL OR o.deadline > date('now'))
+                ORDER BY o.created_at DESC LIMIT ?
+            """, (int(limit),)).fetchall()
+
+            offers = []
+            for r in rows:
+                v = _row_to_list(r)
+                theme = v[2]
+                # Mark relevance to senior
+                relevant = (theme is None) or (theme in senior_themes) or not senior_themes
+                offers.append({
+                    'id': v[0],
+                    'title': v[1],
+                    'theme': theme,
+                    'price_kc': v[3],
+                    'royalty_years': v[4],
+                    'seats_remaining': (v[5] - v[6]) if v[5] and v[6] is not None else None,
+                    'buyer_name': v[7],
+                    'buyer_type': v[8],
+                    'buyer_trust_score': v[9],
+                    'deadline': str(v[10]) if v[10] else None,
+                    'relevant_to_senior': relevant,
+                })
+            return {
+                'count': len(offers),
+                'senior_themes': senior_themes,
+                'offers': offers,
+            }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_earnings_summary(senior_id):
+    """Senior's earnings from experience licensing.
+
+    Returns:
+    - this_month_kc: revenue this month
+    - all_time_kc: total earned
+    - active_contracts: count of signed contracts not yet expired
+    - monthly_breakdown: last 12 months
+    - has_bank_info: whether IBAN is configured
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    try:
+        with db_context() as db:
+            # Total earnings
+            row = db.execute("""
+                SELECT COALESCE(SUM(amount_kc), 0)
+                FROM experience_earnings WHERE user_id = ?
+            """, (str(senior_id),)).fetchone()
+            all_time = float(_row_to_list(row)[0] or 0) if row else 0
+
+            # This month
+            today = datetime.now()
+            row = db.execute("""
+                SELECT COALESCE(SUM(amount_kc), 0)
+                FROM experience_earnings
+                WHERE user_id = ? AND EXTRACT(YEAR FROM paid_at) = ?
+                  AND EXTRACT(MONTH FROM paid_at) = ?
+            """ if is_postgres() else """
+                SELECT COALESCE(SUM(amount_kc), 0)
+                FROM experience_earnings
+                WHERE user_id = ?
+                  AND strftime('%Y', paid_at) = ? AND strftime('%m', paid_at) = ?
+            """, (str(senior_id), str(today.year), f'{today.month:02d}')).fetchone()
+            this_month = float(_row_to_list(row)[0] or 0) if row else 0
+
+            # Active contracts
+            row = db.execute("""
+                SELECT COUNT(*) FROM experience_contracts
+                WHERE user_id = ? AND signed_at IS NOT NULL
+                  AND revoked_at IS NULL
+            """, (str(senior_id),)).fetchone()
+            active_contracts = _row_to_list(row)[0] if row else 0
+
+            # Last 12 months breakdown
+            rows = db.execute("""
+                SELECT TO_CHAR(paid_at, 'YYYY-MM') AS month,
+                       COALESCE(SUM(amount_kc), 0) AS amount
+                FROM experience_earnings
+                WHERE user_id = ? AND paid_at > NOW() - INTERVAL '12 months'
+                GROUP BY TO_CHAR(paid_at, 'YYYY-MM')
+                ORDER BY month DESC
+            """ if is_postgres() else """
+                SELECT strftime('%Y-%m', paid_at) AS month,
+                       COALESCE(SUM(amount_kc), 0) AS amount
+                FROM experience_earnings
+                WHERE user_id = ? AND paid_at > datetime('now', '-12 months')
+                GROUP BY strftime('%Y-%m', paid_at)
+                ORDER BY month DESC
+            """, (str(senior_id),)).fetchall()
+            monthly = []
+            for r in rows:
+                v = _row_to_list(r)
+                monthly.append({'month': v[0], 'amount_kc': float(v[1] or 0)})
+
+            # Bank info status
+            row = db.execute("""
+                SELECT iban_last4, verified FROM experience_bank_info
+                WHERE user_id = ?
+            """, (str(senior_id),)).fetchone()
+            bank = None
+            if row:
+                v = _row_to_list(row)
+                bank = {'iban_last4': v[0], 'verified': bool(v[1])}
+
+            return {
+                'all_time_kc': round(all_time, 2),
+                'this_month_kc': round(this_month, 2),
+                'active_contracts': active_contracts,
+                'monthly_breakdown_12m': monthly,
+                'bank_info': bank,
+                'has_bank_info': bool(bank and bank.get('iban_last4')),
+            }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_legacy_status(senior_id):
+    """Senior's digital legacy state — what's been distilled for family.
+
+    Returns approved + draft entries by category, last curated, recipients.
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    try:
+        with db_context() as db:
+            # Distilled entries
+            rows = db.execute("""
+                SELECT category, status, COUNT(*)
+                FROM legacy_entries
+                WHERE user_id = ?
+                GROUP BY category, status
+            """, (str(senior_id),)).fetchall()
+
+            by_category = {}
+            for r in rows:
+                v = _row_to_list(r)
+                cat = v[0]
+                status = v[1]
+                count = v[2]
+                if cat not in by_category:
+                    by_category[cat] = {}
+                by_category[cat][status] = count
+
+            # Last distillation timestamp
+            row = db.execute("""
+                SELECT MAX(created_at) FROM legacy_entries WHERE user_id = ?
+            """, (str(senior_id),)).fetchone()
+            last_curated = str(_row_to_list(row)[0]) if row and _row_to_list(row)[0] else None
+
+            # Recipients
+            row = db.execute("""
+                SELECT heir_name, heir_relation, heir_contact,
+                       royalty_years_after_death, unlock_family_archive,
+                       public_memorial
+                FROM experience_inheritance WHERE user_id = ?
+            """, (str(senior_id),)).fetchone()
+            recipient = None
+            if row:
+                v = _row_to_list(row)
+                recipient = {
+                    'heir_name': v[0],
+                    'heir_relation': v[1],
+                    'heir_contact': (v[2] or '')[:6] + '***' if v[2] else None,
+                    'royalty_years': v[3],
+                    'unlock_family_archive': bool(v[4]),
+                    'public_memorial': bool(v[5]),
+                }
+
+            return {
+                'by_category': by_category,
+                'total_entries': sum(sum(s.values()) for s in by_category.values()),
+                'last_curated_at': last_curated,
+                'recipient_configured': bool(recipient),
+                'recipient': recipient,
+                '_categories': ['life_principles', 'memories', 'family_attitudes',
+                               'practical_wisdom', 'fears_hopes'],
+            }
+    except Exception as e:
+        # Table may not exist yet
+        if 'does not exist' in str(e) or 'no such table' in str(e):
+            return {"info": "Senior has no legacy entries yet"}
+        return {"error": str(e)[:200]}
+
+
+def _tool_trigger_legacy_distillation(senior_id, categories=None):
+    """Run AI legacy distillation for senior. Categories: life_principles,
+    memories, family_attitudes, practical_wisdom, fears_hopes.
+
+    If None, runs all 5. Each category takes 5-10s with Gemini.
+    Cooling-off: senior must approve before family delivery.
+    """
+    if not _LEGACY_DISTILL:
+        return {"error": "legacy_engine not available"}
+    valid_cats = {'life_principles', 'memories', 'family_attitudes',
+                  'practical_wisdom', 'fears_hopes'}
+    if categories:
+        if isinstance(categories, str):
+            categories = [c.strip() for c in categories.split(',')]
+        invalid = [c for c in categories if c not in valid_cats]
+        if invalid:
+            return {"error": f"invalid categories: {invalid}, valid={sorted(valid_cats)}"}
+
+    try:
+        result = _distill_legacy(
+            user_id=str(senior_id),
+            categories=categories,
+            history_limit=200,
+        )
+        if not result:
+            return {"info": "No conversation history sufficient for distillation"}
+        return {
+            'distilled': True,
+            'categories_processed': list(result.keys()) if isinstance(result, dict) else [],
+            'entries_generated': sum(len(v) if isinstance(v, list) else 1
+                                     for v in (result.values() if isinstance(result, dict) else [])),
+            '_hint': 'Senior must approve drafts before family delivery',
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_inheritance_settings(senior_id):
+    """Senior's inheritance configuration: who inherits what after death.
+
+    Includes: heir details, royalty years post-death, family archive
+    unlock setting, public memorial preference.
+
+    Returns masked contact (privacy) — do NOT expose full contact in chat.
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    try:
+        with db_context() as db:
+            row = db.execute("""
+                SELECT heir_name, heir_relation, heir_contact,
+                       royalty_years_after_death, unlock_family_archive,
+                       public_memorial, updated_at
+                FROM experience_inheritance WHERE user_id = ?
+            """, (str(senior_id),)).fetchone()
+            if not row:
+                return {"info": "No inheritance configured"}
+            v = _row_to_list(row)
+            return {
+                'configured': True,
+                'heir_name': v[0],
+                'heir_relation': v[1],
+                'heir_contact_masked': (v[2] or '')[:6] + '***' if v[2] else None,
+                'royalty_years_after_death': v[3],
+                'unlock_family_archive': bool(v[4]),
+                'public_memorial': bool(v[5]),
+                'updated_at': str(v[6]) if v[6] else None,
+            }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_record_experience_session(senior_id, topic, transcript_summary,
+                                     contribution_type='story', theme='family'):
+    """Record a new experience contribution in DRAFT state.
+
+    Senior must explicitly approve before publication. This tool only
+    creates the draft — it never makes it eligible for sale.
+
+    contribution_type: story / skill / wisdom / witness / data
+    theme: family / historical / skill / love / place
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    if not transcript_summary or not transcript_summary.strip():
+        return {"error": "transcript required"}
+    valid_types = {'story', 'skill', 'wisdom', 'witness', 'data'}
+    valid_themes = {'family', 'historical', 'skill', 'love', 'place'}
+    if contribution_type not in valid_types:
+        return {"error": f"contribution_type must be {sorted(valid_types)}"}
+    if theme not in valid_themes:
+        return {"error": f"theme must be {sorted(valid_themes)}"}
+    try:
+        word_count = len(transcript_summary.split())
+        # Depth based on word count
+        if word_count < 500:
+            depth = 'short'
+        elif word_count < 1500:
+            depth = 'medium'
+        else:
+            depth = 'long'
+
+        with db_context(commit=True) as db:
+            from database import db_insert
+            cid = db_insert(db, 'experience_contributions',
+                ['user_id', 'type', 'title', 'theme', 'depth',
+                 'transcript', 'privacy', 'word_count'],
+                [str(senior_id), contribution_type, topic[:200],
+                 theme, depth, transcript_summary[:10000],
+                 'draft', word_count])
+
+        return {
+            'created': True,
+            'contribution_id': cid,
+            'type': contribution_type,
+            'theme': theme,
+            'depth': depth,
+            'word_count': word_count,
+            'privacy': 'draft',
+            '_hint': ('Draft only — senior must explicitly change privacy '
+                      'to family/research/public before any sharing.'),
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 # Tool dispatcher
 TOOL_HANDLERS = {
     'list_seniors': lambda args: _tool_list_seniors(),
@@ -7075,6 +7617,19 @@ TOOL_HANDLERS = {
         args['senior_id'], args.get('days', 30)),
     'emergency_call_doctor': lambda args: _tool_emergency_call_doctor(
         args['senior_id'], args['reason'], args.get('severity', 'crisis')),
+    # Odkaz / Legacy / Experience
+    'get_senior_experiences': lambda args: _tool_get_senior_experiences(
+        args['senior_id'], args.get('limit', 10)),
+    'get_active_offers': lambda args: _tool_get_active_offers(
+        args['senior_id'], args.get('limit', 10)),
+    'get_earnings_summary': lambda args: _tool_get_earnings_summary(args['senior_id']),
+    'get_legacy_status': lambda args: _tool_get_legacy_status(args['senior_id']),
+    'trigger_legacy_distillation': lambda args: _tool_trigger_legacy_distillation(
+        args['senior_id'], args.get('categories')),
+    'get_inheritance_settings': lambda args: _tool_get_inheritance_settings(args['senior_id']),
+    'record_experience_session': lambda args: _tool_record_experience_session(
+        args['senior_id'], args['topic'], args['transcript_summary'],
+        args.get('contribution_type', 'story'), args.get('theme', 'family')),
 }
 
 
@@ -7180,7 +7735,8 @@ WRITE_TOOLS = {'send_chat_message', 'send_push', 'notify_family', 'initiate_call
                'play_music_for_senior', 'pause_music_for_senior',
                'start_exercise_for_senior', 'start_quiz_for_senior',
                'create_medical_alert', 'request_consultation',
-               'emergency_call_doctor'}
+               'emergency_call_doctor',
+               'trigger_legacy_distillation', 'record_experience_session'}
 
 
 # Per-senior event-trigger cooldown (anti-thrashing). Independent of
