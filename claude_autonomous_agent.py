@@ -273,6 +273,16 @@ def _tool_list_seniors():
         return {"error": str(e)[:200]}
 
 
+def _row_to_list(row):
+    """Convert a DB row (tuple OR RealDictRow) to a positional list.
+    PG with RealDictCursor returns dict-like rows where iter() yields keys —
+    we need values. Tuples work as-is.
+    """
+    if hasattr(row, 'values') and callable(row.values):
+        return list(row.values())
+    return list(row)
+
+
 def _tool_get_brain_state(senior_id):
     """Read latest Ψ(t) state. PostgreSQL folds unquoted identifiers to
     lowercase, so the actual column names are c/e/r/s, not C/E/R/S.
@@ -288,8 +298,9 @@ def _tool_get_brain_state(senior_id):
             """, (str(senior_id),)).fetchone()
             if not row:
                 return {"info": "No brain state recorded yet"}
+            vals = _row_to_list(row)
             keys = ['C', 'E', 'R', 'S', 'alpha', 'mode', 'coherence', 'source', 'created_at']
-            result = {k: (str(v) if isinstance(v, datetime) else v) for k, v in zip(keys, row)}
+            result = {k: (str(v) if isinstance(v, datetime) else v) for k, v in zip(keys, vals)}
             # Add interpretation hint based on T1=12 / T2=27 thresholds
             c_val = result.get('C')
             if isinstance(c_val, (int, float)):
