@@ -101,6 +101,34 @@ try:
 except ImportError:
     _MEMORY_HELPERS = False
 
+# ─── TTS subsystem (voice synthesis + voice memory) ─────────────────
+try:
+    from voice_filter import build_radim_ssml as _build_ssml
+    from voice_filter import VOICE_PROFILES as _VOICE_PROFILES
+    _TTS_SSML = True
+except ImportError:
+    _TTS_SSML = False
+    _VOICE_PROFILES = {}
+
+try:
+    from twilio_voice_helpers import generate_azure_tts as _gen_azure_tts
+    from twilio_voice_helpers import azure_tts_available as _azure_available
+    _TTS_AZURE = True
+except ImportError:
+    _TTS_AZURE = False
+
+try:
+    from voice_learning import (
+        get_voice_prefs as _get_voice_prefs,
+        save_voice_prefs as _save_voice_prefs,
+        record_voice_feedback as _record_voice_feedback,
+        DEFAULT_PREFS as _DEFAULT_VOICE_PREFS,
+    )
+    _TTS_LEARNING = True
+except ImportError:
+    _TTS_LEARNING = False
+    _DEFAULT_VOICE_PREFS = {}
+
 # ─── Config ────────────────────────────────────────────────────────────
 
 CLAUDE_MODEL = os.getenv('CLAUDE_AGENT_MODEL', 'claude-sonnet-4-5-20250929')
@@ -157,12 +185,35 @@ Tvoje rozhodování je **kvantifikovatelné** přes Ψ(t) stav každého seniora
 5. `get_full_profile` — KDO to je (jméno, příběh, koníčky, preference)
 6. Pokud chceš poslat zprávu/akci:
    - `get_circadian_profile` — neposílej v quiet_hours
-   - `get_speech_adaptation` — jaké tempo/pauzy seniorovi vyhovuje
-7. **Personalizuj** zprávu podle profilu (oslovení jménem, odkaz na koníček)
-8. Aplikuj hodnoty (empatie/trpělivost/srozumitelnost) na text
-9. `create_observation` — ulož krátkodobou paměť
-10. Pokud zjistíš novou pravdu o seniorovi (nálada, zájem, styl) — `update_learning`
-11. Pokud je to závažná změna preference → `update_profile`
+   - `get_voice_memory` — co seniorovi funguje hlasem (rate, pauzy, melody)
+   - `get_speech_adaptation` — jaké tempo/pauzy mu nyní vyhovuje (Ψ(t))
+7. Pokud potřebuješ zprávu řečí (CRISIS hovor, neslyší dobře):
+   - `compose_ssml` (cheap) — ZKONTROLUJ, jak bude znít, než utratíš za audio
+   - `generate_voice_audio` (Azure $$) — vytvoř MP3, max 5×/run
+8. **Personalizuj** zprávu podle profilu (oslovení jménem, odkaz na koníček)
+9. Aplikuj hodnoty (empatie/trpělivost/srozumitelnost) na text
+10. Pošli zprávu (chat/push/voice/call dle situace)
+11. `record_voice_feedback` po předchozí TTS — pokud jsi viděl reakci (positive/no_response/barge_in)
+12. `create_observation` — ulož krátkodobou paměť
+13. Pokud zjistíš novou pravdu o seniorovi → `update_learning`
+14. Pokud závažná změna preference → `update_profile`
+
+# 🎙️ HLASOVÁ PRAVIDLA (TTS)
+- **Mode-matching:** Ψ(t).mode VŽDY určuje TTS mode:
+  - HARMONY (C<12) → friendly, rate-5%, pauzy 500ms
+  - ALERT (12≤C<27) → empathetic, rate-15%, pauzy 800ms
+  - CRISIS (C≥27) → empathetic@max, rate-20%, pauzy 1200ms
+  - POETRY/NARRATION → vyprávění příběhů
+  - SINGING → jen pokud `voice_memory.response_to_singing > 0.6`
+- **Voice memory respektuj:**
+  - `barge_ins > 3` → senior chce rychleji, NESCHVÁLNĚ pomalý hlas
+  - `no_responses > 5` → senior neslyší / neumí — zkus push místo voice
+  - `negative > positive` → změň mode (HARMONY → POETRY?)
+  - `maturity = 'mature'` → drž se learned prefs, ne defaultů
+- **Cost discipline:**
+  - Chat zpráva (text) = ZDARMA → použij vždy, když stačí
+  - Voice generation = $16/1M chars = $0.004 za 250-char zprávu
+  - Hovor přes Twilio = drahé minuty + Azure → JEN v CRISIS
 
 # ⚖️ ZÁSADY ROZHODOVÁNÍ
 1. **Předpověď > stav** — anticipation je důležitější než aktuální C. Klesající trend z C=15 je bezpečnější než stoupající z C=10.
@@ -171,24 +222,19 @@ Tvoje rozhodování je **kvantifikovatelné** přes Ψ(t) stav každého seniora
 4. **Eskalace**: chat → push → SMS rodině → telefon. Telefon jen v CRISIS + vážná hrozba.
 5. **Klid je akce** — pokud je vše OK, jen `create_observation('INFO', ...)` a skonči.
 
-# 🛠 NÁSTROJE
-**🔍 Pozorování (read-only):**
-- `list_seniors`, `get_brain_state`, `get_vitals`, `get_iot_status`
-- `get_recent_chat`, `get_observations` (krátkodobá paměť)
-- `get_full_profile`, `get_learning_state` (kdo to je, dlouhodobé vzorce)
-- `get_anticipation_forecast` (math engine předpověď)
-- `get_circadian_profile`, `get_circadian_triggers`, `get_behavioral_profile`
-- `get_speech_adaptation` (rate/pitch/pause pro tohoto seniora)
-- `compute_brain_state(C, alpha)` (simulace 'co kdyby?')
-- `compute_empathy(voice, hrv, tempo)` (kvantifikace empatie)
-- `get_radim_philosophy(focus?)` (kontext hodnot)
+# 🛠 NÁSTROJE (23 celkem)
+**🔍 Pozorování:** list_seniors, get_brain_state, get_vitals, get_iot_status,
+   get_recent_chat, get_observations, get_full_profile, get_learning_state,
+   get_anticipation_forecast, get_circadian_profile, get_circadian_triggers,
+   get_behavioral_profile, get_speech_adaptation, get_radim_philosophy,
+   compute_brain_state, compute_empathy
 
-**✏️ Akce (write):**
-- `send_chat_message` — chat (cooldown 15 min)
-- `send_push`, `notify_family(urgency)`, `initiate_call(reason)` — eskalace
-- `update_learning(key, value)` — zapiš poznatek do dlouhodobé paměti
-- `update_profile(key, value)` — aktualizuj profil (jen whitelisted klíče)
-- `create_observation(severity, message)` — krátkodobá paměť, VŽDY na konci
+**🎙️ Hlas (TTS):** get_voice_modes_catalog, get_voice_memory, compose_ssml,
+   generate_voice_audio (Azure $$, 5×/run cap), record_voice_feedback
+
+**✏️ Akce:** send_chat_message (cooldown), send_push, notify_family,
+   initiate_call (jen CRISIS), update_learning, update_profile,
+   create_observation (VŽDY na konci)
 
 # COST CAP
 Max 20 tool calls per run. Pokud dojdou, ukonči s observation. Nemarni iterace.
@@ -466,6 +512,86 @@ TOOLS = [
                 "value": {"description": "Hodnota"}
             },
             "required": ["senior_id", "key", "value"]
+        }
+    },
+    # ── TTS TOOLS ────────────────────────────────────────────────
+    {
+        "name": "get_voice_modes_catalog",
+        "description": ("Katalog všech hlasových módů (HARMONY/ALERT/CRISIS/POETRY/"
+                        "NARRATION/SINGING) s parametry (rate, pitch, pause, "
+                        "style). Použij když přemýšlíš, který mode použít."),
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "get_voice_memory",
+        "description": ("Voice paměť tohoto seniora: naučené preference (preferred_rate, "
+                        "preferred_pause, preferred_energy), interaction stats "
+                        "(positive/negative feedback, barge_ins, no_responses), "
+                        "voice_pref z profilu, learning maturity (cold-start/learning/"
+                        "reliable/mature). Volej PŘED compose_ssml — chceš vědět, "
+                        "co seniorovi funguje."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "compose_ssml",
+        "description": ("Sestav SSML pro daný text — bez generování audia (no Azure $$). "
+                        "Použij to, když chceš VIDĚT, jak bude zpráva znít před skutečným "
+                        "odesláním. Auto-vybere mode z aktuálního Ψ(t) seniora pokud "
+                        "neuvedeš. Vrátí SSML preview + voice_params."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "text": {"type": "string", "description": "Text v češtině, max 500 znaků"},
+                "mode": {"type": "string", "enum":
+                         ["HARMONY", "ALERT", "CRISIS", "POETRY", "NARRATION", "SINGING"],
+                         "description": "Volitelně override automatického mode"}
+            },
+            "required": ["senior_id", "text"]
+        }
+    },
+    {
+        "name": "generate_voice_audio",
+        "description": ("VYGENERUJ skutečné audio přes Azure TTS Neural ($16/1M znaků). "
+                        "Limit 5 generací per run. Použij JEN když je voice nutný — "
+                        "CRISIS welfare check, hlasové preference seniora, vizuálně "
+                        "postižený. Vrátí base64 preview + metadata. Pro běžný chat "
+                        "použij send_chat_message (bez audia, zdarma)."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "text": {"type": "string", "description": "Max 800 znaků"},
+                "mode": {"type": "string",
+                         "enum": ["HARMONY", "ALERT", "CRISIS", "POETRY", "NARRATION", "SINGING"]}
+            },
+            "required": ["senior_id", "text"]
+        }
+    },
+    {
+        "name": "record_voice_feedback",
+        "description": ("Zaznamenej reakci seniora na předchozí TTS — adaptuje "
+                        "voice preferences přes φ-blend learning (61.8% staré + "
+                        "38.2% nové). Events: response_fast (<5s), response_slow "
+                        "(>10s), no_response, barge_in, positive, negative, "
+                        "melody_positive/negative, singing_positive/negative."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "event_type": {"type": "string",
+                               "enum": ["response_fast", "response_slow", "no_response",
+                                        "barge_in", "positive", "negative",
+                                        "melody_positive", "melody_negative",
+                                        "singing_positive", "singing_negative"]},
+                "voice_mode": {"type": "string",
+                               "description": "Mode použitý při dané zprávě (audit)"}
+            },
+            "required": ["senior_id", "event_type"]
         }
     },
     # ── PHILOSOPHY TOOL ─────────────────────────────────────────
@@ -1040,6 +1166,263 @@ def _tool_update_profile(senior_id, key, value):
         return {"error": str(e)[:200]}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# TTS TOOLS — voice synthesis + voice memory + learning loop
+# ═══════════════════════════════════════════════════════════════════════
+
+# Cap on Azure TTS audio generation per run — prevents runaway cost.
+# Azure TTS Neural ≈ $16 per 1M characters → ~250 chars × 5 calls/run = ~$0.02/run.
+MAX_TTS_GENERATIONS_PER_RUN = 5
+_tts_generation_counter = {'count': 0}  # reset per run via run_claude_agent
+
+
+def _tool_get_voice_modes_catalog():
+    """Show all available voice modes (HARMONY/ALERT/CRISIS/POETRY/NARRATION/...)
+    with their SSML parameters. Use this when picking a mode for a message."""
+    if not _TTS_SSML:
+        return {"error": "voice_filter not available"}
+    catalog = {}
+    for mode, profile in _VOICE_PROFILES.items():
+        catalog[mode] = {
+            'style': profile.get('style'),
+            'styledegree': profile.get('styledegree'),
+            'rate': profile.get('rate'),
+            'pitch': profile.get('pitch'),
+            'volume': profile.get('volume'),
+            'pause_ms': profile.get('pause_ms'),
+            'emphasis': profile.get('emphasis'),
+        }
+    return {
+        'modes': catalog,
+        'voice': 'cs-CZ-AntoninNeural',
+        '_hint': ('HARMONY=běžná konverzace; ALERT=zvýšená empatie '
+                  '(klesající rate, delší pauzy); CRISIS=maximální klid '
+                  '(rate-20%, 1200ms pauzy); POETRY=recitace; '
+                  'NARRATION=vyprávění příběhů.'),
+    }
+
+
+def _tool_get_voice_memory(senior_id):
+    """Read everything Radim knows about THIS senior's voice preferences.
+
+    Returns:
+    - Current voice_prefs (rate, energy, pause learned over time)
+    - Interaction stats (positive/negative feedback, barge-ins, no_responses)
+    - Profile-level voice_pref (override voice/quiet_hours)
+    - Learning maturity (more interactions = more reliable prefs)
+    """
+    if not _TTS_LEARNING:
+        return {"error": "voice_learning not available"}
+    try:
+        prefs = _get_voice_prefs(str(senior_id))
+        # Pull profile-level voice_pref too (different concept — explicit user pick)
+        profile_voice = {}
+        if _MEMORY_HELPERS:
+            try:
+                p = _load_profile(str(senior_id)) or {}
+                profile_voice = {
+                    'voice_pref': p.get('voice_pref'),  # e.g. {voice: 'AntoninNeural', volume: 'loud'}
+                    'quiet_hours': p.get('quiet_hours'),
+                    'radim_mode': p.get('radim_mode'),  # POETRY / CONVERSATIONAL / etc.
+                }
+            except Exception:
+                pass
+
+        # Maturity = how reliable the learned prefs are
+        n = prefs.get('interactions', 0)
+        if n < 3: maturity = 'cold-start'
+        elif n < 10: maturity = 'learning'
+        elif n < 30: maturity = 'reliable'
+        else: maturity = 'mature'
+
+        return {
+            'learned_prefs': {
+                'preferred_rate_pct': prefs.get('preferred_rate'),
+                'preferred_energy': prefs.get('preferred_energy'),
+                'preferred_pause_ms': prefs.get('preferred_pause'),
+                'response_to_melody': prefs.get('response_to_melody'),
+                'response_to_singing': prefs.get('response_to_singing'),
+            },
+            'interaction_stats': {
+                'total': n,
+                'positive_feedback': prefs.get('positive_feedback', 0),
+                'negative_feedback': prefs.get('negative_feedback', 0),
+                'barge_ins': prefs.get('barge_ins', 0),  # příliš pomalé
+                'no_responses': prefs.get('no_responses', 0),  # neslyšel/nerozuměl
+                'last_updated': prefs.get('last_updated'),
+            },
+            'profile_voice': profile_voice,
+            'maturity': maturity,
+            '_hint': ({
+                'cold-start': 'Málo dat — drž se HARMONY default.',
+                'learning': 'Pomalu adaptuj. Sleduj reakce.',
+                'reliable': 'Použij learned_prefs s důvěrou.',
+                'mature': 'Senior má jasný styl. Drž se ho.'
+            })[maturity],
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_compose_ssml(senior_id, text, mode=None):
+    """Compose SSML for given text WITHOUT calling Azure (no $ cost).
+
+    Use this when you want to:
+    - See how the voice will sound BEFORE generating audio
+    - Validate mode selection
+    - Debug voice config
+
+    If mode=None, auto-pick from current Ψ(t):
+    - HARMONY (C<12), ALERT (12≤C<27), CRISIS (C≥27)
+
+    Returns SSML XML + breakdown of voice params (rate, pitch, pause, style).
+    """
+    if not _TTS_SSML:
+        return {"error": "voice_filter not available"}
+    if not text or len(text.strip()) == 0:
+        return {"error": "empty text"}
+    try:
+        # Auto-pick mode from latest brain state if not specified
+        if mode is None and _DB:
+            try:
+                with db_context() as db:
+                    row = db.execute("""
+                        SELECT mode FROM brain_states WHERE user_id = ?
+                        ORDER BY created_at DESC LIMIT 1
+                    """, (str(senior_id),)).fetchone()
+                if row:
+                    vals = _row_to_list(row)
+                    mode = vals[0] or 'HARMONY'
+                else:
+                    mode = 'HARMONY'
+            except Exception:
+                mode = 'HARMONY'
+        mode = mode or 'HARMONY'
+
+        ssml = _build_ssml(text[:500], mode=mode,
+                           voice='cs-CZ-AntoninNeural',
+                           user_id=str(senior_id))
+        profile = _VOICE_PROFILES.get(mode, _VOICE_PROFILES.get('HARMONY', {}))
+        return {
+            'ssml_preview': ssml[:1000] + ('…[truncated]' if len(ssml) > 1000 else ''),
+            'ssml_length': len(ssml),
+            'mode': mode,
+            'voice': 'cs-CZ-AntoninNeural',
+            'voice_params': {
+                'style': profile.get('style'),
+                'rate': profile.get('rate'),
+                'pitch': profile.get('pitch'),
+                'volume': profile.get('volume'),
+                'pause_ms': profile.get('pause_ms'),
+            },
+            'estimated_chars': len(text),
+            '_no_audio_generated': True,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_generate_voice_audio(senior_id, text, mode=None):
+    """Generate ACTUAL Azure TTS audio (incurs $$ — ~$16/1M chars).
+
+    Returns base64-encoded MP3 + metadata. Use sparingly:
+    - For CRISIS welfare-check call greetings
+    - When senior has indicated voice-only preference
+    - When chat text alone won't be heard (vision impaired)
+
+    Capped at 5 generations per agent run. Beyond that, returns error.
+    """
+    if not _TTS_AZURE:
+        return {"error": "Azure TTS not available"}
+    if not _azure_available():
+        return {"error": "AZURE_SPEECH_KEY not set"}
+    if _tts_generation_counter['count'] >= MAX_TTS_GENERATIONS_PER_RUN:
+        return {"error": f"TTS generation cap reached ({MAX_TTS_GENERATIONS_PER_RUN}/run)"}
+    if not text or len(text.strip()) == 0:
+        return {"error": "empty text"}
+    if len(text) > 800:
+        return {"error": f"text too long ({len(text)} chars > 800 max)"}
+
+    try:
+        if mode is None and _DB:
+            try:
+                with db_context() as db:
+                    row = db.execute("""
+                        SELECT mode FROM brain_states WHERE user_id = ?
+                        ORDER BY created_at DESC LIMIT 1
+                    """, (str(senior_id),)).fetchone()
+                if row:
+                    vals = _row_to_list(row)
+                    mode = vals[0] or 'HARMONY'
+            except Exception:
+                pass
+        mode = mode or 'HARMONY'
+
+        audio_bytes = _gen_azure_tts(text, mode=mode, user_id=str(senior_id))
+        _tts_generation_counter['count'] += 1
+
+        if not audio_bytes:
+            return {"error": "Azure TTS returned empty audio"}
+
+        import base64
+        audio_b64 = base64.b64encode(audio_bytes).decode('ascii')
+        # Estimate cost: $16 per 1M chars
+        chars = len(text)
+        cost_usd = chars * 16.0 / 1_000_000
+
+        return {
+            'audio_base64_preview': audio_b64[:200] + '…[truncated]',
+            'audio_bytes': len(audio_bytes),
+            'audio_kb': round(len(audio_bytes) / 1024, 1),
+            'mode': mode,
+            'voice': 'cs-CZ-AntoninNeural',
+            'chars_used': chars,
+            'cost_usd_estimate': round(cost_usd, 6),
+            'generations_remaining': MAX_TTS_GENERATIONS_PER_RUN - _tts_generation_counter['count'],
+            '_audio_truncated_for_response': True,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_record_voice_feedback(senior_id, event_type, voice_mode=None):
+    """Record voice feedback into voice_learning system (φ-blended adaptation).
+
+    event_type:
+    - response_fast — senior odpověděl <5s (hlas srozumitelný)
+    - response_slow — senior odpověděl >10s (možná neslyšel)
+    - no_response — neodpověděl (15s+)
+    - barge_in — přerušil TTS (pomalý)
+    - positive — řekl 'děkuju/krásné/super'
+    - negative — řekl 'co/nerozumím/pomaleji'
+    - melody_positive / melody_negative
+    - singing_positive / singing_negative
+
+    Adapts preferred_rate/energy/pause via φ-blend (61.8% old + 38.2% new).
+    """
+    if not _TTS_LEARNING:
+        return {"error": "voice_learning not available"}
+    valid_events = {'response_fast', 'response_slow', 'no_response', 'barge_in',
+                    'positive', 'negative', 'melody_positive', 'melody_negative',
+                    'singing_positive', 'singing_negative'}
+    if event_type not in valid_events:
+        return {"error": f"invalid event_type — must be one of {sorted(valid_events)}"}
+    try:
+        prefs = _record_voice_feedback(str(senior_id), event_type, voice_mode=voice_mode)
+        return {
+            'recorded': True,
+            'event': event_type,
+            'updated_prefs': {
+                'preferred_rate_pct': prefs.get('preferred_rate'),
+                'preferred_pause_ms': prefs.get('preferred_pause'),
+                'preferred_energy': prefs.get('preferred_energy'),
+            },
+            'total_interactions': prefs.get('interactions', 0),
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 # Tool dispatcher
 TOOL_HANDLERS = {
     'list_seniors': lambda args: _tool_list_seniors(),
@@ -1075,6 +1458,15 @@ TOOL_HANDLERS = {
         args['senior_id'], args['key'], args['value']),
     'update_profile': lambda args: _tool_update_profile(
         args['senior_id'], args['key'], args['value']),
+    # TTS
+    'get_voice_modes_catalog': lambda args: _tool_get_voice_modes_catalog(),
+    'get_voice_memory': lambda args: _tool_get_voice_memory(args['senior_id']),
+    'compose_ssml': lambda args: _tool_compose_ssml(
+        args['senior_id'], args['text'], args.get('mode')),
+    'generate_voice_audio': lambda args: _tool_generate_voice_audio(
+        args['senior_id'], args['text'], args.get('mode')),
+    'record_voice_feedback': lambda args: _tool_record_voice_feedback(
+        args['senior_id'], args['event_type'], args.get('voice_mode')),
 }
 
 
@@ -1165,7 +1557,8 @@ def _record_run(input_tokens, output_tokens, tool_calls, seniors, actions, durat
 # ═══════════════════════════════════════════════════════════════════════
 
 WRITE_TOOLS = {'send_chat_message', 'send_push', 'notify_family', 'initiate_call',
-               'update_learning', 'update_profile'}
+               'update_learning', 'update_profile',
+               'record_voice_feedback', 'generate_voice_audio'}
 
 
 def run_claude_agent(app=None, trigger='cron', force=False):
@@ -1197,6 +1590,9 @@ def run_claude_agent(app=None, trigger='cron', force=False):
 
     started = time.time()
     client = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+
+    # Reset TTS generation counter for this run
+    _tts_generation_counter['count'] = 0
 
     messages = [
         {"role": "user", "content":
