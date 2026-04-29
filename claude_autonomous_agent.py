@@ -3389,7 +3389,8 @@ def _tool_stt_detect_safety(text):
     'nemůžu vstát', 'bolí', 'rychle'. Levenshtein-tolerant, handles
     speech-impaired diction.
 
-    Returns: {detected: bool, word_matched: str, distance: int}
+    Returns: {detected, word, input, distance, severity} where
+    severity is 'critical'/'high'/'medium'/None.
     """
     if not _STT_UNDERSTANDING:
         return {"error": "speech_understanding not available"}
@@ -3397,7 +3398,15 @@ def _tool_stt_detect_safety(text):
         return {"error": "empty text"}
     try:
         result = _stt_detect_safety(text)
-        return result if isinstance(result, dict) else {'detected': bool(result)}
+        if result is None:
+            return {'detected': False, 'word': None, 'severity': None}
+        return {
+            'detected': True,
+            'word': result.get('word'),
+            'input': result.get('input'),
+            'distance': result.get('distance'),
+            'severity': result.get('severity'),
+        }
     except Exception as e:
         return {"error": str(e)[:200]}
 
@@ -3405,8 +3414,12 @@ def _tool_stt_detect_safety(text):
 def _tool_stt_classify_priority(text, confidence=1.0):
     """Classify how urgent the speech is.
 
-    Returns: priority (CRITICAL / HIGH / MEDIUM / NORMAL) + reason.
-    Use to decide if to interrupt other operations or fast-path to CRISIS.
+    Returns: {priority: 'CRITICAL'/'MEDIUM'/'LOW',
+              bypass_ai: bool,
+              escalate: bool,
+              reason: str|None}
+    bypass_ai=True means skip full AI cycle, react immediately.
+    escalate=True means notify caregiver/family.
     """
     if not _STT_UNDERSTANDING:
         return {"error": "speech_understanding not available"}
@@ -3414,7 +3427,9 @@ def _tool_stt_classify_priority(text, confidence=1.0):
         return {"error": "empty text"}
     try:
         result = _stt_classify_safety(text, float(confidence))
-        return result if isinstance(result, dict) else {'priority': str(result)}
+        if isinstance(result, dict):
+            return result
+        return {'priority': str(result)}
     except Exception as e:
         return {"error": str(e)[:200]}
 
@@ -3432,12 +3447,17 @@ def _tool_stt_correct_text(text, senior_id=None):
     if not text:
         return {"error": "empty text"}
     try:
-        corrected = _stt_correct(text, user_id=str(senior_id) if senior_id else None)
+        # Returns tuple: (corrected_text, corrections_applied_list)
+        result = _stt_correct(text, user_id=str(senior_id) if senior_id else None)
+        if isinstance(result, tuple) and len(result) == 2:
+            corrected, applied = result
+        else:
+            corrected, applied = (str(result), [])
         return {
             'original': text[:500],
-            'corrected': corrected[:500],
-            'changed': text != corrected,
-            'preview_diff': (corrected[:100] if text != corrected else 'no changes'),
+            'corrected': str(corrected)[:500],
+            'changed': str(corrected) != text,
+            'corrections_applied': applied if isinstance(applied, list) else [],
         }
     except Exception as e:
         return {"error": str(e)[:200]}
@@ -3446,15 +3466,24 @@ def _tool_stt_correct_text(text, senior_id=None):
 def _tool_stt_should_retry(text, confidence):
     """Should we re-prompt the senior because STT confidence was too low?
 
-    Returns: {retry: bool, reason: str, suggested_threshold: float}
-    Used in Twilio Gather logic to ask 'Promiňte, slyšel jsem to špatně,
-    můžete to říct znovu?' when confidence is too low.
+    Returns: {action, retry, safety_match}
+    - action: 'retry' (ask again) | 'safety' (safety word detected) | 'proceed' (OK)
     """
     if not _STT_UNDERSTANDING:
         return {"error": "speech_understanding not available"}
     try:
         result = _stt_should_retry(text or '', float(confidence))
-        return result if isinstance(result, dict) else {'retry': bool(result)}
+        # Returns (action, data) tuple
+        if isinstance(result, tuple) and len(result) == 2:
+            action, data = result
+            return {
+                'action': action,
+                'retry': action == 'retry',
+                'safety_detected': action == 'safety',
+                'safety_match': data if action == 'safety' else None,
+                'proceed': action == 'proceed',
+            }
+        return {'action': str(result)}
     except Exception as e:
         return {"error": str(e)[:200]}
 
