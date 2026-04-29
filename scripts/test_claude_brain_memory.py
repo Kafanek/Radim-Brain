@@ -24,12 +24,14 @@ print('━━━ BRAIN (math, no senior needed) ━━━')
 # Compute Ψ(t) at C=15, alpha=0.6 — should give ALERT mode
 psi = _tool_compute_brain_state('test', C=15, alpha=0.6)
 if isinstance(psi, dict) and not psi.get('error'):
+    f = lambda v: f'{v:.3f}' if isinstance(v, (int, float)) else str(v)
     print(f'  ✓ compute_brain_state(C=15, alpha=0.6):')
-    print(f'    mode={psi.get("mode")} | E={psi.get("E"):.3f} | R={psi.get("R"):.3f} | S={psi.get("S"):.3f}')
-    print(f'    coherence={psi.get("coherence"):.3f} | phi_index={psi.get("phi_index"):.3f}')
+    print(f'    mode={psi.get("mode")} | E={f(psi.get("E"))} | R={f(psi.get("R"))} | S={f(psi.get("S"))}')
+    print(f'    coherence={f(psi.get("coherence"))} | phi_index={f(psi.get("phi_index"))}')
     speech = psi.get('speech', {})
     if speech:
         print(f'    speech: rate={speech.get("rate")} pause={speech.get("pause_ms")}ms')
+    print(f'    DEBUG keys: {list(psi.keys())}')
 else:
     print(f'  ✗ FAIL: {psi}')
 
@@ -39,7 +41,8 @@ print(f'  ✓ compute_brain_state(C=28, alpha=0.3): mode={psi2.get("mode")} (sho
 
 # Empathy
 emp = _tool_compute_empathy(0.7, 0.4, 0.6)
-print(f'  ✓ compute_empathy(0.7, 0.4, 0.6): E={emp.get("E"):.3f}')
+ev = emp.get("E") if isinstance(emp, dict) else None
+print(f'  ✓ compute_empathy(0.7, 0.4, 0.6): E={ev:.3f}' if isinstance(ev, (int, float)) else f'  ?? compute_empathy returned: {emp}')
 print()
 
 # Per-senior tests
