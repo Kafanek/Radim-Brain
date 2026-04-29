@@ -19,7 +19,17 @@ def http(method, path, body=None, token=None, admin=False):
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         resp = urllib.request.urlopen(req, timeout=30)
-        return resp.status, json.loads(resp.read().decode())
+        raw = resp.read()
+        # Try JSON, fall back to binary metadata
+        try:
+            return resp.status, json.loads(raw.decode('utf-8'))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            content_type = resp.headers.get('Content-Type', 'unknown')
+            return resp.status, {
+                '_binary': True,
+                'content_type': content_type,
+                'size_bytes': len(raw),
+            }
     except urllib.error.HTTPError as e:
         try:
             return e.code, json.loads(e.read().decode())
@@ -98,11 +108,12 @@ if code == 200 and new_token:
 else:
     fail(f'HTTP {code}: {body}')
 
-# Step 4: Get user info
+# Step 4: Get user info (response can be flat or nested {user: {...}})
 step(4, 'GET /api/auth/me')
 code, body = http('GET', '/api/auth/me', token=token)
-if code == 200 and body.get('email') == test_email:
-    ok(f'role={body.get("role")}')
+user_obj = body.get('user', body) if code == 200 else {}
+if code == 200 and user_obj.get('email') == test_email:
+    ok(f"role={user_obj.get('role')}, id={user_obj.get('id')}")
 else:
     warn(f'HTTP {code}: {body}')
 
@@ -142,13 +153,14 @@ if code == 200:
 else:
     warn(f'HTTP {code}')
 
-# Step 8: Pilot complete (valid consents schema)
+# Step 8: Pilot complete (real consent fields: privacyAccepted, termsAccepted)
 step(8, 'POST /api/onboarding/pilot/complete')
 code, body = http('POST', '/api/onboarding/pilot/complete', {
-    'iban': 'CZ6508000000192000145399',
-    'iban_holder': test_name,
-    'agreements_accepted': ['mou', 'dpa'],
-    'consent_research': True,
+    'phone': '+420604123456',
+    'privacyAccepted': True,
+    'termsAccepted': True,
+    'voiceTested': True,
+    'athsAcknowledged': True,
 }, token=token)
 if code == 200:
     ok(f'pilot completed at {body.get("completed_at", "")[:19]}')
@@ -203,27 +215,28 @@ else:
 print()
 print(f'{C_INFO}━━━ PHASE 4: Voice / TTS ━━━{C_END}')
 
-# Step 12: TTS health
+# Step 12: TTS health (status='healthy' is the success signal)
 step(12, 'GET /api/tts/health')
 code, body = http('GET', '/api/tts/health')
-if code == 200 and body.get('available'):
-    ok(f"voice={body.get('voice', '?')}, region={body.get('region', '?')}")
+if code == 200 and body.get('status') == 'healthy':
+    eps = body.get('endpoints', {})
+    ok(f"healthy — endpoints: azure={eps.get('azure', '?')}, elevenlabs={eps.get('elevenlabs', '?')}")
 else:
     warn(f'HTTP {code}: {body}')
 
-# Step 13: TTS synthesis (Azure endpoint)
+# Step 13: TTS synthesis (Azure endpoint, returns binary MP3)
 step(13, 'POST /api/azure/tts (Azure synthesis)')
 code, body = http('POST', '/api/azure/tts', {
     'text': 'Dobrý den paní Pavlo, jak se máte?',
     'voice': 'cs-CZ-AntoninNeural',
 }, token=token)
-# Azure TTS returns binary audio, not JSON. Just check status code.
 if code == 200:
-    ok('Azure TTS responded 200')
-elif code == 202:
-    ok('Azure TTS accepted (202)')
+    if body.get('_binary'):
+        ok(f'audio generated: {body.get("size_bytes")} bytes ({body.get("content_type")})')
+    else:
+        ok('Azure TTS responded 200 (JSON shape)')
 else:
-    warn(f'HTTP {code}: {body if isinstance(body, dict) else "binary"}')
+    warn(f'HTTP {code}: {body}')
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 5: CLAUDE AGENT AWARENESS
@@ -271,20 +284,15 @@ else:
 print()
 print(f'{C_INFO}━━━ PHASE 6: Settings management ━━━{C_END}')
 
-# Step 17: Default radim_mode (via /api/memory/load)
-step(17, 'Default radim_mode after registration')
-code, body = http('GET', f'/api/memory/load/{user_id}', token=token)
+# Step 17: Default radim_mode (via /api/memory/profile/<user_id>)
+step(17, 'GET /api/memory/profile/<user_id>')
+code, body = http('GET', f'/api/memory/profile/{user_id}', token=token)
 if code == 200:
     profile = body.get('profile', {}) if isinstance(body, dict) else {}
-    rmode = profile.get('radim_mode', 'guide')
-    ok(f'radim_mode={rmode}')
+    rmode = profile.get('radim_mode', 'guide (default — not set)')
+    ok(f'profile loaded, radim_mode={rmode}')
 else:
-    # Fallback path
-    code2, body2 = http('GET', f'/api/memory/{user_id}', token=token)
-    if code2 == 200:
-        ok(f'memory loaded via /api/memory/{{id}} (status {code2})')
-    else:
-        warn(f'memory endpoints: /api/memory/load → {code}, /api/memory/ → {code2}')
+    warn(f'HTTP {code}: {body if isinstance(body, dict) else "binary"}')
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE 7: GDPR + CLEANUP
@@ -292,13 +300,17 @@ else:
 print()
 print(f'{C_INFO}━━━ PHASE 7: GDPR + cleanup ━━━{C_END}')
 
-# Step 18: GDPR export
+# Step 18: GDPR export — response shape: {success, data: {...}}
 step(18, 'GET /api/auth/data-export (GDPR)')
 code, body = http('GET', '/api/auth/data-export', token=token)
-if code == 200 and body.get('user'):
-    ok(f'export contains: {list(body.keys())[:5]}')
+if code == 200 and body.get('success'):
+    data = body.get('data', {})
+    backend = data.get('backend_data', {})
+    keys = list(backend.keys()) if isinstance(backend, dict) else []
+    history_count = backend.get('history_count', 0) if isinstance(backend, dict) else 0
+    ok(f"export OK: backend keys={keys}, history_count={history_count}")
 else:
-    warn(f'HTTP {code}')
+    warn(f'HTTP {code}: {body}')
 
 # Step 19: GDPR delete (cleanup)
 step(19, 'DELETE /api/auth/data (GDPR delete)')
