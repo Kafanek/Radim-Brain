@@ -154,6 +154,32 @@ try:
 except ImportError:
     _RTCF_BRIDGE = False
 
+# ─── Komunikace module (32 medical scenarios + topic/mood) ──────────
+try:
+    from communication_needs import (
+        COMMUNICATION_NEEDS as _COMM_NEEDS,
+        get_communication_instructions as _get_comm_instructions,
+        detect_topic as _detect_topic,
+        detect_mood as _detect_mood,
+    )
+    _COMMUNICATION = True
+except ImportError:
+    _COMMUNICATION = False
+    _COMM_NEEDS = {}
+
+# Twilio channels (WhatsApp + SMS) — already imported via send_sms via notify_family
+try:
+    from twilio_voice_helpers import send_sms as _send_sms_helper
+    _SMS_AVAILABLE = True
+except ImportError:
+    _SMS_AVAILABLE = False
+
+try:
+    from twilio_voice_helpers import send_whatsapp_message as _send_whatsapp_helper
+    _WHATSAPP_AVAILABLE = True
+except ImportError:
+    _WHATSAPP_AVAILABLE = False
+
 # ─── Config ────────────────────────────────────────────────────────────
 
 CLAUDE_MODEL = os.getenv('CLAUDE_AGENT_MODEL', 'claude-sonnet-4-5-20250929')
@@ -261,6 +287,30 @@ Systém má vlastní "srdeční tep" — synthetické vitály celé situace:
 3. Pokud parasympathetic → HARMONY (přirozený)
 4. `presence` blízko 1.0 = senior plně zaujatý → můžeš mluvit déle
 5. `warmth` (trust+safety)/2 nízká → zpomal, buduj důvěru
+
+# 💬 KOMUNIKAČNÍ PROFIL (modul Komunikace)
+Každý senior má **specifické komunikační potřeby** — Alzheimer, afázie,
+nedoslýchavost, deprese, úzkost, ... Aplikace má 32 strategií.
+
+**Před zprávou ZKONTROLUJ:**
+1. `get_senior_communication_profile(senior)` — vrátí communication_needs +
+   preferred_channel + active_strategy_text (Plné instrukce v češtině)
+2. Pokud má needs=alzheimer_middle: kratší věty (5-7 slov), opakovat klíčová slova
+3. Pokud má needs=hearing_loss: WhatsApp/SMS místo voice, větší font
+4. Pokud má needs=anxiety: klidný tón, vyhnout se urgentním slovům
+
+**Kanály (podle preferred_channel):**
+- `chat` (default) → `send_chat_message`
+- `whatsapp` → `send_whatsapp`
+- `sms` → `send_sms_to_senior`
+- `voice` → `initiate_call` (CRISIS only)
+- `none` (digital detox) → respektuj, jdi přes rodinu (`notify_family`)
+
+**Příchozí zpráva analýza:**
+- `detect_topic_mood(text)` → topic + mood
+- Použij topic na výběr kontextu (rodina/zdraví/počasí/...)
+- Použij mood na výběr tónu (anxious → CRISIS voice, sad → empathy++,
+  happy → udrž lehkost)
 
 # 🎙️ HLASOVÁ PRAVIDLA (TTS)
 - **Mode-matching:** Ψ(t).mode VŽDY určuje TTS mode:
@@ -760,6 +810,79 @@ TOOLS = [
             "required": []
         }
     },
+    # ── KOMUNIKACE TOOLS ────────────────────────────────────────
+    {
+        "name": "get_communication_needs_catalog",
+        "description": ("Katalog 32 komunikačních strategií (alzheimer_*, "
+                        "lewy_body, aphasia, dysarthria, parkinsons, autism, "
+                        "anxiety, depression, hearing_loss, vision_loss, ...). "
+                        "Vrátí list klíčů se shrnutím."),
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "get_communication_strategy",
+        "description": ("Plné instrukce pro jeden komunikační scénář v češtině. "
+                        "Můžeš vrstvit více klíčů ('alzheimer_middle,hearing_loss'). "
+                        "Použij když rozhoduješ TÓN a STRUKTURU zprávy seniorovi "
+                        "se specifickými potřebami."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "needs_key": {"type": "string",
+                              "description": "Klíč nebo čárkou oddělené klíče"}
+            },
+            "required": ["needs_key"]
+        }
+    },
+    {
+        "name": "detect_topic_mood",
+        "description": ("Lehká česká NLP analýza textu. Vrátí topic (health/family/"
+                        "weather/memory/emotions/...) a mood (happy/sad/anxious/"
+                        "neutral). Použij na příchozí zprávě seniora pro routování."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"text": {"type": "string", "maxLength": 1000}},
+            "required": ["text"]
+        }
+    },
+    {
+        "name": "get_senior_communication_profile",
+        "description": ("Komunikační profil seniora — communication_needs (klíče "
+                        "scénářů), preferred_channel (chat/voice/whatsapp), language, "
+                        "communication_style, voice_pref, quiet_hours, has_phone, "
+                        "has_emergency_contacts. Volej PŘED výběrem kanálu."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "send_whatsapp",
+        "description": ("Pošli WhatsApp zprávu seniorovi. Použij když senior má "
+                        "preferred_channel='whatsapp' nebo když voice/SMS selhalo."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "text": {"type": "string", "maxLength": 1000}
+            },
+            "required": ["senior_id", "text"]
+        }
+    },
+    {
+        "name": "send_sms_to_senior",
+        "description": ("Pošli SMS přímo seniorovi (ne rodině!). Pro hloupé telefony "
+                        "bez chat aplikace. Pro alerty rodině použij notify_family."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "text": {"type": "string", "maxLength": 300}
+            },
+            "required": ["senior_id", "text"]
+        }
+    },
     # ── PHILOSOPHY TOOL ─────────────────────────────────────────
     {
         "name": "get_radim_philosophy",
@@ -1248,6 +1371,7 @@ _PROFILE_WRITABLE_KEYS = {
     'preferences', 'notes', 'mood_log', 'last_topic', 'favorite_topics',
     'communication_style', 'preferred_length', 'comfort_words',
     'reminders_consent', 'hobbies', 'family_summary', 'health_notes_brief',
+    'communication_needs', 'preferred_channel',  # Komunikace tunables
 }
 
 
@@ -1849,6 +1973,179 @@ def _tool_compute_custom_beat(risk=0.0, pain=0.0, intuition=0.0, load=0.0,
         return {"error": str(e)[:200]}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# KOMUNIKACE TOOLS — communication needs + channels (WhatsApp/SMS)
+# ═══════════════════════════════════════════════════════════════════════
+
+def _tool_get_communication_needs_catalog():
+    """List all 32 communication strategies the system supports.
+
+    Strategies are grouped by category: dementia (alzheimer_*, lewy_body,
+    vascular_dementia), aphasia, dysarthria, parkinsons, autism, anxiety,
+    depression, hearing_loss, vision_loss, ...
+
+    Returns: list of {key, summary} for each strategy.
+    """
+    if not _COMMUNICATION:
+        return {"error": "communication_needs not available"}
+    catalog = []
+    for key, instructions in _COMM_NEEDS.items():
+        # Extract first line as summary
+        summary = (instructions or '').strip().split('\n')[0]
+        # Strip "KOMUNIKACNI POTREBA:" prefix if present
+        summary = summary.replace('KOMUNIKACNI POTREBA:', '').strip()
+        catalog.append({
+            'key': key,
+            'summary': summary[:120],
+        })
+    return {
+        'total': len(catalog),
+        'strategies': catalog,
+        '_hint': ('Read full instructions with get_communication_strategy(key). '
+                  'Strategies layer — multiple keys can be combined with comma '
+                  '("alzheimer_middle,hearing_loss").'),
+    }
+
+
+def _tool_get_communication_strategy(needs_key):
+    """Get full Czech instructions for a specific communication need.
+
+    needs_key: single key (e.g. 'alzheimer_middle') or comma-separated list
+    ('alzheimer_middle,hearing_loss').
+
+    Returns: the actual strategy text Claude can use to adapt its messages.
+    """
+    if not _COMMUNICATION:
+        return {"error": "communication_needs not available"}
+    try:
+        instructions = _get_comm_instructions(needs_key)
+        if not instructions:
+            return {"error": f"unknown needs_key: {needs_key}",
+                    "_hint": "use get_communication_needs_catalog() to see available keys"}
+        return {
+            'needs_key': needs_key,
+            'instructions': instructions,
+            'length': len(instructions),
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_detect_topic_mood(text):
+    """Lightweight Czech NLP — detect topic + mood from text.
+
+    Topics: health, weather, news, family, memory, exercise, food,
+            entertainment, technology, emotions, general.
+    Moods: happy, sad, anxious, neutral.
+
+    Use this on incoming senior message to route response strategy.
+    """
+    if not _COMMUNICATION:
+        return {"error": "communication_needs not available"}
+    if not text or not text.strip():
+        return {"error": "empty text"}
+    try:
+        topic = _detect_topic(text)
+        mood = _detect_mood(text)
+        return {
+            'topic': topic,
+            'mood': mood,
+            'text_preview': text[:100],
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_senior_communication_profile(senior_id):
+    """Get senior's communication profile — what needs they have.
+
+    Pulls 'communication_needs' field from memory_profiles + their
+    learning state's 'communication_style' + voice_pref.
+    Combines into a single decision-ready view.
+    """
+    if not _MEMORY_HELPERS:
+        return {"error": "memory_helpers not available"}
+    try:
+        profile = _load_profile(str(senior_id)) or {}
+        learning = _load_learning(str(senior_id)) or {}
+
+        result = {
+            'communication_needs': profile.get('communication_needs', []),
+            'preferred_channel': profile.get('preferred_channel'),  # chat/voice/whatsapp/none
+            'language': profile.get('language', 'cs-CZ'),
+            'communication_style': learning.get('communication_style', 'warm'),
+            'preferred_length': learning.get('preferred_length', 'medium'),
+            'voice_pref': profile.get('voice_pref'),
+            'quiet_hours': profile.get('quiet_hours'),
+            'has_phone': bool(profile.get('phone')),
+            'has_emergency_contacts': len(profile.get('emergency_contacts', []) or []) > 0,
+        }
+
+        # If communication_needs is a string, parse comma-separated
+        if isinstance(result['communication_needs'], str):
+            result['communication_needs'] = [
+                s.strip() for s in result['communication_needs'].split(',') if s.strip()
+            ]
+
+        # Auto-merge full instructions if needs are set
+        if result['communication_needs'] and _COMMUNICATION:
+            try:
+                key_str = ','.join(result['communication_needs'])
+                result['active_strategy_text'] = _get_comm_instructions(key_str)[:1500]
+            except Exception:
+                pass
+
+        return result
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_send_whatsapp(senior_id, text):
+    """Send WhatsApp message to senior. Requires phone in profile.
+
+    Use when:
+    - Senior prefers WhatsApp (preferred_channel)
+    - Voice/SMS already failed
+    - Family member wants WhatsApp digest
+    """
+    if not _WHATSAPP_AVAILABLE:
+        return {"error": "WhatsApp not configured (TWILIO_WHATSAPP_NUMBER missing?)"}
+    if not _check_action_cooldown(senior_id):
+        return {"skipped": "cooldown active for senior"}
+    try:
+        from twilio_voice_helpers import get_senior_phone
+        phone = get_senior_phone(str(senior_id))
+        if not phone:
+            return {"error": "No phone on file"}
+        ok = _send_whatsapp_helper(phone, text[:1000], user_id=str(senior_id))
+        return {"sent": bool(ok), "channel": "whatsapp",
+                "phone": phone[:6] + '***', "preview": text[:80]}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_send_sms_to_senior(senior_id, text):
+    """Send SMS directly to senior (NOT family). Use when senior has phone but
+    no smart device. Goes to senior's profile phone, NOT emergency contacts.
+
+    For family alerts use notify_family() instead.
+    """
+    if not _SMS_AVAILABLE:
+        return {"error": "SMS not configured"}
+    if not _check_action_cooldown(senior_id):
+        return {"skipped": "cooldown active for senior"}
+    try:
+        from twilio_voice_helpers import get_senior_phone
+        phone = get_senior_phone(str(senior_id))
+        if not phone:
+            return {"error": "No phone on file"}
+        ok = _send_sms_helper(phone, text[:300], user_id=str(senior_id))
+        return {"sent": bool(ok), "channel": "sms_senior",
+                "phone": phone[:6] + '***', "preview": text[:80]}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 # Tool dispatcher
 TOOL_HANDLERS = {
     'list_seniors': lambda args: _tool_list_seniors(),
@@ -1910,6 +2207,13 @@ TOOL_HANDLERS = {
         args.get('risk', 0), args.get('pain', 0), args.get('intuition', 0),
         args.get('load', 0), args.get('recovery', 0), args.get('threat', 0),
         args.get('trust', 0.7), args.get('safety', 1.0)),
+    # Komunikace
+    'get_communication_needs_catalog': lambda args: _tool_get_communication_needs_catalog(),
+    'get_communication_strategy': lambda args: _tool_get_communication_strategy(args['needs_key']),
+    'detect_topic_mood': lambda args: _tool_detect_topic_mood(args['text']),
+    'get_senior_communication_profile': lambda args: _tool_get_senior_communication_profile(args['senior_id']),
+    'send_whatsapp': lambda args: _tool_send_whatsapp(args['senior_id'], args['text']),
+    'send_sms_to_senior': lambda args: _tool_send_sms_to_senior(args['senior_id'], args['text']),
 }
 
 
@@ -2002,7 +2306,8 @@ def _record_run(input_tokens, output_tokens, tool_calls, seniors, actions, durat
 WRITE_TOOLS = {'send_chat_message', 'send_push', 'notify_family', 'initiate_call',
                'update_learning', 'update_profile',
                'record_voice_feedback', 'generate_voice_audio',
-               'emit_agent_message'}
+               'emit_agent_message',
+               'send_whatsapp', 'send_sms_to_senior'}
 
 
 def run_claude_agent(app=None, trigger='cron', force=False):

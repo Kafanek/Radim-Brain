@@ -449,14 +449,33 @@ def contact_ring_phone(cid):
         )
 
     # Trigger Twilio outbound (reuses existing v389 function)
+    # TTS audit fix: derive voice_mode from senior's current Ψ(t) instead of
+    # hardcoded HARMONY — senior in ALERT/CRISIS should hear empathetic voice,
+    # not breezy "happy" tone.
     try:
         from twilio_voice_helpers import initiate_proactive_call
+        derived_mode = "HARMONY"
+        try:
+            from database import db_context
+            with db_context() as db:
+                row = db.execute(
+                    "SELECT mode FROM brain_states WHERE user_id = ? "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (str(sid),)
+                ).fetchone()
+            if row:
+                m = row[0] if not hasattr(row, 'values') else list(row.values())[0]
+                if m in ('HARMONY', 'ALERT', 'CRISIS'):
+                    derived_mode = m
+        except Exception:
+            pass
+
         result = initiate_proactive_call(
             phone_number=senior_phone,
             greeting=greeting,
             user_id=sid,
             reason="family_call",
-            voice_mode="HARMONY",
+            voice_mode=derived_mode,
         )
     except Exception as e:
         logger.exception(f"twilio outbound error: {e}")
