@@ -9,7 +9,7 @@ from claude_autonomous_agent import (
 )
 from database import db_context
 
-TEST_SENIOR = '268'  # Anna AU has chat history already
+TEST_SENIOR = '287'  # Q — testovací účet, žádná chat historie, žádný cooldown
 TEST_TAG = f'CLAUDE_TEST_{int(time.time())}'
 
 print(f'━━━ Test write tools on senior #{TEST_SENIOR} ({TEST_TAG}) ━━━')
