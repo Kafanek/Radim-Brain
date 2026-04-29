@@ -369,7 +369,12 @@ def auth_resend_verification():
 @auth_bp.route('/api/auth/data-export', methods=['GET'])
 @require_auth
 def auth_data_export():
-    """GDPR: Export všech dat uživatele z backendu"""
+    """GDPR: Export všech dat uživatele z backendu.
+
+    v841: Migrated from legacy cursor pattern to db_context. Old code used
+    `conn.cursor()` which doesn't exist on PgConnectionWrapper — silently
+    failed (returned 200 with error placeholder, not real data).
+    """
     user_id = str(g.auth_user.get('id', ''))
     export_data = {
         "export_date": now_iso(),
@@ -377,44 +382,63 @@ def auth_data_export():
         "backend_data": {}
     }
 
-    # Export memory data
-    conn = None
     try:
-        conn = get_connection()
-        if conn:
-            cursor = conn.cursor()
+        with db_context() as db:
             # Profile
-            cursor.execute("SELECT data FROM memory_profiles WHERE user_id = %s", (user_id,))
-            row = cursor.fetchone()
-            if row:
-                export_data["backend_data"]["profile"] = json.loads(row[0]) if isinstance(row[0], str) else row[0]
-
-            # History (last 500)
-            cursor.execute(
-                "SELECT role, content, timestamp FROM memory_history WHERE user_id = %s ORDER BY timestamp DESC LIMIT 500",
+            row = db.execute(
+                "SELECT data FROM memory_profiles WHERE user_id = ?",
                 (user_id,)
-            )
-            export_data["backend_data"]["history"] = [
-                {"role": r[0], "content": r[1], "timestamp": str(r[2])} for r in cursor.fetchall()
-            ]
+            ).fetchone()
+            if row:
+                # row[0] for tuple, row['data'] for dict-like
+                data = row[0] if not hasattr(row, 'values') else row['data']
+                if isinstance(data, str):
+                    try:
+                        data = json.loads(data)
+                    except Exception:
+                        pass
+                export_data["backend_data"]["profile"] = data
+
+            # History (last 500). Column is 'created_at' not 'timestamp'.
+            rows = db.execute(
+                "SELECT role, content, created_at FROM memory_history "
+                "WHERE user_id = ? ORDER BY created_at DESC LIMIT 500",
+                (user_id,)
+            ).fetchall()
+            history = []
+            for r in rows:
+                if hasattr(r, 'values'):
+                    history.append({
+                        "role": r['role'],
+                        "content": r['content'],
+                        "timestamp": str(r['created_at']) if r['created_at'] else None,
+                    })
+                else:
+                    history.append({
+                        "role": r[0],
+                        "content": r[1],
+                        "timestamp": str(r[2]) if r[2] else None,
+                    })
+            export_data["backend_data"]["history"] = history
+            export_data["backend_data"]["history_count"] = len(history)
 
             # Learning data
-            cursor.execute("SELECT data FROM memory_learning WHERE user_id = %s", (user_id,))
-            row = cursor.fetchone()
+            row = db.execute(
+                "SELECT data FROM memory_learning WHERE user_id = ?",
+                (user_id,)
+            ).fetchone()
             if row:
-                export_data["backend_data"]["learning"] = json.loads(row[0]) if isinstance(row[0], str) else row[0]
-
-            cursor.close()
+                data = row[0] if not hasattr(row, 'values') else row['data']
+                if isinstance(data, str):
+                    try:
+                        data = json.loads(data)
+                    except Exception:
+                        pass
+                export_data["backend_data"]["learning"] = data
     except Exception as e:
         # v330: Don't leak exception details in GDPR export
-        logger.error(f"GDPR export error for user: {e}")
+        logger.exception(f"GDPR export error for user {user_id}: {e}")
         export_data["backend_data"]["error"] = "Chyba při načítání dat"
-    finally:
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
 
     return jsonify({
         "success": True,
@@ -424,32 +448,41 @@ def auth_data_export():
 @auth_bp.route('/api/auth/data', methods=['DELETE'])
 @require_auth
 def auth_data_delete():
-    """GDPR: Smaže všechna data uživatele z backendu"""
+    """GDPR: Smaže všechna data uživatele z backendu.
+
+    v841: Migrated from legacy cursor pattern to db_context. Old code used
+    `conn.cursor()` which doesn't exist on PgConnectionWrapper — returned
+    HTTP 500 every time. GDPR-mandated functionality was broken.
+    """
     user_id = str(g.auth_user.get('id', ''))
     deleted = {"profile": False, "history": False, "learning": False}
 
-    conn = None
     try:
-        conn = get_connection()
-        if conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM memory_profiles WHERE user_id = %s", (user_id,))
-            deleted["profile"] = cursor.rowcount > 0
-            cursor.execute("DELETE FROM memory_history WHERE user_id = %s", (user_id,))
-            deleted["history"] = cursor.rowcount > 0
-            cursor.execute("DELETE FROM memory_learning WHERE user_id = %s", (user_id,))
-            deleted["learning"] = cursor.rowcount > 0
-            conn.commit()
-            cursor.close()
+        with db_context(commit=True) as db:
+            # Memory profiles
+            cur = db.execute(
+                "DELETE FROM memory_profiles WHERE user_id = ?",
+                (user_id,)
+            )
+            deleted["profile"] = (getattr(cur, 'rowcount', 0) or 0) > 0
+
+            # Memory history
+            cur = db.execute(
+                "DELETE FROM memory_history WHERE user_id = ?",
+                (user_id,)
+            )
+            deleted["history"] = (getattr(cur, 'rowcount', 0) or 0) > 0
+
+            # Memory learning
+            cur = db.execute(
+                "DELETE FROM memory_learning WHERE user_id = ?",
+                (user_id,)
+            )
+            deleted["learning"] = (getattr(cur, 'rowcount', 0) or 0) > 0
     except Exception as e:
-        logger.error(f"auth data delete error: {e}")
-        return jsonify({"success": False, "error": "Interní chyba serveru"}), 500
-    finally:
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
+        logger.exception(f"auth data delete error for user {user_id}: {e}")
+        return jsonify({"success": False, "error": "Interní chyba serveru",
+                       "detail": str(e)[:200]}), 500
 
     return jsonify({
         "success": True,
