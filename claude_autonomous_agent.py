@@ -211,6 +211,23 @@ except ImportError:
                      'THINKING': 'thinking', 'SPEAKING': 'speaking'}
 
 # ─── STT (speech-to-text) — Azure Speech + Czech understanding ──────
+# ─── Caregiver + care plan + relationship engine ────────────────────
+try:
+    from care_plan import _get_plan as _get_care_plan
+    _CARE_PLAN = True
+except ImportError:
+    _CARE_PLAN = False
+
+try:
+    from relationship_engine import (
+        identify_relationship as _identify_rel,
+        load_relationship as _load_rel,
+        compute_trust as _compute_trust,
+    )
+    _RELATIONSHIP = True
+except ImportError:
+    _RELATIONSHIP = False
+
 # ─── Calendar + Email subsystems ─────────────────────────────────────
 try:
     from calendar_routes import _parse_event_gemini, _parse_event_rule_based
@@ -394,6 +411,38 @@ by byla katastrofa. Ty jsi observer + diagnostician, ne kodér produkce.
 - Cooldown skips (správné chování)
 - "No data yet" pro nové seniory (cold start)
 - Insufficient_data circadian_profile (potřeba 14 dní)
+
+# 👥 PEČOVATELÉ + CARE PLAN
+Senior má **pečovatele** a **rodinu** — v aplikaci jsou jeden model
+(`senior_family_links` table). Liší se jen rolí v `auth_users.role`:
+'caregiver' (placený) vs jiné (rodina).
+
+**Care plan** (care_plans table) má strukturu:
+- `goals` — cíle péče (high/medium/low priority)
+- `medications` — léky s dosage + frequency + doctor
+- `daily_routine` — 7:00-21:30 časové sloty
+- `monitored_metrics` — krevní tlak, glukóza, ...
+- `risks` — identifikovaná rizika + mitigace
+- `responsibilities` — kdo dělá co (rodina/pečovatel/lékař)
+- `checkups` — plánované kontroly
+
+**Konfuciánský relationship engine** vrátí permission_level:
+- `SUGGEST` (low trust) — jen navrhuj, nezasahuj sám
+- `ASSIST` (medium) — můžeš pomoct s confirm
+- `EXECUTE` (high trust) — můžeš jednat samostatně
+
+**Tvoje akce pro pečovatele:**
+1. `get_senior_caregivers(senior)` PŘED notify — kdo dostane zprávu
+2. `get_care_plan(senior, summary=True)` na začátku runu — kontext léků/cílů
+3. `get_medication_schedule(senior)` — víš kdy připomenout
+4. `get_relationship(senior)` — kolik důvěry máš → co můžeš dělat
+5. `send_caregiver_notification` — alert do caregiver inboxu (in-app, ne SMS)
+6. `caregiver_whisper(senior, text)` — kontext do paměti pro DALŠÍ chat
+   (např. "vnučka má dnes narozeniny" — Radim to natural mention)
+7. `add_care_plan_goal/risk` — když z konverzace vyplývá nový cíl/riziko
+
+**Důležité:** Care plan modifikace jsou WRITE — buď konzervativní.
+Necht human review goals s `high` priority. Drobné updates (medium/low) jsou OK.
 
 # 📅 KALENDÁŘ
 Senior má `calendar_events` table — události typu doktor / léky / návštěva /
@@ -1531,6 +1580,117 @@ TOOLS = [
                 "urgency": {"type": "string", "enum": ["low", "normal", "high"], "default": "normal"}
             },
             "required": ["senior_id", "subject", "body"]
+        }
+    },
+    # ── CAREGIVER TOOLS ─────────────────────────────────────────
+    {
+        "name": "get_senior_caregivers",
+        "description": ("Seznam všech pečovatelů + rodiny linkovaných na seniora "
+                        "(jeden model: senior_family_links). Vrátí role, relation, "
+                        "notify settings, sos_priority. Použij PŘED notify_family "
+                        "abys věděl, kdo dostane zprávu."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "get_care_plan",
+        "description": ("Plný care plan seniora: cíle, léky, denní rutina, "
+                        "monitorované metriky, rizika, odpovědnosti, kontrolní "
+                        "vyšetření. summary=True vrátí jen counts (cheap)."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "summary": {"type": "boolean", "default": False}
+            },
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "get_medication_schedule",
+        "description": ("Seznam léků s dosage + frequency + doctor. Použij PŘED "
+                        "připomenutím léků — víš kdy a kolik."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "add_care_plan_goal",
+        "description": ("Přidej nový cíl do care plánu. priority: high/medium/low. "
+                        "Použij když z konverzace vyplývá nový lékařský cíl."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "text": {"type": "string", "maxLength": 500},
+                "priority": {"type": "string", "enum": ["high", "medium", "low"], "default": "medium"}
+            },
+            "required": ["senior_id", "text"]
+        }
+    },
+    {
+        "name": "add_care_plan_risk",
+        "description": ("Přidej riziko + mitigaci do care plánu. severity: high/medium/low. "
+                        "Použij když detekuješ vzorec (opakované pády, non-adherence)."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "text": {"type": "string", "maxLength": 500},
+                "severity": {"type": "string", "enum": ["high", "medium", "low"], "default": "medium"},
+                "mitigation": {"type": "string", "maxLength": 500}
+            },
+            "required": ["senior_id", "text"]
+        }
+    },
+    {
+        "name": "send_caregiver_notification",
+        "description": ("Pošli notifikaci VŠEM pečovatelům/rodině seniora. "
+                        "Routes přes caregiver_notifications table → caregiver "
+                        "inbox + push (pokud notify_on_X=True). Liší se od "
+                        "notify_family (SMS): tohle je in-app caregiver dashboard."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "title": {"type": "string", "maxLength": 200},
+                "body": {"type": "string", "maxLength": 1000},
+                "severity": {"type": "string", "enum": ["info","warning","alert","crisis"], "default": "info"},
+                "ntype": {"type": "string", "default": "claude_observation"}
+            },
+            "required": ["senior_id", "title", "body"]
+        }
+    },
+    {
+        "name": "get_relationship",
+        "description": ("Konfuciánský relationship state seniora: type, trust (0-1), "
+                        "vulnerability, familiarity, permission_level (SUGGEST/ASSIST/"
+                        "EXECUTE), virtue scores (ren/yi/li/zhi/xin). Říká co můžeš dělat: "
+                        "SUGGEST = jen navrhuj, EXECUTE = můžeš jednat sám."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"senior_id": {"type": "string"}},
+            "required": ["senior_id"]
+        }
+    },
+    {
+        "name": "caregiver_whisper",
+        "description": ("Zašeptej kontext Radimovi do paměti — bude to mentioning "
+                        "v dalším chatu. 'Připomeň jí, že vnučka má dnes narozeniny.' "
+                        "Uloží do memory_learning.caregiver_whispers."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senior_id": {"type": "string"},
+                "text": {"type": "string", "maxLength": 500},
+                "priority": {"type": "string", "enum": ["low","normal","high"], "default": "normal"}
+            },
+            "required": ["senior_id", "text"]
         }
     },
     # ── PHILOSOPHY TOOL ─────────────────────────────────────────
@@ -4134,6 +4294,353 @@ def _tool_send_email_to_family(senior_id, subject, body, urgency='normal'):
         return {"error": str(e)[:200]}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# CAREGIVER TOOLS — care plan, caregivers, relationships
+# ═══════════════════════════════════════════════════════════════════════
+
+def _tool_get_senior_caregivers(senior_id):
+    """List all caregivers + family linked to senior (paid + family — same model).
+
+    Returns: list of {family_user_id, name, relation, email, status,
+                      notify_on_sos, notify_on_crisis, notify_on_daily,
+                      sos_priority, role}.
+    role inferred from auth_users.role: 'caregiver' (paid) vs 'family' (linked).
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    try:
+        with db_context() as db:
+            rows = db.execute("""
+                SELECT l.id, l.family_user_id, l.family_name, l.family_email,
+                       l.relation, l.sos_priority, l.notify_on_sos,
+                       l.notify_on_crisis, l.notify_on_daily,
+                       l.confirmed_at, l.revoked_at,
+                       u.role, COALESCE(u.name, u.email)
+                FROM senior_family_links l
+                LEFT JOIN auth_users u ON
+                    CASE WHEN l.family_user_id ~ '^[0-9]+$'
+                         THEN u.id::text = l.family_user_id ELSE FALSE END
+                WHERE l.senior_id = ?
+                ORDER BY l.sos_priority NULLS LAST, l.confirmed_at DESC NULLS LAST
+            """ if is_postgres() else """
+                SELECT l.id, l.family_user_id, l.family_name, l.family_email,
+                       l.relation, l.sos_priority, l.notify_on_sos,
+                       l.notify_on_crisis, l.notify_on_daily,
+                       l.confirmed_at, l.revoked_at,
+                       u.role, COALESCE(u.name, u.email)
+                FROM senior_family_links l
+                LEFT JOIN auth_users u ON u.id = l.family_user_id
+                WHERE l.senior_id = ?
+                ORDER BY l.sos_priority, l.confirmed_at DESC
+            """, (str(senior_id),)).fetchall()
+
+        caregivers = []
+        for r in rows:
+            v = _row_to_list(r)
+            if v[10]:  # revoked
+                continue
+            caregivers.append({
+                'link_id': v[0],
+                'family_user_id': v[1],
+                'name': v[2] or v[12] or 'Unknown',
+                'email': (v[3] or '')[:6] + '***' if v[3] else None,
+                'relation': v[4],
+                'sos_priority': v[5],
+                'notify_sos': bool(v[6]),
+                'notify_crisis': bool(v[7]),
+                'notify_daily': bool(v[8]),
+                'confirmed': bool(v[9]),
+                'role': v[11] or 'family',  # 'caregiver' if paid, else 'family'
+            })
+        return {
+            'count': len(caregivers),
+            'confirmed_count': sum(1 for c in caregivers if c['confirmed']),
+            'caregivers': caregivers,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_care_plan(senior_id, summary=False):
+    """Senior's complete care plan: goals, medications, daily_routine,
+    monitored_metrics, risks, responsibilities, checkups.
+
+    summary=True returns counts only (cheap), False returns full plan.
+    """
+    if not _CARE_PLAN:
+        return {"error": "care_plan module not available"}
+    try:
+        plan = _get_care_plan(str(senior_id))
+        if not plan:
+            return {"info": "No care plan yet — defaults will apply"}
+        if summary:
+            return {
+                'has_plan': True,
+                'goals_count': len(plan.get('goals', []) or []),
+                'medications_count': len(plan.get('medications', []) or []),
+                'risks_count': len(plan.get('risks', []) or []),
+                'checkups_count': len(plan.get('checkups', []) or []),
+                'routine_slots': len(plan.get('daily_routine', {}) or {}),
+                'updated_by': plan.get('updated_by'),
+                'updated_at': plan.get('updated_at'),
+            }
+        # Full but trim long lists
+        for key in ('goals', 'medications', 'risks', 'checkups'):
+            if isinstance(plan.get(key), list) and len(plan[key]) > 10:
+                plan[key] = plan[key][:10] + [{'_truncated': len(plan[key]) - 10}]
+        return plan
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_medication_schedule(senior_id):
+    """Senior's medication schedule from care plan + adherence flag.
+
+    Returns: list of {name, dosage, frequency, doctor, _next_dose_hint}.
+    No actual compliance tracking yet — flag is heuristic.
+    """
+    if not _CARE_PLAN:
+        return {"error": "care_plan not available"}
+    try:
+        plan = _get_care_plan(str(senior_id))
+        if not plan:
+            return {"info": "No care plan — no medications tracked"}
+        meds = plan.get('medications', []) or []
+        if not meds:
+            return {"info": "No medications in care plan", "count": 0}
+        return {
+            'count': len(meds),
+            'medications': [
+                {
+                    'name': m.get('name'),
+                    'dosage': m.get('dosage'),
+                    'frequency': m.get('frequency'),
+                    'doctor': m.get('doctor'),
+                }
+                for m in meds[:15]
+            ],
+            '_hint': ('Use this to remind senior PROACTIVELY before scheduled '
+                      'dose times. Cross-reference with daily_routine.'),
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_add_care_plan_goal(senior_id, text, priority='medium'):
+    """Append a new goal to senior's care plan.
+
+    priority: 'high' / 'medium' / 'low'.
+    Use when learning new medical objective from chat / family input.
+    """
+    if not _CARE_PLAN:
+        return {"error": "care_plan not available"}
+    if not text or not text.strip():
+        return {"error": "empty goal text"}
+    if priority not in ('high', 'medium', 'low'):
+        priority = 'medium'
+    try:
+        from care_plan import _get_plan as _gp
+        from database import db_context as _dbc
+        plan = _gp(str(senior_id)) or {}
+        goals = plan.get('goals', []) or []
+        new_goal = {
+            'id': len(goals) + 1,
+            'text': text[:500],
+            'status': 'active',
+            'priority': priority,
+            'added': datetime.utcnow().isoformat(),
+            'added_by': 'claude_agent',
+        }
+        goals.append(new_goal)
+        plan['goals'] = goals
+        # Persist via JSONB update
+        with _dbc(commit=True) as db:
+            if is_postgres():
+                db.execute(
+                    "UPDATE care_plans SET goals = ?, updated_by = ?, "
+                    "updated_at = NOW() WHERE senior_id = ?",
+                    (json.dumps(goals, ensure_ascii=False),
+                     'claude_agent', str(senior_id))
+                )
+            else:
+                db.execute(
+                    "UPDATE care_plans SET goals = ?, updated_by = ?, "
+                    "updated_at = datetime('now') WHERE senior_id = ?",
+                    (json.dumps(goals, ensure_ascii=False),
+                     'claude_agent', str(senior_id))
+                )
+        return {'added': True, 'goal_id': new_goal['id'], 'priority': priority}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_add_care_plan_risk(senior_id, text, severity='medium', mitigation=None):
+    """Append a new risk + mitigation to senior's care plan.
+
+    severity: 'high' / 'medium' / 'low'.
+    Use when detecting recurring pattern (multiple falls, med non-adherence).
+    """
+    if not _CARE_PLAN:
+        return {"error": "care_plan not available"}
+    if not text or not text.strip():
+        return {"error": "empty risk text"}
+    if severity not in ('high', 'medium', 'low'):
+        severity = 'medium'
+    try:
+        from care_plan import _get_plan as _gp
+        plan = _gp(str(senior_id)) or {}
+        risks = plan.get('risks', []) or []
+        new_risk = {
+            'id': len(risks) + 1,
+            'text': text[:500],
+            'severity': severity,
+            'mitigation': (mitigation or '')[:500],
+            'added': datetime.utcnow().isoformat(),
+            'added_by': 'claude_agent',
+        }
+        risks.append(new_risk)
+        with db_context(commit=True) as db:
+            if is_postgres():
+                db.execute(
+                    "UPDATE care_plans SET risks = ?, updated_by = ?, "
+                    "updated_at = NOW() WHERE senior_id = ?",
+                    (json.dumps(risks, ensure_ascii=False),
+                     'claude_agent', str(senior_id))
+                )
+            else:
+                db.execute(
+                    "UPDATE care_plans SET risks = ?, updated_by = ?, "
+                    "updated_at = datetime('now') WHERE senior_id = ?",
+                    (json.dumps(risks, ensure_ascii=False),
+                     'claude_agent', str(senior_id))
+                )
+        return {'added': True, 'risk_id': new_risk['id'], 'severity': severity}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_send_caregiver_notification(senior_id, title, body,
+                                      severity='info', ntype='claude_observation'):
+    """Send a notification to ALL caregivers/family linked to senior.
+
+    Routes through caregiver_notifications table — they appear in
+    caregiver inbox + push if notify_on_X=True.
+
+    severity: 'info' / 'warning' / 'alert' / 'crisis'
+    ntype: short type tag (claude_observation / med_reminder / etc.)
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    valid_sev = {'info', 'warning', 'alert', 'crisis'}
+    if severity.lower() not in valid_sev:
+        return {"error": f"severity must be one of {sorted(valid_sev)}"}
+    try:
+        # Find all confirmed family/caregiver links
+        with db_context() as db:
+            rows = db.execute("""
+                SELECT family_user_id FROM senior_family_links
+                WHERE senior_id = ?
+                  AND confirmed_at IS NOT NULL
+                  AND revoked_at IS NULL
+            """, (str(senior_id),)).fetchall()
+        if not rows:
+            return {"info": "No confirmed caregivers/family"}
+
+        # Use existing helper to queue notifications
+        sent = 0
+        try:
+            from caregiver_routes import create_caregiver_notification
+            for r in rows:
+                fam_id = _row_to_list(r)[0]
+                if not fam_id:
+                    continue
+                nid = create_caregiver_notification(
+                    recipient_id=str(fam_id),
+                    senior_id=str(senior_id),
+                    ntype=ntype,
+                    title=title[:200],
+                    body=body[:1000],
+                    severity=severity.lower(),
+                    ref_type='claude_agent',
+                    ref_id=None,
+                    data={'source': 'claude_agent'},
+                )
+                if nid:
+                    sent += 1
+        except ImportError:
+            return {"error": "create_caregiver_notification helper missing"}
+
+        return {
+            'sent': sent,
+            'recipients': len(rows),
+            'severity': severity,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_get_relationship(senior_id):
+    """Get Confucian relationship state for senior.
+
+    Returns: {type, trust (0-1), vulnerability, familiarity,
+              permission_level (SUGGEST/ASSIST/EXECUTE), virtues:
+              {ren, yi, li, zhi, xin}, prompt_text}.
+
+    Use to understand what level of action Claude is empowered to take.
+    permission_level=SUGGEST → only propose, don't act.
+    permission_level=EXECUTE → can take direct action without asking.
+    """
+    if not _RELATIONSHIP:
+        return {"error": "relationship_engine not available"}
+    try:
+        rel = _load_rel(str(senior_id))
+        if not rel:
+            return {"info": "No relationship state — first interaction"}
+        # Trim verbose fields
+        if 'prompt' in rel and len(rel.get('prompt', '')) > 500:
+            rel['prompt'] = rel['prompt'][:500] + '…'
+        return rel
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+def _tool_caregiver_whisper(senior_id, text, priority='normal'):
+    """Inject caregiver context into Radim's chat memory.
+
+    Caregivers can 'whisper' context to Radim that he'll mention naturally
+    in next conversation: 'Připomeň jí, že vnučka má dnes narozeniny.'
+
+    Stored in memory_learning.caregiver_whispers — the chat coordinator
+    pulls these into system prompt.
+    """
+    if not _DB:
+        return {"error": "DB not available"}
+    if not text or not text.strip():
+        return {"error": "empty text"}
+    try:
+        from memory_helpers import db_load_learning, db_save_learning
+        learning = db_load_learning(str(senior_id)) or {}
+        whispers = learning.get('caregiver_whispers', []) or []
+        whispers.append({
+            'text': text[:500],
+            'priority': priority,
+            'added_at': datetime.utcnow().isoformat(),
+            'source': 'claude_agent',
+            'consumed': False,
+        })
+        # Keep last 20
+        learning['caregiver_whispers'] = whispers[-20:]
+        db_save_learning(str(senior_id), learning)
+        return {
+            'whispered': True,
+            'priority': priority,
+            'total_whispers': len(whispers),
+            '_hint': 'Radim will mention this naturally in next chat',
+        }
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 # Tool dispatcher
 TOOL_HANDLERS = {
     'list_seniors': lambda args: _tool_list_seniors(),
@@ -4262,6 +4769,22 @@ TOOL_HANDLERS = {
     'send_email_to_family': lambda args: _tool_send_email_to_family(
         args['senior_id'], args['subject'], args['body'],
         args.get('urgency', 'normal')),
+    # Caregiver / care plan
+    'get_senior_caregivers': lambda args: _tool_get_senior_caregivers(args['senior_id']),
+    'get_care_plan': lambda args: _tool_get_care_plan(
+        args['senior_id'], args.get('summary', False)),
+    'get_medication_schedule': lambda args: _tool_get_medication_schedule(args['senior_id']),
+    'add_care_plan_goal': lambda args: _tool_add_care_plan_goal(
+        args['senior_id'], args['text'], args.get('priority', 'medium')),
+    'add_care_plan_risk': lambda args: _tool_add_care_plan_risk(
+        args['senior_id'], args['text'],
+        args.get('severity', 'medium'), args.get('mitigation')),
+    'send_caregiver_notification': lambda args: _tool_send_caregiver_notification(
+        args['senior_id'], args['title'], args['body'],
+        args.get('severity', 'info'), args.get('ntype', 'claude_observation')),
+    'get_relationship': lambda args: _tool_get_relationship(args['senior_id']),
+    'caregiver_whisper': lambda args: _tool_caregiver_whisper(
+        args['senior_id'], args['text'], args.get('priority', 'normal')),
 }
 
 
@@ -4360,7 +4883,9 @@ WRITE_TOOLS = {'send_chat_message', 'send_push', 'notify_family', 'initiate_call
                'speak_to_senior',
                'report_bug',
                'add_calendar_reminder', 'flag_email_to_family',
-               'send_email_to_family'}
+               'send_email_to_family',
+               'add_care_plan_goal', 'add_care_plan_risk',
+               'send_caregiver_notification', 'caregiver_whisper'}
 
 
 # Per-senior event-trigger cooldown (anti-thrashing). Independent of
