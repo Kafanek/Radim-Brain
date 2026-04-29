@@ -6567,29 +6567,20 @@ def _tool_get_upcoming_consultations(senior_id, days=30):
         return {"error": "DB not available"}
     try:
         with db_context() as db:
-            interval = (f"NOW() + INTERVAL '{int(days)} days'" if is_postgres()
-                        else f"datetime('now', '+{int(days)} day')")
-            now = ("NOW()" if is_postgres() else "datetime('now')")
-            rows = db.execute(f"""
+            # Use simple date comparison (avoid interval cast issues)
+            today_str = datetime.now().strftime('%Y-%m-%d')
+            future_date = (datetime.now() + __import__('datetime').timedelta(days=int(days))).strftime('%Y-%m-%d')
+            rows = db.execute("""
                 SELECT id, teacher_id, scheduled_date, scheduled_time, status,
                        consultation_type, complaint, title
                 FROM telemedicine_consultations
                 WHERE student_id = ?
                   AND status IN ('requested', 'confirmed', 'in_progress')
-                  AND (scheduled_date::timestamp BETWEEN {now}::timestamp
-                       AND {interval}::timestamp
-                       OR scheduled_date IS NULL)
+                  AND (scheduled_date IS NULL
+                       OR (scheduled_date >= ? AND scheduled_date <= ?))
                 ORDER BY scheduled_date, scheduled_time
                 LIMIT 20
-            """ if is_postgres() else f"""
-                SELECT id, teacher_id, scheduled_date, scheduled_time, status,
-                       consultation_type, complaint, title
-                FROM telemedicine_consultations
-                WHERE student_id = ?
-                  AND status IN ('requested', 'confirmed', 'in_progress')
-                ORDER BY scheduled_date, scheduled_time
-                LIMIT 20
-            """, (str(senior_id),)).fetchall()
+            """, (str(senior_id), today_str, future_date)).fetchall()
 
             consultations = []
             for r in rows:
