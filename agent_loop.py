@@ -13,6 +13,7 @@ For each active senior:
 
 import json
 import logging
+import os
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -688,6 +689,48 @@ def _execute_action(user_id, obs, app):
 
     # Always inject into memory (so Radim mentions it in next chat)
     _inject_into_memory(user_id, obs)
+
+    # v824: Event-driven Claude agent trigger
+    # When agent_loop detects ALERT/CRISIS, hand off to Claude Sonnet 4.5
+    # for deeper holistic analysis (full Ψ(t) state, profile, learning,
+    # anticipation forecast, HA, voice runtime — 65 tools at once).
+    # Runs asynchronously so this function doesn't block the loop.
+    # Gated by env var CLAUDE_AGENT_EVENT_TRIGGER=1 (default off — opt-in).
+    if (severity in (ALERT, CRISIS) and
+        os.environ.get('CLAUDE_AGENT_EVENT_TRIGGER', '0') == '1' and
+        os.environ.get('CLAUDE_AGENT_ENABLED', '0') == '1'):
+        try:
+            import threading as _threading
+            from claude_autonomous_agent import run_claude_agent
+
+            event_context = {
+                'severity': severity,
+                'observation_type': obs.get('type', 'unknown'),
+                'message': obs.get('message', ''),
+                'source': 'agent_loop',
+            }
+
+            def _bg_claude():
+                try:
+                    run_claude_agent(
+                        app=app,
+                        trigger='agent_loop',
+                        focus_senior_id=str(user_id),
+                        event_context=event_context,
+                    )
+                except Exception as e:
+                    logger.exception(f"Claude agent event-trigger failed: {e}")
+
+            _threading.Thread(target=_bg_claude, daemon=True).start()
+            logger.info(
+                f"🤖 Claude agent triggered for senior {user_id} "
+                f"(severity={severity}, type={obs.get('type')})"
+            )
+        except ImportError:
+            logger.debug("Claude agent not available — event trigger skipped")
+        except Exception as e:
+            # Trigger failure must never block primary action flow
+            logger.warning(f"Claude event trigger error (non-fatal): {e}")
 
     # v478: Respect user's chosen mode (observer/guide/guardian)
     profile = db_load_profile(user_id)

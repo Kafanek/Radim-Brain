@@ -3732,14 +3732,39 @@ WRITE_TOOLS = {'send_chat_message', 'send_push', 'notify_family', 'initiate_call
                'report_bug'}
 
 
-def run_claude_agent(app=None, trigger='cron', force=False):
+# Per-senior event-trigger cooldown (anti-thrashing). Independent of
+# action cooldown — this is "don't re-run the agent on the same senior
+# for the same triggering event within X minutes".
+EVENT_TRIGGER_COOLDOWN_MIN = int(os.getenv('CLAUDE_AGENT_EVENT_COOLDOWN_MIN', '10'))
+_event_trigger_history = {}  # senior_id → last trigger timestamp
+
+
+def _can_trigger_for_senior(senior_id):
+    """Returns True if event trigger is allowed for this senior right now."""
+    last = _event_trigger_history.get(str(senior_id))
+    if not last:
+        return True
+    elapsed_min = (time.time() - last) / 60
+    return elapsed_min >= EVENT_TRIGGER_COOLDOWN_MIN
+
+
+def _mark_trigger(senior_id):
+    _event_trigger_history[str(senior_id)] = time.time()
+
+
+def run_claude_agent(app=None, trigger='cron', force=False,
+                     focus_senior_id=None, event_context=None):
     """
     Main entry point. Run autonomous Claude agent for one cycle.
 
     Args:
         app: Flask app for context (optional)
-        trigger: 'cron' / 'manual' / 'event' (audit)
+        trigger: 'cron' / 'manual' / 'event' / 'agent_loop' (audit)
         force: bypass daily budget check (manual override)
+        focus_senior_id: if provided, agent is told to focus deeply on
+                        ONE senior (event-driven mode, faster + cheaper).
+        event_context: dict with details about the triggering event
+                      (severity, observation_type, message).
 
     Returns:
         dict with summary and metrics
@@ -3750,6 +3775,15 @@ def run_claude_agent(app=None, trigger='cron', force=False):
         return {'error': 'ANTHROPIC_API_KEY not set'}
 
     _ensure_telemetry_table()
+
+    # Event-trigger cooldown (per-senior anti-thrashing)
+    if trigger == 'agent_loop' and focus_senior_id:
+        if not _can_trigger_for_senior(focus_senior_id) and not force:
+            logger.info(f"Claude agent: event trigger cooldown active for senior {focus_senior_id}")
+            return {'skipped': 'event_cooldown',
+                    'senior_id': focus_senior_id,
+                    'cooldown_min': EVENT_TRIGGER_COOLDOWN_MIN}
+        _mark_trigger(focus_senior_id)
 
     # Budget check
     if not force:
@@ -3765,12 +3799,47 @@ def run_claude_agent(app=None, trigger='cron', force=False):
     # Reset TTS generation counter for this run
     _tts_generation_counter['count'] = 0
 
-    messages = [
-        {"role": "user", "content":
-         f"Je {datetime.now().strftime('%Y-%m-%d %H:%M')} ({trigger}). "
-         "Zkontroluj aktivní seniory, posuď jejich stav a rozhodni o akcích. "
-         "Začni `list_seniors`. Na konci VŽDY volej `create_observation` se shrnutím."}
-    ]
+    # Customize initial message based on trigger
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+    if focus_senior_id:
+        # Focused/event-driven mode — deep dive on one senior
+        ev = event_context or {}
+        ev_summary = ''
+        if ev:
+            ev_summary = (
+                f"\n\n**TRIGGERING EVENT:**\n"
+                f"- Severity: {ev.get('severity', 'unknown')}\n"
+                f"- Type: {ev.get('observation_type', 'unknown')}\n"
+                f"- Source: {ev.get('source', 'agent_loop')}\n"
+                f"- Message: {(ev.get('message') or '')[:300]}\n"
+            )
+        initial_text = (
+            f"Je {timestamp} (event-driven trigger: {trigger}).\n"
+            f"**FOCUS na seniora #{focus_senior_id}** — rule-based agent_loop právě "
+            f"detekoval situaci, která vyžaduje hlubší analýzu.{ev_summary}\n\n"
+            "Postup:\n"
+            "1. `get_full_profile({focus})` + `get_brain_state({focus})` + "
+            "`get_anticipation_forecast({focus})` — kontext\n"
+            "2. `get_recent_chat({focus})` + `get_observations({focus}, days=3)` — "
+            "co se dělo\n"
+            "3. `get_agent_messages({focus})` — co viděli ostatní agenti\n"
+            "4. `get_voice_session_state({focus})` — je teď v hovoru?\n"
+            "5. Rozhodni o akci (chat / push / family / call) — eskaluj jen pokud forecast "
+            "nebo HA potvrzuje skutečnou krizi. Není-li, vytvoř INFO observation s důvodem "
+            "neeskalace.\n"
+            "6. `create_observation` na konci s tvým rozhodnutím.\n\n"
+            "**Buď rychlý** — toto je event-driven, ne periodic sweep. "
+            "Nezdržuj se s ostatními seniory."
+        ).format(focus=focus_senior_id)
+        messages = [{"role": "user", "content": initial_text}]
+    else:
+        # Periodic sweep — broad scan
+        messages = [
+            {"role": "user", "content":
+             f"Je {timestamp} ({trigger}). "
+             "Zkontroluj aktivní seniory, posuď jejich stav a rozhodni o akcích. "
+             "Začni `list_seniors`. Na konci VŽDY volej `create_observation` se shrnutím."}
+        ]
 
     total_input = 0
     total_output = 0
@@ -3867,6 +3936,7 @@ def run_claude_agent(app=None, trigger='cron', force=False):
 
     summary = {
         'trigger': trigger,
+        'focus_senior_id': str(focus_senior_id) if focus_senior_id else None,
         'duration_s': round(duration, 2),
         'iterations': iteration + 1 if 'iteration' in dir() else 0,
         'tool_calls': tool_calls_made,
