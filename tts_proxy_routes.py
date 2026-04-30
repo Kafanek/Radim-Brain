@@ -489,3 +489,41 @@ def tts_health():
             'elevenlabs': '/api/elevenlabs/tts'
         }
     })
+
+
+@tts_proxy_bp.route('/api/tts/stats', methods=['GET'])
+def tts_stats():
+    """Public TTS metrics — cache hit rate, Azure quota usage, projected cost.
+
+    v453 — visibility for the optimization work (streaming, persistent cache,
+    phoneme expansion). Without these numbers we are flying blind.
+    """
+    payload = {'service': 'TTS Proxy', 'success': True}
+    try:
+        from scaling_optimizations import tts_cache, tts_quota
+        payload['cache'] = tts_cache.stats()
+        payload['quota'] = tts_quota.stats()
+    except ImportError as e:
+        payload['success'] = False
+        payload['error'] = f'scaling_optimizations not available: {e}'
+        return jsonify(payload), 503
+
+    try:
+        from self_healing import get_breaker
+        b = get_breaker('azure_tts')
+        if b:
+            payload['circuit'] = b.get_status()
+    except ImportError:
+        pass
+
+    try:
+        from voice_filter import VOICE_PROFILES, _CZECH_PHONEME_FIXES, EMPHASIS_WORDS
+        payload['voice_filter'] = {
+            'modes': sorted(VOICE_PROFILES.keys()),
+            'phoneme_rules': len(_CZECH_PHONEME_FIXES),
+            'emphasis_words': len(EMPHASIS_WORDS),
+        }
+    except ImportError:
+        pass
+
+    return jsonify(payload)

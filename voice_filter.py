@@ -195,7 +195,139 @@ _CZECH_PHONEME_FIXES = [
     (r'\b[Vv]isegrád(ský|ská|ské|ského|skému|ským|ských)?\b',
                            'vɪsɛɡraːt', None),
     (r'\bV4\b',            'veːʃtiːrʒɪ', 'V4'),
+
+    # ── v453: Tech / social brands (newer ones missing from original list) ──
+    (r'\b[Tt]ik[Tt]ok\b',  'tɪktɔk',     'TikTok'),
+    (r'\b[Ii]nstagram\b',  'instaɡram',  'Instagram'),
+    (r'\b[Ll]inked[Ii]n\b', 'lɪŋktɪn',   'LinkedIn'),
+    (r'\b[Ss]potify\b',    'spɔtɪfaj',   'Spotify'),
+    (r'\b[Nn]etflix\b',    'nɛtflɪks',   'Netflix'),
+    (r'\b[Ss]kype\b',      'skajp',      'Skype'),
+    (r'\b[Zz]oom\b',       'zuːm',       'Zoom'),
+    (r'\b[Tt]eams\b',      'tiːms',      'Teams'),
+    (r'\b[Gg]mail\b',      'dʒiːmɛjl',   'Gmail'),
+    (r'\b[Yy]ahoo\b',      'jahuː',      'Yahoo'),
+    (r'\b[Aa]i\b',         'eːiː',       'AI'),
+    (r'\b[Ee][Vv]\b',      'iːviː',      'EV'),     # electric vehicle
+    (r'\b[Cc][Tt]\b',      'tseːteː',    'CT'),
+    (r'\b[Mm][Rr]\b',      'ɛmɛr',       'MR'),     # magnetická rezonance
+    (r'\b[Ee][Kk][Gg]\b',  'eːkaːgeː',   'EKG'),
+    (r'\b[Hh][Ii][Vv]\b',  'haːiːveː',   'HIV'),
+    (r'\b[Dd][Nn][Aa]\b',  'deːenaː',    'DNA'),
+    (r'\b[Tt][Vv]\b',      'teːveː',     'TV'),
 ]
+
+
+# ── v453: Smart number/date reader ──────────────────────────────────────────
+# Standard Azure SSML <say-as> tags are MORE reliable than IPA for numbers,
+# dates, and times because Azure's Czech morphology engine handles inflection
+# (pětadvacátého prosince vs dvacátého pátého dvanáctého).
+#
+# Rules below are applied BEFORE the phoneme list so the say-as text doesn't
+# get accidentally re-tagged. Order matters — most specific patterns first.
+
+# Czech tísňové linky — must be read digit-by-digit so seniors don't lose
+# them under stress (e.g. "jedna pět pět" not "sto padesát pět").
+_EMERGENCY_NUMBERS = {'112', '150', '155', '156', '158'}
+
+
+def _apply_smart_say_as(text):
+    """Wrap numbers/dates/times in <say-as> so Azure reads them naturally.
+
+    Patterns:
+      - +420 XXX XXX XXX  → digits (telephone)
+      - DD.MM.YYYY        → date d.m.y
+      - DD.MM.            → date d.m (year inherited from context)
+      - HH:MM             → time hms24
+      - 4-digit years (19xx, 20xx) inside "v roce" / "rok" → cardinal
+      - Emergency numbers (112/150/155/156/158) → digits
+    """
+    # 1. Phone numbers: +420 728 123 456 or +420728123456
+    text = re.sub(
+        r'\+420[\s\-]?(\d{3})[\s\-]?(\d{3})[\s\-]?(\d{3})',
+        lambda m: f'<say-as interpret-as="telephone">+420 {m.group(1)} {m.group(2)} {m.group(3)}</say-as>',
+        text,
+    )
+
+    # 2. Time HH:MM (24h)
+    text = re.sub(
+        r'\b([01]?\d|2[0-3]):([0-5]\d)\b',
+        lambda m: f'<say-as interpret-as="time" format="hms24">{m.group(1)}:{m.group(2)}</say-as>',
+        text,
+    )
+
+    # 3. Full date DD.MM.YYYY
+    text = re.sub(
+        r'\b(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4})\b',
+        lambda m: f'<say-as interpret-as="date" format="dmy">{m.group(1)}.{m.group(2)}.{m.group(3)}</say-as>',
+        text,
+    )
+
+    # 4. Short date DD.MM. (no year)
+    text = re.sub(
+        r'\b(\d{1,2})\.\s?(\d{1,2})\.(?!\d)',
+        lambda m: f'<say-as interpret-as="date" format="dm">{m.group(1)}.{m.group(2)}.</say-as>',
+        text,
+    )
+
+    # 5. Year reading after "rok / v roce / roku"
+    text = re.sub(
+        r'\b([Rr]ok[uy]?|[Vv]\s+roce)\s+(19\d{2}|20\d{2})\b',
+        lambda m: f'{m.group(1)} <say-as interpret-as="cardinal">{m.group(2)}</say-as>',
+        text,
+    )
+
+    # 6. Emergency numbers — digit-by-digit
+    text = re.sub(
+        r'\b(112|150|155|156|158)\b',
+        lambda m: f'<say-as interpret-as="digits">{m.group(1)}</say-as>',
+        text,
+    )
+
+    return text
+
+
+# ── v453: Czech-friendly aliases for commonly-mispronounced words ───────────
+# Uses <sub alias="..."> so Azure's Czech engine handles inflection.
+# Only includes entries where the alias actually changes pronunciation
+# (no-op aliases just add SSML overhead without benefit).
+_CZECH_SUB_ALIASES = [
+    # Léky / medication brand names where original spelling misleads Azure
+    (r'\b[Ww]arfarin\b',          'Varfarín'),    # W → V (Czech)
+    (r'\b[Aa]nopyrin\b',          'Anopyrín'),    # add long í
+    (r'\b[Cc]oncor\b',            'Konkor'),      # C → K
+    (r'\b[Vv]erospiron\b',        'Verospíron'),
+    (r'\b[Ff]urosemid\b',         'Furosemíd'),
+    (r'\b[Ii]buprofen\b',         'Ibuprofén'),
+    (r'\b[Ll]ozartan\b',          'Lozartán'),
+    (r'\b[Mm]etformin\b',         'Metformín'),
+    (r'\b[Aa]pixaban\b',          'Apixabán'),
+    (r'\b[Ll]isinopril\b',        'Lisinopríl'),
+    (r'\b[Ss]imvastatin\b',       'Simvastatín'),
+    (r'\b[Aa]torvastatin\b',      'Atorvastatín'),
+
+    # Communication apps — anglicismy s nečeským zvukovým profilem
+    (r'\b[Mm]essenger\b',         'mesendžr'),
+    (r'\b[Vv]iber\b',             'vajbr'),
+]
+
+
+def _apply_czech_sub_aliases(text):
+    """Apply <sub alias="..."> for Czech-friendly mispronunciation fixes."""
+    for pattern, alias_or_fn in _CZECH_SUB_ALIASES:
+        if not re.search(pattern, text):
+            continue
+
+        if callable(alias_or_fn):
+            def _replace(m, fn=alias_or_fn):
+                alias = fn(m)
+                return f'<sub alias="{alias}">{m.group(0)}</sub>'
+        else:
+            def _replace(m, alias=alias_or_fn):
+                return f'<sub alias="{alias}">{m.group(0)}</sub>'
+
+        text = re.sub(pattern, _replace, text)
+    return text
 
 def _fix_czech_pronunciation(text):
     """Fix Azure mispronunciations using IPA phoneme tags.
@@ -220,6 +352,12 @@ def _fix_czech_pronunciation(text):
         lambda m: f'<sub alias="{m.group(1)}aďim{m.group(2) or ""}">{m.group(0)}</sub>',
         text,
     )
+
+    # v453: numbers/dates/times via standard SSML <say-as> (more reliable than IPA)
+    text = _apply_smart_say_as(text)
+
+    # v453: Czech-friendly aliases for medications and medical terms
+    text = _apply_czech_sub_aliases(text)
 
     for pattern, ipa, display in _CZECH_PHONEME_FIXES:
         # Pre-check: pokud žádný match, přeskočit (re.sub by stejně neudělal nic,
