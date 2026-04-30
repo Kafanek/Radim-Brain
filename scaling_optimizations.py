@@ -8,6 +8,7 @@
 # ============================================
 
 import hashlib
+import os
 import time
 import logging
 from datetime import datetime, timedelta
@@ -16,28 +17,118 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================
-# 1. TTS CACHE — In-memory LRU for Azure TTS
+# 1. TTS CACHE — In-memory LRU + persistent disk for Azure TTS
 # ============================================
-# Azure TTS costs ~$0.12/1000 chars. Radim repeats many phrases:
+# Azure TTS costs ~$16/1M chars. Radim repeats many phrases:
 # "Ahoj!", "Dobrý den!", "Výborně!", "Správně!", etc.
 # Cache audio bytes in memory — saves 30-50% of TTS API calls.
+#
+# v453: Disk-backed persistence (Heroku /tmp) so cache survives:
+#   - eventlet greenlet recycle / gunicorn worker reload
+#   - Eco-dyno short sleep cycles (if /tmp persists across the wake)
+# Disk is BEST EFFORT — every dyno restart wipes /tmp, so persistence is
+# bounded by dyno lifetime (~24 h on Heroku).
+
+# Disk cache root: Heroku /tmp is the only writable ephemeral fs.
+TTS_DISK_ROOT = os.environ.get('TTS_DISK_CACHE', '/tmp/radim_tts_cache')
+
 
 class TTSCache:
-    """LRU cache for TTS audio responses.
+    """Two-tier LRU cache for TTS audio responses.
 
-    Key: hash(text + voice + rate)
-    Value: (audio_bytes, timestamp)
-    Max: 200 entries (~40MB at 200KB average per audio)
-    TTL: 24 hours
+    Layer 1 (in-memory): hot keys, instant lookup, capped by max_entries.
+    Layer 2 (disk): /tmp/radim_tts_cache/<key>.mp3 + <key>.meta — survives
+                    in-process restarts, lazy-loaded on cache miss.
+
+    Key: md5(text.lower() + voice + rate)
+    TTL: 24 h (both layers honour it)
+
+    Disk operations are guarded — failures fall back silently to memory-only,
+    so a full /tmp cannot break TTS.
     """
 
-    def __init__(self, max_entries=200, ttl_hours=24):
+    def __init__(self, max_entries=200, ttl_hours=24, disk_root=None):
         self._cache = {}
         self._access_order = []
         self.max_entries = max_entries
         self.ttl = ttl_hours * 3600
         self.hits = 0
         self.misses = 0
+        self.disk_hits = 0       # served from disk (memory miss)
+        self.disk_writes = 0
+        self.disk_root = disk_root if disk_root is not None else TTS_DISK_ROOT
+        self._disk_ok = self._init_disk()
+
+    def _init_disk(self):
+        """Create disk root + warm in-memory index from existing files.
+        Returns True if disk is usable, False on permission/IO error."""
+        try:
+            os.makedirs(self.disk_root, exist_ok=True)
+            now = time.time()
+            warmed = 0
+            for fn in os.listdir(self.disk_root):
+                if not fn.endswith('.meta'):
+                    continue
+                key = fn[:-5]
+                meta_path = os.path.join(self.disk_root, fn)
+                try:
+                    with open(meta_path) as f:
+                        cached_at = float(f.read().strip())
+                except (OSError, ValueError):
+                    continue
+                # TTL filter — drop expired files now to keep disk tidy
+                if now - cached_at > self.ttl:
+                    self._unlink_safe(key)
+                    continue
+                # Index entry without loading audio (lazy via _read_disk on get)
+                self._cache[key] = (None, cached_at)  # None = disk-only sentinel
+                self._access_order.append(key)
+                warmed += 1
+            if warmed:
+                logger.info(f"⚡ TTSCache: warmed {warmed} entries from disk ({self.disk_root})")
+            return True
+        except OSError as e:
+            logger.warning(f"⚡ TTSCache: disk init failed ({e}); memory-only mode")
+            return False
+
+    def _file_paths(self, key):
+        return (os.path.join(self.disk_root, key + '.mp3'),
+                os.path.join(self.disk_root, key + '.meta'))
+
+    def _read_disk(self, key):
+        if not self._disk_ok:
+            return None
+        mp3_path, _ = self._file_paths(key)
+        try:
+            with open(mp3_path, 'rb') as f:
+                return f.read()
+        except OSError:
+            return None
+
+    def _write_disk(self, key, audio_bytes, cached_at):
+        if not self._disk_ok:
+            return
+        mp3_path, meta_path = self._file_paths(key)
+        try:
+            # Write atomically: tmp file then rename (no torn reads)
+            tmp = mp3_path + '.tmp'
+            with open(tmp, 'wb') as f:
+                f.write(audio_bytes)
+            os.replace(tmp, mp3_path)
+            with open(meta_path, 'w') as f:
+                f.write(str(cached_at))
+            self.disk_writes += 1
+        except OSError as e:
+            logger.debug(f"⚡ TTSCache disk write failed for {key[:8]}: {e}")
+
+    def _unlink_safe(self, key):
+        if not self._disk_ok:
+            return
+        for path in self._file_paths(key):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
     def _key(self, text, voice='cs-CZ-AntoninNeural', rate=0.9):
         """Generate cache key from text + voice params."""
@@ -55,11 +146,28 @@ class TTSCache:
             return None
 
         audio_bytes, cached_at = entry
-        # Check TTL
+        # Check TTL (covers both memory & disk-warmed entries)
         if time.time() - cached_at > self.ttl:
             del self._cache[key]
+            if key in self._access_order:
+                self._access_order.remove(key)
+            self._unlink_safe(key)
             self.misses += 1
             return None
+
+        # Disk-only entry (warmed at startup, audio not yet loaded)
+        if audio_bytes is None:
+            audio_bytes = self._read_disk(key)
+            if audio_bytes is None:
+                # Disk file vanished — drop the index entry
+                del self._cache[key]
+                if key in self._access_order:
+                    self._access_order.remove(key)
+                self.misses += 1
+                return None
+            # Promote to in-memory (with current timestamp from disk)
+            self._cache[key] = (audio_bytes, cached_at)
+            self.disk_hits += 1
 
         self.hits += 1
         # Move to end (most recently used)
@@ -70,41 +178,73 @@ class TTSCache:
         return audio_bytes
 
     def put(self, text, audio_bytes, voice='cs-CZ-AntoninNeural', rate=0.9):
-        """Cache audio bytes for text."""
+        """Cache audio bytes for text — both in-memory and on disk."""
         if not audio_bytes or len(audio_bytes) < 100:
             return  # Don't cache empty/error responses
 
         key = self._key(text, voice, rate)
+        cached_at = time.time()
 
         # Evict oldest if at capacity
         while len(self._cache) >= self.max_entries:
             if self._access_order:
                 oldest = self._access_order.pop(0)
                 self._cache.pop(oldest, None)
+                self._unlink_safe(oldest)
             else:
                 break
 
-        self._cache[key] = (audio_bytes, time.time())
+        self._cache[key] = (audio_bytes, cached_at)
         self._access_order.append(key)
+        self._write_disk(key, audio_bytes, cached_at)
 
     def stats(self):
         total = self.hits + self.misses
         hit_rate = (self.hits / total * 100) if total > 0 else 0
-        mem_bytes = sum(len(v[0]) for v in self._cache.values())
+        # Memory-resident entries (disk-only sentinels excluded)
+        mem_bytes = sum(len(v[0]) for v in self._cache.values() if v[0] is not None)
+        loaded = sum(1 for v in self._cache.values() if v[0] is not None)
+        disk_only = len(self._cache) - loaded
+        # Disk usage (best-effort)
+        disk_bytes = 0
+        try:
+            if self._disk_ok and os.path.isdir(self.disk_root):
+                for fn in os.listdir(self.disk_root):
+                    if fn.endswith('.mp3'):
+                        try:
+                            disk_bytes += os.path.getsize(os.path.join(self.disk_root, fn))
+                        except OSError:
+                            pass
+        except OSError:
+            pass
         return {
             'entries': len(self._cache),
+            'entries_in_memory': loaded,
+            'entries_disk_only': disk_only,
             'max_entries': self.max_entries,
             'hits': self.hits,
+            'disk_hits': self.disk_hits,
             'misses': self.misses,
             'hit_rate_pct': round(hit_rate, 1),
-            'memory_mb': round(mem_bytes / 1024 / 1024, 2)
+            'memory_mb': round(mem_bytes / 1024 / 1024, 2),
+            'disk_mb': round(disk_bytes / 1024 / 1024, 2),
+            'disk_writes': self.disk_writes,
+            'disk_enabled': self._disk_ok,
+            'disk_root': self.disk_root,
         }
 
     def clear(self):
+        # In-memory wipe
+        keys = list(self._cache.keys())
         self._cache.clear()
         self._access_order.clear()
         self.hits = 0
+        self.disk_hits = 0
         self.misses = 0
+        self.disk_writes = 0
+        # Disk wipe
+        for key in keys:
+            self._unlink_safe(key)
 
 
 # Global singleton
