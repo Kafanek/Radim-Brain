@@ -329,24 +329,110 @@ def _apply_czech_sub_aliases(text):
         text = re.sub(pattern, _replace, text)
     return text
 
-def _fix_czech_pronunciation(text):
-    """Fix Azure mispronunciations using IPA phoneme tags.
+# ── v456: per-user custom lexicon cache ─────────────────────────────────────
+# Lexicon lives in memory_profiles.data['voice_lexicon'] as a flat
+# {original: alias} dict. Lookup happens on every TTS call where user_id is
+# present, so we cache per-user with a short TTL to avoid hammering the DB.
+
+_LEXICON_TTL_SEC = 60
+_lexicon_cache = {}  # user_id → (lexicon_dict, timestamp, fingerprint)
+
+
+def _get_user_lexicon(user_id):
+    """Load this user's voice_lexicon dict (cached, 60 s TTL).
+
+    Returns (lexicon_dict, fingerprint) where fingerprint is a stable hash
+    of the lexicon content — used downstream for cache-key isolation so
+    users with custom pronunciations don't poison the shared TTS cache.
+    """
+    if not user_id:
+        return {}, ''
+    import time as _t
+    entry = _lexicon_cache.get(user_id)
+    now = _t.time()
+    if entry and (now - entry[1]) < _LEXICON_TTL_SEC:
+        return entry[0], entry[2]
+    try:
+        from memory_helpers import db_load_profile
+        profile = db_load_profile(str(user_id)) or {}
+        lex = profile.get('voice_lexicon') or {}
+        if not isinstance(lex, dict):
+            lex = {}
+        # Drop empty / non-string entries defensively
+        lex = {str(k).strip(): str(v).strip()
+               for k, v in lex.items()
+               if k and v and str(k).strip() and str(v).strip()}
+        # Stable fingerprint: short md5 over sorted items
+        import hashlib as _h
+        fp = _h.md5(repr(sorted(lex.items())).encode()).hexdigest()[:8] if lex else ''
+    except Exception as e:
+        logger.debug(f"voice_lexicon load failed for {user_id}: {e}")
+        lex, fp = {}, ''
+    _lexicon_cache[user_id] = (lex, now, fp)
+    return lex, fp
+
+
+def get_user_lexicon_fingerprint(user_id):
+    """Public helper for the TTS proxy to add to cache keys when the user
+    has any custom lexicon entries. Empty fingerprint means no lexicon →
+    user shares the global TTS cache like before."""
+    _, fp = _get_user_lexicon(user_id)
+    return fp
+
+
+def invalidate_user_lexicon_cache(user_id):
+    """Called by lexicon REST endpoints after add/delete so next TTS call
+    sees the new state immediately instead of waiting for the 60 s TTL."""
+    _lexicon_cache.pop(str(user_id), None)
+
+
+def _apply_user_lexicon(text, user_id):
+    """Wrap user-defined originals with <sub alias="..."> so Azure renders
+    the alias text instead. Applied AFTER xml_escape so the SSML stays
+    well-formed. Word-boundary matching keeps substring matches safe.
+    """
+    if not user_id:
+        return text
+    lex, _ = _get_user_lexicon(user_id)
+    if not lex:
+        return text
+    # Sort by descending key length so longer originals match first
+    # (e.g. "můj synek Davídek" wraps before "Davídek" alone).
+    for original in sorted(lex.keys(), key=len, reverse=True):
+        alias = lex[original]
+        try:
+            pattern = r'\b' + re.escape(original) + r'\b'
+            text = re.sub(
+                pattern,
+                lambda m, a=alias: f'<sub alias="{xml_escape(a)}">{m.group(0)}</sub>',
+                text,
+                flags=re.IGNORECASE,
+            )
+        except re.error:
+            continue
+    return text
+
+
+def _fix_czech_pronunciation(text, user_id=None):
+    """Fix Azure mispronunciations using IPA phoneme + <sub> tags.
 
     Must be called AFTER xml_escape() so the SSML tags are not escaped.
+
+    Pipeline order (each layer wraps further):
+      1. v456 — per-user lexicon (highest priority, can override built-ins)
+      2. v452 — Radim base + declinations → Raďim alias
+      3. v453 — say-as for numbers/dates/times/telephone (standard SSML)
+      4. v453 — Czech-friendly aliases for medications & apps
+      5. existing IPA phoneme rules (brands, tech terms, breathing cues)
 
     Bug-fix (TTS audit #8): dříve `re.search()` našel jen PRVNÍ výskyt
     slova v textu. Pokud text obsahoval "PDF a další PDF dokument",
     jen první PDF dostal phoneme tag, druhý zněl Azure-default.
     Fix: re.sub s callbackem nahradí VŠECHNY výskyty pattern najednou.
-
-    v452 — Radim fix: Azure cs-CZ-AntoninNeural mispronounced base form
-    "Radim" with hard /d/ + /ɪ/ → sounded like "Radym" instead of the
-    proper Czech palatalized [ˈraɟɪm]. IPA phoneme tag was inconsistent.
-    Solution: <sub alias="Raďim"> forces Azure's Czech engine to render
-    the explicit ď, which always palatalizes correctly. Covers base form
-    plus common declinations (Radime/Radima/Radimovi/Radimem) so chat
-    greetings like "Ahoj Radime!" sound natural.
     """
+    # v456: user-defined lexicon FIRST so it can override built-in fixes
+    text = _apply_user_lexicon(text, user_id)
+
     text = re.sub(
         r'\b([Rr])adim(e|a|em|ovi|ě|u)?\b',
         lambda m: f'<sub alias="{m.group(1)}aďim{m.group(2) or ""}">{m.group(0)}</sub>',
@@ -788,7 +874,7 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural",
         # v10.20: Pronunciation fixes AFTER xml_escape (SSML tags won't be escaped)
         # Azure cs-CZ-AntoninNeural says "dýčejte" instead of "dýchejte"
         # Fix: use IPA phoneme tag to force correct "ch" /x/ pronunciation
-        safe_sentence = _fix_czech_pronunciation(safe_sentence)
+        safe_sentence = _fix_czech_pronunciation(safe_sentence, user_id=user_id)
 
         # Emphasis for ALERT/CRISIS
         if profile["emphasis"]:

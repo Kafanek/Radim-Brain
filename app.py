@@ -877,6 +877,14 @@ init_tts_proxy_routes(
 app.register_blueprint(tts_proxy_bp)
 logger.info("✅ TTS Proxy routes registered: /api/azure/tts, /api/elevenlabs/tts")
 
+# v456: per-user voice lexicon (TTS pronunciation overrides)
+try:
+    from voice_lexicon_routes import voice_lexicon_bp
+    app.register_blueprint(voice_lexicon_bp)
+    logger.info("✅ Voice Lexicon routes registered: /api/voice/lexicon")
+except ImportError as _vlex_err:
+    logger.warning(f"⚠️ Voice Lexicon routes not loaded: {_vlex_err}")
+
 # v10.34: Browser Agent — safe read-only web browsing for seniors + agent tool
 try:
     from browser_agent_routes import browser_agent_bp

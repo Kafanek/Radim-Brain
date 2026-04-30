@@ -169,6 +169,18 @@ def azure_tts_proxy():
                 # HARMONY: cache by mode only — much higher hit rate.
                 # Subtle RTCF/rate variations are imperceptible to senior.
                 _brain_fp = f"|m={_bm}"
+        # v456: include user lexicon fingerprint so users with custom
+        # pronunciations don't poison the shared cache. Empty fingerprint
+        # (no lexicon — most users) keeps the global hit rate intact.
+        _lex_fp = ''
+        try:
+            from voice_filter import get_user_lexicon_fingerprint
+            _lex_fp = get_user_lexicon_fingerprint(uid) if uid else ''
+        except Exception:
+            pass
+        if _lex_fp:
+            _brain_fp += f"|lex={_lex_fp}"
+
         _cache_rate = str(rate) + ':' + _cache_ctx + _brain_fp
         try:
             from scaling_optimizations import tts_cache, tts_quota
