@@ -580,6 +580,36 @@ def lookup_contact_phone(target, caller_phone):
 # PROACTIVE OUTBOUND CALLS (v387 — agent loop integration)
 # ============================================================================
 
+# v451: numbers Twilio rejected as "unverified" (trial-account block).
+# Persisted only in-memory (rebuilt on dyno restart); paid account makes it irrelevant.
+_unverified_phones = set()
+
+
+def _is_trial_unverified_error(exc):
+    """True if Twilio rejected the number because the account is on trial and the destination is unverified."""
+    msg = str(exc) if exc else ""
+    code = getattr(exc, "code", None)
+    # Twilio API error 21219 = unverified destination on trial account
+    return code == 21219 or "unverified" in msg.lower() or "trial accounts may only" in msg.lower()
+
+
+def _looks_like_dummy_phone(phone_number):
+    """Detect obviously fake/seed phone numbers so agent_loop doesn't burn Twilio calls on them.
+    Filters CZ mobile patterns with repeated/sequential digits used in seed_demo / seed_pilot."""
+    if not phone_number or not phone_number.startswith("+420"):
+        return False
+    digits = phone_number[4:]
+    if len(digits) != 9:
+        return False
+    # Repeated triplets like 603111222, 777111222, 603222333 etc.
+    if re.match(r'^\d{3}(\d)\1\1(\d)\2\2$', digits):
+        return True
+    # All-same body: 600000000, 777777777
+    if re.match(r'^\d(\d)\1{7}$', digits):
+        return True
+    return False
+
+
 def initiate_proactive_call(phone_number, greeting, user_id=None, reason="check_in", voice_mode=None):
     """
     Initiate outbound call from Radim to a senior or caregiver.
@@ -603,6 +633,15 @@ def initiate_proactive_call(phone_number, greeting, user_id=None, reason="check_
     # v407: E.164 validation (must be +countrycode + digits, 8-15 total)
     if not phone_number or not re.match(r'^\+[1-9]\d{7,14}$', phone_number):
         return {"success": False, "error": f"Invalid E.164 phone: {phone_number}"}
+
+    # v451: skip seed/dummy numbers so trial-account rejections don't trip the circuit breaker
+    if _looks_like_dummy_phone(phone_number):
+        logger.info(f"📞 Proactive call skipped — phone looks like seed/dummy: {phone_number}")
+        return {"success": False, "error": "Dummy phone number, skipped", "skipped": True}
+
+    if phone_number in _unverified_phones:
+        logger.info(f"📞 Proactive call skipped — phone previously rejected as unverified by Twilio trial: {phone_number}")
+        return {"success": False, "error": "Twilio trial: number unverified, skipped", "skipped": True}
 
     # v450: Circuit breaker for Twilio
     try:
@@ -658,6 +697,19 @@ def initiate_proactive_call(phone_number, greeting, user_id=None, reason="check_
         return {"success": True, "call_sid": call.sid}
 
     except Exception as e:
+        # v451: Twilio trial → unverified destination is configuration, not infra failure.
+        # Cache the number, log a clear admin warning, do NOT trip the circuit breaker.
+        if _is_trial_unverified_error(e):
+            _unverified_phones.add(phone_number)
+            logger.warning(
+                f"📞 Twilio trial rejected number {phone_number} (unverified destination). "
+                f"Number cached; future proactive calls will be skipped silently. "
+                f"Fix: verify the number in Twilio Console or upgrade to paid account."
+            )
+            try: log_healing_event('call_unverified', 'twilio', {'phone': phone_number[-4:]})
+            except: pass
+            return {"success": False, "error": "Twilio trial: number unverified", "skipped": True}
+
         logger.error(f"Proactive call error: {e}")
         if twilio_breaker: twilio_breaker.record_failure()
         try: log_healing_event('call_failed', 'twilio', {'error': str(e)[:80], 'phone': phone_number[-4:]})
