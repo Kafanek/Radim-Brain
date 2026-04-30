@@ -166,7 +166,9 @@ _CZECH_PHONEME_FIXES = [
     (r'\b[Dd]ýchej\b',     'diːxɛj',    None),
 
     # ── Brands & tech terms (English-origin, common in RADIM context) ──
-    (r'\b[Rr]adim\b',      'radɪm',       'Radim'),
+    # NOTE: "Radim" is handled separately via <sub alias="Raďim"> in
+    # _fix_czech_pronunciation() — IPA phoneme is unreliable for the
+    # palatalized "di" cluster (Azure was rendering it as hard "Radym").
     (r'\bChatGPT\b',       'tʃɛtdʒiːpiːtiː', 'ChatGPT'),
     (r'\b[Gg]emini\b',     'ɡɛmɪnaɪ',    'Gemini'),
     (r'\b[Cc][Oo][Vv][Ii][Dd](-19)?\b', 'kɔvɪt',  'COVID'),
@@ -204,7 +206,21 @@ def _fix_czech_pronunciation(text):
     slova v textu. Pokud text obsahoval "PDF a další PDF dokument",
     jen první PDF dostal phoneme tag, druhý zněl Azure-default.
     Fix: re.sub s callbackem nahradí VŠECHNY výskyty pattern najednou.
+
+    v452 — Radim fix: Azure cs-CZ-AntoninNeural mispronounced base form
+    "Radim" with hard /d/ + /ɪ/ → sounded like "Radym" instead of the
+    proper Czech palatalized [ˈraɟɪm]. IPA phoneme tag was inconsistent.
+    Solution: <sub alias="Raďim"> forces Azure's Czech engine to render
+    the explicit ď, which always palatalizes correctly. Covers base form
+    plus common declinations (Radime/Radima/Radimovi/Radimem) so chat
+    greetings like "Ahoj Radime!" sound natural.
     """
+    text = re.sub(
+        r'\b([Rr])adim(e|a|em|ovi|ě|u)?\b',
+        lambda m: f'<sub alias="{m.group(1)}aďim{m.group(2) or ""}">{m.group(0)}</sub>',
+        text,
+    )
+
     for pattern, ipa, display in _CZECH_PHONEME_FIXES:
         # Pre-check: pokud žádný match, přeskočit (re.sub by stejně neudělal nic,
         # ale tím se vyhneme zbytečné regex compilation)
