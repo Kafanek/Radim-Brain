@@ -232,57 +232,120 @@ _EMERGENCY_NUMBERS = {'112', '150', '155', '156', '158'}
 
 
 def _apply_smart_say_as(text):
-    """Wrap numbers/dates/times in <say-as> so Azure reads them naturally.
+    """Wrap numbers/dates/times/currency/etc in <say-as> tags.
 
-    Patterns:
-      - +420 XXX XXX XXX  → digits (telephone)
-      - DD.MM.YYYY        → date d.m.y
-      - DD.MM.            → date d.m (year inherited from context)
-      - HH:MM             → time hms24
-      - 4-digit years (19xx, 20xx) inside "v roce" / "rok" → cardinal
-      - Emergency numbers (112/150/155/156/158) → digits
+    v457: single-pass priority-based matcher. Each pattern has a priority;
+    when multiple patterns match overlapping positions (e.g. "150 Kč" hits
+    both currency AND emergency-numbers), the higher-priority match wins.
+    No double-wrapping — once a region is consumed, lower-priority patterns
+    skip it. This replaces the v453 sequential `re.sub` chain that produced
+    nested tags for "+420 728 123 456" and lost currency to emergency for
+    "150 Kč".
+
+    Priority ordering (higher = more specific = preferred):
+      90  Phone with +420 prefix      (most contextual)
+      80  Phone without prefix (CZ mobile 6XX/7XX, 9-digit grouped)
+      70  Time HH:MM
+      60  Date DD.MM.YYYY
+      50  Date DD.MM. (no year)
+      40  Year after "rok / v roce"
+      35  Currency Kč
+      30  Temperature °C/°F
+      25  Percentage %
+      10  Emergency 3-digit numbers (112/150/155/156/158) — lowest so
+          "150 Kč" goes to currency, but lone "155" still becomes digits
     """
-    # 1. Phone numbers: +420 728 123 456 or +420728123456
-    text = re.sub(
-        r'\+420[\s\-]?(\d{3})[\s\-]?(\d{3})[\s\-]?(\d{3})',
-        lambda m: f'<say-as interpret-as="telephone">+420 {m.group(1)} {m.group(2)} {m.group(3)}</say-as>',
-        text,
-    )
+    patterns = [
+        (
+            90,
+            r'\+420[\s\-]?(\d{3})[\s\-]?(\d{3})[\s\-]?(\d{3})',
+            lambda m: (
+                f'<say-as interpret-as="telephone">'
+                f'+420 {m.group(1)} {m.group(2)} {m.group(3)}'
+                f'</say-as>'
+            ),
+        ),
+        (
+            80,
+            r'(?<![\d/])\b([67]\d{2})[\s\-]?(\d{3})[\s\-]?(\d{3})\b(?![\d/])',
+            lambda m: (
+                f'<say-as interpret-as="telephone">'
+                f'{m.group(1)} {m.group(2)} {m.group(3)}'
+                f'</say-as>'
+            ),
+        ),
+        (
+            70,
+            r'\b([01]?\d|2[0-3]):([0-5]\d)\b',
+            lambda m: f'<say-as interpret-as="time" format="hms24">{m.group(1)}:{m.group(2)}</say-as>',
+        ),
+        (
+            60,
+            r'\b(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4})\b',
+            lambda m: f'<say-as interpret-as="date" format="dmy">{m.group(1)}.{m.group(2)}.{m.group(3)}</say-as>',
+        ),
+        (
+            50,
+            r'\b(\d{1,2})\.\s?(\d{1,2})\.(?!\d)',
+            lambda m: f'<say-as interpret-as="date" format="dm">{m.group(1)}.{m.group(2)}.</say-as>',
+        ),
+        (
+            40,
+            r'\b([Rr]ok[uy]?|[Vv]\s+roce)\s+(19\d{2}|20\d{2})\b',
+            lambda m: f'{m.group(1)} <say-as interpret-as="cardinal">{m.group(2)}</say-as>',
+        ),
+        (
+            35,
+            r'\b(\d+(?:[.,]\d+)?)\s*Kč\b',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> '
+                f'<sub alias="korun">Kč</sub>'
+            ),
+        ),
+        (
+            30,
+            r'(-?\d+(?:[.,]\d+)?)\s*°\s*([CFcf])\b',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> '
+                f'°{m.group(2).upper()}'
+            ),
+        ),
+        (
+            25,
+            r'\b(\d+(?:[.,]\d+)?)\s*%',
+            lambda m: f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> %',
+        ),
+        (
+            10,
+            r'\b(112|150|155|156|158)\b',
+            lambda m: f'<say-as interpret-as="digits">{m.group(1)}</say-as>',
+        ),
+    ]
 
-    # 2. Time HH:MM (24h)
-    text = re.sub(
-        r'\b([01]?\d|2[0-3]):([0-5]\d)\b',
-        lambda m: f'<say-as interpret-as="time" format="hms24">{m.group(1)}:{m.group(2)}</say-as>',
-        text,
-    )
+    # Collect all candidate matches with their priority
+    candidates = []
+    for priority, pattern, transform in patterns:
+        for m in re.finditer(pattern, text):
+            candidates.append((m.start(), m.end(), priority, m, transform))
 
-    # 3. Full date DD.MM.YYYY
-    text = re.sub(
-        r'\b(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4})\b',
-        lambda m: f'<say-as interpret-as="date" format="dmy">{m.group(1)}.{m.group(2)}.{m.group(3)}</say-as>',
-        text,
-    )
+    if not candidates:
+        return text
 
-    # 4. Short date DD.MM. (no year)
-    text = re.sub(
-        r'\b(\d{1,2})\.\s?(\d{1,2})\.(?!\d)',
-        lambda m: f'<say-as interpret-as="date" format="dm">{m.group(1)}.{m.group(2)}.</say-as>',
-        text,
-    )
+    # Sort: earlier start first; for same start, higher priority first.
+    candidates.sort(key=lambda x: (x[0], -x[2]))
 
-    # 5. Year reading after "rok / v roce / roku"
-    text = re.sub(
-        r'\b([Rr]ok[uy]?|[Vv]\s+roce)\s+(19\d{2}|20\d{2})\b',
-        lambda m: f'{m.group(1)} <say-as interpret-as="cardinal">{m.group(2)}</say-as>',
-        text,
-    )
+    # Greedy non-overlap selection — first match wins, later overlapping skipped
+    selected = []
+    last_end = -1
+    for cand in candidates:
+        start, end, _prio, _m, _fn = cand
+        if start >= last_end:
+            selected.append(cand)
+            last_end = end
 
-    # 6. Emergency numbers — digit-by-digit
-    text = re.sub(
-        r'\b(112|150|155|156|158)\b',
-        lambda m: f'<say-as interpret-as="digits">{m.group(1)}</say-as>',
-        text,
-    )
+    # Apply replacements right-to-left so earlier indices stay valid
+    for start, end, _prio, m, transform in reversed(selected):
+        text = text[:start] + transform(m) + text[end:]
 
     return text
 
