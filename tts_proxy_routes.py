@@ -8,7 +8,7 @@ import re
 import logging
 import requests as http_requests
 from xml.sax.saxutils import escape as xml_escape
-from flask import Blueprint, request, jsonify, Response
+from flask import Blueprint, request, jsonify, Response, stream_with_context
 from rate_limiter import rate_limit
 
 logger = logging.getLogger(__name__)
@@ -318,14 +318,26 @@ def azure_tts_proxy():
         except ImportError:
             tts_breaker = None
 
+        # v455: stream the Azure response so the browser can start playing
+        # MP3 frames as they arrive (~300-500 ms first byte vs ~1.4 s for the
+        # buffered approach). The generator below yields chunks to the client
+        # AND accumulates them in `buf` so we can populate the cache at the
+        # end. Old clients that do `await resp.blob()` are unaffected — they
+        # just wait for the chunked stream to finish, exactly as before.
         response = None
         for _attempt in range(2):  # max 1 retry
             try:
-                response = http_requests.post(url, headers=headers, data=ssml.encode('utf-8'), timeout=15)
+                response = http_requests.post(
+                    url, headers=headers, data=ssml.encode('utf-8'),
+                    timeout=15, stream=True,
+                )
                 if response.status_code == 200:
                     if tts_breaker: tts_breaker.record_success()
                     break
                 else:
+                    # Drain + close failed response before retry
+                    try: response.close()
+                    except Exception: pass
                     if tts_breaker: tts_breaker.record_failure()
             except http_requests.exceptions.Timeout:
                 if tts_breaker: tts_breaker.record_failure()
@@ -344,62 +356,82 @@ def azure_tts_proxy():
         if response is None or response.status_code != 200:
             return jsonify({'error': f'Azure TTS error: {response.status_code if response else "no response"}', 'fallback': 'browser'}), 503
 
-        if response.status_code == 200:
-            # ⚡ Cache the audio for future requests
-            try:
-                from scaling_optimizations import tts_cache, tts_quota
-                tts_cache.put(text, response.content, voice, _cache_rate)
-                # Sprint AL.4: cache MISS = real Azure call, count chars
-                tts_quota.record_azure(len(text))
-            except Exception:
-                pass
+        # ── Build streaming Flask response ──
+        # Headers must be set before the generator starts producing bytes.
+        resp_headers = {
+            'X-Voice-Name': voice,
+            'X-Voice-Mode': _mode,
+            'Cache-Control': 'no-cache',
+            'X-Cache': 'MISS',
+            'X-Tts-Streamed': '1',  # diagnostic so frontend knows the variant
+        }
+        if ant_state:
+            resp_headers['X-Anticipation-State'] = ant_state
+        if brain_speech:
+            resp_headers['X-Brain-Mode'] = brain_speech['mode']
+            resp_headers['X-Brain-Coherence'] = str(brain_speech['coherence'])
 
-            # Sprint AC: log a single visible line that summarises the full
-            # Ψ(t)→audio path. Uses print() (not logger.info) because gunicorn
-            # in this app captures stdout to Heroku log stream while module
-            # loggers without explicit handlers stay silent.
-            # Sprint AE: extend with RTCF heartbeat deltas when ENABLE_RTCF=true.
+        # Capture closure variables for the generator
+        _azure_response = response
+        _text = text
+        _voice = voice
+        _cr = _cache_rate
+        _uid = uid
+        _mode_for_log = _mode
+        _bs = brain_speech
+
+        def _generate_and_cache():
+            buf = bytearray()
             try:
-                _log_parts = [f"mode={_mode}", f"size={len(response.content)}B"]
-                if brain_speech:
-                    _log_parts.append(
-                        f"brain[{brain_speech.get('mode')}/"
-                        f"r={brain_speech.get('rate')}/"
-                        f"p={brain_speech.get('pitch_pct')}%/"
-                        f"ps={brain_speech.get('pause_ms')}ms/"
-                        f"coh={brain_speech.get('coherence')}]"
-                    )
-                    _rtv = brain_speech.get('rtcf_voice') or {}
-                    if _rtv:
+                for chunk in _azure_response.iter_content(chunk_size=4096):
+                    if chunk:
+                        buf.extend(chunk)
+                        yield chunk
+            except Exception as ge:
+                logger.warning(f"TTS stream interrupted: {ge}")
+                # Don't re-raise — partial content is what the client already saw
+            finally:
+                try: _azure_response.close()
+                except Exception: pass
+
+                # Cache the full audio + record quota only when we got a complete payload.
+                if buf and len(buf) > 100:
+                    try:
+                        from scaling_optimizations import tts_cache, tts_quota
+                        tts_cache.put(_text, bytes(buf), _voice, _cr)
+                        tts_quota.record_azure(len(_text))
+                    except Exception as ce:
+                        logger.debug(f"TTS cache/quota record failed: {ce}")
+
+                # Sprint AC observability log — same shape as pre-v455 path
+                try:
+                    _log_parts = [f"mode={_mode_for_log}", f"size={len(buf)}B", "stream=1"]
+                    if _bs:
                         _log_parts.append(
-                            f"rtcf[{brain_speech.get('rtcf_state','?')}/"
-                            f"Δr={_rtv.get('rate_adjust',0)}/"
-                            f"Δps={_rtv.get('pause_adjust_ms',0)}ms"
-                            + (f"/style={_rtv.get('style_hint')}" if _rtv.get('style_hint') else "")
-                            + "]"
+                            f"brain[{_bs.get('mode')}/"
+                            f"r={_bs.get('rate')}/"
+                            f"p={_bs.get('pitch_pct')}%/"
+                            f"ps={_bs.get('pause_ms')}ms/"
+                            f"coh={_bs.get('coherence')}]"
                         )
-                print(f"🎙️ TTS uid={uid or 'anon'} text='{text[:40]}' " + " ".join(_log_parts), flush=True)
-            except Exception:
-                pass
+                        _rtv = _bs.get('rtcf_voice') or {}
+                        if _rtv:
+                            _log_parts.append(
+                                f"rtcf[{_bs.get('rtcf_state','?')}/"
+                                f"Δr={_rtv.get('rate_adjust',0)}/"
+                                f"Δps={_rtv.get('pause_adjust_ms',0)}ms"
+                                + (f"/style={_rtv.get('style_hint')}" if _rtv.get('style_hint') else "")
+                                + "]"
+                            )
+                    print(f"🎙️ TTS uid={_uid or 'anon'} text='{_text[:40]}' " + " ".join(_log_parts), flush=True)
+                except Exception:
+                    pass
 
-            resp_headers = {
-                'X-Voice-Name': voice,
-                'X-Voice-Mode': _mode,
-                'Cache-Control': 'no-cache',
-                'X-Cache': 'MISS'
-            }
-            if ant_state:
-                resp_headers['X-Anticipation-State'] = ant_state
-            if brain_speech:
-                resp_headers['X-Brain-Mode'] = brain_speech['mode']
-                resp_headers['X-Brain-Coherence'] = str(brain_speech['coherence'])
-            return Response(
-                response.content,
-                mimetype='audio/mpeg',
-                headers=resp_headers
-            )
-        else:
-            return jsonify({'error': f'Azure TTS error: {response.status_code}'}), response.status_code
+        return Response(
+            stream_with_context(_generate_and_cache()),
+            mimetype='audio/mpeg',
+            headers=resp_headers,
+        )
 
     except Exception as e:
         logger.error(f"TTS proxy error: {e}")
