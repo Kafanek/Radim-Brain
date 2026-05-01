@@ -54,7 +54,30 @@ def call_gemini_whatsapp(message, context=None, mode='senior', personalized_prom
                 role_label = "Uživatel" if msg["role"] == "user" else "Radim"
                 history_text += f"{role_label}: {msg['content']}\n"
 
-        full_prompt = f"{system}{context_text}{history_text}\n\nUživatel: {message}\nRadim:"
+        # v8.19.26: identity recency boost — short reminder before user message.
+        # The identity layer is ~1500-3500 chars at the START of a 13-16k prompt;
+        # AI tends to forget it by the time it generates a reply (recency bias).
+        # We append a SHORT identity reminder with 2 random concrete examples
+        # right before the user message — last thing AI sees before it speaks.
+        identity_hint = ""
+        if mode == 'senior':
+            try:
+                from radim_identity import LOVES, CURIOUS_ABOUT, QUIRKS
+                import random
+                pool = LOVES + CURIOUS_ABOUT + QUIRKS
+                samples = random.sample(pool, min(2, len(pool)))
+                identity_hint = (
+                    "\n\n[Připomínka tvé identity: máš VLASTNÍ konkrétní vkus. "
+                    "Když se uživatel zeptá „co máš rád?", „co tě zajímá?", "
+                    "„pověz o sobě" — odpověz autenticky JEDNOU konkrétní položkou ze své "
+                    "identity (např. „" + samples[0] + "" nebo „" + samples[1] + ""). "
+                    "Nikdy neuhýbej do obecností typu „mám rád když lidé naslouchají"."
+                    " Pokud je téma vážné (smutek, bolest, krize) — toto pravidlo NEPOUŽÍVEJ.]"
+                )
+            except Exception:
+                pass
+
+        full_prompt = f"{system}{context_text}{history_text}{identity_hint}\n\nUživatel: {message}\nRadim:"
 
         # Generation config — adjusted by Anticipation Engine
         temperature = gen_config["temperature"] if gen_config else 0.7

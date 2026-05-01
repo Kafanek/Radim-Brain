@@ -805,12 +805,17 @@ INTENTS = [
     {
         "name": "medication_info",
         "patterns": [
+            # v8.19.26: tightened \u2014 only match when followed by \u201el\u00e9k/pr\u00e1\u0161ek/tableta"
+            # OR a Capitalized word (typical med brand: Warfarin, Anopyrin).
+            # Old patterns matched anything (eg. \u201epov\u011bz mi n\u011bco o sob\u011b" \u2192 med=sob\u011b).
             r"\bco\s+(?:je|to\s+je)\s+\S+\b.*\b(l\u00e9k|pr\u00e1\u0161ek|tableta|na\s+co)\b",
-            r"\bco\s+(?:je|to\s+je)\s+(?:l\u00e9k\s+)?[A-Z\u00c1\u010c\u010e\u00c9\u011a\u00cd\u0147\u00d3\u0158\u0160\u0164\u00da\u016e\u00dd\u017da-z\u00e1\u010d\u010f\u00e9\u011b\u00ed\u0148\u00f3\u0159\u0161\u0165\u00fa\u016f\u00fd\u017e]{4,}",
-            r"\b(?:k\s+\u010demu\s+je|na\s+co\s+je|k\s+\u010demu\s+slou\u017e\u00ed)\s+\S+",
-            r"\b(?:\u0159ekni\s+mi\s+(?:o|n\u011bco\s+o)|info\s+o|popi\u0161|vysv\u011btli)\s+(?:l\u00e9k\s+)?\S+",
-            r"\bn\u011bco\s+o\s+\S+",                                          # 'n\u011bco o Euthyroxu'
-            r"\b(?:co\s+d\u011bl\u00e1|jak\s+p\u016fsob\u00ed|jak\s+funguje)\s+\S+\s*(?:l\u00e9k|tableta)?",
+            r"\bco\s+(?:je|to\s+je)\s+(?:l\u00e9k\s+)?[A-Z\u00c1\u010c\u010e\u00c9\u011a\u00cd\u0147\u00d3\u0158\u0160\u0164\u00da\u016e\u00dd\u017d][a-z\u00e1\u010d\u010f\u00e9\u011b\u00ed\u0148\u00f3\u0159\u0161\u0165\u00fa\u016f\u00fd\u017e]{3,}",
+            r"\b(?:k\s+\u010demu\s+(?:je|slou\u017e\u00ed)|na\s+co\s+je)\s+(?:l\u00e9k\s+)?[A-Z\u00c1\u010c\u010e\u00c9\u011a\u00cd\u0147\u00d3\u0158\u0160\u0164\u00da\u016e\u00dd\u017d]\S{3,}",
+            # \u201e\u0159ekni mi o Warfarinu" \u2014 but require Capital word, exclude 'sob\u011b/mn\u011b/tob\u011b/n\u00e1s/tom/n\u011b\u010dem'
+            r"\b(?:\u0159ekni\s+mi\s+(?:o|n\u011bco\s+o)\s+|info\s+o\s+|popi\u0161\s+(?:l\u00e9k\s+)?|vysv\u011btli\s+l\u00e9k\s+)(?!sob\u011b|mn\u011b|tob\u011b|n\u00e1s|tom|n\u011b\u010dem|n\u011b\u010dom|p\u0159\u00edrod\u011b|sv\u011bt)[A-Z\u00c1\u010c\u010e\u00c9\u011a\u00cd\u0147\u00d3\u0158\u0160\u0164\u00da\u016e\u00dd\u017d]\S{3,}",
+            # \u201en\u011bco o Euthyroxu" \u2014 but only if word is capitalized (likely a med brand)
+            r"\bn\u011bco\s+o\s+(?!sob\u011b|mn\u011b|tob\u011b|n\u00e1s|nich|tom|n\u011b\u010dem)[A-Z\u00c1\u010c\u010e\u00c9\u011a\u00cd\u0147\u00d3\u0158\u0160\u0164\u00da\u016e\u00dd\u017d]\S{3,}",
+            r"\b(?:co\s+d\u011bl\u00e1|jak\s+p\u016fsob\u00ed|jak\s+funguje)\s+(?:l\u00e9k\s+)?[A-Z\u00c1\u010c\u010e\u00c9\u011a\u00cd\u0147\u00d3\u0158\u0160\u0164\u00da\u016e\u00dd\u017d]\S{3,}",
             # NOTE: 'zkontroluj m\u00e9 l\u00e9ky' deliberately NOT matched here \u2014
             # it's caught by the existing 'medication' intent, whose handler
             # (_handle_my_medications) appends interaction warnings (v466).
