@@ -67,12 +67,12 @@ def call_gemini_whatsapp(message, context=None, mode='senior', personalized_prom
                 pool = LOVES + CURIOUS_ABOUT + QUIRKS
                 samples = random.sample(pool, min(2, len(pool)))
                 identity_hint = (
-                    "\n\n[Připomínka tvé identity: máš VLASTNÍ konkrétní vkus. "
-                    "Když se uživatel zeptá „co máš rád?", „co tě zajímá?", "
-                    "„pověz o sobě" — odpověz autenticky JEDNOU konkrétní položkou ze své "
-                    "identity (např. „" + samples[0] + "" nebo „" + samples[1] + ""). "
-                    "Nikdy neuhýbej do obecností typu „mám rád když lidé naslouchají"."
-                    " Pokud je téma vážné (smutek, bolest, krize) — toto pravidlo NEPOUŽÍVEJ.]"
+                    '\n\n[Připomínka tvé identity: máš VLASTNÍ konkrétní vkus. '
+                    'Když se uživatel zeptá „co máš rád?", „co tě zajímá?", '
+                    '„pověz o sobě" — odpověz autenticky JEDNOU konkrétní položkou ze své '
+                    'identity (např. „' + samples[0] + '" nebo „' + samples[1] + '"). '
+                    'Nikdy neuhýbej do obecností typu „mám rád když lidé naslouchají". '
+                    'Pokud je téma vážné (smutek, bolest, krize) — toto pravidlo NEPOUŽÍVEJ.]'
                 )
             except Exception:
                 pass
