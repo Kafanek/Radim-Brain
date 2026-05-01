@@ -764,14 +764,18 @@ def _apply_czech_palatalization(text):
 # All require terminal period (real abbreviation marker) to avoid matching
 # substrings inside words.
 _CZECH_ABBREVIATIONS = [
-    # Academic titles — case-sensitive (always start with capital in real Czech)
-    (r'\bPh\.\s?D\.', 'pé há dé'),                  # most readers say it this way
-    (r'\bMUDr\.', 'doktor medicíny'),
-    (r'\bMVDr\.', 'doktor veterinární medicíny'),
-    (r'\bRNDr\.', 'doktor přírodních věd'),
-    (r'\bJUDr\.', 'doktor práv'),
-    (r'\bPhDr\.', 'doktor filozofie'),
-    (r'\bPaedDr\.', 'doktor pedagogiky'),
+    # Academic titles — case-sensitive (always start with capital in real Czech).
+    # v462 hotfix: switched all *Dr. variants from multi-word aliases (e.g.
+    # 'doktor medicíny') to single-word 'doktor' because multi-word aliases
+    # consistently triggered Azure 5xx for 'MUDr. Novák odešel'-type sentences.
+    # Czech listeners infer the specialty from context — no info loss.
+    (r'\bPh\.\s?D\.', 'pé há dé'),
+    (r'\bMUDr\.', 'doktor'),
+    (r'\bMVDr\.', 'doktor'),
+    (r'\bRNDr\.', 'doktor'),
+    (r'\bJUDr\.', 'doktor'),
+    (r'\bPhDr\.', 'doktor'),
+    (r'\bPaedDr\.', 'doktor'),
     (r'\bMgr\.', 'magistr'),
     (r'\bIng\.', 'inženýr'),
     (r'\bBc\.', 'bakalář'),
