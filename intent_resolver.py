@@ -511,6 +511,162 @@ def _detect_room(text):
     return None
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# B1 (v458) — VOICE LEXICON TEACHING via chat command
+# Senior says: "Radime, neříkej Eliška, říkej Elinka" → Radim saves the
+# pronunciation override into memory_profiles.data['voice_lexicon'].
+# Hands-free alternative to the /api/voice/lexicon REST endpoint.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Each tuple is (regex, original_group, alias_group). Tried in order;
+# first match wins. \w+ would miss diacritics, so we use [^\s,.!?]+ for
+# names (matches everything except whitespace/punctuation).
+_LEXICON_TEACH_PATTERNS = [
+    # "Radime, neříkej Eliška, říkej Elinka"  (most common natural form)
+    (r"(?:radime[,\s]+)?(?:neříkej|nečti|nevyslovuj)\s+([^\s,.!?]+(?:\s+[^\s,.!?]+){0,3})\s*[,]?\s*(?:ale\s+)?(?:říkej|čti|vyslovuj|řekni)\s+([^\s,.!?]+(?:\s+[^\s,.!?]+){0,3})",
+     1, 2),
+    # "Místo Eliška říkej Elinka"
+    (r"(?:radime[,\s]+)?místo\s+([^\s,.!?]+(?:\s+[^\s,.!?]+){0,3})\s+(?:říkej|čti|vyslovuj)\s+([^\s,.!?]+(?:\s+[^\s,.!?]+){0,3})",
+     1, 2),
+    # "Vyslovuj Eliška jako Elinka"
+    (r"(?:radime[,\s]+)?(?:vyslovuj|vyslovovat)\s+([^\s,.!?]+(?:\s+[^\s,.!?]+){0,3})\s+jako\s+([^\s,.!?]+(?:\s+[^\s,.!?]+){0,3})",
+     1, 2),
+    # "Nauč se vyslovovat Eliška jako Elinka"
+    (r"(?:radime[,\s]+)?nauč\s+se\s+vyslovovat\s+([^\s,.!?]+(?:\s+[^\s,.!?]+){0,3})\s+jako\s+([^\s,.!?]+(?:\s+[^\s,.!?]+){0,3})",
+     1, 2),
+]
+
+
+def _save_lexicon_entry(user_id, original, alias):
+    """Persist {original: alias} into memory_profiles.data['voice_lexicon']
+    and invalidate the in-process voice_filter cache so the next TTS call
+    uses the new entry immediately."""
+    try:
+        from memory_helpers import db_load_profile, db_save_profile
+        profile = db_load_profile(str(user_id)) or {}
+        lex = profile.get('voice_lexicon') or {}
+        if not isinstance(lex, dict):
+            lex = {}
+        # Mirror the REST limits (voice_lexicon_routes.MAX_*)
+        if len(original) > 80 or len(alias) > 120:
+            return False, 'name_too_long'
+        if original not in lex and len(lex) >= 100:
+            return False, 'lexicon_full'
+        lex[original] = alias
+        profile['voice_lexicon'] = lex
+        db_save_profile(str(user_id), profile)
+        try:
+            from voice_filter import invalidate_user_lexicon_cache
+            invalidate_user_lexicon_cache(str(user_id))
+        except ImportError:
+            pass
+        return True, None
+    except Exception as e:
+        logger.warning(f"lexicon save failed for {user_id}: {e}")
+        return False, str(e)
+
+
+def _delete_lexicon_entry(user_id, original):
+    try:
+        from memory_helpers import db_load_profile, db_save_profile
+        profile = db_load_profile(str(user_id)) or {}
+        lex = profile.get('voice_lexicon') or {}
+        if not isinstance(lex, dict) or original not in lex:
+            return False
+        del lex[original]
+        profile['voice_lexicon'] = lex
+        db_save_profile(str(user_id), profile)
+        try:
+            from voice_filter import invalidate_user_lexicon_cache
+            invalidate_user_lexicon_cache(str(user_id))
+        except ImportError:
+            pass
+        return True
+    except Exception as e:
+        logger.warning(f"lexicon delete failed for {user_id}: {e}")
+        return False
+
+
+def _handle_lexicon_teach(**kwargs):
+    """Parse 'neříkej X, říkej Y' style commands and persist to lexicon."""
+    message = (kwargs.get('message') or '').strip()
+    user_id = kwargs.get('user_id')
+    if not message or not user_id:
+        return None
+
+    text = message
+    for pattern, orig_grp, alias_grp in _LEXICON_TEACH_PATTERNS:
+        m = re.search(pattern, text, flags=re.IGNORECASE)
+        if not m:
+            continue
+        original = m.group(orig_grp).strip().strip(',.!?\'"')
+        alias = m.group(alias_grp).strip().strip(',.!?\'"')
+        if not original or not alias:
+            continue
+        if original.lower() == alias.lower():
+            return f"To už říkám stejně. Ale dobře, zapamatuju si {original}."
+        ok, err = _save_lexicon_entry(user_id, original, alias)
+        if ok:
+            return f"Dobře, od teď budu místo {original} říkat {alias}."
+        if err == 'lexicon_full':
+            return ("Mám už hodně naučených jmen — sto. Nejdřív zapomeň jedno "
+                    "starší (řekni 'Radime, zapomeň výslovnost X') a pak zkus znovu.")
+        if err == 'name_too_long':
+            return "To jméno je moc dlouhé. Zkus to kratší."
+        return "Nepodařilo se mi to uložit, zkus to za chvíli znovu."
+
+    # Detection matched but extraction failed → pass to AI for clarification
+    return None
+
+
+def _handle_lexicon_list(**kwargs):
+    user_id = kwargs.get('user_id')
+    if not user_id:
+        return None
+    try:
+        from memory_helpers import db_load_profile
+        profile = db_load_profile(str(user_id)) or {}
+        lex = profile.get('voice_lexicon') or {}
+        if not isinstance(lex, dict) or not lex:
+            return ("Zatím jsem se nenaučil žádnou speciální výslovnost. "
+                    "Řekni 'Radime, neříkej X, říkej Y' a já si to zapamatuju.")
+        items = sorted(lex.items())
+        if len(items) <= 5:
+            pretty = ", ".join(f"{o} říkám jako {a}" for o, a in items)
+            return f"Naučil jsem se: {pretty}."
+        # Compact for long lists
+        pretty = ", ".join(f"{o}→{a}" for o, a in items[:8])
+        return f"Mám {len(items)} naučených výslovností. Prvních pár: {pretty}…"
+    except Exception as e:
+        logger.warning(f"lexicon list failed for {user_id}: {e}")
+        return "Něco se pokazilo se slovníkem výslovností."
+
+
+def _handle_lexicon_forget(**kwargs):
+    """Parse 'zapomeň výslovnost X' / 'smaž X ze slovníku'."""
+    message = (kwargs.get('message') or '').strip()
+    user_id = kwargs.get('user_id')
+    if not message or not user_id:
+        return None
+
+    patterns = [
+        r"(?:radime[,\s]+)?zapomeň\s+(?:výslovnost|jak\s+vyslovuješ)\s+([^\s,.!?]+(?:\s+[^\s,.!?]+){0,3})",
+        r"(?:radime[,\s]+)?smaž\s+([^\s,.!?]+(?:\s+[^\s,.!?]+){0,3})\s+ze\s+slovn",
+        r"už\s+neříkej\s+([^\s,.!?]+(?:\s+[^\s,.!?]+){0,3})\s+(?:jako|jinak)",
+    ]
+    for pat in patterns:
+        m = re.search(pat, message, flags=re.IGNORECASE)
+        if not m:
+            continue
+        original = m.group(1).strip().strip(',.!?\'"')
+        if not original:
+            continue
+        if _delete_lexicon_entry(user_id, original):
+            return f"Dobře, zapomněl jsem speciální výslovnost pro {original}."
+        return f"Pro {original} jsem si žádnou speciální výslovnost nepamatoval."
+    return None
+
+
 _HANDLERS = {
     "time": _handle_time,
     "date": _handle_date,
@@ -539,6 +695,10 @@ _HANDLERS = {
     "ha_lock": _handle_ha_lock,
     "ha_climate": _handle_ha_climate,
     "ha_cover": _handle_ha_cover,
+    # B1 v458 — voice lexicon learning via chat
+    "lexicon_teach": _handle_lexicon_teach,
+    "lexicon_list": _handle_lexicon_list,
+    "lexicon_forget": _handle_lexicon_forget,
 }
 
 

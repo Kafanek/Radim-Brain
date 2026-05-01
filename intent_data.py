@@ -585,6 +585,46 @@ INTENTS = [
         ],
         "handler": None,
     },
+    # \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+    # \ud83d\udde3\ufe0f B1 (v458): VOICE LEXICON TEACHING
+    # Senior teaches Radim how to pronounce specific names hands-free.
+    # The handler does precise capture; these patterns just gate dispatch.
+    # \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+    {
+        "name": "lexicon_teach",
+        "patterns": [
+            r"(?:radime[,\s]+)?ne\u0159\u00edkej\s+\S+",       # ne\u0159\u00edkej X
+            r"(?:radime[,\s]+)?ne\u010dti\s+\S+",              # ne\u010dti X
+            r"(?:radime[,\s]+)?nevyslovuj\s+\S+",              # nevyslovuj X
+            r"(?:radime[,\s]+)?m\u00edsto\s+\S+\s+(?:\u0159\u00edkej|\u010dti|vyslovuj)",  # m\u00edsto X \u0159\u00edkej/\u010dti/vyslovuj
+            r"(?:radime[,\s]+)?vyslovuj\s+\S+\s+jako",         # vyslovuj X jako
+            r"(?:radime[,\s]+)?nau\u010d\s+se\s+vyslov",       # nau\u010d se vyslovovat
+        ],
+        "handler": "lexicon_teach",
+    },
+    {
+        "name": "lexicon_list",
+        "patterns": [
+            r"jak\s+vyslovuje\u0161\s+(?:jm\u00e9na|jmena)",
+            r"jak\u00e1?\s+(?:m\u00e1m|m\u00e1\u0161)\s+v\u00fdslovnost",
+            r"(?:uka\u017e|uk\u00e1\u017e|vyjmenuj)\s+(?:slovn[\u00edi]k|m\u00e1\s+slovn)",
+            r"jak\u00e1\s+jm\u00e9na\s+jsi\s+se\s+nau\u010d",
+            r"co\s+v\u0161e\s+jsi\s+se\s+nau\u010d\s+vyslov",
+            r"co\s+ses?\s+nau\u010d(?:il|ila)\s+vyslov",
+            r"jak\u00e9\s+v\u00fdslovnosti\s+(?:zn\u00e1\u0161|m\u00e1\u0161|si\s+pamatuje\u0161)",
+            r"vlastn\u00ed\s+v\u00fdslovnost",
+        ],
+        "handler": "lexicon_list",
+    },
+    {
+        "name": "lexicon_forget",
+        "patterns": [
+            r"(?:radime[,\s]+)?zapome\u0148\s+(?:v\u00fdslovnost|jak\s+vyslovuje\u0161)\s+\S+",
+            r"(?:radime[,\s]+)?sma\u017e\s+\S+\s+ze\s+slovn",
+            r"u\u017e\s+ne\u0159\u00edkej\s+\S+\s+(?:jako|jinak)",
+        ],
+        "handler": "lexicon_forget",
+    },
 ]
 
 # Compile patterns
