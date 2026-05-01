@@ -718,30 +718,18 @@ def _palatalize_word(word):
 
 # Patterns: each regex matches a native Czech word stem + optional declension.
 # Designed to NOT match foreign loanwords with overlapping spelling.
+#
+# v461 hotfix: list intentionally EMPTY by default. Live tests showed Azure
+# cs-CZ-AntoninNeural pronounces common words like 'dítě', 'nikdo', 'tisíc'
+# correctly natively — forcing <sub alias="ďíťe"> broke Azure's TTS engine
+# (returned 5xx for ~30% of requests). The infrastructure (helper +
+# applier) stays so individual problem words can be added back as evidence
+# accumulates from real users (telemetry / 'cože?' counts via C1).
+#
+# Add an entry here ONLY when there is concrete evidence that Azure
+# mispronounces the word AND the alias actually produces correct speech.
 _CZECH_PALATALIZATION_PATTERNS = [
-    # ── di/dí/dě family ───────────────────────────────────────────
-    r'\b[Dd]ít(?:ě|ěte|ěti|ětem|ětech|ětům|ětmi|ek|ka|ky|ku|kem|kách)?\b',  # dítě + decl
-    r'\b[Dd]ík(?:y|ům|u|em)?\b',                                              # dík/díky
-    r'\b[Dd]ivadl(?:o|a|u|e|em|y|ům|ech)?\b',                                 # divadlo + locative
-    r'\b[Dd]ivn(?:ý|á|é|ého|ému|ým|ých|ými|ě)?\b',                            # divný
-    r'\b[Dd]ívá(?:m|š|me|te|t|ní|ní)?\b',                                     # dívám
-    r'\b[Dd]ív(?:at|ej|ám|áš|á|áme|áte|ají|al|ala|alo|ali|aly)\b',           # dívat
-    r'\b[Dd]ivok(?:ý|á|é|ého|ému|ým|ých|ými|ost)?\b',                         # divoký
-    r'\b[Dd]ívka\b|\b[Dd]ívky\b|\b[Dd]ívce\b|\b[Dd]ívkou\b|\b[Dd]ívkám\b',   # dívka
-
-    # ── ti/tí/tě family ───────────────────────────────────────────
-    r'\b[Tt]ich(?:o|a|u|ý|á|é|ého|ému|ým|ých|ými|ě|em|ounký)?\b',            # tichý/ticho
-    r'\b[Tt]isíc(?:e|i|em|ích|ům|ů|krát)?\b',                                 # tisíc
-    r'\b[Tt]isk(?:u|y|ům|ne|nout|nul|árna|ovat|ový)?\b',                      # tisk
-    r'\b[Tt]ipov(?:at|al|ala|aly|ali)\b',                                     # tipovat (rare native)
-
-    # ── ni/ní/ně family ───────────────────────────────────────────
-    r'\b[Nn]ic(?:eho|emu|ím|emž)?\b',                                         # nic
-    r'\b[Nn]ikd(?:o|y|e)\b',                                                  # nikdo/nikdy/nikde
-    r'\b[Nn]ik(?:oho|omu|ým|am)\b',                                           # nikoho, nikam
-    r'\b[Nn]ičí\b|\b[Nn]ičím\b|\b[Nn]ičemu\b|\b[Nn]ičeho\b',                  # ničí, ničím
-    # NOTE: standalone 'nic' already matched by the pattern above with
-    # optional suffix — adding another \b[Nn]ic\b here would double-wrap.
+    # (intentionally empty — see comment above)
 ]
 
 
@@ -824,6 +812,43 @@ _CZECH_ABBREVIATIONS = [
     (r'\bp\.\s*(?=[A-ZČĎĚŇŘŠŤŮÝŽ])', 'pan '),                       # p. Novák
     (r'\bpí\.\s*(?=[A-ZČĎĚŇŘŠŤŮÝŽ])', 'paní '),                     # pí. Nováková
 ]
+
+
+# v462 hotfix: prevent sentence splitter from breaking inside abbreviations
+# like 'MUDr. Novák'. List ALL stems whose terminal period must NOT be
+# treated as sentence end. Used by _split_sentences_safe() below.
+_SENTENCE_SAFE_ABBREVS = (
+    'MUDr', 'MVDr', 'RNDr', 'JUDr', 'PhDr', 'PaedDr',
+    'Mgr', 'Ing', 'Bc', 'Dr', 'Ph\\.D', 'Ph', 'D',
+    'prof', 'doc', 'p', 'pí',
+    'atd', 'tzv', 'tzn', 'např', 'apod', 'popř', 'resp', 'obr',
+    'min', 'max', 'str', 'tab', 'spol', 'aj', 'mj', 'tj', 'tč', 'vč',
+    'č', 'mil', 'mld',
+)
+_SENTENCE_SAFE_RE = re.compile(
+    r'(?<=[.!?])\s+(?=[A-ZČĎĚŇŘŠŤŮÝŽÁÉÍÓÚ])'  # split only before capital
+)
+_ABBREV_PERIOD_GUARD = re.compile(
+    r'\b(?:' + '|'.join(_SENTENCE_SAFE_ABBREVS) + r')\.\s+(?=[A-ZČĎĚŇŘŠŤŮÝŽÁÉÍÓÚ])',
+    re.IGNORECASE,
+)
+
+
+def split_sentences_safe(text):
+    """Split on sentence-final punctuation while keeping abbreviations intact.
+
+    Strategy: temporarily replace the space after known-abbrev periods with
+    a sentinel, run the standard sentence split, then restore the spaces.
+    The sentinel (NUL char) is forbidden in normal text so it round-trips
+    cleanly.
+    """
+    SENTINEL = '\x00'
+    guarded = _ABBREV_PERIOD_GUARD.sub(
+        lambda m: m.group(0).replace(' ', SENTINEL),
+        text,
+    )
+    pieces = _SENTENCE_SAFE_RE.split(guarded)
+    return [p.replace(SENTINEL, ' ') for p in pieces if p]
 
 
 def _apply_czech_abbreviations(text):
@@ -1033,7 +1058,7 @@ def _add_sentence_pauses(text, pause_ms, poetry_mode=False):
         return _add_poetry_pauses(text, pause_ms)
 
     # Standard prose pausing
-    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    sentences = split_sentences_safe(text.strip())
     if len(sentences) <= 1:
         return xml_escape(text)
 
@@ -1406,7 +1431,7 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural",
     _energy = profile.get('learned_energy', profile.get('contour_energy', 0.5))
 
     # Split text into sentences
-    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    sentences = split_sentences_safe(text.strip())
     if not sentences:
         sentences = [text]
 
