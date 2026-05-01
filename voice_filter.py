@@ -296,10 +296,11 @@ def _apply_smart_say_as(text):
         ),
         (
             35,
-            r'\b(\d+(?:[.,]\d+)?)\s*Kč\b',
+            r'\b((?:\d{1,3}(?:[\s ]\d{3})+|\d+)(?:[.,]\d+)?)\s*Kč\b',
             lambda m: (
-                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> '
-                f'<sub alias="korun">Kč</sub>'
+                f'<say-as interpret-as="cardinal">'
+                f'{m.group(1).replace(" ", "").replace(chr(160), "").replace(",", ".")}'
+                f'</say-as> <sub alias="korun">Kč</sub>'
             ),
         ),
         (
@@ -320,6 +321,99 @@ def _apply_smart_say_as(text):
             r'\b(112|150|155|156|158)\b',
             lambda m: f'<say-as interpret-as="digits">{m.group(1)}</say-as>',
         ),
+        # ── v460: B1 — number refinements ──────────────────────────────────
+        # Common fractions — Czech grammatical forms
+        (
+            22,
+            r'\b1/2\b',
+            lambda m: '<sub alias="jedna polovina">1/2</sub>',
+        ),
+        (
+            22,
+            r'\b1/3\b',
+            lambda m: '<sub alias="jedna třetina">1/3</sub>',
+        ),
+        (
+            22,
+            r'\b2/3\b',
+            lambda m: '<sub alias="dvě třetiny">2/3</sub>',
+        ),
+        (
+            22,
+            r'\b1/4\b',
+            lambda m: '<sub alias="jedna čtvrtina">1/4</sub>',
+        ),
+        (
+            22,
+            r'\b3/4\b',
+            lambda m: '<sub alias="tři čtvrtiny">3/4</sub>',
+        ),
+        (
+            22,
+            r'\b1/5\b',
+            lambda m: '<sub alias="jedna pětina">1/5</sub>',
+        ),
+        (
+            22,
+            r'\b1/8\b',
+            lambda m: '<sub alias="jedna osmina">1/8</sub>',
+        ),
+        (
+            22,
+            r'\b1/10\b',
+            lambda m: '<sub alias="jedna desetina">1/10</sub>',
+        ),
+        # Numeric range with en/em dash (NOT hyphen — too ambiguous with negative).
+        # 5–10, 5—10, 5 – 10  →  "pět až deset"
+        (
+            20,
+            r'\b(\d+(?:[.,]\d+)?)\s*[–—]\s*(\d+(?:[.,]\d+)?)\b',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as>'
+                f' až '
+                f'<say-as interpret-as="cardinal">{m.group(2).replace(",", ".")}</say-as>'
+            ),
+        ),
+        # Mathematical minus (U+2212) followed by digits — "minus pět"
+        # Skip plain hyphen-minus to avoid breaking dates / phone numbers / etc.
+        (
+            18,
+            r'(?<![0-9a-zA-Z])−(\d+(?:[.,]\d+)?)\b',
+            lambda m: (
+                f'mínus '
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as>'
+            ),
+        ),
+        # Large numbers with thousands separator (1 000 000, 1 500 000)
+        # Normalize to plain digits and let cardinal handle million/miliarda forms.
+        # Requires at least one space-separated thousand group.
+        (
+            16,
+            r'\b(\d{1,3}(?:[\s ]\d{3}){1,3})\b(?!\s*(?:Kč|EUR|kg|mg|km|m²|m³|h|°|%|cm|mm|kWh|W|/))',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(" ", "").replace(chr(160), "")}</say-as>'
+            ),
+        ),
+        # Million / miliard abbreviations: ONLY 'mil', 'mil.', 'mld', 'mld.'.
+        # Full forms 'milion', 'milionů', 'miliarda' are left to Azure
+        # because they're already correct Czech (and forcing genitive plural
+        # alias would mangle 'jeden milion' → 'jedna milionů').
+        (
+            14,
+            r'\b(\d+(?:[.,]\d+)?)\s+mil\.?(?=\s|$|[^a-zA-Záčďéěíňóřšťúůýž.])',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as>'
+                f' <sub alias="milionů">{m.group(0).split(None, 1)[1]}</sub>'
+            ),
+        ),
+        (
+            14,
+            r'\b(\d+(?:[.,]\d+)?)\s+mld\.?(?=\s|$|[^a-zA-Záčďéěíňóřšťúůýž.])',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as>'
+                f' <sub alias="miliard">{m.group(0).split(None, 1)[1]}</sub>'
+            ),
+        ),
         # ── v459: A2 — Czech units (require number context to avoid false positives) ──
         # Higher priority than emergency so "5 kg" isn't mistaken for nothing.
         # Each unit pattern keeps cardinal reading + maps unit to genitive plural
@@ -334,10 +428,11 @@ def _apply_smart_say_as(text):
         ),
         (
             34,
-            r'\b(\d+(?:[.,]\d+)?)\s*km\b(?!/)',
+            r'\b((?:\d{1,3}(?:[\s ]\d{3})+|\d+)(?:[.,]\d+)?)\s*km\b(?!/)',
             lambda m: (
-                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> '
-                f'<sub alias="kilometrů">km</sub>'
+                f'<say-as interpret-as="cardinal">'
+                f'{m.group(1).replace(" ", "").replace(chr(160), "").replace(",", ".")}'
+                f'</say-as> <sub alias="kilometrů">km</sub>'
             ),
         ),
         (
@@ -489,6 +584,91 @@ _CZECH_SUB_ALIASES = [
     (r'\b[Mm]essenger\b',         'mesendžr'),
     (r'\b[Vv]iber\b',             'vajbr'),
 ]
+
+
+# ── v460: A4 — Czech palatalization for native words ───────────────────────
+# Azure cs-CZ-AntoninNeural sometimes treats native Czech 'di/ti/ni/dě/tě/ně'
+# as if 'i/ě' followed hard d/t/n (like in foreign 'diktát'). Same fix
+# family as Radim → Raďim (v452): wrap the word in <sub alias="..."> where
+# every soft cluster is rewritten with explicit ď/ť/ň. Azure's Czech engine
+# MUST then render it palatalized.
+#
+# Curated whitelist of native Czech words known/likely to be misread.
+# Foreign loanwords (diktát, kandidát, prezident, magistr, tradice, …) are
+# NOT in this list, so they keep their hard d/t/n via Azure default.
+
+# Helper: rewrites every soft cluster in a word (di/dí/dě/ti/tí/tě/ni/ní/ně)
+# with the palatalized equivalent (ďi/ďí/ďe/ťi/ťí/ťe/ňi/ňí/ňe).
+# Preserves capitalization (Dítě → Ďítě, not ďítě).
+_PALATALIZE_MAP = [
+    # Order matters: longer (with diacritic) before shorter so 'dí' beats 'di'
+    ('Dí', 'Ďí'), ('Dě', 'Ďe'), ('Di', 'Ďi'),
+    ('dí', 'ďí'), ('dě', 'ďe'), ('di', 'ďi'),
+    ('Tí', 'Ťí'), ('Tě', 'Ťe'), ('Ti', 'Ťi'),
+    ('tí', 'ťí'), ('tě', 'ťe'), ('ti', 'ťi'),
+    ('Ní', 'Ňí'), ('Ně', 'Ňe'), ('Ni', 'Ňi'),
+    ('ní', 'ňí'), ('ně', 'ňe'), ('ni', 'ňi'),
+]
+
+
+def _palatalize_word(word):
+    """Apply all soft-consonant substitutions inside a single word.
+    Each native Czech d/t/n + i/í/ě cluster becomes ď/ť/ň + i/í/e."""
+    out = word
+    for src, dst in _PALATALIZE_MAP:
+        out = out.replace(src, dst)
+    return out
+
+
+# Patterns: each regex matches a native Czech word stem + optional declension.
+# Designed to NOT match foreign loanwords with overlapping spelling.
+_CZECH_PALATALIZATION_PATTERNS = [
+    # ── di/dí/dě family ───────────────────────────────────────────
+    r'\b[Dd]ít(?:ě|ěte|ěti|ětem|ětech|ětům|ětmi|ek|ka|ky|ku|kem|kách)?\b',  # dítě + decl
+    r'\b[Dd]ík(?:y|ům|u|em)?\b',                                              # dík/díky
+    r'\b[Dd]ivadl(?:o|a|u|e|em|y|ům|ech)?\b',                                 # divadlo + locative
+    r'\b[Dd]ivn(?:ý|á|é|ého|ému|ým|ých|ými|ě)?\b',                            # divný
+    r'\b[Dd]ívá(?:m|š|me|te|t|ní|ní)?\b',                                     # dívám
+    r'\b[Dd]ív(?:at|ej|ám|áš|á|áme|áte|ají|al|ala|alo|ali|aly)\b',           # dívat
+    r'\b[Dd]ivok(?:ý|á|é|ého|ému|ým|ých|ými|ost)?\b',                         # divoký
+    r'\b[Dd]ívka\b|\b[Dd]ívky\b|\b[Dd]ívce\b|\b[Dd]ívkou\b|\b[Dd]ívkám\b',   # dívka
+
+    # ── ti/tí/tě family ───────────────────────────────────────────
+    r'\b[Tt]ich(?:o|a|u|ý|á|é|ého|ému|ým|ých|ými|ě|em|ounký)?\b',            # tichý/ticho
+    r'\b[Tt]isíc(?:e|i|em|ích|ům|ů|krát)?\b',                                 # tisíc
+    r'\b[Tt]isk(?:u|y|ům|ne|nout|nul|árna|ovat|ový)?\b',                      # tisk
+    r'\b[Tt]ipov(?:at|al|ala|aly|ali)\b',                                     # tipovat (rare native)
+
+    # ── ni/ní/ně family ───────────────────────────────────────────
+    r'\b[Nn]ic(?:eho|emu|ím|emž)?\b',                                         # nic
+    r'\b[Nn]ikd(?:o|y|e)\b',                                                  # nikdo/nikdy/nikde
+    r'\b[Nn]ik(?:oho|omu|ým|am)\b',                                           # nikoho, nikam
+    r'\b[Nn]ičí\b|\b[Nn]ičím\b|\b[Nn]ičemu\b|\b[Nn]ičeho\b',                  # ničí, ničím
+    # NOTE: standalone 'nic' already matched by the pattern above with
+    # optional suffix — adding another \b[Nn]ic\b here would double-wrap.
+]
+
+
+def _apply_czech_palatalization(text):
+    """Wrap each curated native Czech word in <sub alias="..."> where every
+    soft consonant cluster is rewritten with explicit ď/ť/ň/+e. Foreign
+    loanwords with overlapping spelling are excluded by the curated regex
+    list (diktát, prezident, magistr, tradice, etc. don't match)."""
+    def _make_sub(m):
+        original = m.group(0)
+        alias = _palatalize_word(original)
+        if alias == original:
+            return original  # no-op safety
+        return f'<sub alias="{xml_escape(alias)}">{xml_escape(original)}</sub>'
+
+    for pattern in _CZECH_PALATALIZATION_PATTERNS:
+        try:
+            if re.search(pattern, text):
+                text = re.sub(pattern, _make_sub, text)
+        except Exception as e:
+            logger.debug(f"palatalization pattern failed: {e}")
+            continue
+    return text
 
 
 # ── v459: A1 — Czech abbreviations expansion ───────────────────────────────
@@ -706,6 +886,9 @@ def _fix_czech_pronunciation(text, user_id=None):
 
     # v459: A1 — Czech abbreviations (atd., tzv., např., academic titles, …)
     text = _apply_czech_abbreviations(text)
+
+    # v460: A4 — palatalization for native Czech words (di/ti/ni/dě/tě/ně)
+    text = _apply_czech_palatalization(text)
 
     for pattern, ipa, display in _CZECH_PHONEME_FIXES:
         # Pre-check: pokud žádný match, přeskočit (re.sub by stejně neudělal nic,
