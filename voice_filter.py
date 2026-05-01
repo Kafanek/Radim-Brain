@@ -320,6 +320,122 @@ def _apply_smart_say_as(text):
             r'\b(112|150|155|156|158)\b',
             lambda m: f'<say-as interpret-as="digits">{m.group(1)}</say-as>',
         ),
+        # ── v459: A2 — Czech units (require number context to avoid false positives) ──
+        # Higher priority than emergency so "5 kg" isn't mistaken for nothing.
+        # Each unit pattern keeps cardinal reading + maps unit to genitive plural
+        # (grammatically loose for 1-4 but ear-pleasing vs Azure's letter-by-letter).
+        (
+            36,
+            r'\b(\d+(?:[.,]\d+)?)\s*km/h\b',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> '
+                f'<sub alias="kilometrů za hodinu">km/h</sub>'
+            ),
+        ),
+        (
+            34,
+            r'\b(\d+(?:[.,]\d+)?)\s*km\b(?!/)',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> '
+                f'<sub alias="kilometrů">km</sub>'
+            ),
+        ),
+        (
+            33,
+            r'\b(\d+(?:[.,]\d+)?)\s*m²\b',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> '
+                f'<sub alias="metrů čtverečních">m²</sub>'
+            ),
+        ),
+        (
+            33,
+            r'\b(\d+(?:[.,]\d+)?)\s*m³\b',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> '
+                f'<sub alias="metrů krychlových">m³</sub>'
+            ),
+        ),
+        (
+            32,
+            r'\b(\d+(?:[.,]\d+)?)\s*kg\b',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> '
+                f'<sub alias="kilogramů">kg</sub>'
+            ),
+        ),
+        (
+            32,
+            r'\b(\d+(?:[.,]\d+)?)\s*mg\b',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> '
+                f'<sub alias="miligramů">mg</sub>'
+            ),
+        ),
+        (
+            32,
+            r'\b(\d+(?:[.,]\d+)?)\s*g\b(?![A-Za-z])',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> '
+                f'<sub alias="gramů">g</sub>'
+            ),
+        ),
+        (
+            32,
+            r'\b(\d+(?:[.,]\d+)?)\s*ml\b',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> '
+                f'<sub alias="mililitrů">ml</sub>'
+            ),
+        ),
+        (
+            31,
+            r'\b(\d+(?:[.,]\d+)?)\s*l\b(?![A-Za-z])',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> '
+                f'<sub alias="litrů">l</sub>'
+            ),
+        ),
+        (
+            31,
+            r'\b(\d+(?:[.,]\d+)?)\s*cm\b',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> '
+                f'<sub alias="centimetrů">cm</sub>'
+            ),
+        ),
+        (
+            31,
+            r'\b(\d+(?:[.,]\d+)?)\s*mm\b(?!Hg)',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> '
+                f'<sub alias="milimetrů">mm</sub>'
+            ),
+        ),
+        (
+            33,
+            r'\b(\d+(?:[.,]\d+)?)\s*mmHg\b',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> '
+                f'<sub alias="milimetrů rtuťového sloupce">mmHg</sub>'
+            ),
+        ),
+        (
+            32,
+            r'\b(\d+(?:[.,]\d+)?)\s*kWh\b',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> '
+                f'<sub alias="kilowatthodin">kWh</sub>'
+            ),
+        ),
+        (
+            32,
+            r'\b(\d+(?:[.,]\d+)?)\s*W\b(?!h|i|o)',
+            lambda m: (
+                f'<say-as interpret-as="cardinal">{m.group(1).replace(",", ".")}</say-as> '
+                f'<sub alias="wattů">W</sub>'
+            ),
+        ),
     ]
 
     # Collect all candidate matches with their priority
@@ -373,6 +489,86 @@ _CZECH_SUB_ALIASES = [
     (r'\b[Mm]essenger\b',         'mesendžr'),
     (r'\b[Vv]iber\b',             'vajbr'),
 ]
+
+
+# ── v459: A1 — Czech abbreviations expansion ───────────────────────────────
+# Azure cs-CZ-AntoninNeural reads abbreviations letter-by-letter ("á tě dé"
+# instead of "a tak dále"). For each common Czech abbreviation we sub in
+# the spelled-out form so Czech morphology engine handles inflection.
+#
+# Order: longer patterns first so 'Ph.D.' beats 'D.', 'apod.' beats 'pod'.
+# All require terminal period (real abbreviation marker) to avoid matching
+# substrings inside words.
+_CZECH_ABBREVIATIONS = [
+    # Academic titles — case-sensitive (always start with capital in real Czech)
+    (r'\bPh\.\s?D\.', 'pé há dé'),                  # most readers say it this way
+    (r'\bMUDr\.', 'doktor medicíny'),
+    (r'\bMVDr\.', 'doktor veterinární medicíny'),
+    (r'\bRNDr\.', 'doktor přírodních věd'),
+    (r'\bJUDr\.', 'doktor práv'),
+    (r'\bPhDr\.', 'doktor filozofie'),
+    (r'\bPaedDr\.', 'doktor pedagogiky'),
+    (r'\bMgr\.', 'magistr'),
+    (r'\bIng\.', 'inženýr'),
+    (r'\bBc\.', 'bakalář'),
+    (r'\bDr\.', 'doktor'),
+    (r'\bprof\.', 'profesor'),
+    (r'\bdoc\.', 'docent'),
+
+    # 4+ letter abbreviations (more specific — match first)
+    (r'(?i)\bapod\.', 'a podobně'),
+    (r'(?i)\bnapř\.', 'například'),
+    (r'(?i)\bpopř\.', 'popřípadě'),
+    (r'(?i)\bresp\.', 'respektive'),
+    (r'(?i)\bobr\.', 'obrázek'),
+
+    # 3-letter abbreviations (case-insensitive — appear at sentence start too)
+    (r'(?i)\batd\.', 'a tak dále'),
+    (r'(?i)\btzv\.', 'takzvané'),
+    (r'(?i)\btzn\.', 'to znamená'),
+    (r'(?i)\bcca\b', 'cirka'),
+    (r'(?i)\bmin\.', 'minimálně'),
+    (r'(?i)\bmax\.', 'maximálně'),
+    (r'(?i)\bstr\.', 'strana'),
+    (r'(?i)\btab\.', 'tabulka'),
+    (r'(?i)\bbod\.', 'bod'),
+    (r'(?i)\bspol\.', 'společnost'),
+
+    # 2-letter / shorter
+    (r'(?i)\baj\.', 'a jiné'),
+    (r'(?i)\bmj\.', 'mimo jiné'),
+    (r'(?i)\btj\.', 'to jest'),
+    (r'(?i)\btč\.', 'toho času'),
+    (r'(?i)\bvč\.', 'včetně'),
+    (r'(?i)\bs\.r\.o\.', 'společnost s ručením omezeným'),
+    (r'(?i)\ba\.s\.', 'akciová společnost'),
+
+    # Single letter + period (must be after digit context filter to skip '5 g' etc.)
+    (r'\bč\.\s*(?=\d)', 'číslo '),                                  # č. 25 → "číslo dvacet pět"
+    (r'\bp\.\s*(?=[A-ZČĎĚŇŘŠŤŮÝŽ])', 'pan '),                       # p. Novák
+    (r'\bpí\.\s*(?=[A-ZČĎĚŇŘŠŤŮÝŽ])', 'paní '),                     # pí. Nováková
+]
+
+
+def _apply_czech_abbreviations(text):
+    """Replace common Czech abbreviations with spelled-out forms via <sub alias>.
+    Applied AFTER xml_escape so SSML stays well-formed. Patterns are tried in
+    order; once a position is matched, later patterns won't re-match it because
+    the substituted string contains the alias text inside <sub> tags.
+    """
+    for pattern, alias in _CZECH_ABBREVIATIONS:
+        if not re.search(pattern, text):
+            continue
+
+        def _replace(m, a=alias):
+            # If alias contains a trailing space (e.g. 'číslo '), keep it outside
+            # the closing tag so it's read separately for natural pause.
+            stripped_alias = a.rstrip()
+            trailing = a[len(stripped_alias):]
+            return f'<sub alias="{xml_escape(stripped_alias)}">{xml_escape(m.group(0))}</sub>{trailing}'
+
+        text = re.sub(pattern, _replace, text)
+    return text
 
 
 def _apply_czech_sub_aliases(text):
@@ -507,6 +703,9 @@ def _fix_czech_pronunciation(text, user_id=None):
 
     # v453: Czech-friendly aliases for medications and medical terms
     text = _apply_czech_sub_aliases(text)
+
+    # v459: A1 — Czech abbreviations (atd., tzv., např., academic titles, …)
+    text = _apply_czech_abbreviations(text)
 
     for pattern, ipa, display in _CZECH_PHONEME_FIXES:
         # Pre-check: pokud žádný match, přeskočit (re.sub by stejně neudělal nic,
