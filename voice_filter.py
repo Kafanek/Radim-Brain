@@ -586,6 +586,102 @@ _CZECH_SUB_ALIASES = [
 ]
 
 
+# ── v461: B4 — clause-level prosody pauses ────────────────────────────────
+# Czech sentences benefit from short pauses at sub-sentence boundaries.
+# Without them Azure runs clauses together, making long sentences sound
+# breathless. We insert SSML <break> tags at:
+#   - commas before conjunctions       → 180 ms (sense break)
+#   - commas in general                → 120 ms (light comma pause)
+#   - semicolons                       → 400 ms (longer separation)
+#   - colons                           → 250 ms
+#   - em / en dash with spaces around  → 300 ms (parenthetical insertion)
+#
+# Applied AFTER xml_escape (so '&', '<', '>' are already safe to wrap)
+# but BEFORE other phoneme/sub transforms — at this stage text is plain
+# Czech with only HTML-escaped specials, no SSML tags yet.
+
+# Common Czech conjunctions that mark a sense boundary worth a slightly
+# longer pause. Distinguishes 'comma + conjunction' from 'comma + name'
+# (vocative, which should be tighter).
+_CZECH_CONJUNCTIONS_LONG = frozenset({
+    'a', 'ale', 'nebo', 'ani', 'či', 'anebo', 'neboli', 'takže', 'proto',
+    'tudíž', 'avšak', 'však', 'jenže', 'přesto', 'totiž',
+    'protože', 'jelikož', 'poněvadž', 'aby', 'kdyby', 'když', 'pokud',
+    'přestože', 'třebaže', 'než', 'jakmile', 'aniž', 'zatímco',
+    'i', 'pak', 'tedy', 'tak', 'tj',
+})
+
+
+def _add_clause_pauses(text):
+    """Insert short SSML <break> tags at sub-sentence boundaries.
+
+    Idempotent — running twice produces the same result because the
+    inserted tags don't contain commas or semicolons (the trigger chars).
+    Safe to run before _apply_user_lexicon and friends.
+    """
+    # Comma followed by a Czech word — choose pause length by next word.
+    # (?P<word>\w+) captures the next token to inspect for conjunction class.
+    def _comma_break(m):
+        word = m.group('word')
+        ms = 180 if word.lower() in _CZECH_CONJUNCTIONS_LONG else 120
+        return f', <break time="{ms}ms"/>{word}'
+
+    text = re.sub(
+        r',\s+(?P<word>[A-Za-zÁČĎÉĚÍŇÓŘŠŤÚŮÝŽáčďéěíňóřšťúůýž]+)',
+        _comma_break,
+        text,
+    )
+
+    # Semicolon
+    text = re.sub(r';\s+', '; <break time="400ms"/>', text)
+
+    # Colon (often introduces a list / definition — slight pause)
+    text = re.sub(r':\s+(?=\S)', ': <break time="250ms"/>', text)
+
+    # Em / en dash WITH spaces on both sides — parenthetical insertion.
+    # Without spaces it's likely a date range / hyphen — leave alone.
+    text = re.sub(r'\s+[–—]\s+', ' <break time="300ms"/>— ', text)
+
+    return text
+
+
+# ── v461: B5 — glottal stops between vowel-final + vowel-initial words ──
+# Native Czech speakers insert a tiny glottal stop ('rázové znění') when
+# one word ends in a vowel and the next starts with a vowel — without it
+# the words slur together ('není ani' → 'neníani'). Azure usually omits
+# this. We insert a 40 ms <break> at every such boundary so consecutive
+# vowels stay perceptually separate.
+#
+# Czech vowels (orthographic): a e i o u y á é í ó ú ů ý
+# (ě is excluded — it palatalizes the preceding consonant rather than
+#  starting a new vowel sound; word-initial 'ě' doesn't exist in Czech.)
+
+_CZ_VOWELS_LOWER = 'aeiouyáéíóúůý'
+
+
+def _add_glottal_stops(text):
+    """Insert tiny SSML breaks at vowel|vowel word boundaries.
+
+    Conservative pattern: word-final vowel + whitespace + word-initial
+    vowel. Doesn't match within words or across punctuation — only at
+    plain whitespace token boundaries.
+    """
+    pattern = (
+        r'([' + _CZ_VOWELS_LOWER + _CZ_VOWELS_LOWER.upper() + r'])'
+        r'(\s+)'
+        r'([' + _CZ_VOWELS_LOWER + _CZ_VOWELS_LOWER.upper() + r'])'
+    )
+    # Note: the previous match's last char is consumed, so a chain
+    # 'a o u i' would only match every-other gap. Run twice to cover
+    # adjacent cascades (rare but harmless).
+    for _ in range(2):
+        new_text = re.sub(pattern, r'\1\2<break time="40ms"/>\3', text)
+        if new_text == text:
+            break
+        text = new_text
+    return text
+
+
 # ── v460: A4 — Czech palatalization for native words ───────────────────────
 # Azure cs-CZ-AntoninNeural sometimes treats native Czech 'di/ti/ni/dě/tě/ně'
 # as if 'i/ě' followed hard d/t/n (like in foreign 'diktát'). Same fix
@@ -869,6 +965,15 @@ def _fix_czech_pronunciation(text, user_id=None):
     jen první PDF dostal phoneme tag, druhý zněl Azure-default.
     Fix: re.sub s callbackem nahradí VŠECHNY výskyty pattern najednou.
     """
+    # v461: B4 — clause-level prosody pauses (commas, semicolons, dashes).
+    # Run FIRST (before any tag-inserting transform) so the regex sees plain
+    # text. Inserted <break> tags are inert under all subsequent transforms.
+    text = _add_clause_pauses(text)
+
+    # v461: B5 — glottal stops between adjacent vowel-final / vowel-initial
+    # words ('není ani' → 'není <break/>ani'). Same reason for early run.
+    text = _add_glottal_stops(text)
+
     # v456: user-defined lexicon FIRST so it can override built-in fixes
     text = _apply_user_lexicon(text, user_id)
 
