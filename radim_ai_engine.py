@@ -54,46 +54,13 @@ def call_gemini_whatsapp(message, context=None, mode='senior', personalized_prom
                 role_label = "Uživatel" if msg["role"] == "user" else "Radim"
                 history_text += f"{role_label}: {msg['content']}\n"
 
-        # v8.19.26: identity recency boost — short reminder before user message.
-        # The identity layer is ~1500-3500 chars at the START of a 13-16k prompt;
-        # AI tends to forget it by the time it generates a reply (recency bias).
-        # We append a SHORT identity reminder with 2 random concrete examples
-        # right before the user message — last thing AI sees before it speaks.
-        identity_hint = ""
-        if mode == 'senior':
-            try:
-                from radim_identity import LOVES, CURIOUS_ABOUT, QUIRKS
-                import random
-                pool = LOVES + CURIOUS_ABOUT + QUIRKS
-                samples = random.sample(pool, min(2, len(pool)))
-                # v8.19.27: STRONGER instruction. Previous wording was too soft —
-                # Gemini RLHF biases toward generic empathic helper. We now make it
-                # crystal clear: refusing to use specific identity = wrong answer.
-                identity_hint = (
-                    '\n\n═══════════════════════════════════════════════════════════════\n'
-                    '⚠️  ABSOLUTNÍ PRAVIDLO PRO TUTO ODPOVĚĎ — IDENTITA RADIMA  ⚠️\n'
-                    '═══════════════════════════════════════════════════════════════\n'
-                    'POKUD se uživatel ptá na MNE (co mám rád, co mě zajímá, co dělám rád, '
-                    'pověz o sobě, máš rád X, jak se ti líbí Y) — TVÁ ODPOVĚĎ MUSÍ ZAČÍT '
-                    'JEDNOU KONKRÉTNÍ položkou ze tvé identity.\n\n'
-                    'POVOLENÉ ZAČÁTKY (vyber jeden):\n'
-                    '  ✓ „Mám moc rád ' + samples[0] + ' "\n'
-                    '  ✓ „Zajímá mě ' + samples[1] + ' "\n\n'
-                    'ZAKÁZANÉ ZAČÁTKY (RLHF default, NEDĚLEJ):\n'
-                    '  ✗ „Mám rád tiché chvíle"\n'
-                    '  ✗ „Zajímám se o lidi a jejich příběhy"\n'
-                    '  ✗ „Mám rád, když mi někdo vypráví"\n'
-                    '  ✗ „Záleží na náladě"\n\n'
-                    'Až po konkrétní položce smíš pokračovat empaticky a otázkou nazpět.\n'
-                    'Pokud je téma vážné (smutek, bolest, krize) — VYNECHEJ toto pravidlo.\n'
-                    '═══════════════════════════════════════════════════════════════\n'
-                )
-            except Exception as _ih_err:
-                logger.debug(f"identity hint skip: {_ih_err}")
-        if identity_hint:
-            logger.info(f"🪪 identity recency hint injected ({len(identity_hint)} chars)")
-
-        full_prompt = f"{system}{context_text}{history_text}{identity_hint}\n\nUživatel: {message}\nRadim:"
+        # v8.19.28: identity recency hint moved INTO format_for_prompt() in
+        # radim_identity.py — that way Claude path (claude_routes.py) gets it
+        # too, no per-engine duplication. Live test in v8.19.27 showed chat
+        # routes through Claude (logged "🧠 Claude primary"), Gemini-only
+        # hint never fired. Identity layer now has a closing reinforcement
+        # with 2 random concrete examples per request.
+        full_prompt = f"{system}{context_text}{history_text}\n\nUživatel: {message}\nRadim:"
 
         # Generation config — adjusted by Anticipation Engine
         temperature = gen_config["temperature"] if gen_config else 0.7
