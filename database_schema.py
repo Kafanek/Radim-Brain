@@ -148,6 +148,22 @@ PG_MAIN_SCHEMA = '''
     CREATE INDEX IF NOT EXISTS idx_memory_history_user ON memory_history(user_id);
     CREATE INDEX IF NOT EXISTS idx_memory_history_ts ON memory_history(created_at DESC);
 
+    -- v464: TTS feedback signals (C1) — when senior says "cože?", "pomaleji",
+    -- etc., we log it with the immediately-preceding Radim message so we can
+    -- aggregate which words/phrases consistently trigger comprehension issues.
+    CREATE TABLE IF NOT EXISTS tts_feedback_signals (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        signal_type TEXT NOT NULL,
+        prev_message_text TEXT,
+        suspected_words JSONB DEFAULT '[]',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_tts_feedback_user_ts
+        ON tts_feedback_signals(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tts_feedback_signal_type
+        ON tts_feedback_signals(signal_type);
+
     CREATE TABLE IF NOT EXISTS radim_tasks (
         id SERIAL PRIMARY KEY,
         user_id TEXT NOT NULL,
@@ -849,6 +865,20 @@ SQLITE_SCHEMA = '''
 
     CREATE INDEX IF NOT EXISTS idx_memory_history_user ON memory_history(user_id);
     CREATE INDEX IF NOT EXISTS idx_memory_history_ts ON memory_history(created_at DESC);
+
+    -- v464: TTS feedback signals (C1) — SQLite mirror.
+    CREATE TABLE IF NOT EXISTS tts_feedback_signals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        signal_type TEXT NOT NULL,
+        prev_message_text TEXT,
+        suspected_words TEXT DEFAULT '[]',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_tts_feedback_user_ts
+        ON tts_feedback_signals(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tts_feedback_signal_type
+        ON tts_feedback_signals(signal_type);
 
     CREATE TABLE IF NOT EXISTS radim_tasks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

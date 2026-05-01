@@ -667,6 +667,157 @@ def _handle_lexicon_forget(**kwargs):
     return None
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# C1 (v464) — TTS FEEDBACK SIGNALS
+# Senior says "cože?", "pomaleji", "nerozumím" → we capture the previous
+# Radim message + signal type, store for later analysis, and apply an
+# immediate adaptation (slower rate, louder volume, etc.) so the next
+# response addresses the complaint.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_FEEDBACK_REPLIES = {
+    'didnt_understand': 'Promiňte. Zopakuju to pomaleji a srozumitelněji.',
+    'didnt_hear':       'Omlouvám se, opakuju.',
+    'too_fast':         'Dobře, budu mluvit pomaleji.',
+    'too_slow':         'OK, zrychlím trochu.',
+    'too_quiet':        'Dobře, zesílím hlas.',
+    'too_loud':         'Promiňte, ztiším.',
+}
+
+# How much each signal nudges voice_pref.rate_modifier (incremental).
+_FEEDBACK_RATE_DELTA = {
+    'didnt_understand': -0.05,
+    'didnt_hear':        0.0,    # no rate change, just acknowledgment
+    'too_fast':         -0.05,
+    'too_slow':         +0.05,
+    'too_quiet':         0.0,
+    'too_loud':          0.0,
+}
+
+
+def _last_radim_message(user_id):
+    """Fetch the most recent assistant message for this user from memory_history."""
+    if not user_id:
+        return None
+    try:
+        from database import db_context
+        with db_context() as db:
+            row = db.execute(
+                "SELECT id, content FROM memory_history "
+                "WHERE user_id = ? AND role = 'assistant' "
+                "ORDER BY created_at DESC LIMIT 1",
+                (str(user_id),),
+            ).fetchone()
+            if row:
+                return {'id': row['id'], 'content': row['content']}
+    except Exception as e:
+        logger.debug(f"_last_radim_message failed: {e}")
+    return None
+
+
+# Czech stopwords — exclude from suspected_words extraction
+_FEEDBACK_STOPWORDS = frozenset([
+    'a', 'i', 'o', 'u', 'v', 've', 'k', 'ke', 's', 'se', 'z', 'ze', 'na',
+    'do', 'po', 'od', 'u', 'pro', 'při', 'před', 'za', 'nad', 'pod',
+    'je', 'jsou', 'být', 'byl', 'bylo', 'byla', 'budu', 'budeš', 'bude',
+    'mám', 'máš', 'má', 'máme', 'máte', 'mají',
+    'co', 'kdo', 'jak', 'kde', 'kdy', 'proč', 'jaký', 'jaká', 'jaké',
+    'to', 'ten', 'ta', 'ti', 'ty', 'ta', 'ten', 'ono', 'oni',
+    'já', 'ty', 'on', 'ona', 'my', 'vy', 'oni', 'mi', 'mě', 'tě', 'vás',
+    'ne', 'ano', 'jo', 'ale', 'nebo', 'a', 'i', 'tedy', 'tak', 'pak',
+    'už', 'ještě', 'také', 'taky', 'jen', 'pouze',
+])
+
+
+def _extract_suspected_words(text, max_words=8):
+    """Pick LONG / UNCOMMON words from text that may have caused comprehension
+    issues. Heuristic: words ≥6 chars not in stopword list, sorted by length
+    descending. Capped at max_words to keep storage compact."""
+    if not text:
+        return []
+    # Strip punctuation + lowercase
+    words = re.findall(r"[A-Za-zÁČĎÉĚÍŇÓŘŠŤÚŮÝŽáčďéěíňóřšťúůýž]+", text)
+    candidates = []
+    seen = set()
+    for w in words:
+        wl = w.lower()
+        if wl in seen or wl in _FEEDBACK_STOPWORDS:
+            continue
+        if len(wl) < 6:
+            continue
+        seen.add(wl)
+        candidates.append(wl)
+    # Sort by length desc (longer = more likely culprit)
+    candidates.sort(key=len, reverse=True)
+    return candidates[:max_words]
+
+
+def _save_feedback_signal(user_id, signal_type, prev_message_text, suspected_words):
+    """Persist a TTS feedback signal row."""
+    try:
+        import json as _json
+        from database import db_context, db_insert
+        with db_context(commit=True) as db:
+            db_insert(
+                db, 'tts_feedback_signals',
+                ['user_id', 'signal_type', 'prev_message_text', 'suspected_words'],
+                (str(user_id), signal_type, prev_message_text or '',
+                 _json.dumps(suspected_words, ensure_ascii=False)),
+            )
+        return True
+    except Exception as e:
+        logger.warning(f"feedback signal save failed for user={user_id} type={signal_type}: {e}")
+        return False
+
+
+def _apply_feedback_adaptation(user_id, signal_type):
+    """Immediate per-user adaptation (rate / volume nudge) saved to profile."""
+    delta = _FEEDBACK_RATE_DELTA.get(signal_type, 0.0)
+    if delta == 0.0 and signal_type not in ('too_quiet', 'too_loud'):
+        return
+    try:
+        from memory_helpers import db_load_profile, db_save_profile
+        profile = db_load_profile(str(user_id)) or {}
+        vp = profile.get('voice_pref') or {}
+        if not isinstance(vp, dict):
+            vp = {}
+
+        if delta != 0.0:
+            cur = float(vp.get('rate_modifier', 0.0) or 0.0)
+            new_rate = max(-0.2, min(0.2, cur + delta))
+            vp['rate_modifier'] = round(new_rate, 3)
+            logger.info(f"feedback adaptation: user={user_id} rate {cur:+.2f} → {new_rate:+.2f}")
+
+        if signal_type == 'too_quiet':
+            vp['volume'] = 'x-loud'
+        elif signal_type == 'too_loud':
+            vp['volume'] = 'medium'
+
+        profile['voice_pref'] = vp
+        db_save_profile(str(user_id), profile)
+    except Exception as e:
+        logger.debug(f"feedback adaptation failed for {user_id} {signal_type}: {e}")
+
+
+def _make_feedback_handler(signal_type):
+    """Closure factory — one handler per signal type that records + adapts."""
+    def _handler(**kwargs):
+        user_id = kwargs.get('user_id')
+        if not user_id:
+            return None
+        last = _last_radim_message(user_id)
+        prev_text = last['content'] if last else ''
+        suspects = _extract_suspected_words(prev_text)
+        _save_feedback_signal(user_id, signal_type, prev_text, suspects)
+        _apply_feedback_adaptation(user_id, signal_type)
+        logger.info(
+            f"📊 TTS feedback: user={user_id} type={signal_type} "
+            f"prev_len={len(prev_text)} suspects={suspects[:3]}"
+        )
+        return _FEEDBACK_REPLIES.get(signal_type, 'Rozumím.')
+    return _handler
+
+
 _HANDLERS = {
     "time": _handle_time,
     "date": _handle_date,
@@ -699,6 +850,13 @@ _HANDLERS = {
     "lexicon_teach": _handle_lexicon_teach,
     "lexicon_list": _handle_lexicon_list,
     "lexicon_forget": _handle_lexicon_forget,
+    # C1 v464 — TTS feedback signals (closures generated from list)
+    "tts_feedback_didnt_understand": _make_feedback_handler('didnt_understand'),
+    "tts_feedback_didnt_hear":       _make_feedback_handler('didnt_hear'),
+    "tts_feedback_too_fast":         _make_feedback_handler('too_fast'),
+    "tts_feedback_too_slow":         _make_feedback_handler('too_slow'),
+    "tts_feedback_too_quiet":        _make_feedback_handler('too_quiet'),
+    "tts_feedback_too_loud":         _make_feedback_handler('too_loud'),
 }
 
 

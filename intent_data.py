@@ -625,6 +625,70 @@ INTENTS = [
         ],
         "handler": "lexicon_forget",
     },
+    # \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+    # \ud83d\udd01 C1 (v464): TTS FEEDBACK SIGNALS
+    # Senior tells Radim something didn't land \u2014 we capture the prior
+    # Radim message + the signal type so we can iteratively improve TTS.
+    # Patterns are tight (anchored, short messages only) to avoid
+    # matching the words inside normal conversation.
+    # \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+    {
+        "name": "tts_feedback_didnt_understand",
+        "patterns": [
+            r"^\s*co\u017ee\s*\??!?\s*$",
+            r"^\s*co\s+jsi\s+(?:to\s+)?\u0159ekl\s*\??!?\s*$",
+            r"^\s*co\s+to\s+bylo\s*\??!?\s*$",
+            r"^\s*co\s+pros\u00edm\s*\??!?\s*$",
+            r"^\s*nerozum\u011bl\s+jsem\s*\.?!?\s*$",
+            r"^\s*nerozum\u00edm\s*\.?!?\s*$",
+            r"^\s*nerozumim\s*\.?!?\s*$",
+        ],
+        "handler": "tts_feedback_didnt_understand",
+    },
+    {
+        "name": "tts_feedback_didnt_hear",
+        "patterns": [
+            r"^\s*nesly\u0161el\s+jsem(?:\s+t\u011b)?\s*\.?!?\s*$",
+            r"^\s*neslysel\s+jsem(?:\s+te)?\s*\.?!?\s*$",
+            r"^\s*opakuj(?:\s+to|\s+pros\u00edm)?\s*\.?!?\s*$",
+            r"^\s*je\u0161t\u011b\s+jednou\s*\.?!?\s*$",
+            r"^\s*znovu\s*\.?!?\s*$",
+        ],
+        "handler": "tts_feedback_didnt_hear",
+    },
+    {
+        "name": "tts_feedback_too_fast",
+        "patterns": [
+            r"^\s*(?:radime[,\s]+)?(?:mluv\s+)?pomalej[i\u00ed](?:\s+pros\u00edm)?\s*\.?!?\s*$",
+            r"^\s*zpomal(?:\s+pros\u00edm)?\s*\.?!?\s*$",
+            r"^\s*(?:moc|p\u0159\u00edli\u0161)\s+rychle\s*\.?!?\s*$",
+            r"^\s*nest\u00edh\u00e1m\s+t\u011b\s*\.?!?\s*$",
+        ],
+        "handler": "tts_feedback_too_fast",
+    },
+    {
+        "name": "tts_feedback_too_slow",
+        "patterns": [
+            r"^\s*(?:radime[,\s]+)?(?:mluv\s+)?rychleji(?:\s+pros\u00edm)?\s*\.?!?\s*$",
+            r"^\s*(?:moc|p\u0159\u00edli\u0161)\s+pomalu\s*\.?!?\s*$",
+        ],
+        "handler": "tts_feedback_too_slow",
+    },
+    {
+        "name": "tts_feedback_too_quiet",
+        "patterns": [
+            r"^\s*(?:mluv\s+)?(?:hlasit\u011bji|hlasiteji|nahlas|hlasit\u011b)\s*\.?!?\s*$",
+            r"^\s*(?:slab\u011b|slabe|tich\u00fd)\s+(?:t\u011b\s+)?sly\u0161[\u00edi]m\s*\.?!?\s*$",
+        ],
+        "handler": "tts_feedback_too_quiet",
+    },
+    {
+        "name": "tts_feedback_too_loud",
+        "patterns": [
+            r"^\s*(?:mluv\s+)?(?:ti\u0161e[ji\u00ed]?|potichu|ti\u0161eji|moc\s+nahlas)\s*\.?!?\s*$",
+        ],
+        "handler": "tts_feedback_too_loud",
+    },
 ]
 
 # Compile patterns

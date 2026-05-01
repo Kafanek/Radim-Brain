@@ -535,6 +535,71 @@ def tts_health():
     })
 
 
+@tts_proxy_bp.route('/api/tts/feedback/stats', methods=['GET'])
+def tts_feedback_stats():
+    """C1 (v464) — aggregate TTS feedback signals.
+
+    Public read-only endpoint. Returns per-signal counts + top suspected
+    words across the last N days (?days= query param, default 7).
+
+    Use cases:
+      - Admin dashboard: see what words seniors complain about
+      - Future: feed top suspected words into voice_filter palatalization
+        whitelist (data-driven instead of guessing)
+    """
+    import json as _json
+    from collections import Counter
+    try:
+        days = int(request.args.get('days', '7'))
+        days = max(1, min(90, days))
+    except (TypeError, ValueError):
+        days = 7
+
+    payload = {'service': 'TTS Feedback', 'success': True, 'window_days': days}
+    try:
+        from database import db_context, is_postgres
+        with db_context() as db:
+            interval_sql = (f"NOW() - INTERVAL '{days} days'" if is_postgres()
+                            else f"datetime('now', '-{days} days')")
+            rows = db.execute(
+                f"SELECT signal_type, prev_message_text, suspected_words "
+                f"FROM tts_feedback_signals "
+                f"WHERE created_at > {interval_sql}"
+            ).fetchall()
+    except Exception as e:
+        payload['success'] = False
+        payload['error'] = str(e)
+        return jsonify(payload), 503
+
+    by_type = Counter()
+    word_counter = Counter()
+    top_messages = Counter()
+
+    for row in rows:
+        st = row['signal_type']
+        by_type[st] += 1
+        msg = (row['prev_message_text'] or '').strip()
+        if msg:
+            top_messages[msg[:80]] += 1
+        sw = row['suspected_words'] or '[]'
+        if isinstance(sw, str):
+            try:
+                sw = _json.loads(sw)
+            except (ValueError, TypeError):
+                sw = []
+        if isinstance(sw, list):
+            for word in sw:
+                word_counter[word] += 1
+
+    payload['total_signals'] = sum(by_type.values())
+    payload['by_signal_type'] = dict(by_type)
+    payload['top_suspected_words'] = word_counter.most_common(20)
+    payload['top_problem_messages'] = [
+        {'text': m, 'count': c} for m, c in top_messages.most_common(10)
+    ]
+    return jsonify(payload)
+
+
 @tts_proxy_bp.route('/api/tts/stats', methods=['GET'])
 def tts_stats():
     """Public TTS metrics — cache hit rate, Azure quota usage, projected cost.
