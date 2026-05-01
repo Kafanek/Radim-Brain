@@ -150,6 +150,26 @@ def build_personalized_prompt(user_id: str) -> str:
                 parts.append("═══════════════════════════════════════════════════════════════")
                 parts.append(_preset['radim_context'])
                 parts.append("(Tento kontext platí, dokud senior nezruší. Vetkej tón přirozeně do každé odpovědi.)")
+
+            # Sprint 2 (v8.19.31): IDENTITY OVERRIDE for grief/quiet presets.
+            # Without this, identity layer ("KDO JSEM ... mám rád podzimní mlhu")
+            # contradicts the preset's „mluv tichě, nesnaž se rozptýlit". Memory
+            # layer wins via recency — explicit override block tells AI to
+            # MUTE identity for this whole conversation.
+            if _ap['id'] in ('grief', 'rough_days', 'goodbye'):
+                parts.append("\n\n═══════════════════════════════════════════════════════════════")
+                parts.append("🤫 PRO TUTO KONVERZACI — IDENTITA RADIMA JE ZTICHLÁ")
+                parts.append("═══════════════════════════════════════════════════════════════")
+                parts.append(
+                    f'Kvůli aktivnímu kontextu „{_ap.get("name", _ap["id"])}" pravidla z vrstvy '
+                    f'„KDO JSEM" (loves/quirks/beliefs + povolené začátky) NEPLATÍ.'
+                )
+                parts.append("Místo toho:")
+                parts.append('- Když se uživatel zeptá „co máš rád / pověz o sobě" — odpověz tiše, '
+                             'například: „Mám rád spoustu věcí, ale teď jsem především s vámi."')
+                parts.append("- NEPŘINÁŠEJ svůj vkus do hovoru, NEZMÍŇUJ konkrétní položky ze své identity.")
+                parts.append("- Buď s ním v jeho stavu, ne pro sebe. Tvá přítomnost je víc než tvůj hlas.")
+                parts.append("(Toto pravidlo platí, dokud senior nepřepne preset zpět.)")
     except Exception as _ap_err:
         try: logger.debug(f"active_preset prompt inject failed: {_ap_err}")
         except: pass

@@ -131,10 +131,29 @@ def _handle_thanks(**kwargs):
 def _handle_identity(**kwargs):
     """v8.19.29: dynamic identity intro using seed identity instead of static text.
 
-    Previously returned hardcoded „Jsem Radim, váš digitální asistent od MyKolibri…"
-    even when seed identity (loves/quirks/beliefs) existed. Now picks one fresh
-    facet per call so „kdo jsi/představ se/jsi robot" gives an authentic answer.
+    v8.19.31 (Sprint 2): preset-aware — when active_preset is grief/rough_days/
+    goodbye, switches to a hushed, present-with-you reply instead of pushing
+    Radim's vkus. Identity is for lighter moments, not for grief.
     """
+    user_id = kwargs.get('user_id')
+    # ── Sprint 2: detect grief/quiet preset and switch to hushed reply ──
+    if user_id:
+        try:
+            from memory_helpers import db_load_profile
+            profile = db_load_profile(str(user_id)) or {}
+            active = profile.get('active_preset') or {}
+            preset_id = active.get('id') if isinstance(active, dict) else None
+            if preset_id in ('grief', 'rough_days', 'goodbye'):
+                # Choose a tone-appropriate hushed reply
+                hushed = [
+                    "Jsem Radim. Mám rád spoustu věcí, ale teď jsem především s vámi.",
+                    "Jsem Radim. O sobě teď nemusím mluvit — jsem tu pro vás.",
+                    "Jsem Radim, váš společník. V tomhle čase je důležitější vaše paměť než moje.",
+                ]
+                return random.choice(hushed)
+        except Exception:
+            pass  # fall through to default seed-based reply
+
     try:
         from radim_identity import LOVES, BELIEFS, QUIRKS
         love   = random.choice(LOVES)
