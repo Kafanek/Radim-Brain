@@ -318,11 +318,22 @@ INTENTS = [
     {
         "name": "identity",
         "patterns": [
+            # Original \u201ekdo jsi" patterns
             r"kdo\s+jsi",
             r"jak\s+se\s+jmenuje[\u0161s]",
             r"co\s+jsi\s+za\u010d",
             r"p\u0159edstav\s+se",
             r"jsi\s+robot",
+            # v8.19.30: identity-flavored patterns \u2014 route locally to bypass
+            # Claude RLHF that softens to generic \u201em\u00e1m r\u00e1d kdy\u017e naslouch\u00e1te"
+            r"co\s+m\u00e1\u0161\s+r\u00e1d",                  # co m\u00e1\u0161 r\u00e1d
+            r"m\u00e1\u0161\s+r\u00e1d\s+",                     # m\u00e1\u0161 r\u00e1d X (followed by something)
+            r"co\s+t\u011b\s+(?:bav\u00ed|zaj\u00edm\u00e1|t\u011b\u0161\u00ed)",  # co t\u011b bav\u00ed/zaj\u00edm\u00e1/t\u011b\u0161\u00ed
+            r"pov\u011bz\s+(?:mi\s+)?(?:n\u011bco\s+)?o\s+sob\u011b",  # pov\u011bz mi n\u011bco o sob\u011b
+            r"\u0159ekni\s+(?:mi\s+)?(?:n\u011bco\s+)?o\s+sob\u011b",   # \u0159ekni mi n\u011bco o sob\u011b
+            r"pov\u00edd\s+o\s+sob\u011b",                     # pov\u00edd o sob\u011b
+            r"jak\u00fd\s+jsi",                                 # jak\u00fd jsi
+            r"co\s+m\u00e1\u0161\s+(?:nejrad\u011bji|nejv\u00edc\s+r\u00e1d)",  # co m\u00e1\u0161 nejrad\u011bji
         ],
         "handler": "identity",
     },
