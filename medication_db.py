@@ -932,7 +932,462 @@ MEDICATIONS = {
             'při dlouhodobé léčbě prevence osteoporózy',
         ],
     },
+
+    # ───────────────────────────────────────────────────────────────
+    # v468: PHASE 3 — KARDIOVASKULÁRNÍ
+    # ───────────────────────────────────────────────────────────────
+    'digoxin': {
+        'name': 'Digoxin',
+        'aliases': ['lanoxin', 'digitalis'],
+        'atc_code': 'C01AA05',
+        'group': 'cardiac_glycoside',
+        'group_human': 'srdeční glykosid (lék na srdce)',
+        'indication': 'srdeční selhání, fibrilace síní',
+        'typical_dose': 'velmi individuální, obvykle nula celá sto dvacet pět miligramu denně',
+        'food': 'kdykoli, vždy ve stejnou dobu',
+        'warnings': [
+            'velmi úzká terapeutická šíře — pravidelné kontroly hladin',
+            'nevolnost, žluté vidění, zpomalení pulzu jsou příznaky předávkování',
+            'opatrně s diuretiky (pokles draslíku zesiluje účinek)',
+        ],
+    },
+    'cordarone': {
+        'name': 'Cordarone',
+        'aliases': ['amiodaron', 'sedacoron'],
+        'atc_code': 'C01BD01',
+        'group': 'antiarrhythmic',
+        'group_human': 'antiarytmikum (lék na poruchy rytmu srdce)',
+        'indication': 'závažné poruchy srdečního rytmu',
+        'typical_dose': 'sto až dvě stě miligramů denně po nasycovací fázi',
+        'food': 's jídlem',
+        'warnings': [
+            'kontroly štítné žlázy a jater pravidelně',
+            'vyhnout se slunci — může způsobit modré zbarvení kůže',
+            'opatrně s warfarinem — nutná úprava dávky',
+        ],
+    },
+    'diovan': {
+        'name': 'Diovan',
+        'aliases': ['valsartan', 'valsacor'],
+        'atc_code': 'C09CA03',
+        'group': 'arb',
+        'group_human': 'sartan (lék na tlak)',
+        'indication': 'vysoký krevní tlak, srdeční selhání',
+        'typical_dose': 'osmdesát až sto šedesát miligramů denně',
+        'food': 's jídlem nebo bez',
+        'warnings': [
+            'kontroly draslíku a ledvin',
+            'NEKOMBINOVAT s ACE inhibitory',
+        ],
+    },
+    'pritor': {
+        'name': 'Pritor',
+        'aliases': ['telmisartan', 'micardis'],
+        'atc_code': 'C09CA07',
+        'group': 'arb',
+        'group_human': 'sartan (lék na tlak)',
+        'indication': 'vysoký krevní tlak, prevence kardiovaskulárních příhod',
+        'typical_dose': 'čtyřicet až osmdesát miligramů ráno',
+        'food': 's jídlem nebo bez',
+        'warnings': [
+            'kontroly draslíku',
+            'opatrně při dehydrataci',
+        ],
+    },
+    'hydrochlorothiazid': {
+        'name': 'Hydrochlorothiazid',
+        'aliases': ['hctz', 'hypothiazid'],
+        'atc_code': 'C03AA03',
+        'group': 'thiazide_diuretic',
+        'group_human': 'diuretikum (mírné odvodnění)',
+        'indication': 'vysoký krevní tlak',
+        'typical_dose': 'dvanáct a půl až dvacet pět miligramů ráno',
+        'food': 'ráno',
+        'warnings': [
+            'doplňovat draslík',
+            'pravidelné kontroly elektrolytů',
+            'může zvýšit hladinu kyseliny močové (dna)',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v468: DIABETES (rozšíření)
+    # ───────────────────────────────────────────────────────────────
+    'jardiance': {
+        'name': 'Jardiance',
+        'aliases': ['empagliflozin'],
+        'atc_code': 'A10BK03',
+        'group': 'antidiabetic_sglt2',
+        'group_human': 'lék na cukrovku (SGLT2 inhibitor)',
+        'indication': 'diabetes 2. typu, srdeční selhání, ochrana ledvin',
+        'typical_dose': 'deset až dvacet pět miligramů jednou denně ráno',
+        'food': 's jídlem nebo bez, dostatek tekutin',
+        'warnings': [
+            'pijte hodně vody (zvyšuje močení)',
+            'pozor na infekce močových cest',
+            'při horečce nebo dehydrataci dočasně přerušit',
+        ],
+    },
+    'januvia': {
+        'name': 'Januvia',
+        'aliases': ['sitagliptin'],
+        'atc_code': 'A10BH01',
+        'group': 'antidiabetic_dpp4',
+        'group_human': 'lék na cukrovku (DPP-4 inhibitor)',
+        'indication': 'diabetes 2. typu',
+        'typical_dose': 'sto miligramů jednou denně',
+        'food': 's jídlem nebo bez',
+        'warnings': [
+            'při bolesti břicha okamžitě k lékaři (riziko pankreatitidy)',
+            'při onemocnění ledvin sníženě dávky',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v468: NEUROLOGIE — Alzheimer, Parkinson, migréna
+    # ───────────────────────────────────────────────────────────────
+    'aricept': {
+        'name': 'Aricept',
+        'aliases': ['donepezil', 'yasnal'],
+        'atc_code': 'N06DA02',
+        'group': 'cholinesterase_inhibitor',
+        'group_human': 'lék na Alzheimerovu chorobu',
+        'indication': 'mírná až středně těžká Alzheimerova demence',
+        'typical_dose': 'pět až deset miligramů večer před spaním',
+        'food': 'večer, s jídlem nebo bez',
+        'warnings': [
+            'může způsobit nevolnost, průjem na začátku — postupně se zlepší',
+            'opatrně s léky zpomalujícími srdce',
+            'efekt je postupný — nevysazovat unáhleně',
+        ],
+    },
+    'ebixa': {
+        'name': 'Ebixa',
+        'aliases': ['memantin', 'axura'],
+        'atc_code': 'N06DX01',
+        'group': 'nmda_antagonist',
+        'group_human': 'lék na pokročilou Alzheimerovu chorobu',
+        'indication': 'středně těžká až těžká Alzheimerova demence',
+        'typical_dose': 'postupně zvyšovaná na dvacet miligramů denně',
+        'food': 'kdykoli',
+        'warnings': [
+            'dávku zvyšovat postupně po týdnech',
+            'sníženě dávky při onemocnění ledvin',
+        ],
+    },
+    'madopar': {
+        'name': 'Madopar',
+        'aliases': ['levodopa+benserazid', 'isicom', 'sinemet'],
+        'atc_code': 'N04BA02',
+        'group': 'antiparkinsonian',
+        'group_human': 'lék na Parkinsonovu chorobu',
+        'indication': 'Parkinsonova choroba',
+        'typical_dose': 'individuálně, obvykle dvě stě padesát miligramů třikrát denně',
+        'food': 'na lačno (půl hodiny před jídlem) — bílkoviny snižují vstřebávání',
+        'warnings': [
+            'NEVYNECHÁVAT dávky — návrat ztuhlosti',
+            'NEKOMBINOVAT s vitamínem B6 ve vysokých dávkách',
+            'může způsobovat nevolnost, závratě',
+        ],
+    },
+    'mirapexin': {
+        'name': 'Mirapexin',
+        'aliases': ['pramipexol', 'sifrol'],
+        'atc_code': 'N04BC05',
+        'group': 'dopamine_agonist',
+        'group_human': 'lék na Parkinsonovu chorobu (dopaminový agonista)',
+        'indication': 'Parkinsonova choroba, syndrom neklidných nohou',
+        'typical_dose': 'postupně zvyšovaná individuálně',
+        'food': 's jídlem (sníží nevolnost)',
+        'warnings': [
+            'může způsobit náhlé usnutí — opatrně při řízení',
+            'NEVYSAZOVAT náhle',
+            'občas nutkavé chování (gambling, nakupování) — informovat lékaře',
+        ],
+    },
+    'topamax': {
+        'name': 'Topamax',
+        'aliases': ['topiramat'],
+        'atc_code': 'N03AX11',
+        'group': 'antiepileptic',
+        'group_human': 'antiepileptikum (také prevence migrén)',
+        'indication': 'epilepsie, prevence migrén',
+        'typical_dose': 'postupně zvyšovaná na padesát až dvě stě miligramů denně',
+        'food': 's jídlem nebo bez',
+        'warnings': [
+            'mravenčení v rukou je běžné',
+            'pijte dostatek tekutin (riziko ledvinných kamenů)',
+            'NEVYSAZOVAT náhle při epilepsii',
+        ],
+    },
+    'imigran': {
+        'name': 'Imigran',
+        'aliases': ['sumatriptan', 'rosemig'],
+        'atc_code': 'N02CC01',
+        'group': 'triptan',
+        'group_human': 'lék na akutní záchvat migrény',
+        'indication': 'migréna — akutní léčba',
+        'typical_dose': 'padesát až sto miligramů při záchvatu, max dva razy denně',
+        'food': 's jídlem nebo bez',
+        'warnings': [
+            'NEUŽÍVAT při ischemické chorobě srdeční nebo po infarktu',
+            'opatrně při vysokém tlaku',
+            'nekombinovat s SSRI bez konzultace',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v468: GASTRO (rozšíření)
+    # ───────────────────────────────────────────────────────────────
+    'nolpaza': {
+        'name': 'Nolpaza',
+        'aliases': ['pantoprazol nolpaza'],
+        'atc_code': 'A02BC02',
+        'group': 'ppi',
+        'group_human': 'inhibitor protonové pumpy (lék na žaludek)',
+        'indication': 'pálení žáhy, vředy, refluxní nemoc',
+        'typical_dose': 'dvacet až čtyřicet miligramů ráno',
+        'food': 'ráno na lačno',
+        'warnings': [
+            'dlouhodobé užívání kontrolovat',
+            'stejný typ jako Controloc',
+        ],
+    },
+    'espumisan': {
+        'name': 'Espumisan',
+        'aliases': ['simeticon', 'sab simplex'],
+        'atc_code': 'A03AX13',
+        'group': 'antiflatulent',
+        'group_human': 'lék proti nadýmání',
+        'indication': 'nadýmání, plynatost',
+        'typical_dose': 'dvě tobolky třikrát denně po jídle',
+        'food': 'po jídle a před spaním',
+        'warnings': [
+            'bezpečný — minimální vedlejší účinky',
+        ],
+    },
+    'smecta': {
+        'name': 'Smecta',
+        'aliases': ['diosmectite'],
+        'atc_code': 'A07BC05',
+        'group': 'antidiarrheal',
+        'group_human': 'lék proti průjmu',
+        'indication': 'akutní průjem',
+        'typical_dose': 'jeden sáček třikrát denně rozpuštěný ve vodě',
+        'food': 'mezi jídly, s odstupem od ostatních léků (2 hodiny)',
+        'warnings': [
+            'může snížit vstřebávání jiných léků — užívat s odstupem',
+            'při průjmu pijte hodně tekutin',
+        ],
+    },
+    'ulcogant': {
+        'name': 'Ulcogant',
+        'aliases': ['sucralfate', 'sukralfát'],
+        'atc_code': 'A02BX02',
+        'group': 'mucosal_protectant',
+        'group_human': 'ochrana sliznice žaludku',
+        'indication': 'vředová choroba, refluxní nemoc',
+        'typical_dose': 'jeden gram čtyřikrát denně',
+        'food': 'na lačno (hodinu před jídlem) a na noc',
+        'warnings': [
+            'může snížit vstřebávání jiných léků — užívat s odstupem 2 hodiny',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v468: KOSTI / DOPLŇKY
+    # ───────────────────────────────────────────────────────────────
+    'calcichew': {
+        'name': 'Calcichew D3',
+        'aliases': ['calcium d3', 'caltrate', 'kalcium s vitamin d'],
+        'atc_code': 'A12AX',
+        'group': 'mineral',
+        'group_human': 'doplněk vápníku s vitaminem D',
+        'indication': 'osteoporóza, prevence zlomenin',
+        'typical_dose': 'jedna tableta jednou až dvakrát denně',
+        'food': 's jídlem (lepší vstřebávání)',
+        'warnings': [
+            'NEUŽÍVAT společně s Euthyroxem v stejný čas (2 hodiny rozdíl)',
+            'opatrně při onemocnění ledvin',
+        ],
+    },
+    'magnerot': {
+        'name': 'Magnerot',
+        'aliases': ['magnesium orotat'],
+        'atc_code': 'A12CC',
+        'group': 'mineral',
+        'group_human': 'doplněk hořčíku',
+        'indication': 'svalové křeče, podpora srdce',
+        'typical_dose': 'dvě tablety třikrát denně',
+        'food': 's jídlem',
+        'warnings': [
+            'může způsobit průjem při vysokých dávkách',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v468: KAŠEL / RESPIRAČNÍ
+    # ───────────────────────────────────────────────────────────────
+    'mucosolvan': {
+        'name': 'Mucosolvan',
+        'aliases': ['ambroxol', 'mucobron'],
+        'atc_code': 'R05CB06',
+        'group': 'expectorant',
+        'group_human': 'expektorans (uvolňuje hlen)',
+        'indication': 'vlhký kašel, hlen v dýchacích cestách',
+        'typical_dose': 'třicet miligramů třikrát denně',
+        'food': 's jídlem',
+        'warnings': [
+            'pijte dostatek tekutin',
+            'nekombinovat s léky na potlačení kašle (Stoptussin)',
+        ],
+    },
+    'acc_long': {
+        'name': 'ACC Long',
+        'aliases': ['acetylcystein', 'fluimucil', 'broncholysin'],
+        'atc_code': 'R05CB01',
+        'group': 'expectorant',
+        'group_human': 'mukolytikum (rozpouští hlen)',
+        'indication': 'vlhký kašel, chronická bronchitida',
+        'typical_dose': 'šest set miligramů jednou denně, šumivá tableta',
+        'food': 'rozpustit ve vodě, vypít',
+        'warnings': [
+            'opatrně při astmatu',
+            'pijte hodně vody',
+        ],
+    },
+    'stoptussin': {
+        'name': 'Stoptussin',
+        'aliases': ['butamirat', 'sinecod'],
+        'atc_code': 'R05DB13',
+        'group': 'antitussive',
+        'group_human': 'lék proti suchému kašli',
+        'indication': 'suchý dráždivý kašel',
+        'typical_dose': 'patnáct až čtyřicet kapek třikrát denně',
+        'food': 'po jídle',
+        'warnings': [
+            'NEUŽÍVAT při vlhkém kašli (zadržuje hlen)',
+            'nekombinovat s Mucosolvanem',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v468: OČNÍ KAPKY (rozšíření)
+    # ───────────────────────────────────────────────────────────────
+    'hylo_comod': {
+        'name': 'Hylo-Comod',
+        'aliases': ['umelé slzy', 'lubristil', 'systane'],
+        'atc_code': 'S01XA20',
+        'group': 'eye_drops_lubricant',
+        'group_human': 'umělé slzy (zvlhčující kapky)',
+        'indication': 'suché oči, podráždění',
+        'typical_dose': 'jedna kapka třikrát denně nebo podle potřeby',
+        'food': 'kapky',
+        'warnings': [
+            'bezpečné, lze kombinovat s ostatními kapkami (rozestup 5 min)',
+        ],
+    },
+    'tobradex': {
+        'name': 'Tobradex',
+        'aliases': ['tobramycin+dexamethason'],
+        'atc_code': 'S01CA01',
+        'group': 'eye_drops_steroid',
+        'group_human': 'oční kapky (kortikoid + antibiotikum)',
+        'indication': 'záněty očí s rizikem infekce',
+        'typical_dose': 'jedna až dvě kapky čtyřikrát denně',
+        'food': 'kapky',
+        'warnings': [
+            'krátkodobé použití (max 7 dní bez kontroly)',
+            'opatrně při glaukomu',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v468: NOSNÍ / ALERGIE
+    # ───────────────────────────────────────────────────────────────
+    'avamys': {
+        'name': 'Avamys',
+        'aliases': ['flutikason nosní', 'nasonex', 'momesalk'],
+        'atc_code': 'R01AD12',
+        'group': 'nasal_steroid',
+        'group_human': 'nosní sprej s kortikoidem',
+        'indication': 'sezónní alergická rýma, chronická rýma',
+        'typical_dose': 'dva vstřiky do každé nosní dírky jednou denně',
+        'food': 'sprej',
+        'warnings': [
+            'účinek nastupuje za několik dní',
+            'pravidelné použití pro plný účinek',
+        ],
+    },
+    'nasivin': {
+        'name': 'Nasivin',
+        'aliases': ['oxymetazolin', 'olynth'],
+        'atc_code': 'R01AA05',
+        'group': 'nasal_decongestant',
+        'group_human': 'nosní sprej proti ucpanému nosu',
+        'indication': 'akutní rýma, ucpaný nos',
+        'typical_dose': 'jeden až dva vstřiky dvakrát denně',
+        'food': 'sprej',
+        'warnings': [
+            'NEPOUŽÍVAT déle než 5-7 dní (riziko závislosti — rebound rýma)',
+            'opatrně při vysokém tlaku',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v468: ZÁCPA (rozšíření)
+    # ───────────────────────────────────────────────────────────────
+    'dulcolax': {
+        'name': 'Dulcolax',
+        'aliases': ['bisacodyl', 'guttalax'],
+        'atc_code': 'A06AB02',
+        'group': 'laxative_stimulant',
+        'group_human': 'projímadlo (stimulační)',
+        'indication': 'akutní zácpa, krátkodobě',
+        'typical_dose': 'jedna až dvě tablety na noc',
+        'food': 'na noc — účinek za 6-12 hodin',
+        'warnings': [
+            'pouze krátkodobě (max týden)',
+            'dlouhodobé užívání oslabuje střeva',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v468: ČESKÉ SPECIFICKÉ
+    # ───────────────────────────────────────────────────────────────
+    'iberogast': {
+        'name': 'Iberogast',
+        'aliases': ['stw 5'],
+        'atc_code': 'A03AX',
+        'group': 'phytomedicine',
+        'group_human': 'rostlinný přípravek na trávení',
+        'indication': 'funkční zažívací potíže, nadýmání',
+        'typical_dose': 'dvacet kapek třikrát denně před jídlem',
+        'food': 'před jídlem, rozpustit v malém množství vody',
+        'warnings': [
+            'obsahuje alkohol — opatrně při užívání disulfiramu',
+        ],
+    },
 }
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Future SÚKL integration — DESIGN NOTE (TODO for next sprint)
+# ════════════════════════════════════════════════════════════════════════
+# SÚKL (Státní ústav pro kontrolu léčiv) provides Czech drug data via:
+#   - Open data portal: https://opendata.sukl.cz
+#   - DLP CSV dump (Database léčivých přípravků): updated weekly
+#   - REST API for individual drug lookup (rate-limited)
+#
+# Recommended integration path (NOT implemented in this sprint):
+#   1. Cron job downloads weekly CSV → parsed into PostgreSQL `sukl_drugs`
+#      table (atc_code, generic_name, brand_name, manufacturer, spc_url)
+#   2. Lookup priority: medication_db (curated) → sukl_drugs (broad fallback)
+#   3. atc_code field on each curated entry maps cleanly to SÚKL ATC index
+#   4. SPC URL in card → senior can read official product info (optional)
+#
+# The atc_code fields added to v468 entries are pre-wiring for that step.
+# ════════════════════════════════════════════════════════════════════════
 
 
 # Build reverse-lookup map (alias → canonical key) once at import time.
@@ -948,6 +1403,10 @@ def lookup(name):
 
     Returns the medication dict (with extra '_match' field) or None.
     Match priority: exact key > exact alias > substring of name > substring of alias.
+
+    v468: hyphens and underscores are treated as equivalent so 'Hylo-Comod'
+    matches the 'hylo_comod' DB key (Python identifier-friendly underscore
+    is canonical, but users naturally type the hyphen as printed on packaging).
     """
     if not name or not isinstance(name, str):
         return None
@@ -955,13 +1414,18 @@ def lookup(name):
     if not q:
         return None
 
-    # 1. Exact alias / key match
-    if q in _ALIAS_INDEX:
-        key = _ALIAS_INDEX[q]
-        result = dict(MEDICATIONS[key])
-        result['_match'] = 'exact'
-        result['_key'] = key
-        return result
+    # Normalize hyphens/underscores both ways
+    q_norm = q.replace('-', '_')
+    q_norm_alt = q.replace('_', '-')
+
+    # 1. Exact alias / key match (try original + both normalisations)
+    for cand in (q, q_norm, q_norm_alt):
+        if cand in _ALIAS_INDEX:
+            key = _ALIAS_INDEX[cand]
+            result = dict(MEDICATIONS[key])
+            result['_match'] = 'exact'
+            result['_key'] = key
+            return result
 
     # 2. Substring match — q contains alias OR alias contains q
     for alias_lower, key in _ALIAS_INDEX.items():
