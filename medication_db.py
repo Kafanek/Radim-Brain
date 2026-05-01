@@ -43,6 +43,7 @@ MEDICATIONS = {
             'pravidelné kontroly INR každé čtyři týdny',
             'nekombinovat s ibuprofenem ani aspirinem, paracetamol je v pořádku',
         ],
+        'allergy_classes': ['warfarin'],
     },
     'anopyrin': {
         'name': 'Anopyrin',
@@ -470,6 +471,465 @@ MEDICATIONS = {
         'food': 's tučným jídlem (lepší vstřebávání)',
         'warnings': [
             'kontroly hladiny vápníku při vysokých dávkách',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v467: ANTIBIOTIKA — penicillin family, macrolides, cephalosporins
+    # ───────────────────────────────────────────────────────────────
+    'amoxicilin': {
+        'name': 'Amoxicilin',
+        'aliases': ['amoxicillin', 'amoclen', 'duomox'],
+        'group': 'antibiotic_penicillin',
+        'group_human': 'antibiotikum (penicilínového typu)',
+        'indication': 'bakteriální infekce dýchacích cest, močových cest, kůže',
+        'typical_dose': 'pět set miligramů třikrát denně po osmi hodinách',
+        'food': 's jídlem nebo bez',
+        'warnings': [
+            'při vyrážce, otoku tváře nebo dušnosti ihned přestat užívat',
+            'doužívat celé balení i když se cítíte lépe',
+        ],
+    },
+    'augmentin': {
+        'name': 'Augmentin',
+        'aliases': ['amoxiclav', 'curam', 'amoksiklav'],
+        'group': 'antibiotic_penicillin',
+        'group_human': 'antibiotikum (penicilínového typu s klavulánovou kyselinou)',
+        'indication': 'bakteriální infekce dýchacích cest, dutin, močových cest',
+        'typical_dose': 'sedm set padesát miligramů dvakrát denně',
+        'food': 's jídlem (sníží žaludeční nevolnost)',
+        'warnings': [
+            'při alergii na penicilin NEUŽÍVAT',
+            'doužívat celé balení',
+            'může způsobit průjem',
+        ],
+    },
+    'sumamed': {
+        'name': 'Sumamed',
+        'aliases': ['azitromycin', 'azithromycin', 'azitrox', 'azimed'],
+        'group': 'antibiotic_macrolide',
+        'group_human': 'antibiotikum (makrolid)',
+        'indication': 'infekce dýchacích cest, ORL, kožní infekce',
+        'typical_dose': 'pět set miligramů jednou denně po dobu tří dnů',
+        'food': 'na lačno, hodinu před jídlem nebo dvě hodiny po',
+        'warnings': [
+            'opatrně při srdečních arytmiích — může prodloužit QT interval',
+            'nekombinovat s warfarinem bez konzultace',
+        ],
+    },
+    'klacid': {
+        'name': 'Klacid',
+        'aliases': ['clarithromycin', 'klaritromycin', 'fromilid'],
+        'group': 'antibiotic_macrolide',
+        'group_human': 'antibiotikum (makrolid)',
+        'indication': 'infekce dýchacích cest, dutin, kůže',
+        'typical_dose': 'pět set miligramů dvakrát denně',
+        'food': 's jídlem',
+        'warnings': [
+            'mnoho lékových interakcí — informovat lékaře o všech lécích',
+            'opatrně se statiny',
+        ],
+    },
+    'cefuroxim': {
+        'name': 'Cefuroxim',
+        'aliases': ['zinnat', 'zinacef', 'cefurox'],
+        'group': 'antibiotic_cephalosporin',
+        'group_human': 'antibiotikum (cefalosporin)',
+        'indication': 'infekce dýchacích cest, močových cest, kůže',
+        'typical_dose': 'dvě stě padesát až pět set miligramů dvakrát denně',
+        'food': 's jídlem',
+        'warnings': [
+            'při těžké alergii na penicilin opatrně — možná křížová reakce',
+        ],
+    },
+    'biseptol': {
+        'name': 'Biseptol',
+        'aliases': ['cotrimoxazol', 'sumetrolim', 'bactrim', 'sulfametoxazol'],
+        'group': 'antibiotic_sulfonamide',
+        'group_human': 'antibiotikum (sulfonamid)',
+        'indication': 'močové infekce, některé respirační infekce',
+        'typical_dose': 'dvě tablety dvakrát denně po dvanácti hodinách',
+        'food': 's jídlem a velkým množstvím tekutin',
+        'warnings': [
+            'při alergii na sulfonamidy NEUŽÍVAT',
+            'pijte hodně vody — prevence krystalů v moči',
+            'opatrně s warfarinem',
+        ],
+    },
+    'ciprofloxacin': {
+        'name': 'Ciprofloxacin',
+        'aliases': ['ciprinol', 'ciplox', 'cifran'],
+        'group': 'antibiotic_quinolone',
+        'group_human': 'antibiotikum (chinolon)',
+        'indication': 'močové infekce, infekce trávicího traktu',
+        'typical_dose': 'pět set miligramů dvakrát denně',
+        'food': 'na lačno, NIKDY s mlékem nebo mléčnými výrobky (sníží vstřebávání)',
+        'warnings': [
+            'opatrně při onemocnění šlach (riziko ruptury Achillovy šlachy)',
+            'omezit pobyt na slunci',
+            'nekombinovat s antacidy v stejný čas',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v467: ANTIHISTAMINIKA — alergie
+    # ───────────────────────────────────────────────────────────────
+    'zyrtec': {
+        'name': 'Zyrtec',
+        'aliases': ['cetirizin', 'analergin', 'zodac', 'cerex'],
+        'group': 'antihistamine',
+        'group_human': 'antihistaminikum (lék na alergii)',
+        'indication': 'sezónní alergie, kopřivka, alergická rýma',
+        'typical_dose': 'deset miligramů jednou denně večer',
+        'food': 's jídlem nebo bez',
+        'warnings': [
+            'může způsobit ospalost',
+            'opatrně při řízení',
+        ],
+    },
+    'claritine': {
+        'name': 'Claritine',
+        'aliases': ['loratadin', 'flonidan', 'claritine repetabs'],
+        'group': 'antihistamine',
+        'group_human': 'antihistaminikum (lék na alergii)',
+        'indication': 'sezónní alergie, kopřivka',
+        'typical_dose': 'deset miligramů jednou denně',
+        'food': 'kdykoli',
+        'warnings': [
+            'méně ospalosti než starší antihistaminika',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v467: GERD/ŽALUDEK — H2 blokátory
+    # ───────────────────────────────────────────────────────────────
+    'famotidin': {
+        'name': 'Famotidin',
+        'aliases': ['quamatel', 'famosan'],
+        'group': 'h2_blocker',
+        'group_human': 'lék na žaludek (H2 blokátor)',
+        'indication': 'pálení žáhy, vředy, refluxní nemoc',
+        'typical_dose': 'dvacet až čtyřicet miligramů večer',
+        'food': 'večer, s jídlem nebo bez',
+        'warnings': [
+            'sníženě dávky při onemocnění ledvin',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v467: ASTMA / CHOPN — inhalátory
+    # ───────────────────────────────────────────────────────────────
+    'ventolin': {
+        'name': 'Ventolin',
+        'aliases': ['salbutamol', 'salamol', 'aerolin'],
+        'group': 'bronchodilator',
+        'group_human': 'inhalátor (rozšíření průdušek)',
+        'indication': 'astma, rychlá úleva při dušnosti',
+        'typical_dose': 'jeden až dva vdechy podle potřeby, max čtyřikrát denně',
+        'food': 'inhalace, ne pro polykání',
+        'warnings': [
+            'při častějším použití než obvykle informovat lékaře',
+            'může způsobit třes rukou nebo bušení srdce',
+        ],
+    },
+    'symbicort': {
+        'name': 'Symbicort',
+        'aliases': ['budesonid+formoterol', 'easyhaler'],
+        'group': 'bronchodilator',
+        'group_human': 'inhalátor (kombinovaný)',
+        'indication': 'astma, CHOPN — pravidelná léčba',
+        'typical_dose': 'jeden až dva vdechy dvakrát denně, ráno a večer',
+        'food': 'po inhalaci si vypláchnout ústa vodou (prevence kvasinkové infekce)',
+        'warnings': [
+            'NENÍ pro rychlou úlevu — k té slouží Ventolin',
+            'pravidelná inhalace — nevynechávat',
+        ],
+    },
+    'spiriva': {
+        'name': 'Spiriva',
+        'aliases': ['tiotropium', 'tiogiva'],
+        'group': 'bronchodilator',
+        'group_human': 'inhalátor pro CHOPN',
+        'indication': 'chronická obstrukční plicní nemoc (CHOPN)',
+        'typical_dose': 'jeden vdech jednou denně, vždy ve stejnou dobu',
+        'food': 'inhalace ráno',
+        'warnings': [
+            'opatrně při glaukomu nebo zvětšené prostatě',
+            'může způsobit suchá ústa',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v467: OČI — kapky
+    # ───────────────────────────────────────────────────────────────
+    'xalatan': {
+        'name': 'Xalatan',
+        'aliases': ['latanoprost', 'lataprost'],
+        'group': 'eye_drops',
+        'group_human': 'oční kapky (snížení nitroočního tlaku)',
+        'indication': 'glaukom, vysoký nitrooční tlak',
+        'typical_dose': 'jedna kapka do každého oka jednou denně večer',
+        'food': 'kapky, ne pro polykání. Vyjmout kontaktní čočky předem.',
+        'warnings': [
+            'může změnit barvu duhovky (na hnědou)',
+            'pravidelné kontroly tlaku',
+        ],
+    },
+    'cosopt': {
+        'name': 'Cosopt',
+        'aliases': ['dorzolamid+timolol'],
+        'group': 'eye_drops',
+        'group_human': 'oční kapky (kombinované, glaukom)',
+        'indication': 'glaukom — kombinovaná léčba',
+        'typical_dose': 'jedna kapka dvakrát denně',
+        'food': 'kapky',
+        'warnings': [
+            'opatrně při astmatu (timolol je beta-blokátor)',
+            'po kapkání tisknout vnitřní koutek 1 minutu',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v467: ZÁCPA / TRÁVENÍ
+    # ───────────────────────────────────────────────────────────────
+    'forlax': {
+        'name': 'Forlax',
+        'aliases': ['macrogol', 'fortrans'],
+        'group': 'laxative',
+        'group_human': 'projímadlo (osmotické)',
+        'indication': 'zácpa',
+        'typical_dose': 'jeden až dva sáčky denně rozpuštěné ve vodě',
+        'food': 'kdykoli, hodně tekutin',
+        'warnings': [
+            'pijte dostatečně vody',
+            'při dlouhodobé zácpě informovat lékaře',
+        ],
+    },
+    'lactulose': {
+        'name': 'Lactulose',
+        'aliases': ['duphalac', 'lactulose biomedica'],
+        'group': 'laxative',
+        'group_human': 'projímadlo (laktulóza)',
+        'indication': 'zácpa, jaterní encefalopatie',
+        'typical_dose': 'patnáct až třicet mililitrů denně',
+        'food': 'ráno, hodně vody',
+        'warnings': [
+            'opatrně při cukrovce (obsahuje cukr)',
+            'plynatost na začátku užívání je běžná',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v467: SILNÁ BOLEST — opiáty
+    # ───────────────────────────────────────────────────────────────
+    'tramal': {
+        'name': 'Tramal',
+        'aliases': ['tramadol', 'tramundin', 'noax'],
+        'group': 'opioid',
+        'group_human': 'silný lék proti bolesti (opioid)',
+        'indication': 'středně silná až silná bolest',
+        'typical_dose': 'padesát až sto miligramů každých šest hodin',
+        'food': 's jídlem',
+        'warnings': [
+            'NEKOMBINOVAT s alkoholem ani sedativy',
+            'může způsobit závratě, ospalost',
+            'NIKDY s SSRI bez konzultace (riziko serotoninového syndromu)',
+        ],
+    },
+    'zaldiar': {
+        'name': 'Zaldiar',
+        'aliases': ['tramadol+paracetamol', 'palgotal'],
+        'group': 'opioid',
+        'group_human': 'kombinovaný lék proti bolesti (tramadol + paracetamol)',
+        'indication': 'středně silná bolest',
+        'typical_dose': 'jedna až dvě tablety čtyřikrát denně, max osm tablet',
+        'food': 's jídlem',
+        'warnings': [
+            'NEKOMBINOVAT s alkoholem',
+            'maximálně osm tablet denně (kvůli paracetamolu)',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v467: NEVOLNOST / ZÁVRATĚ
+    # ───────────────────────────────────────────────────────────────
+    'cerucal': {
+        'name': 'Cerucal',
+        'aliases': ['metoclopramid', 'degan'],
+        'group': 'antiemetic',
+        'group_human': 'lék proti nevolnosti a zvracení',
+        'indication': 'nevolnost, zvracení, migréna',
+        'typical_dose': 'deset miligramů třikrát denně před jídlem',
+        'food': 'patnáct minut před jídlem',
+        'warnings': [
+            'krátkodobá léčba (max 5 dní u seniorů)',
+            'může způsobit neklid nebo třes',
+        ],
+    },
+    'betaserc': {
+        'name': 'Betaserc',
+        'aliases': ['betahistin', 'serc', 'urutal'],
+        'group': 'antivertigo',
+        'group_human': 'lék proti závratím',
+        'indication': 'Ménièrova choroba, závratě',
+        'typical_dose': 'šestnáct až čtyřicet osm miligramů denně, rozděleno do dávek',
+        'food': 's jídlem',
+        'warnings': [
+            'opatrně při astmatu',
+            'účinek nastupuje postupně (týdny)',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v467: INSULIN
+    # ───────────────────────────────────────────────────────────────
+    'lantus': {
+        'name': 'Lantus',
+        'aliases': ['insulin glargin', 'toujeo', 'abasaglar'],
+        'group': 'insulin',
+        'group_human': 'inzulin (dlouhodobý)',
+        'indication': 'diabetes 1. a 2. typu',
+        'typical_dose': 'individuálně podle hladiny cukru, jednou denně',
+        'food': 'injekce do podkoží, vždy ve stejnou dobu',
+        'warnings': [
+            'pozor na hypoglykemii — vždy mít kostku cukru',
+            'rotovat místa vpichu',
+            'NIKDY nemíchat s jiným inzulínem v stříkačce',
+        ],
+    },
+    'humalog': {
+        'name': 'Humalog',
+        'aliases': ['insulin lispro', 'novorapid', 'apidra'],
+        'group': 'insulin',
+        'group_human': 'inzulin (rychlý, k jídlu)',
+        'indication': 'diabetes — pokrytí jídla',
+        'typical_dose': 'individuálně podle množství sacharidů v jídle',
+        'food': 'krátce před jídlem (5-15 min) nebo s jídlem',
+        'warnings': [
+            'pozor na hypoglykemii pokud nesníte plánované jídlo',
+            'rotovat místa vpichu',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v467: SEDATIVA — alternativy benzodiazepinů
+    # ───────────────────────────────────────────────────────────────
+    'atarax': {
+        'name': 'Atarax',
+        'aliases': ['hydroxyzin'],
+        'group': 'sedative_antihistamine',
+        'group_human': 'sedativum / antihistaminikum',
+        'indication': 'úzkost, svědění, nespavost',
+        'typical_dose': 'dvacet pět miligramů večer',
+        'food': 'večer, s jídlem nebo bez',
+        'warnings': [
+            'může způsobit ospalost — opatrně při řízení',
+            'NIKDY s alkoholem',
+            'opatrně u seniorů (riziko zmatenosti)',
+        ],
+    },
+    'mirtazapin': {
+        'name': 'Mirtazapin',
+        'aliases': ['remeron', 'esprital'],
+        'group': 'antidepressant',
+        'group_human': 'antidepresivum (zlepšuje spánek a chuť k jídlu)',
+        'indication': 'deprese, nespavost u deprese',
+        'typical_dose': 'patnáct až třicet miligramů večer před spaním',
+        'food': 'večer, s jídlem nebo bez',
+        'warnings': [
+            'může zvyšovat hmotnost',
+            'účinek nastupuje za 2-4 týdny',
+            'NEVYSAZOVAT náhle',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v467: VOLBY HORMONŮ A KOSTI
+    # ───────────────────────────────────────────────────────────────
+    'fosamax': {
+        'name': 'Fosamax',
+        'aliases': ['alendronat', 'alendronic acid', 'fosavance'],
+        'group': 'bisphosphonate',
+        'group_human': 'lék na osteoporózu (bisfosfonát)',
+        'indication': 'osteoporóza, prevence zlomenin',
+        'typical_dose': 'sedmdesát miligramů jednou týdně ráno',
+        'food': 'RÁNO NA LAČNO, půl hodiny před snídaní, zapít VELKÝM POHÁREM VODY',
+        'warnings': [
+            'po užití NESEDAT ANI NELEŽET 30 minut — riziko podráždění jícnu',
+            'pouze čistá voda — žádná káva, čaj, mléko, džus',
+            'kontroly zubů (riziko osteonekrózy čelisti při delším užívání)',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v467: DALŠÍ ČASTÉ
+    # ───────────────────────────────────────────────────────────────
+    'wobenzym': {
+        'name': 'Wobenzym',
+        'aliases': ['wobenzym mucos'],
+        'group': 'enzyme',
+        'group_human': 'enzymový přípravek',
+        'indication': 'podpora imunity, hojení, otoky',
+        'typical_dose': 'tři tablety třikrát denně',
+        'food': 'půl hodiny před jídlem, zapít vodou',
+        'warnings': [
+            'opatrně při užívání léků na ředění krve',
+        ],
+    },
+    'magnesium': {
+        'name': 'Magnesium',
+        'aliases': ['magnez', 'magneb6', 'magnesii lactici'],
+        'group': 'mineral',
+        'group_human': 'doplněk hořčíku',
+        'indication': 'svalové křeče, podpora srdce, nervová soustava',
+        'typical_dose': 'tři sta až čtyři sta miligramů denně',
+        'food': 's jídlem',
+        'warnings': [
+            'může způsobit průjem při vysokých dávkách',
+            'opatrně při onemocnění ledvin',
+        ],
+    },
+    'detralex': {
+        'name': 'Detralex',
+        'aliases': ['diosmin+hesperidin', 'flavobion'],
+        'group': 'venoactive',
+        'group_human': 'lék na cévy (žilní problémy)',
+        'indication': 'žilní nedostatečnost, hemoroidy, otoky nohou',
+        'typical_dose': 'jedna tableta dvakrát denně',
+        'food': 's jídlem',
+        'warnings': [
+            'dlouhodobé užívání obvykle bez problémů',
+        ],
+    },
+    'kalium': {
+        'name': 'Kalium chloratum',
+        'aliases': ['draslík', 'kaldyum', 'kalnormin'],
+        'group': 'mineral',
+        'group_human': 'doplněk draslíku',
+        'indication': 'při ztrátách draslíku (diuretika), svalové křeče',
+        'typical_dose': 'jeden gram jednou až dvakrát denně',
+        'food': 's jídlem a velkým množstvím vody',
+        'warnings': [
+            'NEUŽÍVAT s ACE inhibitory ani Verospironem bez konzultace',
+            'kontroly hladiny draslíku',
+        ],
+    },
+
+    # ───────────────────────────────────────────────────────────────
+    # v467: KORTIKOIDY
+    # ───────────────────────────────────────────────────────────────
+    'prednison': {
+        'name': 'Prednison',
+        'aliases': ['prednisone', 'medrol', 'methylprednisolon'],
+        'group': 'corticosteroid',
+        'group_human': 'kortikoid (silný protizánětlivý lék)',
+        'indication': 'záněty, autoimunitní choroby, alergické reakce',
+        'typical_dose': 'individuálně, obvykle pět až čtyřicet miligramů denně',
+        'food': 'ráno s jídlem',
+        'warnings': [
+            'NEVYSAZOVAT náhle — postupně snižovat dávku',
+            'může zvýšit cukr a krevní tlak',
+            'při dlouhodobé léčbě prevence osteoporózy',
         ],
     },
 }

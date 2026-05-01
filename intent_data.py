@@ -817,6 +817,61 @@ INTENTS = [
         ],
         "handler": "medication_info",
     },
+    # \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+    # \ud83e\ude79 v467: ALLERGIES \u2014 record + list + check
+    # \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+    {
+        "name": "allergy_record",
+        "patterns": [
+            # alergick\u00fd / alergick\u00e1 / alergi\u010dt\u00ed / alergick\u00fdch \u2014 Czech word chars vary
+            r"(?:jsem|m\u00e1m)\s+alergi\w*\s+(?:na\s+)?\S+",
+            r"\balergie\s+na\s+\S+",
+            r"\bnesn\u00e1\u0161\u00edm\s+\S+",
+            r"\bpo\s+\S+\s+(?:dost\u00e1v\u00e1m|mi\s+je\s+\u0161patn\u011b)",
+        ],
+        "handler": "allergy_record",
+    },
+    {
+        "name": "allergy_list",
+        "patterns": [
+            r"^\s*(?:radime[,\s]+)?(?:jak\u00e9|na\s+co)\s+(?:m\u00e1m|m\u00e1\u0161)\s+alergie\s*\??!?\s*$",
+            r"^\s*(?:moje|m\u00e9)\s+alergie\s*\??!?\s*$",
+            r"^\s*uka\u017e\s+(?:m\u00e9|moje)?\s*alergie\s*\??!?\s*$",
+        ],
+        "handler": "allergy_list",
+    },
+    {
+        "name": "can_i_take",
+        # 'M\u016f\u017eu si vz\u00edt Ibuprofen?' / 'Je bezpe\u010dn\u00fd Aspirin?' \u2014 combined check
+        # against allergies + interactions with current meds.
+        "patterns": [
+            r"(?:m\u016f\u017eu|sm\u00edm|mohu|m\u00e1m\s+br\u00e1t)\s+(?:si\s+)?(?:vz\u00edt|br\u00e1t)\s+\S+",
+            r"^\s*(?:je|nen\u00ed)\s+bezpe\u010dn[\u00e1\u00e9\u00fd]\s+\S+\s*\??!?\s*$",
+            r"^\s*(?:je|jsou)\s+\S+\s+v\s+po\u0159\u00e1dku\s*\??!?\s*$",
+        ],
+        "handler": "can_i_take",
+    },
+    # \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+    # \u2696\ufe0f v467: WEIGHT
+    # \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+    {
+        "name": "weight_record",
+        "patterns": [
+            r"(?:v\u00e1\u017e\u00edm|m\u00e1m\s+v\u00e1hu)\s+\d+(?:[,.]\d+)?\s*(?:kilo|kg|kilogram)",
+            r"moje\s+(?:nyn\u011bj\u0161\u00ed\s+)?v\u00e1ha\s+je\s+\d+",
+            r"v\u00e1ha\s+(?:dnes|te\u010f)?\s*\d+\s*(?:kilo|kg)",
+        ],
+        "handler": "weight_record",
+    },
+    {
+        "name": "weight_query",
+        "patterns": [
+            r"^\s*(?:radime[,\s]+)?(?:kolik|jakou)\s+(?:m\u00e1m|m\u00e1\u0161)\s+v\u00e1hu\s*\??!?\s*$",
+            r"^\s*(?:moje|m\u00e9)\s+v\u00e1ha\s*\??!?\s*$",
+            r"^\s*kolik\s+v\u00e1\u017e\u00edm\s*\??!?\s*$",
+        ],
+        "handler": "weight_query",
+    },
 ]
 
 # Compile patterns

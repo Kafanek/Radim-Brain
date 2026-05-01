@@ -888,6 +888,225 @@ def _extract_med_name(message):
     return tokens[0]
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# v467 — ALLERGIES + WEIGHT + 'CAN I TAKE X?' SAFETY COMBINER
+# ═══════════════════════════════════════════════════════════════════════════
+
+_ALLERGY_NOISE = re.compile(
+    # alergi\w+ covers all Czech declensions: alergický/á/é, alergičtí, alergických…
+    r'\b(?:jsem|mám|alergi\w*|alergie|na|nesnáším|po|mi\s+je\s+špatně|dostávám|prosím|radime)\b',
+    re.IGNORECASE,
+)
+
+
+def _extract_allergy_substance(message):
+    cleaned = _ALLERGY_NOISE.sub(' ', message or '')
+    cleaned = re.sub(r'[?!.,;:"]', ' ', cleaned)
+    tokens = [t for t in cleaned.split() if len(t) >= 3 and t.replace('-', '').isalpha()]
+    if not tokens:
+        return None
+    tokens.sort(key=len, reverse=True)
+    return tokens[0]
+
+
+def _handle_allergy_record(**kwargs):
+    user_id = kwargs.get('user_id')
+    msg = (kwargs.get('message') or '').strip()
+    if not user_id or not msg:
+        return None
+    substance = _extract_allergy_substance(msg)
+    if not substance:
+        return None
+    severity = 'severe' if re.search(r'\b(?:silná|těžká|anafylakt|nesnáším)\b', msg, re.IGNORECASE) else 'moderate'
+    try:
+        from memory_helpers import db_load_profile, db_save_profile
+        from allergy_db import normalize_allergy
+        profile = db_load_profile(str(user_id)) or {}
+        allergies = profile.get('allergies') or []
+        if not isinstance(allergies, list):
+            allergies = []
+        substance_low = substance.lower()
+        # Don't double-add
+        if any(isinstance(a, dict) and a.get('substance', '').lower() == substance_low for a in allergies):
+            return f"Alergii na {substance} už mám zaznamenanou."
+        normalized = normalize_allergy(substance)
+        from datetime import datetime, timezone
+        allergies.append({
+            'substance': substance,
+            'normalized_class': normalized,
+            'severity': severity,
+            'notes': '',
+            'recorded_at': datetime.now(timezone.utc).isoformat(),
+        })
+        profile['allergies'] = allergies
+        db_save_profile(str(user_id), profile)
+        if normalized:
+            return (f"Zapamatoval jsem si alergii na {substance}. "
+                    f"Při příštím dotazu na lék zkontroluju, jestli neobsahuje příbuznou skupinu.")
+        return (f"Zapamatoval jsem si alergii na {substance}. "
+                f"Tu látku v mé hlavní databázi nemám — řekněte to vždy lékaři.")
+    except Exception as e:
+        logger.debug(f"allergy_record failed: {e}")
+        return None
+
+
+def _handle_allergy_list(**kwargs):
+    user_id = kwargs.get('user_id')
+    if not user_id:
+        return None
+    try:
+        from memory_helpers import db_load_profile
+        profile = db_load_profile(str(user_id)) or {}
+        allergies = profile.get('allergies') or []
+        if not allergies:
+            return ("Zatím nemám zaznamenanou žádnou vaši alergii. "
+                    "Když mi řeknete: jsem alergický na penicilin, uložím si to.")
+        names = [a.get('substance', '') for a in allergies if isinstance(a, dict) and a.get('substance')]
+        if len(names) <= 3:
+            return f"Vaše alergie: {', '.join(names)}."
+        return f"Máte {len(names)} alergií: {', '.join(names[:5])}{', a další' if len(names) > 5 else ''}."
+    except Exception as e:
+        logger.debug(f"allergy_list failed: {e}")
+        return None
+
+
+def _handle_can_i_take(**kwargs):
+    """'Můžu si vzít Ibuprofen?' → check vs allergies + current meds."""
+    user_id = kwargs.get('user_id')
+    msg = (kwargs.get('message') or '').strip()
+    if not user_id or not msg:
+        return None
+    drug_name = _extract_med_name(msg)
+    if not drug_name:
+        return None
+    try:
+        from medication_db import lookup
+        from allergy_db import (check_allergies_against_meds,
+                                 get_drug_allergy_classes,
+                                 expand_with_cross_reactivity,
+                                 normalize_allergy,
+                                 ALLERGY_CATALOG)
+        from memory_helpers import db_load_profile
+        from drug_interactions import check_interactions
+
+        entry = lookup(drug_name)
+        if not entry:
+            return (f"Lék {drug_name} v mé databázi nemám, nedokážu zkontrolovat. "
+                    f"Zeptejte se lékárníka.")
+
+        profile = db_load_profile(str(user_id)) or {}
+        user_allergies = profile.get('allergies') or []
+        user_meds = profile.get('medications_list') or []
+        if not isinstance(user_meds, list):
+            user_meds = []
+
+        warnings = []
+
+        # Check vs allergies
+        clashes = check_allergies_against_meds(user_allergies, [entry['name']]) or []
+        for c in clashes:
+            warnings.append({
+                'kind': 'allergy',
+                'severity': c.get('severity', 'moderate'),
+                'msg': c.get('warning', ''),
+            })
+
+        # Check vs current meds (interactions)
+        if user_meds:
+            tentative = list(user_meds) + [entry['name']]
+            ix = check_interactions(tentative) or []
+            # Filter to only interactions involving the new drug
+            new_low = entry['name'].lower()
+            for w in ix:
+                if (w.get('drug_a', '').lower().find(new_low) >= 0
+                        or w.get('drug_b', '').lower().find(new_low) >= 0):
+                    warnings.append({
+                        'kind': 'interaction',
+                        'severity': w.get('severity', 'LOW'),
+                        'msg': w.get('warning', ''),
+                    })
+
+        if not warnings:
+            return (f"Podle mé databáze {entry['name']} u vás nemá žádné riziko "
+                    f"alergie ani interakce. Vždy ale poraďte se s lékárníkem.")
+
+        # Sort severity desc + take top
+        sev_order = {'severe': 0, 'HIGH': 0, 'moderate': 1, 'MEDIUM': 1, 'mild': 2, 'LOW': 2}
+        warnings.sort(key=lambda w: sev_order.get(w['severity'], 3))
+        top = warnings[0]
+        prefix = "POZOR — " if top['severity'] in ('severe', 'HIGH') else "Upozornění: "
+        return f"{prefix}{top['msg']}"
+    except Exception as e:
+        logger.debug(f"can_i_take failed: {e}")
+        return None
+
+
+_WEIGHT_NUM = re.compile(r'(\d+(?:[,.]\d+)?)')
+
+
+def _handle_weight_record(**kwargs):
+    user_id = kwargs.get('user_id')
+    msg = (kwargs.get('message') or '').strip()
+    if not user_id or not msg:
+        return None
+    m = _WEIGHT_NUM.search(msg)
+    if not m:
+        return None
+    try:
+        kg = float(m.group(1).replace(',', '.'))
+    except ValueError:
+        return None
+    if kg < 25 or kg > 250:
+        return f"To číslo {kg} jako váha mi přijde divné. Řekněte mi to znovu."
+    try:
+        from memory_helpers import db_load_profile, db_save_profile
+        from datetime import datetime, timezone
+        profile = db_load_profile(str(user_id)) or {}
+        history = profile.get('weight_history') or []
+        if not isinstance(history, list):
+            history = []
+        history.append({'kg': round(kg, 1),
+                        'recorded_at': datetime.now(timezone.utc).isoformat()})
+        if len(history) > 50:
+            history = history[-50:]
+        profile['weight_kg'] = round(kg, 1)
+        profile['weight_history'] = history
+        db_save_profile(str(user_id), profile)
+        # Trend feedback
+        prev = None
+        if len(history) >= 2:
+            prev = history[-2].get('kg')
+        if prev:
+            diff = round(kg - prev, 1)
+            if abs(diff) < 0.3:
+                trend = "Váha se nemění, to je dobře."
+            elif diff > 0:
+                trend = f"Přibyl/a jste {diff} kilo."
+            else:
+                trend = f"Ubyl/a jste {abs(diff)} kilo."
+            return f"Váhu {kg} kilo jsem si zapsal. {trend}"
+        return f"Váhu {kg} kilo jsem si zapsal. Příště mě uvědomte zase."
+    except Exception as e:
+        logger.debug(f"weight_record failed: {e}")
+        return None
+
+
+def _handle_weight_query(**kwargs):
+    user_id = kwargs.get('user_id')
+    if not user_id:
+        return None
+    try:
+        from memory_helpers import db_load_profile
+        profile = db_load_profile(str(user_id)) or {}
+        kg = profile.get('weight_kg')
+        if kg is None:
+            return ("Vaši váhu zatím nemám. Když mi řeknete: vážím sedmdesát pět kilo, uložím si ji.")
+        return f"Naposledy jste vážil/a {kg} kilo."
+    except Exception as e:
+        logger.debug(f"weight_query failed: {e}")
+        return None
+
+
 def _handle_medication_info(**kwargs):
     """Look up a drug name in medication_db and return a voice-friendly reply."""
     message = (kwargs.get('message') or '').strip()
@@ -921,6 +1140,24 @@ def _handle_medication_info(**kwargs):
         from medication_db import speak_brief, lookup
         info = lookup(name)
         if not info:
+            # v467: log unknown med to crowdsource queue so admin can prioritise expansion
+            try:
+                from datetime import datetime, timezone
+                from memory_helpers import db_load_profile, db_save_profile
+                admin_p = db_load_profile('__admin_unknown_meds__') or {}
+                queue = admin_p.get('queue') or []
+                if not isinstance(queue, list):
+                    queue = []
+                queue.append({
+                    'name': name,
+                    'user_id': str(user_id) if user_id else 'anonymous',
+                    'context': message[:100],
+                    'flagged_at': datetime.now(timezone.utc).isoformat(),
+                })
+                admin_p['queue'] = queue[-200:]
+                db_save_profile('__admin_unknown_meds__', admin_p)
+            except Exception as fe:
+                logger.debug(f"unknown-med flag failed: {fe}")
             return (f"Lék {name} v mé databázi nemám. "
                     f"Zeptejte se lékárníka, ten vám poradí přesně.")
         return speak_brief(name)
@@ -983,6 +1220,12 @@ _HANDLERS = {
     "ok_acknowledge":     _make_social_handler('ok_acknowledge'),
     # v466 — medication knowledge
     "medication_info":    _handle_medication_info,
+    # v467 — allergies + weight + safety combiner
+    "allergy_record":     _handle_allergy_record,
+    "allergy_list":       _handle_allergy_list,
+    "can_i_take":         _handle_can_i_take,
+    "weight_record":      _handle_weight_record,
+    "weight_query":       _handle_weight_query,
 }
 
 

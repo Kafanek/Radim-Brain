@@ -147,6 +147,87 @@ def medication_check():
     })
 
 
+@medication_bp.route('/api/medication/unknown', methods=['POST'])
+def flag_unknown_medication():
+    """v467: crowdsource flag — when senior asks about a med that isn't in
+    our DB, log it for admin review so we can prioritize what to add next.
+
+    Body: {name, user_id (optional), context (optional)}
+    Storage: profile JSONB has no 'unknown_meds_seen' aggregator yet, so we
+    log to a flat global JSONB record under user 'admin' (singleton). Cheap
+    and survives dyno restarts via Postgres."""
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()
+    user_id = (data.get('user_id') or 'anonymous').strip()
+    context = (data.get('context') or '').strip()[:200]
+
+    if not name or len(name) > 80:
+        return jsonify({'success': False, 'error': 'invalid name'}), 400
+
+    try:
+        from datetime import datetime, timezone
+        from memory_helpers import db_load_profile, db_save_profile
+        admin_profile = db_load_profile('__admin_unknown_meds__') or {}
+        queue = admin_profile.get('queue') or []
+        if not isinstance(queue, list):
+            queue = []
+        # Cap to last 200 entries
+        if len(queue) >= 200:
+            queue = queue[-200:]
+        # Dedup by name within last hour for same user
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        recent_dup = any(
+            (e.get('name', '').lower() == name.lower()
+             and e.get('user_id') == user_id
+             and (now - datetime.fromisoformat(e.get('flagged_at', '').replace('Z', '+00:00'))).total_seconds() < 3600)
+            for e in queue
+            if isinstance(e, dict) and e.get('flagged_at')
+        )
+        if recent_dup:
+            return jsonify({'success': True, 'duplicate': True, 'queue_size': len(queue)})
+
+        queue.append({
+            'name': name,
+            'user_id': user_id,
+            'context': context,
+            'flagged_at': now.isoformat(),
+        })
+        admin_profile['queue'] = queue
+        db_save_profile('__admin_unknown_meds__', admin_profile)
+        return jsonify({'success': True, 'queue_size': len(queue)})
+    except Exception as e:
+        logger.warning(f"flag_unknown_medication error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@medication_bp.route('/api/medication/unknown', methods=['GET'])
+def list_unknown_queue():
+    """Admin view of unknown-med queue — sorted by frequency desc."""
+    try:
+        from collections import Counter
+        from memory_helpers import db_load_profile
+        admin_profile = db_load_profile('__admin_unknown_meds__') or {}
+        queue = admin_profile.get('queue') or []
+        if not isinstance(queue, list):
+            queue = []
+        # Aggregate by name
+        names = Counter(e.get('name', '').strip() for e in queue
+                        if isinstance(e, dict) and e.get('name'))
+        unique = [{'name': n, 'count': c, 'top_user_examples': [
+            e.get('user_id') for e in queue
+            if isinstance(e, dict) and e.get('name') == n
+        ][:3]} for n, c in names.most_common(50)]
+        return jsonify({
+            'success': True,
+            'queue_size': len(queue),
+            'unique_names': len(names),
+            'top_unknown': unique,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @medication_bp.route('/api/medication/list', methods=['GET'])
 def medication_list_for_user():
     """Return the user's medication list resolved against the drug DB.

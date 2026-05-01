@@ -889,9 +889,17 @@ except ImportError as _vlex_err:
 try:
     from medication_routes import medication_bp
     app.register_blueprint(medication_bp)
-    logger.info("✅ Medication routes registered: /api/medication/{info,check,list,db/stats}")
+    logger.info("✅ Medication routes registered: /api/medication/{info,check,list,db/stats,unknown}")
 except ImportError as _med_err:
     logger.warning(f"⚠️ Medication routes not loaded: {_med_err}")
+
+# v467: allergies + weight + combined safety-check
+try:
+    from allergy_routes import allergy_bp
+    app.register_blueprint(allergy_bp)
+    logger.info("✅ Allergy + weight routes registered: /api/allergy, /api/profile/weight, /api/medication/safety-check")
+except ImportError as _alg_err:
+    logger.warning(f"⚠️ Allergy routes not loaded: {_alg_err}")
 
 # v10.34: Browser Agent — safe read-only web browsing for seniors + agent tool
 try:
