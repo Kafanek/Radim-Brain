@@ -1810,6 +1810,49 @@ def admin_iot_simulate():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # v383: Debug personalized prompt (check if agent observations appear)
+# v8.19.31: admin testing endpoint — set/clear active_preset bypassing JWT
+@app.route('/api/admin/set-preset/<user_id>', methods=['POST', 'OPTIONS'])
+def admin_set_preset(user_id):
+    """Test-only: directly set active_preset on a user profile.
+
+    Body: {"preset_id": "grief" | "rough_days" | ... | null}
+    Use with X-Admin-Secret header. For verifying preset-aware identity behavior.
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        from memory_helpers import db_load_profile, db_save_profile
+        from datetime import datetime as _dt
+        body = request.get_json(silent=True) or {}
+        preset_id = body.get('preset_id')
+
+        profile = db_load_profile(str(user_id)) or {}
+        if preset_id is None or preset_id == '':
+            profile.pop('active_preset', None)
+            db_save_profile(str(user_id), profile)
+            return jsonify({'success': True, 'cleared': True}), 200
+
+        from life_presets import PRESETS
+        if preset_id not in PRESETS:
+            return jsonify({'success': False, 'error': 'unknown preset',
+                            'available': list(PRESETS.keys())}), 400
+        preset = PRESETS[preset_id]
+        profile['active_preset'] = {
+            'id': preset_id,
+            'name': preset['name'],
+            'activated_at': _dt.utcnow().isoformat(),
+            'expires_at': None,
+            'snapshot': {},
+        }
+        db_save_profile(str(user_id), profile)
+        return jsonify({'success': True, 'preset_id': preset_id, 'preset_name': preset['name']}), 200
+    except Exception as e:
+        import traceback
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
 @app.route('/api/admin/debug-prompt/<user_id>', methods=['GET', 'OPTIONS'])
 def admin_debug_prompt(user_id):
     """Show the personalized system prompt for a user.
