@@ -901,6 +901,16 @@ try:
 except ImportError as _alg_err:
     logger.warning(f"⚠️ Allergy routes not loaded: {_alg_err}")
 
+# v8.19.23: Radim's own identity — vlastní vkus, názory, zájmy.
+# Public read-only endpoints + 6th system-prompt layer (auto-injected
+# in radim_system_prompt.get_radim_prompt() for user_type='senior').
+try:
+    from radim_identity_routes import identity_bp
+    app.register_blueprint(identity_bp)
+    logger.info("✅ Radim Identity routes registered: GET /api/radim/identity (+ /random)")
+except ImportError as _id_err:
+    logger.warning(f"⚠️ Radim Identity routes not loaded: {_id_err}")
+
 # v10.34: Browser Agent — safe read-only web browsing for seniors + agent tool
 try:
     from browser_agent_routes import browser_agent_bp

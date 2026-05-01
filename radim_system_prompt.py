@@ -168,18 +168,28 @@ def get_radim_prompt(mode='full', user_type='senior', time_context=None):
 
     parts = [PROMPT_SOUL]
 
-    # Vrstva 2: Role domácího asistenta + časový kontext
+    # Vrstva 2 (nová od v8.19.23): Vlastní identita — Radim má vkus, názory, zájmy.
+    # Jemně mezi DUŠI a ROLI, aby AI generovala s vědomím "kdo jsem"
+    # ještě před "co dělám". Pro caregivera/facility vynecháváme — tam stačí věcnost.
+    if user_type == 'senior':
+        try:
+            from radim_identity import format_for_prompt as _identity_layer
+            parts.append(_identity_layer())
+        except Exception:
+            pass  # identity je doplněk, ne hard-dep — když se nenačte, prompt funguje dál
+
+    # Vrstva 3: Role domácího asistenta + časový kontext
     tc = time_context if time_context else ""
     parts.append(PROMPT_ASSISTANT_ROLE.format(time_context=tc))
 
-    # Vrstva 3: Kontext podle typu uživatele
+    # Vrstva 4: Kontext podle typu uživatele
     context = _CONTEXT_MAP.get(user_type, PROMPT_SENIOR)
     parts.append(context)
 
-    # Vrstva 4: Hranice
+    # Vrstva 5: Hranice
     parts.append(PROMPT_BOUNDARIES)
 
-    # Vrstva 5: Kognitivní pipeline — adaptivní vědomí
+    # Vrstva 6: Kognitivní pipeline — adaptivní vědomí
     parts.append(PROMPT_COGNITIVE_PIPELINE)
 
     return "\n\n".join(parts)
