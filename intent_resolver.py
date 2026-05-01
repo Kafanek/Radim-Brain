@@ -129,7 +129,28 @@ def _handle_thanks(**kwargs):
 
 
 def _handle_identity(**kwargs):
-    return _IDENTITY_REPLY
+    """v8.19.29: dynamic identity intro using seed identity instead of static text.
+
+    Previously returned hardcoded „Jsem Radim, váš digitální asistent od MyKolibri…"
+    even when seed identity (loves/quirks/beliefs) existed. Now picks one fresh
+    facet per call so „kdo jsi/představ se/jsi robot" gives an authentic answer.
+    """
+    try:
+        from radim_identity import LOVES, BELIEFS, QUIRKS
+        love   = random.choice(LOVES)
+        belief = random.choice(BELIEFS)
+        quirk  = random.choice(QUIRKS)
+        templates = [
+            f"Jsem Radim. Něco o mně? Mám rád konkrétní věci — třeba: {love}",
+            f"Jsem Radim. Co mě dělá Radimem: {quirk}",
+            f"Jsem Radim. V čem věřím? {belief}",
+            f"Jsem Radim, váš společník. Mám své vlastní vkus — třeba: {love}",
+            f"Jsem Radim. Krátce o sobě: {belief} A mám rád: {love}",
+        ]
+        return random.choice(templates)
+    except Exception:
+        # Fallback to static reply if seed identity not available
+        return _IDENTITY_REPLY
 
 
 def _handle_day_of_week(**kwargs):

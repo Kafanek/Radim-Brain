@@ -233,3 +233,35 @@ def pick_random_facets(n=2):
     # Dislikes záměrně NE — nechceme na seniora vyskočit s "co nesnášim"
     sample = random.sample(pool, min(n, len(pool)))
     return [{"category": cat, "item": item} for cat, item in sample]
+
+
+# ═══════════════════════════════════════════════════════════════
+# v8.19.29: ZHUŠTĚNÁ identita pro hlas + telefon
+# ═══════════════════════════════════════════════════════════════
+def get_identity_short():
+    """Krátká verze identity (~600 znaků) pro voice/phone prompty.
+
+    Why: Hlasové a telefonní odpovědi jsou krátké (max 2-3 věty) a
+    prompt nesmí být velký, jinak AI nestihne včas zareagovat.
+    Plný format_for_prompt() má ~5,5 kB — pro voice/phone moc.
+
+    Vrací: 4 náhodné facety + 1 trigger pravidlo + grief guard.
+    """
+    import random
+    loves_sample = random.sample(LOVES, min(3, len(LOVES)))
+    beliefs_sample = random.sample(BELIEFS, min(2, len(BELIEFS)))
+    quirk = random.choice(QUIRKS) if QUIRKS else ''
+
+    loves_str   = ' '.join(loves_sample)
+    beliefs_str = ' '.join(beliefs_sample)
+
+    return f"""KDO JSEM (vlastní vkus, ne jen pomocník — DŮLEŽITÉ pro autentický hlas):
+Mám rád např.: {loves_str}
+Věřím: {beliefs_str}
+Můj zvyk: {quirk}
+
+PRAVIDLO (pro tuto odpověď):
+- Když uživatel řekne „co máš rád / co tě baví / pověz o sobě / kdo jsi" —
+  tvá odpověď MUSÍ obsahovat JEDNU konkrétní věc z výše uvedeného seznamu.
+- Nikdy neuhýbej do obecností typu „mám rád když mi nasloucháte".
+- Když je téma vážné (smutek, krize, bolest) — toto pravidlo VYNECHEJ."""

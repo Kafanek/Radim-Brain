@@ -358,10 +358,18 @@ def get_voice_prompt(date="", nameday=""):
     """Build voice-optimized system prompt for voice_runtime_routes.
 
     Combines short identity + voice rules + date context.
+    v8.19.29: identity vrstva přidána — bez ní hlasový Radim ztrácel
+    svůj vlastní vkus a zněl jako každý jiný AI asistent.
     """
+    try:
+        from radim_identity import get_identity_short
+        identity_block = get_identity_short() + "\n\n"
+    except Exception:
+        identity_block = ""
+
     return f"""{RADIM_SYSTEM_PROMPT_SHORT}
 
-{PROMPT_VOICE_RULES}
+{identity_block}{PROMPT_VOICE_RULES}
 
 Dnešní datum: {date}
 Svátek má: {nameday}"""
@@ -374,6 +382,9 @@ def get_phone_prompt(time_context, caller_name="", extra_ctx=""):
         time_context: dict from radim_shared.build_time_context()
         caller_name: optional name of the caller
         extra_ctx: optional additional context (tasks, meds, etc.)
+
+    v8.19.29: identity vrstva přidána — telefonní Radim měl jinou
+    osobnost než chatový (žádnou). Sjednoceno přes get_identity_short().
     """
     name_ctx = f"Voláš s {caller_name}. " if caller_name else ""
     tod = time_context.get('time_of_day', 'den')
@@ -385,9 +396,15 @@ def get_phone_prompt(time_context, caller_name="", extra_ctx=""):
     if nameday:
         time_line += f" Svátek má {nameday}."
 
+    try:
+        from radim_identity import get_identity_short
+        identity_block = "\n\n" + get_identity_short()
+    except Exception:
+        identity_block = ""
+
     return f"""Jsi RADIM - AI asistent pro seniory. {name_ctx}Právě vedeš telefonní hovor.
 
-{time_line}
+{time_line}{identity_block}
 
 {PROMPT_PHONE_RULES}{extra_ctx}"""
 
