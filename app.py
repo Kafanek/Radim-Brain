@@ -1812,15 +1812,37 @@ def admin_iot_simulate():
 # v383: Debug personalized prompt (check if agent observations appear)
 @app.route('/api/admin/debug-prompt/<user_id>', methods=['GET', 'OPTIONS'])
 def admin_debug_prompt(user_id):
-    """Show the personalized system prompt for a user."""
+    """Show the personalized system prompt for a user.
+
+    v8.19.24: ?full=1 returns the COMPLETE assembled prompt as Gemini would
+    see it (dynamic prompt = SOUL + IDENTITY + ROLE + ... PLUS personalized
+    memory, presets, agent bus, neuron summary). Without ?full=1, returns
+    only the memory_logic.build_personalized_prompt() addition.
+    """
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
     try:
         from memory_logic import build_personalized_prompt
         prompt = build_personalized_prompt(user_id)
-        return jsonify({'user_id': user_id, 'prompt_length': len(prompt), 'prompt': prompt}), 200
+
+        result = {'user_id': user_id, 'prompt_length': len(prompt), 'prompt': prompt}
+
+        if request.args.get('full') in ('1', 'true', 'yes'):
+            # Build the complete final prompt the same way radim_ai_engine.call_gemini_whatsapp does
+            from radim_helpers import _get_dynamic_system_prompt
+            dyn = _get_dynamic_system_prompt('senior')
+            full = dyn + prompt
+            result['dynamic_prompt'] = dyn
+            result['dynamic_prompt_length'] = len(dyn)
+            result['full_prompt'] = full
+            result['full_prompt_length'] = len(full)
+            result['has_identity_layer'] = 'KDO JSEM' in dyn
+            result['identity_excerpt'] = dyn[dyn.find('KDO JSEM'):dyn.find('KDO JSEM') + 400] if 'KDO JSEM' in dyn else None
+
+        return jsonify(result), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 # v382: Admin seed demo data
 @app.route('/api/admin/seed-demo', methods=['POST', 'OPTIONS'])
