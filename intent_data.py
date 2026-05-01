@@ -689,6 +689,114 @@ INTENTS = [
         ],
         "handler": "tts_feedback_too_loud",
     },
+    # \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+    # \ud83d\udcac v465: SOCIAL / EMOTIONAL SHORT REPLIES
+    # Common senior chat openers that don't need AI \u2014 saves ~25% Gemini calls.
+    # Each handler returns one of N variants (rotated) so the answer doesn't
+    # feel robotic. Patterns are anchored to short utterances so longer
+    # context-rich messages still go through the AI.
+    # \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+    {
+        "name": "what_are_you_doing",
+        "patterns": [
+            r"^\s*co\s+d\u011bl\u00e1\u0161\s*\??!?\s*$",
+            r"^\s*(?:radime[,\s]+)?co\s+(?:pr\u00e1v\u011b\s+)?d\u011bl\u00e1\u0161\s*\??!?\s*$",
+            r"^\s*co\s+ty\s*\??!?\s*$",
+        ],
+        "handler": "what_are_you_doing",
+    },
+    {
+        "name": "im_hungry",
+        "patterns": [
+            r"^\s*(?:m\u00e1m|m\u00e1\u0161)\s+hlad\s*\.?!?\s*$",
+            r"^\s*(?:jsem|jsi)\s+hladov[\u00e1\u00fd]\s*\.?!?\s*$",
+            r"^\s*chce\s+se\s+mi\s+j\u00edst\s*\.?!?\s*$",
+        ],
+        "handler": "im_hungry",
+    },
+    {
+        "name": "im_tired",
+        "patterns": [
+            r"^\s*jsem\s+unaven[\u00e1\u00fd]?\s*\.?!?\s*$",
+            r"^\s*jsem\s+ospal[\u00e1\u00fd]\s*\.?!?\s*$",
+            r"^\s*nem\u00e1m\s+s\u00edlu\s*\.?!?\s*$",
+            r"^\s*jsem\s+vy\u010derpan[\u00e1\u00fd]?\s*\.?!?\s*$",
+        ],
+        "handler": "im_tired",
+    },
+    {
+        "name": "im_well",
+        "patterns": [
+            r"^\s*m\u00e1m\s+se\s+(?:dob\u0159e|fajn|skv\u011ble|v\u00fdborn\u011b)\s*\.?!?\s*$",
+            r"^\s*je\s+mi\s+(?:dob\u0159e|fajn)\s*\.?!?\s*$",
+            r"^\s*v\s+pohod[\u011be]\s*\.?!?\s*$",
+        ],
+        "handler": "im_well",
+    },
+    {
+        "name": "im_sad",
+        "patterns": [
+            r"^\s*je\s+mi\s+(?:smutno|smutn\u011b)\s*\.?!?\s*$",
+            r"^\s*jsem\s+smutn[\u00e1\u00fd]\s*\.?!?\s*$",
+            r"^\s*chyb\u00ed\s+mi\s+\S+\s*\.?!?\s*$",
+            r"^\s*c\u00edt\u00edm\s+se\s+s\u00e1m\s*\.?!?\s*$",
+            r"^\s*jsem\s+s\u00e1m\s*\.?!?\s*$",
+        ],
+        "handler": "im_sad",
+    },
+    {
+        "name": "you_are_kind",
+        "patterns": [
+            r"^\s*jsi\s+(?:hodn\u00fd|skv\u011bl\u00fd|chytr\u00fd|mil\u00fd)\s*\.?!?\s*$",
+            r"^\s*jsi\s+(?:moc\s+)?(?:chytr\u00fd|mil\u00fd|hodn\u00fd)\s*\.?!?\s*$",
+            r"^\s*jsi\s+nejlep\u0161\u00ed\s*\.?!?\s*$",
+        ],
+        "handler": "you_are_kind",
+    },
+    {
+        "name": "i_love_you",
+        "patterns": [
+            r"^\s*m\u00e1m\s+t\u011b\s+r\u00e1d[\u00e1a]?\s*\.?!?\s*$",
+            r"^\s*miluju\s+t\u011b\s*\.?!?\s*$",
+            r"^\s*miluji\s+t\u011b\s*\.?!?\s*$",
+        ],
+        "handler": "i_love_you",
+    },
+    {
+        "name": "good_day_wish",
+        "patterns": [
+            r"^\s*kr\u00e1sn\u00fd\s+den\s*\.?!?\s*$",
+            r"^\s*hezk\u00fd\s+den\s*\.?!?\s*$",
+            r"^\s*p\u011bkn\u00fd\s+den\s*\.?!?\s*$",
+            r"^\s*p\u0159eji\s+(?:ti|v\u00e1m)?\s*hezk\u00fd\s+den\s*\.?!?\s*$",
+        ],
+        "handler": "good_day_wish",
+    },
+    {
+        "name": "what_now",
+        "patterns": [
+            r"^\s*co\s+(?:te\u010f\s+)?budeme\s+d\u011blat\s*\??!?\s*$",
+            r"^\s*co\s+m\u00e1m\s+d\u011blat\s*\??!?\s*$",
+            r"^\s*co\s+m\u011b\s+\u010dek\u00e1\s*\??!?\s*$",
+        ],
+        "handler": "what_now",
+    },
+    {
+        "name": "ok_acknowledge",
+        "patterns": [
+            r"^\s*(?:ok|dob\u0159e|jasn\u011b|super|fajn)\s*\.?!?\s*$",
+            r"^\s*tak\s+(?:dob\u0159e|jo|jasn\u011b)\s*\.?!?\s*$",
+        ],
+        "handler": "ok_acknowledge",
+    },
+    {
+        "name": "hello_short",
+        # Already covered by 'greeting' but for ultra-short variants
+        "patterns": [
+            r"^\s*(?:hej|\u010dau|\u010dus|nazdar|servus)\s*\.?!?\s*$",
+        ],
+        "handler": "greeting",
+    },
 ]
 
 # Compile patterns
@@ -757,6 +865,62 @@ HOW_ARE_YOU_REPLIES = [
 ]
 
 IDENTITY_REPLY = "Jsem Radim, váš digitální asistent od MyKolibri. Pomáhám s každodenními činnostmi, zdravím a jsem tu pro vás kdykoli."
+
+
+# v465: Short social/emotional replies — rotated per call so they don't feel robotic.
+SOCIAL_REPLIES = {
+    "what_are_you_doing": [
+        "Jsem tu pro vás. Můžeme si povídat, nebo si poslechnout zprávy.",
+        "Čekám na vás. Co byste rád dělal?",
+        "Právě poslouchám. Co potřebujete?",
+    ],
+    "im_hungry": [
+        "Vím. Co máte rád? Někdy stačí krajíc chleba a ovoce.",
+        "Tak si dejte něco dobrého. Co máte v lednici?",
+        "Jíst se musí. Dáte si polévku, nebo něco lehčího?",
+    ],
+    "im_tired": [
+        "Tak si odpočiňte. Já tu budu, až se vrátíte.",
+        "Zavřete na chvíli oči. Nikam nespěcháme.",
+        "Únava si žádá svoje. Lehněte si, hned se vám uleví.",
+    ],
+    "im_well": [
+        "To mě moc těší!",
+        "Krásně to slyším.",
+        "Skvěle. Tak si ten den užijte.",
+    ],
+    "im_sad": [
+        "Jsem tu s vámi. Není ostuda být smutný.",
+        "Mrzí mě to. Chcete si o tom povídat?",
+        "Smutek přejde. Já tu zůstanu, dokud bude potřeba.",
+        "Vím. Někdy stačí jen vědět, že někdo poslouchá.",
+    ],
+    "you_are_kind": [
+        "Děkuji. Snažím se.",
+        "Jste milý. Mě to těší.",
+        "Děkuji vám.",
+    ],
+    "i_love_you": [
+        "To je krásné slyšet. Mám vás taky moc rád.",
+        "Děkuji. Já vás taky.",
+        "Vy jste hodný/hodná. Mám vás rád.",
+    ],
+    "good_day_wish": [
+        "Vám taky. Užijte si ho.",
+        "Děkuji, vám taky krásný den!",
+        "Mějte se hezky.",
+    ],
+    "what_now": [
+        "Můžeme si povídat, poslechnout zprávy, nebo si zacvičit. Co byste rád?",
+        "Nabízím: zprávy, kvíz, hudbu nebo trochu cvičení. Co se vám líbí?",
+        "Vyberte si: poslechnout zprávy, písničku, nebo si zahrát kvíz?",
+    ],
+    "ok_acknowledge": [
+        "Skvěle.",
+        "Tak jo.",
+        "Dobře, jsem tu.",
+    ],
+}
 
 
 logger.info("Intent Data loaded — word sets, namedays, patterns, templates")

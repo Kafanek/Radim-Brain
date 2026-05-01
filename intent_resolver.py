@@ -818,6 +818,28 @@ def _make_feedback_handler(signal_type):
     return _handler
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# v465 — SOCIAL / EMOTIONAL SHORT REPLIES (10 new local intents)
+# Each handler picks a rotating reply from intent_data.SOCIAL_REPLIES[key]
+# so the senior doesn't hear the same canned line every time.
+# ═══════════════════════════════════════════════════════════════════════════
+
+import random as _random
+
+
+def _make_social_handler(key):
+    def _handler(**kwargs):
+        try:
+            from intent_data import SOCIAL_REPLIES
+            options = SOCIAL_REPLIES.get(key, [])
+            if not options:
+                return None  # fall through to AI
+            return _random.choice(options)
+        except ImportError:
+            return None
+    return _handler
+
+
 _HANDLERS = {
     "time": _handle_time,
     "date": _handle_date,
@@ -857,6 +879,17 @@ _HANDLERS = {
     "tts_feedback_too_slow":         _make_feedback_handler('too_slow'),
     "tts_feedback_too_quiet":        _make_feedback_handler('too_quiet'),
     "tts_feedback_too_loud":         _make_feedback_handler('too_loud'),
+    # v465 — social/emotional short replies
+    "what_are_you_doing": _make_social_handler('what_are_you_doing'),
+    "im_hungry":          _make_social_handler('im_hungry'),
+    "im_tired":           _make_social_handler('im_tired'),
+    "im_well":            _make_social_handler('im_well'),
+    "im_sad":             _make_social_handler('im_sad'),
+    "you_are_kind":       _make_social_handler('you_are_kind'),
+    "i_love_you":         _make_social_handler('i_love_you'),
+    "good_day_wish":      _make_social_handler('good_day_wish'),
+    "what_now":           _make_social_handler('what_now'),
+    "ok_acknowledge":     _make_social_handler('ok_acknowledge'),
 }
 
 

@@ -1156,8 +1156,16 @@ def radim_chat():
                 else:
                     log_healing_event('circuit_open', 'claude')
 
-                # ── FALLBACK: Gemini (if Claude failed) ──
-                if not text_response:
+                # ── FALLBACK: Gemini (only if env-flag enables it) ──
+                # v465: skip Gemini fallback by default. Was costing 2-3s extra
+                # latency on every Claude failure (which then often also failed
+                # because root cause was network, not Claude-specific). Cached
+                # safe_response below kicks in within 50 ms instead. To restore
+                # the chained provider behaviour set ENABLE_GEMINI_FALLBACK=1.
+                _enable_gemini_fallback = (
+                    os.environ.get('ENABLE_GEMINI_FALLBACK', '').lower() in ('1', 'true', 'yes')
+                )
+                if not text_response and _enable_gemini_fallback:
                     gemini_breaker = get_breaker('gemini')
                     if gemini_breaker.can_proceed():
                         try:
