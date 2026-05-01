@@ -295,6 +295,28 @@ def _handle_my_medications(**kwargs):
         elif meds and isinstance(meds, list):
             parts.append(f"  {', '.join(meds)}")
 
+        # v466: append interaction warnings if any. Triggered ONLY when senior
+        # explicitly asked to check ('zkontroluj', 'prověř') OR if there's a
+        # HIGH-severity warning (always surface those — patient safety).
+        try:
+            wants_check = bool(re.search(
+                r'\b(?:zkontroluj|prověř|interakce|kombinaci)\b', message
+            ))
+            from drug_interactions import check_user_interactions
+            warnings = check_user_interactions(user_id) or []
+            high = [w for w in warnings if w.get('severity') == 'HIGH']
+            if high:
+                parts.append("")
+                parts.append(f"⚠️ Pozor — našel jsem rizikovou kombinaci: {high[0].get('warning', '')}")
+            elif wants_check and warnings:
+                parts.append("")
+                parts.append(f"Upozornění: {warnings[0].get('warning', '')}")
+            elif wants_check and not warnings:
+                parts.append("")
+                parts.append("Vaše kombinace léků se v mé databázi nezdá riziková. Konzultujte s lékárníkem.")
+        except Exception as ie:
+            logger.debug(f"interaction enrichment failed: {ie}")
+
         return "\n".join(parts)
     except Exception:
         return None  # pass to AI
@@ -840,6 +862,75 @@ def _make_social_handler(key):
     return _handler
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# v466 — MEDICATION INFO
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Words to strip when extracting drug name from a sentence
+_MED_QUERY_NOISE = re.compile(
+    r'\b(?:co|to|je|k\s+čemu|na\s+co|slouží|řekni|mi|o|něco|info|popiš|vysvětli|'
+    r'dělá|jak\s+působí|funguje|lék|prášek|tableta|tablety|prosím|radime|tedy)\b',
+    re.IGNORECASE,
+)
+
+
+def _extract_med_name(message):
+    """Pull a likely medication name out of a free-form question."""
+    if not message:
+        return None
+    cleaned = _MED_QUERY_NOISE.sub(' ', message)
+    cleaned = re.sub(r'[?!.,;:"]', ' ', cleaned)
+    tokens = [t for t in cleaned.split() if len(t) >= 4 and t.isalpha()]
+    if not tokens:
+        return None
+    # Prefer the longest token (drug names are usually distinctive)
+    tokens.sort(key=len, reverse=True)
+    return tokens[0]
+
+
+def _handle_medication_info(**kwargs):
+    """Look up a drug name in medication_db and return a voice-friendly reply."""
+    message = (kwargs.get('message') or '').strip()
+    user_id = kwargs.get('user_id')
+
+    # Special phrasing 'zkontroluj mé léky' → run interaction check
+    if re.search(r'\b(?:zkontroluj|prověř)(?:\s+(?:mé|moje))?\s+(?:léky|kombinaci|interakce)\b',
+                 message, re.IGNORECASE):
+        if not user_id:
+            return None
+        try:
+            from drug_interactions import check_user_interactions
+            warnings = check_user_interactions(str(user_id))
+        except Exception as e:
+            logger.debug(f"interaction check failed for {user_id}: {e}")
+            warnings = []
+        if not warnings:
+            return ("Vaše kombinace léků se v mé databázi nezdá riziková. "
+                    "Pravidelně to ale konzultujte s lékárníkem.")
+        # Highest severity first
+        warnings.sort(key=lambda w: {'HIGH': 0, 'MEDIUM': 1, 'LOW': 2}.get(w.get('severity'), 3))
+        top = warnings[0]
+        return (f"Pozor: našel jsem upozornění. {top.get('warning', '')} "
+                f"Konzultujte s lékařem.")
+
+    # Otherwise — look up specific drug
+    name = _extract_med_name(message)
+    if not name:
+        return None
+    try:
+        from medication_db import speak_brief, lookup
+        info = lookup(name)
+        if not info:
+            return (f"Lék {name} v mé databázi nemám. "
+                    f"Zeptejte se lékárníka, ten vám poradí přesně.")
+        return speak_brief(name)
+    except ImportError:
+        return None
+    except Exception as e:
+        logger.debug(f"medication_info handler failed: {e}")
+        return None
+
+
 _HANDLERS = {
     "time": _handle_time,
     "date": _handle_date,
@@ -890,6 +981,8 @@ _HANDLERS = {
     "good_day_wish":      _make_social_handler('good_day_wish'),
     "what_now":           _make_social_handler('what_now'),
     "ok_acknowledge":     _make_social_handler('ok_acknowledge'),
+    # v466 — medication knowledge
+    "medication_info":    _handle_medication_info,
 }
 
 

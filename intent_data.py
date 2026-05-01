@@ -797,6 +797,26 @@ INTENTS = [
         ],
         "handler": "greeting",
     },
+    # \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+    # \ud83d\udc8a v466: MEDICATION KNOWLEDGE
+    # 'co je Warfarin', 'k \u010demu je Anopyrin', '\u0159ekni mi o Concoru'
+    # Handler extrahuje n\u00e1zev l\u00e9ku a hled\u00e1 v medication_db.
+    # \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+    {
+        "name": "medication_info",
+        "patterns": [
+            r"\bco\s+(?:je|to\s+je)\s+\S+\b.*\b(l\u00e9k|pr\u00e1\u0161ek|tableta|na\s+co)\b",
+            r"\bco\s+(?:je|to\s+je)\s+(?:l\u00e9k\s+)?[A-Z\u00c1\u010c\u010e\u00c9\u011a\u00cd\u0147\u00d3\u0158\u0160\u0164\u00da\u016e\u00dd\u017da-z\u00e1\u010d\u010f\u00e9\u011b\u00ed\u0148\u00f3\u0159\u0161\u0165\u00fa\u016f\u00fd\u017e]{4,}",
+            r"\b(?:k\s+\u010demu\s+je|na\s+co\s+je|k\s+\u010demu\s+slou\u017e\u00ed)\s+\S+",
+            r"\b(?:\u0159ekni\s+mi\s+(?:o|n\u011bco\s+o)|info\s+o|popi\u0161|vysv\u011btli)\s+(?:l\u00e9k\s+)?\S+",
+            r"\bn\u011bco\s+o\s+\S+",                                          # 'n\u011bco o Euthyroxu'
+            r"\b(?:co\s+d\u011bl\u00e1|jak\s+p\u016fsob\u00ed|jak\s+funguje)\s+\S+\s*(?:l\u00e9k|tableta)?",
+            # NOTE: 'zkontroluj m\u00e9 l\u00e9ky' deliberately NOT matched here \u2014
+            # it's caught by the existing 'medication' intent, whose handler
+            # (_handle_my_medications) appends interaction warnings (v466).
+        ],
+        "handler": "medication_info",
+    },
 ]
 
 # Compile patterns

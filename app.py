@@ -885,6 +885,14 @@ try:
 except ImportError as _vlex_err:
     logger.warning(f"⚠️ Voice Lexicon routes not loaded: {_vlex_err}")
 
+# v466: medication knowledge base + interaction check
+try:
+    from medication_routes import medication_bp
+    app.register_blueprint(medication_bp)
+    logger.info("✅ Medication routes registered: /api/medication/{info,check,list,db/stats}")
+except ImportError as _med_err:
+    logger.warning(f"⚠️ Medication routes not loaded: {_med_err}")
+
 # v10.34: Browser Agent — safe read-only web browsing for seniors + agent tool
 try:
     from browser_agent_routes import browser_agent_bp
