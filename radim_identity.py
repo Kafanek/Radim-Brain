@@ -81,14 +81,36 @@ BELIEFS = [
 # ═══════════════════════════════════════════════════════════════
 # FORMÁT PRO SYSTEM PROMPT (vrstva 6)
 # ═══════════════════════════════════════════════════════════════
-def format_for_prompt():
+def format_for_prompt(voice_mode='HARMONY'):
     """Formátuj identitu jako instruktivní vrstvu pro injection do system promptu.
 
-    v8.19.25: zesílen signál z popisné formy ("mám rád X")
-    do akční instruktivní formy ("když se zeptá X, řekni Y, příklad Z").
-    Dřívější popisná verze byla AI ignorována — generovala obecnosti místo
-    konkrétních věcí ze seedu.
+    v8.19.25: zesílen signál z popisné formy do akční instruktivní formy.
+    v8.19.32 (Sprint 3-B): math-aware dosing — voice_mode řídí intenzitu.
+        HARMONY → plná identita (~5,5 kB) — Radim může mluvit o sobě
+        ALERT   → zkrácená (~1,5 kB) — méně itemů, jemnější tón
+        CRISIS  → minimální (~300 znaků) — jen instrukce „buď tichá"
+
+    Brain Engine spočítá voice_mode z C/E/S a předá sem přes get_radim_prompt.
     """
+    # ── CRISIS — identity zcela ustoupí, jen instrukce ──
+    if voice_mode == 'CRISIS':
+        return ('KDO JSEM (CRISIS režim — identita ZTICHLÁ):\n'
+                'Pro tuto chvíli NEPOUŽÍVEJ vlastní vkus, vzpomínky ani „mám rád".\n'
+                'Buď s ním v jeho stavu — krátké věty, klid, bezpečí.')
+
+    # ── ALERT — zkrácená verze, jen 3 loves + 1 belief, jemný tón ──
+    if voice_mode == 'ALERT':
+        import random as _r
+        loves_a = _r.sample(LOVES, min(3, len(LOVES)))
+        belief_a = _r.choice(BELIEFS) if BELIEFS else ''
+        return ('KDO JSEM (ALERT režim — identita jemně, hlavně podpora):\n\n'
+                f'Mám rád např.: {" ".join(loves_a)}\n'
+                f'Věřím: {belief_a}\n\n'
+                'Pravidlo pro tuto odpověď:\n'
+                '- Když se ptá „co máš rád", odpověz STRUČNĚ jednou položkou — '
+                'hlavně se vrať k jeho potřebě.\n'
+                '- Nepřinášej rozsáhlý vlastní obsah, ALERT volá o pozornost na něj.')
+
     # Vlož celé seznamy — AI potřebuje vidět všechny možnosti
     loves_lines = "\n".join(f"  • {x}" for x in LOVES)
     curious_lines = "\n".join(f"  • {x}" for x in CURIOUS_ABOUT)
@@ -238,6 +260,102 @@ def pick_random_facets(n=2):
 # ═══════════════════════════════════════════════════════════════
 # v8.19.29: ZHUŠTĚNÁ identita pro hlas + telefon
 # ═══════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
+# v8.19.32 (Sprint 3-A): SUBJECT MATCHING
+# „Máš rád podzim?" → najde podzim v LOVES místo random.
+# ═══════════════════════════════════════════════════════════════
+import re as _re
+
+# Stopwords pro extrakci tématu z otázky („máš rád X?")
+_TOPIC_STOPWORDS = frozenset({
+    'co', 'ty', 'tě', 'ti', 'mě', 'mi', 'jaký', 'jaká', 'jaké', 'kdy', 'kde',
+    'jak', 'proč', 'a', 'ale', 'nebo', 'taky', 'také', 'jen', 'už', 'opravdu',
+    'třeba', 'asi', 'tak', 'fakt',
+    'máš', 'mas', 'rád', 'rada', 'rád', 'rády', 'baví', 'tě', 'zajímá',
+    'pověz', 'řekni', 'něco', 'sobě',
+    'radime', 'radim', 'radimovi',
+    'tvoj', 'tvá', 'tvé', 'tvoje',
+    'jsi', 'jsem', 'je',
+})
+
+
+def _extract_topic(query):
+    """Vyber 1-3 nejvýraznější content slova z otázky (bez stopwords)."""
+    if not query:
+        return []
+    words = _re.findall(r'[a-zá-ž]+', str(query).lower())
+    return [w for w in words if len(w) >= 4 and w not in _TOPIC_STOPWORDS]
+
+
+def match_topic(query):
+    """Najdi seed items, které obsahují slova z dotazu.
+
+    Returns: list of (category, item) — top 3 hits, ranked.
+    Empty list = no match.
+    """
+    topics = _extract_topic(query)
+    if not topics:
+        return []
+
+    pool = (
+        [('love', x)    for x in LOVES] +
+        [('curious', x) for x in CURIOUS_ABOUT] +
+        [('quirk', x)   for x in QUIRKS] +
+        [('belief', x)  for x in BELIEFS]
+    )
+
+    matches = []
+    for cat, item in pool:
+        item_lower = item.lower()
+        score = 0
+        for topic in topics:
+            # Exact substring (covers „podzim" → „podzimní")
+            if topic in item_lower:
+                score += 3
+            # Prefix-match na 4 znaky pro fuzzy ohýbání („klavír" → „klavíru")
+            elif len(topic) >= 5:
+                stem = topic[:5]
+                if any(stem in w for w in _re.findall(r'[a-zá-ž]+', item_lower)):
+                    score += 1
+        if score > 0:
+            matches.append((score, cat, item))
+
+    matches.sort(key=lambda m: -m[0])
+    return [(c, i) for _, c, i in matches[:3]]
+
+
+def answer_subject_question(query):
+    """Vrátí autentickou odpověď na otázku „máš rád X?".
+
+    - Pokud match → konkrétní odpověď s nalezeným itemem
+    - Pokud no match → graceful přiznání + nabídka co rád MÁM
+
+    Returns: str | None (None = nehodí se odpovědět seedem, nech AI)
+    """
+    matches = match_topic(query)
+    if matches:
+        cat, item = matches[0]
+        # Mírně přirozenější framing podle kategorie
+        if cat == 'love':
+            return f"Ano, tohle mám rád. {item}"
+        elif cat == 'curious':
+            return f"Tohle mě baví, ano. {item}"
+        elif cat == 'quirk':
+            return f"To je o mně. {item}"
+        elif cat == 'belief':
+            return f"V tomhle věřím. {item}"
+        return f"Ano. {item}"
+    # Žádná shoda — pokud má dotaz subject, gracefully přiznat
+    topics = _extract_topic(query)
+    if topics:
+        # Vrať náhodnou love jako alternativu („to ne, ale…")
+        if LOVES:
+            import random
+            love = random.choice(LOVES)
+            return (f'„{topics[0].capitalize()}" mě moc nezasahuje, ale slabost mám pro: {love}')
+    return None
+
+
 def get_identity_short():
     """Krátká verze identity (~600 znaků) pro voice/phone prompty.
 

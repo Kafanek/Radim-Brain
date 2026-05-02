@@ -151,7 +151,7 @@ _CONTEXT_MAP = {
 }
 
 
-def get_radim_prompt(mode='full', user_type='senior', time_context=None):
+def get_radim_prompt(mode='full', user_type='senior', time_context=None, voice_mode='HARMONY'):
     """
     Sestav systémový prompt podle kontextu.
 
@@ -159,6 +159,8 @@ def get_radim_prompt(mode='full', user_type='senior', time_context=None):
         mode: 'full' nebo 'short'
         user_type: 'senior', 'caregiver', 'facility', 'academic'
         time_context: str s časovým kontextem (den, hodina, svátek) nebo None
+        voice_mode: 'HARMONY' | 'ALERT' | 'CRISIS' (Sprint 3-B math-aware dosing)
+                    HARMONY = full identity, ALERT = short, CRISIS = silent
 
     Returns:
         str: Sestavený systémový prompt
@@ -168,15 +170,14 @@ def get_radim_prompt(mode='full', user_type='senior', time_context=None):
 
     parts = [PROMPT_SOUL]
 
-    # Vrstva 2 (nová od v8.19.23): Vlastní identita — Radim má vkus, názory, zájmy.
-    # Jemně mezi DUŠI a ROLI, aby AI generovala s vědomím "kdo jsem"
-    # ještě před "co dělám". Pro caregivera/facility vynecháváme — tam stačí věcnost.
+    # Vrstva 2: Vlastní identita — Radim má vkus, názory, zájmy.
+    # Sprint 3-B: voice_mode řídí intenzitu (HARMONY/ALERT/CRISIS).
     if user_type == 'senior':
         try:
             from radim_identity import format_for_prompt as _identity_layer
-            parts.append(_identity_layer())
+            parts.append(_identity_layer(voice_mode=voice_mode))
         except Exception:
-            pass  # identity je doplněk, ne hard-dep — když se nenačte, prompt funguje dál
+            pass
 
     # Vrstva 3: Role domácího asistenta + časový kontext
     tc = time_context if time_context else ""

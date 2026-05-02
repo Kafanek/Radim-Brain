@@ -147,8 +147,12 @@ PRAVIDLA:
 - Pokud akce není potřeba, nepřidávej blok"""
 
 
-def _get_dynamic_system_prompt(mode='senior'):
-    """Dynamický system prompt s časovým kontextem a rolí asistenta."""
+def _get_dynamic_system_prompt(mode='senior', voice_mode='HARMONY'):
+    """Dynamický system prompt s časovým kontextem a rolí asistenta.
+
+    v8.19.32 (Sprint 3-B): voice_mode propaguje k identity layeru —
+    HARMONY = full vkus, ALERT = jemný, CRISIS = ztichlý.
+    """
     if _ORCH_SYS_PROMPT:
         try:
             user_type = 'senior' if mode == 'senior' else mode
@@ -159,7 +163,8 @@ def _get_dynamic_system_prompt(mode='senior'):
             prompt = _sys_get_prompt(
                 mode='full',
                 user_type=user_type,
-                time_context=_build_time_context()
+                time_context=_build_time_context(),
+                voice_mode=voice_mode
             )
             return prompt + _ORCH_ACTION_HINT
         except Exception as e:

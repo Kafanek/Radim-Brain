@@ -621,12 +621,16 @@ def radim_chat():
         # Compute rhythm state and let agents decide before AI
         rhythm_context = ''
         rhythm_meta = {}
+        # v8.19.32 (Sprint 3-B): voice_mode for identity dosing — captured here,
+        # passed to call_gemini_whatsapp later. Default HARMONY if rhythm fails.
+        _identity_voice_mode = 'HARMONY'
         try:
             from rhythm_state import compute_rhythm_state
             from agent_coordinator import pick_best_action
             from response_composer import compose_response
 
             rhythm = compute_rhythm_state(user_id)
+            _identity_voice_mode = rhythm.brain_mode if rhythm.brain_mode in ('HARMONY','ALERT','CRISIS') else 'HARMONY'
             rhythm_meta = {
                 'energy': round(rhythm.energy, 2),
                 'stress': round(rhythm.stress, 2),
@@ -1122,12 +1126,22 @@ def radim_chat():
                                 "Bez emoji, bez markdown, bez anglicismů. "
                                 "Teplý, klidný, trpělivý tón."
                             )
+                            # v8.19.32 (Sprint 3-B): identity layer pro Claude path —
+                            # dosud chyběl, identita se k Claude PRIMARY cestě nedostala.
+                            # Teď build dynamic prompt s voice_mode → SOUL + IDENTITY +
+                            # ROLE + SENIOR + BOUNDARIES + COG_PIPELINE + personalized.
+                            _identity_layer = ''
+                            try:
+                                from radim_identity import format_for_prompt as _fmt_id
+                                _identity_layer = '\n\n' + _fmt_id(voice_mode=_identity_voice_mode)
+                            except Exception:
+                                pass
                             if personalized:
-                                # personalized already contains soul (Sprint AO patch
-                                # to memory_logic.build_personalized_prompt)
-                                _sys = personalized
+                                # personalized already contains soul (Sprint AO patch).
+                                # Prepend identity layer (was missing for Claude path).
+                                _sys = personalized + _identity_layer
                             else:
-                                _sys = _SOUL + '\n\n' + _fallback_rules if _SOUL else _fallback_rules
+                                _sys = (_SOUL + _identity_layer + '\n\n' + _fallback_rules) if _SOUL else (_fallback_rules + _identity_layer)
                             # Build messages with history
                             _msgs = []
                             if history:
@@ -1171,7 +1185,8 @@ def radim_chat():
                         try:
                             text_response, action_json = call_gemini_whatsapp(
                                 message, context, mode, personalized, history,
-                                anticipation_prompt, gen_config
+                                anticipation_prompt, gen_config,
+                                voice_mode=_identity_voice_mode
                             )
                             if text_response:
                                 gemini_breaker.record_success()

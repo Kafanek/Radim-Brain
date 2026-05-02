@@ -131,11 +131,13 @@ def _handle_thanks(**kwargs):
 def _handle_identity(**kwargs):
     """v8.19.29: dynamic identity intro using seed identity instead of static text.
 
-    v8.19.31 (Sprint 2): preset-aware — when active_preset is grief/rough_days/
-    goodbye, switches to a hushed, present-with-you reply instead of pushing
-    Radim's vkus. Identity is for lighter moments, not for grief.
+    v8.19.31 (Sprint 2): preset-aware — grief/rough_days/goodbye → hushed reply.
+    v8.19.32 (Sprint 3-A): subject-matching — „máš rád podzim?" → najde podzim
+    v LOVES místo random pickup. Plus log activation pro budoucí evoluci.
     """
     user_id = kwargs.get('user_id')
+    message = kwargs.get('message', '') or ''
+
     # ── Sprint 2: detect grief/quiet preset and switch to hushed reply ──
     if user_id:
         try:
@@ -144,15 +146,30 @@ def _handle_identity(**kwargs):
             active = profile.get('active_preset') or {}
             preset_id = active.get('id') if isinstance(active, dict) else None
             if preset_id in ('grief', 'rough_days', 'goodbye'):
-                # Choose a tone-appropriate hushed reply
                 hushed = [
                     "Jsem Radim. Mám rád spoustu věcí, ale teď jsem především s vámi.",
                     "Jsem Radim. O sobě teď nemusím mluvit — jsem tu pro vás.",
                     "Jsem Radim, váš společník. V tomhle čase je důležitější vaše paměť než moje.",
                 ]
-                return random.choice(hushed)
+                reply = random.choice(hushed)
+                _log_identity_activation(user_id, 'hushed', reply, via='intent_resolver_grief')
+                return reply
         except Exception:
-            pass  # fall through to default seed-based reply
+            pass
+
+    # ── Sprint 3-A: subject-aware — pokud otázka obsahuje konkrétní téma,
+    #    pokus se najít odpovídající seed item místo random ─────────────
+    try:
+        from radim_identity import answer_subject_question, _extract_topic
+        topics = _extract_topic(message)
+        # Pokud otázka má rozumné téma (jiné než jen „máš rád?"), vyhledej
+        if topics:
+            subject_reply = answer_subject_question(message)
+            if subject_reply:
+                _log_identity_activation(user_id, 'subject_match', subject_reply, via='intent_resolver_subject')
+                return subject_reply
+    except Exception:
+        pass  # fall through to default seed-based reply
 
     try:
         from radim_identity import LOVES, BELIEFS, QUIRKS
@@ -166,10 +183,33 @@ def _handle_identity(**kwargs):
             f"Jsem Radim, váš společník. Mám své vlastní vkus — třeba: {love}",
             f"Jsem Radim. Krátce o sobě: {belief} A mám rád: {love}",
         ]
-        return random.choice(templates)
+        reply = random.choice(templates)
+        _log_identity_activation(user_id, 'random_seed', reply, via='intent_resolver_default')
+        return reply
     except Exception:
-        # Fallback to static reply if seed identity not available
         return _IDENTITY_REPLY
+
+
+def _log_identity_activation(user_id, activation_type, text, via=''):
+    """Sprint 3-C: track which identity facets fired per conversation.
+
+    Foundation for future evolution algorithm — knowing which facets
+    resonate with users will let us suggest seed updates organically.
+
+    Best-effort, non-blocking — errors swallowed silently.
+    """
+    if not user_id:
+        return
+    try:
+        from database import db_context
+        with db_context(commit=True) as db:
+            db.execute(
+                "INSERT INTO identity_activations (user_id, activation_type, text, via, fired_at) "
+                "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                (str(user_id), activation_type, text[:500], via)
+            )
+    except Exception:
+        pass  # foundation only — failure here must never break the chat
 
 
 def _handle_day_of_week(**kwargs):

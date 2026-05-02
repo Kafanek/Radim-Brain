@@ -164,6 +164,19 @@ PG_MAIN_SCHEMA = '''
     CREATE INDEX IF NOT EXISTS idx_tts_feedback_signal_type
         ON tts_feedback_signals(signal_type);
 
+    -- v8.19.32 (Sprint 3-C): identity activation log — track which seed
+    -- facets fired in conversations. Foundation for evolution algorithm.
+    CREATE TABLE IF NOT EXISTS identity_activations (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        activation_type TEXT NOT NULL,
+        text TEXT,
+        via TEXT,
+        fired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_identity_activations_user_ts
+        ON identity_activations(user_id, fired_at DESC);
+
     CREATE TABLE IF NOT EXISTS radim_tasks (
         id SERIAL PRIMARY KEY,
         user_id TEXT NOT NULL,
@@ -879,6 +892,18 @@ SQLITE_SCHEMA = '''
         ON tts_feedback_signals(user_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_tts_feedback_signal_type
         ON tts_feedback_signals(signal_type);
+
+    -- v8.19.32 (Sprint 3-C): identity activation log (SQLite mirror)
+    CREATE TABLE IF NOT EXISTS identity_activations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        activation_type TEXT NOT NULL,
+        text TEXT,
+        via TEXT,
+        fired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_identity_activations_user_ts
+        ON identity_activations(user_id, fired_at DESC);
 
     CREATE TABLE IF NOT EXISTS radim_tasks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

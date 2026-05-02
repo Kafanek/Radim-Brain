@@ -25,14 +25,18 @@ logger = logging.getLogger(__name__)
 # ============================================
 # GEMINI AI CALL
 # ============================================
-def call_gemini_whatsapp(message, context=None, mode='senior', personalized_prompt='', history=None, anticipation_prompt='', gen_config=None):
-    """Volání Gemini s WhatsApp promptem + personalizace + historie + rytmus"""
+def call_gemini_whatsapp(message, context=None, mode='senior', personalized_prompt='', history=None, anticipation_prompt='', gen_config=None, voice_mode='HARMONY'):
+    """Volání Gemini s WhatsApp promptem + personalizace + historie + rytmus.
+
+    v8.19.32 (Sprint 3-B): voice_mode (HARMONY/ALERT/CRISIS) propaguje
+    do identity layeru — ALERT/CRISIS modus identitu zkrátí nebo ztichne.
+    """
     if not GEMINI_API_KEY:
         return None, None
 
     try:
         # 🏠 Dynamický system prompt s časem, rolí, kontextem
-        system = _get_dynamic_system_prompt(mode)
+        system = _get_dynamic_system_prompt(mode, voice_mode=voice_mode)
 
         # 🧠 Add personalized prompt from memory (name, interests, style, mood)
         if personalized_prompt:
