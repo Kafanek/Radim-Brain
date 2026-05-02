@@ -1810,6 +1810,53 @@ def admin_iot_simulate():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # v383: Debug personalized prompt (check if agent observations appear)
+# v8.19.32 admin: list identity_activations rows for verification
+@app.route('/api/admin/identity-activations/<user_id>', methods=['GET', 'OPTIONS'])
+def admin_identity_activations(user_id):
+    """Read recent identity_activations rows for a user (Sprint 3-C verification)."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        from database import db_context
+        with db_context() as db:
+            rows = db.execute(
+                "SELECT activation_type, text, via, fired_at FROM identity_activations "
+                "WHERE user_id = ? ORDER BY fired_at DESC LIMIT 20",
+                (str(user_id),)
+            ).fetchall()
+        out = [{
+            'activation_type': r[0] if not hasattr(r, 'keys') else r['activation_type'],
+            'text': r[1] if not hasattr(r, 'keys') else r['text'],
+            'via': r[2] if not hasattr(r, 'keys') else r['via'],
+            'fired_at': str(r[3]) if not hasattr(r, 'keys') else str(r['fired_at']),
+        } for r in rows]
+        return jsonify({'user_id': user_id, 'count': len(out), 'activations': out}), 200
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
+# v8.19.32 admin: probe identity layer at all 3 voice modes
+@app.route('/api/admin/identity-probe', methods=['GET', 'OPTIONS'])
+def admin_identity_probe():
+    """Show format_for_prompt output at HARMONY/ALERT/CRISIS for verification."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        from radim_identity import format_for_prompt
+        out = {}
+        for vm in ('HARMONY', 'ALERT', 'CRISIS'):
+            txt = format_for_prompt(voice_mode=vm)
+            out[vm] = {'length': len(txt), 'first_200': txt[:200]}
+        return jsonify(out), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # v8.19.31: admin testing endpoint — set/clear active_preset bypassing JWT
 @app.route('/api/admin/set-preset/<user_id>', methods=['POST', 'OPTIONS'])
 def admin_set_preset(user_id):
