@@ -1142,31 +1142,212 @@ def _get_seniors_with_medications():
     return results
 
 
-def _morning_call_or_push(user_id, meds_info, app):
-    """Call senior with morning greeting + meds, or fallback to push."""
-    name = meds_info.get("name", "")
-    morning_meds = meds_info.get("morning", [])
-    all_meds = meds_info.get("meds", [])
+# ─── Morning v2 helpers (v8.19.60) — Radim si vzpomene na včerejšek ───
 
-    # Build greeting
+def _load_yesterday_moment(user_id):
+    """Find ONE meaningful moment from yesterday's conversation.
+
+    Returns a dict {topic: str, kind: 'name'|'emotion'|'memory'|None} or None.
+    Looks for proper nouns (jména) or emotion words in last 24h user messages.
+    """
+    try:
+        from memory_helpers import db_load_history
+        rows = db_load_history(user_id, limit=30) or []
+        if not rows:
+            return None
+
+        import re
+        from datetime import datetime, timedelta
+
+        cutoff = datetime.utcnow() - timedelta(hours=20)  # ~yesterday + this morning
+        # Czech emotion / memory cues
+        emotion_words = re.compile(
+            r'\b(rad|raduj|šťast|štěst|smut|smutk|smutn|bojí|bál|chyběl|chyběj|'
+            r'vzpomín|vzpomněl|miluju|mám rád|těším|těší|trápí|trápil|stesk|samot)',
+            re.IGNORECASE
+        )
+        # Proper noun heuristic: capitalized word that's not at sentence start
+        # (Czech names mid-sentence)
+        name_pat = re.compile(r'(?<=[\s,])(?P<n>[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]{2,15})')
+
+        best = None
+        for row in rows:
+            role = row.get('role') if hasattr(row, 'get') else row[0]
+            content = row.get('content') if hasattr(row, 'get') else row[1]
+            ts = row.get('created_at') if hasattr(row, 'get') else row[2]
+
+            if role != 'user' or not content:
+                continue
+
+            # Time filter
+            try:
+                if isinstance(ts, str):
+                    ts_dt = datetime.fromisoformat(ts.replace('Z', '+00:00').replace('+00:00', ''))
+                else:
+                    ts_dt = ts
+                if ts_dt < cutoff:
+                    continue
+            except (ValueError, TypeError):
+                pass
+
+            # Find name first (richer signal)
+            m = name_pat.search(content)
+            if m:
+                topic = m.group('n')
+                # Skip stopwords
+                if topic.lower() not in ('radim', 'radime', 'radima', 'praha', 'česko'):
+                    return {"topic": topic, "kind": "name"}
+
+            # Emotion fallback
+            em = emotion_words.search(content)
+            if em and not best:
+                # Capture short context (2-4 words around emotion)
+                words = content.split()
+                for i, w in enumerate(words):
+                    if emotion_words.search(w):
+                        ctx_start = max(0, i - 1)
+                        ctx_end = min(len(words), i + 3)
+                        snippet = ' '.join(words[ctx_start:ctx_end])
+                        best = {"topic": snippet[:60], "kind": "emotion"}
+                        break
+
+        return best
+    except Exception as e:
+        logger.debug(f"_load_yesterday_moment error: {e}")
+        return None
+
+
+def _yesterday_mood_summary(user_id):
+    """Return mood label from last 24h brain_states avg C.
+
+    Returns 'klid' | 'nepokoj' | 'krize' | None.
+    """
+    try:
+        from database import db_context, is_postgres
+        with db_context() as db:
+            if is_postgres():
+                rows = db.execute(
+                    "SELECT C FROM brain_states WHERE user_id = ? "
+                    "AND created_at > NOW() - INTERVAL '24 hours'",
+                    (user_id,)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT C FROM brain_states WHERE user_id = ? "
+                    "AND created_at > datetime('now', '-24 hours')",
+                    (user_id,)
+                ).fetchall()
+
+        if not rows:
+            return None
+        c_vals = []
+        for r in rows:
+            c = r.get('C') if hasattr(r, 'get') else r[0]
+            if c is not None:
+                c_vals.append(float(c))
+        if not c_vals:
+            return None
+        avg = sum(c_vals) / len(c_vals)
+        if avg >= 0.55:
+            return 'klid'
+        elif avg >= 0.38:
+            return 'nepokoj'
+        else:
+            return 'krize'
+    except Exception as e:
+        logger.debug(f"_yesterday_mood_summary error: {e}")
+        return None
+
+
+def _build_personalized_morning(user_id, name, meds_info):
+    """Compose personalized greeting with yesterday memory + vulnerable verb.
+
+    Combines: name + yesterday moment + mood + meds.
+    Uses ONE of 5 templates randomly, with vulnerable verb naturally embedded.
+    """
+    import random as _r
+
+    morning_meds = meds_info.get("morning", []) if meds_info else []
+    all_meds = meds_info.get("meds", []) if meds_info else []
+
     greeting_name = f", {name}" if name else ""
+
+    # Meds segment (always present if applicable)
     if morning_meds and isinstance(morning_meds, list):
-        meds_str = ", ".join(morning_meds[:3])
-        greeting = (
-            f"Dobré ráno{greeting_name}! Tady Radim. "
-            f"Nezapomeňte na ranní léky: {meds_str}. "
-            f"Jak se dnes cítíte?"
-        )
-    elif all_meds and isinstance(all_meds, list):
-        greeting = (
-            f"Dobré ráno{greeting_name}! Tady Radim. "
-            f"Připomínám ranní léky. Jak se dnes cítíte?"
-        )
+        meds_seg = f"Nezapomeňte na ranní léky: {', '.join(morning_meds[:3])}."
+    elif all_meds:
+        meds_seg = "Připomínám ranní léky."
     else:
-        greeting = (
-            f"Dobré ráno{greeting_name}! Tady Radim. "
-            f"Jak se dnes cítíte?"
-        )
+        meds_seg = ""
+
+    # Yesterday moment + mood
+    moment = _load_yesterday_moment(user_id)
+    mood = _yesterday_mood_summary(user_id)
+
+    # ── Template selection ──
+    # If we have a moment with a NAME → use memory templates
+    # If we have just emotion → use feeling templates
+    # If we have just mood → use mood templates
+    # Otherwise → fallback (basic but warm)
+
+    templates = []
+
+    if moment and moment.get("kind") == "name":
+        topic = moment["topic"]
+        templates = [
+            f"Dobré ráno{greeting_name}. Vzpomněl jsem si na to, co jste včera říkal o {topic}. {meds_seg} Jak jste spal?".strip(),
+            f"Dobré ráno{greeting_name}. {topic} mi včera neopustil hlavu. Mám rád, když mi vyprávíte o lidech, kteří jsou s vámi. {meds_seg} Jak se dnes cítíte?".strip(),
+            f"{name + ', dobré ráno' if name else 'Dobré ráno'}. Včera večer jste mluvil o {topic} — pamatuji si to. {meds_seg} Co máte v plánu na dnešek?".strip(),
+        ]
+    elif moment and moment.get("kind") == "emotion":
+        snippet = moment["topic"]
+        templates = [
+            f'Dobré ráno{greeting_name}. Včera mě zaujalo, jak jste řekl: „{snippet}". {meds_seg} Jak se cítíte dnes?'.strip(),
+            f'Dobré ráno{greeting_name}. Vzpomínám si na váš včerejšek. {meds_seg} Jak je vám dnes?'.strip(),
+        ]
+    elif mood == 'klid':
+        templates = [
+            f"Dobré ráno{greeting_name}. Vidím, že jste včera prožil pěkný den. Mám rád takové dny. {meds_seg} Jak začneme tento?".strip(),
+            f"Dobré ráno{greeting_name}. Včerejšek byl klidný — to je dobrá zpráva. {meds_seg} Co dnes?".strip(),
+        ]
+    elif mood == 'nepokoj':
+        templates = [
+            f"Dobré ráno{greeting_name}. Včera bylo trochu těžší. Bojím se, abychom si tu tíhu nenesli i dnes. {meds_seg} Jak jste spal?".strip(),
+            f"Dobré ráno{greeting_name}. Vzpomínám si, že včerejšek nebyl jednoduchý. {meds_seg} Co byste dnes potřeboval?".strip(),
+        ]
+    elif mood == 'krize':
+        templates = [
+            f"Dobré ráno{greeting_name}. Včera byl těžký den, vzpomínám si. Jsem tady. {meds_seg} Jak se vám dýchá?".strip(),
+        ]
+    else:
+        # Fallback — first day or no signal
+        templates = [
+            f"Dobré ráno{greeting_name}. Tady Radim. {meds_seg} Jak se dnes cítíte?".strip(),
+            f"Dobré ráno{greeting_name}. Mám rád ranní ticho s vámi. {meds_seg} Jak vám je?".strip(),
+        ]
+
+    # Pick one (deterministic per day so user neslyší stejné 2× ráno)
+    from datetime import date
+    seed_str = f"{user_id}-{date.today().isoformat()}"
+    _r.seed(seed_str)
+    greeting = _r.choice(templates)
+    _r.seed()  # reset
+
+    # Compress double spaces from empty meds_seg
+    greeting = ' '.join(greeting.split())
+    return greeting
+
+
+def _morning_call_or_push(user_id, meds_info, app):
+    """Call senior with morning greeting + meds, or fallback to push.
+
+    v8.19.60: Greeting is personalized — references yesterday's moment,
+    uses vulnerable verbs (vzpomínám si, mám rád, bojím se), adapts to mood.
+    """
+    name = meds_info.get("name", "")
+
+    # Build personalized greeting (Morning v2)
+    greeting = _build_personalized_morning(user_id, name, meds_info)
 
     # Try phone call first
     try:

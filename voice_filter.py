@@ -1497,8 +1497,25 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural",
                 val = base_pitch
             pitch_mod = f"{val:+d}%"  # Correct format: "+2%" or "-3%"
 
+        # v8.19.60: Rate micro-variation per sentence — bytost dýchá, ne loop.
+        # Deterministic (cache-safe): opening +1% (forward lean), closing -1%
+        # (mild slowdown for weight). Same text → same rate → cache hit holds.
+        rate_mod = profile['rate']
+        if len(sentences) > 1:
+            try:
+                base_rate = int(rate_mod.replace('%', '').replace('+', ''))
+                if i == 0:
+                    rate_val = base_rate + 1   # forward lean — pozornost
+                elif i == len(sentences) - 1:
+                    rate_val = base_rate - 1   # váha závěru
+                else:
+                    rate_val = base_rate
+                rate_mod = f"{rate_val:+d}%"
+            except (ValueError, AttributeError):
+                pass  # keep profile rate
+
         sentence_blocks.append(
-            f'<prosody rate="{profile["rate"]}" pitch="{pitch_mod}" volume="{profile["volume"]}"{contour_attr}>'
+            f'<prosody rate="{rate_mod}" pitch="{pitch_mod}" volume="{profile["volume"]}"{contour_attr}>'
             f'{safe_sentence}</prosody>'
         )
 
