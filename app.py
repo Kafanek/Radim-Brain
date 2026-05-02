@@ -1838,6 +1838,41 @@ def admin_identity_activations(user_id):
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
+# v8.19.33 admin: probe Sprint 4 identity overlay in proactive message composer
+@app.route('/api/admin/proactive-probe/<user_id>', methods=['GET', 'OPTIONS'])
+def admin_proactive_probe(user_id):
+    """Show what compose_proactive_message produces for various scenarios."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        from agent_bridge import compose_proactive_message
+        scenarios = [
+            ('INFO', 'no_interaction', 'Dlouho jsme nemluvili. Jak se máte?'),
+            ('WARNING', 'c_trend_rising', 'Slyším, že je toho na vás dnes víc.'),
+            ('WARNING', 'activity_drop', 'Dnes jste byla méně aktivní než obvykle.'),
+            ('ALERT', 'c_trend_rising', 'Stoupá vám napětí. Chcete si dát chvíli?'),
+            ('CRISIS', 'vital_anomaly', 'Tlak je vyšší. Posaďte se a dýchejte pomalu.'),
+            ('INFO', 'vital_anomaly', 'Drobná odchylka v měření. Vše vypadá v pořádku.'),
+        ]
+        results = []
+        for sev, typ, raw in scenarios:
+            r = compose_proactive_message(user_id, raw, severity=sev, observation_type=typ)
+            changed = r.get('text', raw) != raw
+            results.append({
+                'severity': sev, 'observation_type': typ,
+                'raw': raw, 'composed': r.get('text', raw),
+                'has_identity_overlay': changed,
+                'speech_rate': r.get('speech_rate'),
+                'state': r.get('state'),
+            })
+        return jsonify({'user_id': user_id, 'scenarios': results}), 200
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
 # v8.19.32 admin: probe identity layer at all 3 voice modes
 @app.route('/api/admin/identity-probe', methods=['GET', 'OPTIONS'])
 def admin_identity_probe():
