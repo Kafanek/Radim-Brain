@@ -22,20 +22,117 @@ logger = logging.getLogger(__name__)
 # Agent Loop sends push/speak to senior — but without style adaptation.
 # This wraps proactive messages through Text Rhythm for state-appropriate tone.
 
-def compose_proactive_message(user_id, raw_message, severity='INFO'):
+def _maybe_add_identity_overlay(user_id, raw_message, severity, observation_type=None):
+    """Sprint 4 (v8.19.33): osobní touch v proaktivní zprávě.
+
+    Když je situace klidná (INFO/WARNING) a senior NENÍ v truchlení/horších dnech,
+    obohatí raw_message o krátký identitní opener — proaktivní zpráva pak zní
+    osobněji než „Dlouho jsme nemluvili."
+
+    Pravidla:
+    - Pouze INFO/WARNING — ALERT/CRISIS musí zůstat jasné a bezpečnostně priorizované
+    - SKIP pokud active_preset ∈ {grief, rough_days, goodbye} — tam buďto tichá
+    - SKIP pro vital_anomaly / fall_detected typy — žádné rozptýlení od bezpečnosti
+    - Logováno do identity_activations s via='agent_loop_proactive'
+    """
+    if severity not in ('INFO', 'WARNING'):
+        return raw_message
+    if observation_type and observation_type in (
+        'vital_anomaly', 'fall_detected', 'fall_suspected',
+        'crisis_chat', 'crisis_message', 'safety_critical'
+    ):
+        return raw_message
+
+    # Skip when senior is in quiet preset
+    try:
+        from memory_helpers import db_load_profile
+        profile = db_load_profile(str(user_id)) or {}
+        ap = profile.get('active_preset') or {}
+        if isinstance(ap, dict) and ap.get('id') in ('grief', 'rough_days', 'goodbye'):
+            return raw_message
+    except Exception:
+        pass
+
+    try:
+        from radim_identity import LOVES, CURIOUS_ABOUT
+        import random
+        # 1 facet — ne dvě, ať to není „Radim teď bude vyprávět o sobě"
+        pool = LOVES + CURIOUS_ABOUT
+        if not pool:
+            return raw_message
+        facet = random.choice(pool)
+
+        # Helper: lowercase pouze prvního písmena (zachovat Smetanu/Dvořáka)
+        def _lower_first(s):
+            return (s[0].lower() + s[1:]) if s else s
+
+        # Templates podle observation_type → osobnější opener
+        facet_lc = _lower_first(facet)
+        opener_templates_by_type = {
+            'no_interaction': [
+                f"Vzpomněl jsem si na tohle: {facet} A napadlo mě, jak se vy dnes máte?",
+                f"Něco mi proběhlo myslí — {facet_lc} A přitom mi došlo, že jsme se dlouho neslyšeli.",
+            ],
+            'c_trend_rising': [
+                f"Já mám taky rád obyčejné věci — {facet_lc} Co kdybychom si dali takovou chvíli?",
+            ],
+            'activity_drop': [
+                f"Dnes je den, kdy si vzpomínám na {facet_lc}",
+            ],
+        }
+        # Default opener (jakýkoli jiný observation_type)
+        default_openers = [
+            f"Něco mi proběhlo hlavou: {facet}",
+            f"Vzpomněl jsem si na tohle: {facet}",
+        ]
+
+        opener = random.choice(opener_templates_by_type.get(observation_type, default_openers))
+
+        # Compose: opener + původní zpráva (jemně oddělené dvěma spaces)
+        composed = f"{opener}  {raw_message}"
+
+        # Log activation (best-effort)
+        try:
+            from database import db_context
+            with db_context(commit=True) as db:
+                db.execute(
+                    "INSERT INTO identity_activations (user_id, activation_type, text, via, fired_at) "
+                    "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                    (str(user_id), 'proactive_overlay', opener[:500],
+                     f'agent_loop_{observation_type or "generic"}')
+                )
+        except Exception:
+            pass
+
+        return composed
+    except Exception as e:
+        logger.debug(f"identity overlay skipped: {e}")
+        return raw_message
+
+
+def compose_proactive_message(user_id, raw_message, severity='INFO', observation_type=None):
     """Adapt a proactive agent message to the user's current brain state.
 
     Uses Text Rhythm to adjust length, tone, complexity.
     Falls back to raw message if Text Rhythm unavailable.
 
+    v8.19.33 (Sprint 4): when severity is INFO/WARNING and senior isn't in
+    grief/rough_days, weaves an identity-flavored opener for personal touch.
+
     Args:
         user_id: Senior identifier
         raw_message: Original message from agent
         severity: INFO/WARNING/ALERT/CRISIS
+        observation_type: optional type (no_interaction/c_trend_rising/...) for
+                          template selection
 
     Returns:
         dict: {text, speech_rate, pause_ms, tone, state}
     """
+    # Sprint 4: identity overlay BEFORE rhythm adaptation, so rhythm scales the
+    # complete (opener + original) text consistently
+    raw_message = _maybe_add_identity_overlay(user_id, raw_message, severity, observation_type)
+
     result = {
         'text': raw_message,
         'speech_rate': 0.9,

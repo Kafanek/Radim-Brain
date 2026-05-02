@@ -852,13 +852,20 @@ def _push_to_medical_team(user_id, obs, routed_roles, app):
 
 
 def _push_to_senior(user_id, obs, app):
-    """Push notification to senior — rhythm-adapted via Text Rhythm."""
+    """Push notification to senior — rhythm-adapted via Text Rhythm.
+
+    v8.19.33 (Sprint 4): predáváme observation_type, aby identita overlay
+    (přes agent_bridge.compose_proactive_message) mohla vybrat tonálně
+    vhodný opener. NEPOUŽIJE se pro vital_anomaly/fall — bezpečnost první.
+    """
     try:
-        # v10.7: Adapt message to brain state via agent_bridge
         message = obs["message"]
         try:
             from agent_bridge import compose_proactive_message
-            adapted = compose_proactive_message(user_id, message, obs.get("severity", "INFO"))
+            adapted = compose_proactive_message(
+                user_id, message, obs.get("severity", "INFO"),
+                observation_type=obs.get("type")
+            )
             message = adapted.get('text', message)
         except (ImportError, Exception):
             pass
