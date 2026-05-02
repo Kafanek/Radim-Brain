@@ -1,4 +1,58 @@
-# Radim — Hlasové příkazy (v8.19.35)
+# Radim — Hlasové příkazy (v8.19.36)
+
+## v8.19.36 STT-UNIFY — jednotná pipeline
+
+Před touto verzí existovaly **2 paralelní STT pipeline**:
+- `index.html:3518-3640` — inline 130 řádků s 6 GATES (aktivní)
+- `VoiceGateway.js listen()` — 5 GATES + delegace (mrtvý kód, nikdo nevolal)
+
+Po v8.19.36: **JEDNA cesta** přes `VoiceGateway.listen(onChat)` — index.html
+je tenký wrapper (~50 řádků) s callback `_sttOnChat` který deleguje na
+`kalService.chat`. VoiceGateway má všechny gates (HARD floor 0.45,
+confirmation 0.45–0.70, min length 3, media noise, echo, sleep, command).
+
+```
+🎤 Mikrofon
+   ↓ UnifiedVoiceManager.startListening(callback)
+   ↓ {text, confidence, isFinal}
+VoiceGateway.listen(onChat) — single STT pipeline
+   ├── G0: min_text_length (3)
+   ├── G1: HARD reject (conf < 0.45)
+   ├── G1b: confirm request (0.45–0.70)
+   ├── G2: rate limit (2s)
+   ├── G3: echo protection (speechGate)
+   ├── G3b: media noise (music/TV playing)
+   ├── sleep_mode (only wake word passes)
+   ├── handleSleepCommand
+   ├── G4: processVoiceInput (LOCAL — no AI cost)
+   └── G5: debounce → onChat(text)
+              ↓
+            _sttOnChat in index.html
+              ↓ kalService.chat(text)
+              ↓ /api/radim/chat
+              ↓ orchestrator (Sprint 1-5 stack)
+              ↓ Claude/Gemini → response
+              ↓ window.speak (Azure TTS)
+```
+
+## /api/radim/chat callsites — 8 míst, všechny legit
+
+Backend orchestrator je single source of truth. Frontend plural = různé UX:
+
+| Callsite | Účel |
+|---|---|
+| `RadimSimpleChat.sendMessage` | Hlavní chat UI bubliny |
+| `KalService.chat` | STT → AI pipeline (volá `_sttOnChat`) |
+| `chat-module.js _call` | Legacy chat module (sekce) |
+| `radim-core.js sendQuickChat` | Quick-input z home page (deleguje na RadimSimpleChat) |
+| `radim-core.js searchInternet` | Search feature (zvláštní query) |
+| `DailyInfoService` | Background daily briefing cron |
+| `RadimOfflineStore` | Replay queued messages po offline |
+| `RadimMessengerV3` | Deleguje na RadimSimpleChat |
+
+Všechny → backend orchestrator → jednotný memory + identity stack.
+
+
 
 Demo dokumentace pro prof. Nováka (ČVUT) + senior testing.
 
