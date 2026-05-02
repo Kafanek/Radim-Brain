@@ -475,6 +475,27 @@ INTENTS = [
     # ═══════════════════════════════════════════════════════════════
     # 🏠 HOME ASSISTANT INTENTS
     # ═══════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════
+    # 📻 v8.19.35: HA MEDIA — rádio přes Home Assistant s fallback
+    # Záměr: pokud má senior HA box (kuchyňský speaker), rádio hraje tam.
+    # Fallback: backend handler vrátí signal → frontend pustí v music-module.
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "name": "ha_radio_play",
+        "patterns": [
+            r"(?:zapni|pus[tť]|hraj)\s+(?:mi\s+)?r[áa]dio\s+(\S+)",
+            r"r[áa]dio\s+(blan[ií]k|impuls|kiss|country|vltav|dvojk|žurn|country|frekvenc)",
+        ],
+        "handler": "ha_radio_play",
+    },
+    {
+        "name": "ha_radio_stop",
+        "patterns": [
+            r"(?:vypni|zastav|stop|ztiš)\s+r[áa]dio",
+            r"vypni\s+(?:hudbu|reproduktor)",
+        ],
+        "handler": "ha_radio_stop",
+    },
     {
         "name": "ha_light_on",
         "patterns": [

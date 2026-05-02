@@ -279,11 +279,41 @@ class HomeAssistantClient:
     def media_pause(self, entity_id):
         return self.call_service('media_player', 'media_pause', entity_id)
 
+    def media_stop(self, entity_id):
+        return self.call_service('media_player', 'media_stop', entity_id)
+
     def media_volume(self, entity_id, volume):
         """Set volume 0-100."""
         return self.call_service('media_player', 'volume_set', entity_id, {
             'volume_level': volume / 100.0
         })
+
+    def play_media(self, entity_id, media_url, media_type='audio/mp3'):
+        """v8.19.35: Play arbitrary media URL on a player (radio streams).
+
+        Used by ha_radio_play intent — allows Radim hlasem zapnout rádio
+        skrz Home Assistant na vybraném reproduktoru (kuchyně, obývák).
+        Vrací True on success, False on failure (frontend pak fallbackne
+        na lokální audio element).
+        """
+        return self.call_service('media_player', 'play_media', entity_id, {
+            'media_content_id': media_url,
+            'media_content_type': media_type
+        })
+
+    def find_default_media_player(self):
+        """Vrátí první nalezený media_player entity_id, nebo None.
+
+        Senior typicky má jeden hlavní reproduktor (kuchyně/obývák).
+        Pokud uživatel chce konkrétní místnost, volat get_devices_by_type
+        a vybrat ručně.
+        """
+        try:
+            devices = self.get_devices_by_type('media_player')
+            mps = devices.get('media_player', [])
+            return mps[0]['entity_id'] if mps else None
+        except Exception:
+            return None
 
     def alarm_arm(self, entity_id, code=None):
         data = {'code': code} if code else {}

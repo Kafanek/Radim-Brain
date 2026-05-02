@@ -577,6 +577,84 @@ def _handle_ha_climate(**kwargs):
     except Exception:
         return None
 
+# v8.19.35 (Sprint Voice-Unify): RADIO STATIONS sdílené mezi HA a frontend.
+# Když je HA dostupné → media_player.play_media (kuchyňský speaker).
+# Jinak → frontend dostane signal a pustí v music-module (mobile speaker).
+RADIO_STATIONS = {
+    'blanik':       'https://ice.abradio.cz/blanikcz128.mp3',
+    'blaník':       'https://ice.abradio.cz/blanikcz128.mp3',
+    'impuls':       'https://icecast4.play.cz/impuls128.mp3',
+    'kiss':         'https://icecast4.play.cz/kiss128.mp3',
+    'country':      'https://icecast4.play.cz/country128.mp3',
+    'vltava':       'https://rozhlas.stream/vltava_mp3_128.mp3',
+    'dvojka':       'https://rozhlas.stream/dvojka_mp3_128.mp3',
+    'žurnál':       'https://rozhlas.stream/radiozurnal_mp3_128.mp3',
+    'zurnal':       'https://rozhlas.stream/radiozurnal_mp3_128.mp3',
+    'radiožurnál':  'https://rozhlas.stream/radiozurnal_mp3_128.mp3',
+    'plus':         'https://rozhlas.stream/plus_mp3_128.mp3',
+    'frekvence':    'https://icecast.actve.net/fm-frekvence-128',
+}
+
+
+def _handle_ha_radio_play(**kwargs):
+    """v8.19.35: zapnout rádio přes HA media_player; fallback signál pro frontend.
+
+    Strategy:
+      1. Vytáhnout název stanice z message (regex pattern už zachytil)
+      2. Najít stream URL v RADIO_STATIONS
+      3. Pokud HA dostupné → ha.play_media(default_player, stream_url)
+      4. Pokud HA nedostupné → vrátit speciální signal řetězec, který
+         frontend rozpozná jako „pusť to lokálně".
+
+    Frontend musí umět: pokud response.startswith('__RADIO_FALLBACK__'),
+    extrahovat name/url z konce a zavolat musicModule.play(stationId).
+    """
+    msg = (kwargs.get('message', '') or '').lower()
+    # Extract station word
+    station = None
+    for name in RADIO_STATIONS.keys():
+        if name in msg:
+            station = name
+            break
+    if not station:
+        return "Které rádio chcete pustit? Třeba Blaník, Impuls, Vltavu nebo Český rozhlas."
+
+    url = RADIO_STATIONS[station]
+    pretty_name = station.capitalize()
+
+    # Try Home Assistant first
+    try:
+        from home_assistant import ha, get_ha_client
+        client = get_ha_client()
+        # Skip HA if client is simulated/disabled (no real HA configured)
+        if client and hasattr(client, 'play_media') and getattr(client, 'is_real', True):
+            entity_id = client.find_default_media_player()
+            if entity_id:
+                ok = client.play_media(entity_id, url, 'audio/mp3')
+                if ok:
+                    return f"Zapínám {pretty_name} v reproduktoru."
+    except Exception:
+        pass
+
+    # Fallback signal — frontend rozpozná prefix __RADIO_FALLBACK__ a pustí lokálně
+    return f"__RADIO_FALLBACK__|{station}|{url}|Zapínám {pretty_name}."
+
+
+def _handle_ha_radio_stop(**kwargs):
+    """v8.19.35: zastav rádio (HA nebo lokální)."""
+    try:
+        from home_assistant import ha, get_ha_client
+        client = get_ha_client()
+        if client and hasattr(client, 'media_stop') and getattr(client, 'is_real', True):
+            entity_id = client.find_default_media_player()
+            if entity_id:
+                client.media_stop(entity_id)
+                return "Vypínám rádio."
+    except Exception:
+        pass
+    return "__RADIO_STOP_FALLBACK__|Vypínám rádio."
+
+
 def _handle_ha_cover(**kwargs):
     try:
         from home_assistant import ha
@@ -1276,6 +1354,9 @@ _HANDLERS = {
     "ha_lock": _handle_ha_lock,
     "ha_climate": _handle_ha_climate,
     "ha_cover": _handle_ha_cover,
+    # 📻 v8.19.35: HA media — radio přes HA s frontend fallback
+    "ha_radio_play": _handle_ha_radio_play,
+    "ha_radio_stop": _handle_ha_radio_stop,
     # B1 v458 — voice lexicon learning via chat
     "lexicon_teach": _handle_lexicon_teach,
     "lexicon_list": _handle_lexicon_list,
