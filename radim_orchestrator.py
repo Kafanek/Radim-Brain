@@ -1496,13 +1496,25 @@ def radim_chat():
         except (ImportError, Exception):
             pass
 
+        # v8.19.34 (Sprint 5): voice_intimate flag — když mluví o vlastní
+        # identitě (loves/quirks/beliefs/hushed), TTS by měl být teplejší +
+        # pomalejší. Frontend RadimSimpleChat čte → Azure style 'gentle' +
+        # speech_rate × 0.92. Aktivuje se pro intent='identity' (Sprint 1+2+3
+        # paths) a v non-CRISIS situations.
+        _intent_final = _resolved_intent if _INTENT_RESOLVER else intent
+        _voice_intimate = (
+            _intent_final == 'identity'
+            and _voice_mode != 'CRISIS'
+        )
+
         result = {
             'success': True,
             'response': text_response,
             'radim_action': action_json,
-            'intent': _resolved_intent if _INTENT_RESOLVER else intent,
+            'intent': _intent_final,
             'mode': mode,
             'voice_mode': _voice_mode,
+            'voice_intimate': _voice_intimate,
             'ai_provider': _ai_provider or 'local',
             'brain_C': _brain_C_val,
             'brain_mode': _brain_mode_val,
