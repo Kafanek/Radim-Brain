@@ -131,6 +131,9 @@ class HomeAssistantClient:
         self._ws = None
         self._ws_thread = None
         self._event_handlers = []
+        # v8.19.35: real client = real connection. Subclass SimulatedHomeAssistant
+        # overrides to False so radio handler správně fallbackne na frontend.
+        self.is_real = True
 
     @property
     def available(self):
@@ -645,6 +648,10 @@ class SimulatedHomeAssistant(HomeAssistantClient):
     def __init__(self):
         super().__init__(url='http://simulated', token='simulated')
         self.connected = True
+        # v8.19.35: explicit marker — let intent handlers know to skip HA
+        # routing (rádio fallback) and use real-device pipeline (frontend
+        # music-module) instead of pretending it played on a fake speaker.
+        self.is_real = False
         self._sim_devices = {
             'light.living_room': {'state': 'off', 'attributes': {'friendly_name': 'Obývák světlo', 'brightness': 0, 'area_id': 'living_room', 'device_class': 'light'}},
             'light.bedroom': {'state': 'off', 'attributes': {'friendly_name': 'Ložnice světlo', 'brightness': 0, 'area_id': 'bedroom'}},
