@@ -270,26 +270,27 @@ def transcribe_speech():
         if 'audio' in request.files:
             audio_file = request.files['audio']
             audio_data = audio_file.read()
-            # v8.19.65: Preserve codec param — Azure REST API needs explicit
-            # codec for opus, jinak vrací prázdný transcript (decoder fail).
-            # Use the upload mimetype if browser sent it, fallback to filename.
+            # v8.19.67: Determine content_type for Azure REST.
+            # MediaRecorder almost always uses opus inside webm/ogg containers.
+            # Browser-supplied mimetype usually omits the codec param ("audio/webm"
+            # instead of "audio/webm;codecs=opus") — Azure then can't decode.
+            # Strategy: take browser hint, but ALWAYS ensure codec is present
+            # for webm/ogg containers.
             up_ct = (audio_file.mimetype or '').strip().lower()
-            if up_ct.startswith('audio/'):
-                # Browser-supplied (e.g. "audio/webm;codecs=opus")
-                content_type = up_ct
-            elif audio_file.filename:
-                fn = audio_file.filename.lower()
-                if fn.endswith('.webm'):
-                    content_type = 'audio/webm; codecs=opus'  # codec param required
-                elif fn.endswith('.ogg'):
-                    content_type = 'audio/ogg; codecs=opus'
-                elif fn.endswith('.mp3'):
-                    content_type = 'audio/mpeg'
-                elif fn.endswith('.mp4'):
-                    content_type = 'audio/mp4'
-                elif fn.endswith('.wav'):
-                    content_type = 'audio/wav'
-            logger.warning(f"🎙️ STT upload: {len(audio_data)} bytes, content_type={content_type}")
+            fn = (audio_file.filename or '').lower()
+            if up_ct.startswith('audio/webm') or fn.endswith('.webm'):
+                content_type = 'audio/webm; codecs=opus'  # always force codec
+            elif up_ct.startswith('audio/ogg') or fn.endswith('.ogg'):
+                content_type = 'audio/ogg; codecs=opus'
+            elif up_ct.startswith('audio/mp4') or fn.endswith('.mp4'):
+                content_type = 'audio/mp4'
+            elif up_ct.startswith('audio/mpeg') or fn.endswith('.mp3'):
+                content_type = 'audio/mpeg'
+            elif up_ct.startswith('audio/wav') or up_ct.startswith('audio/x-wav') or fn.endswith('.wav'):
+                content_type = 'audio/wav'
+            elif up_ct.startswith('audio/'):
+                content_type = up_ct  # trust browser as last resort
+            logger.warning(f"🎙️ STT upload: {len(audio_data)} bytes, content_type={content_type}, browser_ct={up_ct}, fn={fn}")
         elif request.is_json and 'audio_base64' in request.json:
             audio_data = base64.b64decode(request.json['audio_base64'])
             content_type = request.json.get('content_type', 'audio/wav')
