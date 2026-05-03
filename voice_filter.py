@@ -1103,6 +1103,48 @@ def _add_poetry_pauses(text, base_pause_ms):
     return escaped
 
 
+# v8.19.61: Breath markers po vulnerable verbs — dech mezi pocitem a slovem.
+# Vulnerable verbs jsou ze 4 slov v PROMPT_SOUL (radim_system_prompt.py):
+# "Nevím", "Mám rád", "Bojím se", "Vzpomínám si". SSML <break> po nich zní
+# jako lidský vdech před emocí — micro-pauza, která dělá hlas upřímnějším,
+# ne jako glitch. Délka pauzy odráží emoční váhu slovesa (strach delší než
+# nejistota).
+_VULNERABLE_VERB_BREATHS = [
+    # (regex, break_ms, semantic label)
+    (re.compile(r'\b(Vzpomněl jsem si|Vzpomněla jsem si|Vzpomínám si|Vzpomínám na|Pamatuji si)\b', re.IGNORECASE), 300, 'memory'),
+    (re.compile(r'\b(Mám rád[ai]?|Mám tě rád|Mám vás rád|Mám to rád)\b', re.IGNORECASE), 250, 'love'),
+    (re.compile(r'\b(Bojím se|Mám obavu|Mám strach)\b', re.IGNORECASE), 400, 'fear'),
+    (re.compile(r'\b(Nevím|Neumím|Neznám)\b(?=[\s,])', re.IGNORECASE), 200, 'unknown'),
+    (re.compile(r'\b(Cítím|Dotklo se mě|Dojímá mě|Zaujalo mě)\b', re.IGNORECASE), 300, 'feeling'),
+]
+
+
+def _add_breath_markers(text):
+    """Insert SSML <break> micro-pause after vulnerable verbs.
+
+    Example transform:
+      "Vzpomínám si na to" → "Vzpomínám si<break time=\"300ms\"/> na to"
+
+    Runs AFTER xml_escape, BEFORE _add_emphasis (so emphasis wrapping is
+    not broken by inserted SSML tags). Self-skip: if already followed by
+    <break or </emphasis>, lambda re-scan ensures we don't double-insert
+    in the same call.
+    """
+    if not text:
+        return text
+    for pattern, break_ms, _label in _VULNERABLE_VERB_BREATHS:
+        # Skip if break already follows (prevent double-insertion on retries)
+        text = pattern.sub(
+            lambda m: (
+                m.group(0)
+                if m.string[m.end():m.end()+10].lstrip().startswith('<break')
+                else f'{m.group(0)}<break time="{break_ms}ms"/>'
+            ),
+            text
+        )
+    return text
+
+
 def _add_emphasis(text_with_breaks):
     """Add gentle emphasis to key words, numbers, medicine names.
     v473: Prevents double-nesting (<emphasis><emphasis>).
@@ -1454,6 +1496,11 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural",
         # Azure cs-CZ-AntoninNeural says "dýčejte" instead of "dýchejte"
         # Fix: use IPA phoneme tag to force correct "ch" /x/ pronunciation
         safe_sentence = _fix_czech_pronunciation(safe_sentence, user_id=user_id)
+
+        # v8.19.61: Breath markers po vulnerable verbs (vzpomínám si, mám rád,
+        # bojím se, nevím) — micro-pauza zní jako lidský vdech před emocí.
+        # MUSÍ běžet PŘED _add_emphasis, aby emphasis nezamotala SSML breaks.
+        safe_sentence = _add_breath_markers(safe_sentence)
 
         # Emphasis for ALERT/CRISIS
         if profile["emphasis"]:
