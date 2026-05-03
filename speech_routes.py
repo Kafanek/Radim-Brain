@@ -289,7 +289,7 @@ def transcribe_speech():
                     content_type = 'audio/mp4'
                 elif fn.endswith('.wav'):
                     content_type = 'audio/wav'
-            logger.info(f"🎙️ STT upload: {len(audio_data)} bytes, content_type={content_type}")
+            logger.warning(f"🎙️ STT upload: {len(audio_data)} bytes, content_type={content_type}")
         elif request.is_json and 'audio_base64' in request.json:
             audio_data = base64.b64decode(request.json['audio_base64'])
             content_type = request.json.get('content_type', 'audio/wav')
@@ -312,7 +312,7 @@ def transcribe_speech():
             result = response.json()
             # v8.19.65: log full Azure response on empty/failed → easier debug
             rec_status = result.get('RecognitionStatus')
-            logger.info(f"🎙️ STT Azure response: status={rec_status} ct={content_type} bytes={len(audio_data)}")
+            logger.warning(f"🎙️ STT Azure response: status={rec_status} ct={content_type} bytes={len(audio_data)} resp_size={len(response.text)}")
 
             if rec_status == 'Success':
                 if 'NBest' in result and result['NBest']:
