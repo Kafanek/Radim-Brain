@@ -270,13 +270,26 @@ def transcribe_speech():
         if 'audio' in request.files:
             audio_file = request.files['audio']
             audio_data = audio_file.read()
-            if audio_file.filename:
-                if audio_file.filename.endswith('.webm'):
-                    content_type = 'audio/webm'
-                elif audio_file.filename.endswith('.mp3'):
-                    content_type = 'audio/mp3'
-                elif audio_file.filename.endswith('.ogg'):
-                    content_type = 'audio/ogg'
+            # v8.19.65: Preserve codec param — Azure REST API needs explicit
+            # codec for opus, jinak vrací prázdný transcript (decoder fail).
+            # Use the upload mimetype if browser sent it, fallback to filename.
+            up_ct = (audio_file.mimetype or '').strip().lower()
+            if up_ct.startswith('audio/'):
+                # Browser-supplied (e.g. "audio/webm;codecs=opus")
+                content_type = up_ct
+            elif audio_file.filename:
+                fn = audio_file.filename.lower()
+                if fn.endswith('.webm'):
+                    content_type = 'audio/webm; codecs=opus'  # codec param required
+                elif fn.endswith('.ogg'):
+                    content_type = 'audio/ogg; codecs=opus'
+                elif fn.endswith('.mp3'):
+                    content_type = 'audio/mpeg'
+                elif fn.endswith('.mp4'):
+                    content_type = 'audio/mp4'
+                elif fn.endswith('.wav'):
+                    content_type = 'audio/wav'
+            logger.info(f"🎙️ STT upload: {len(audio_data)} bytes, content_type={content_type}")
         elif request.is_json and 'audio_base64' in request.json:
             audio_data = base64.b64decode(request.json['audio_base64'])
             content_type = request.json.get('content_type', 'audio/wav')
@@ -297,8 +310,11 @@ def transcribe_speech():
 
         if response.status_code == 200:
             result = response.json()
+            # v8.19.65: log full Azure response on empty/failed → easier debug
+            rec_status = result.get('RecognitionStatus')
+            logger.info(f"🎙️ STT Azure response: status={rec_status} ct={content_type} bytes={len(audio_data)}")
 
-            if result.get('RecognitionStatus') == 'Success':
+            if rec_status == 'Success':
                 if 'NBest' in result and result['NBest']:
                     best = result['NBest'][0]
                     return jsonify({
@@ -312,11 +328,23 @@ def transcribe_speech():
                         'text': result.get('DisplayText', ''),
                         'confidence': 0.9
                     })
-            elif result.get('RecognitionStatus') == 'NoMatch':
+            elif rec_status == 'NoMatch':
                 return jsonify({
                     'success': True,
                     'text': '',
-                    'message': 'Rec nebyla rozpoznana'
+                    'message': 'Řeč nebyla rozpoznána (mlčení nebo nesrozumitelné).'
+                })
+            elif rec_status == 'InitialSilenceTimeout':
+                return jsonify({
+                    'success': True,
+                    'text': '',
+                    'message': 'Žádný zvuk na začátku — zkontrolujte mikrofon.'
+                })
+            elif rec_status == 'BabbleTimeout':
+                return jsonify({
+                    'success': True,
+                    'text': '',
+                    'message': 'Hluk nebo nesrozumitelná řeč.'
                 })
             else:
                 return jsonify({
