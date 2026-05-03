@@ -56,6 +56,8 @@ class TTSCache:
         self.misses = 0
         self.disk_hits = 0       # served from disk (memory miss)
         self.disk_writes = 0
+        self.redis_hits = 0      # v8.19.63: Redis L2 hits (shared across dynos)
+        self.redis_writes = 0
         self.disk_root = disk_root if disk_root is not None else TTS_DISK_ROOT
         self._disk_ok = self._init_disk()
 
@@ -138,44 +140,72 @@ class TTSCache:
         return hashlib.md5(raw.encode()).hexdigest()
 
     def get(self, text, voice='cs-CZ-AntoninNeural', rate=0.9):
-        """Get cached audio bytes. Returns None on miss."""
+        """Get cached audio bytes. Returns None on miss.
+
+        Lookup order (v8.19.63):
+          L1 in-memory (per-dyno, instant)
+          L2 Redis (shared across dynos, ~1ms network)
+          L3 disk (per-dyno, /tmp ephemeral)
+        """
         key = self._key(text, voice, rate)
         entry = self._cache.get(key)
-        if entry is None:
-            self.misses += 1
-            return None
 
-        audio_bytes, cached_at = entry
-        # Check TTL (covers both memory & disk-warmed entries)
-        if time.time() - cached_at > self.ttl:
-            del self._cache[key]
-            if key in self._access_order:
-                self._access_order.remove(key)
-            self._unlink_safe(key)
-            self.misses += 1
-            return None
-
-        # Disk-only entry (warmed at startup, audio not yet loaded)
-        if audio_bytes is None:
-            audio_bytes = self._read_disk(key)
-            if audio_bytes is None:
-                # Disk file vanished — drop the index entry
+        # L1: in-memory hit
+        if entry is not None:
+            audio_bytes, cached_at = entry
+            if time.time() - cached_at > self.ttl:
                 del self._cache[key]
                 if key in self._access_order:
                     self._access_order.remove(key)
-                self.misses += 1
-                return None
-            # Promote to in-memory (with current timestamp from disk)
+                self._unlink_safe(key)
+                # Fall through to L2/L3 below (key expired locally)
+            elif audio_bytes is None:
+                # Disk-only sentinel — try disk first
+                audio_bytes = self._read_disk(key)
+                if audio_bytes is not None:
+                    self._cache[key] = (audio_bytes, cached_at)
+                    self.disk_hits += 1
+                    self.hits += 1
+                    if key in self._access_order:
+                        self._access_order.remove(key)
+                    self._access_order.append(key)
+                    return audio_bytes
+            else:
+                self.hits += 1
+                if key in self._access_order:
+                    self._access_order.remove(key)
+                self._access_order.append(key)
+                return audio_bytes
+
+        # L2: Redis (shared cache across all dynos)
+        try:
+            from redis_cache import cache_get_bytes
+            audio_bytes = cache_get_bytes('tts:' + key)
+            if audio_bytes:
+                # Promote to L1 (in-memory)
+                cached_at = time.time()
+                self._cache[key] = (audio_bytes, cached_at)
+                self._access_order.append(key)
+                # Best-effort write to L3 (disk) so this dyno survives Redis flush
+                self._write_disk(key, audio_bytes, cached_at)
+                self.redis_hits += 1
+                self.hits += 1
+                return audio_bytes
+        except Exception:
+            pass  # Redis down → fall through to disk
+
+        # L3: disk (per-dyno backup)
+        audio_bytes = self._read_disk(key)
+        if audio_bytes is not None:
+            cached_at = time.time()
             self._cache[key] = (audio_bytes, cached_at)
+            self._access_order.append(key)
             self.disk_hits += 1
+            self.hits += 1
+            return audio_bytes
 
-        self.hits += 1
-        # Move to end (most recently used)
-        if key in self._access_order:
-            self._access_order.remove(key)
-        self._access_order.append(key)
-
-        return audio_bytes
+        self.misses += 1
+        return None
 
     def put(self, text, audio_bytes, voice='cs-CZ-AntoninNeural', rate=0.9):
         """Cache audio bytes for text — both in-memory and on disk."""
@@ -197,6 +227,14 @@ class TTSCache:
         self._cache[key] = (audio_bytes, cached_at)
         self._access_order.append(key)
         self._write_disk(key, audio_bytes, cached_at)
+
+        # v8.19.63: Write to Redis L2 (shared cache, fail-open)
+        try:
+            from redis_cache import cache_set_bytes
+            if cache_set_bytes('tts:' + key, audio_bytes, ttl=self.ttl):
+                self.redis_writes += 1
+        except Exception:
+            pass  # Redis down → memory + disk continue working
 
     def stats(self):
         total = self.hits + self.misses

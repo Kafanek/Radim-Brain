@@ -2741,6 +2741,29 @@ def admin_tts_quota():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/admin/cache/stats', methods=['GET', 'OPTIONS'])
+def admin_cache_stats():
+    """v8.19.63: Redis cache health + hit rates.
+
+    Shows Redis availability, memory usage, total commands, hit/miss ratio.
+    Plus TTSCache 3-tier breakdown (memory L1, Redis L2, disk L3).
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        from redis_cache import cache_health
+        from scaling_optimizations import tts_cache
+        return jsonify({
+            'success': True,
+            'redis': cache_health(),
+            'tts_cache': tts_cache.stats(),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/admin/operator/<user_id>/ack-all-stale', methods=['POST', 'OPTIONS'])
 def admin_operator_ack_all_stale(user_id):
     """Bulk-ack ALL unacked observations older than N hours for a user.

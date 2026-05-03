@@ -94,25 +94,49 @@ def azure_tts_proxy():
         uid = data.get('user_id', '') or data.get('userId', '')
         ant_state = None
 
-        # Speed fix (TTS hotfix): single profile load shared by brain_speech
-        # and voice_pref. Before: 2 DB calls (~50-100ms wasted per TTS req).
+        # v8.19.63: Profile lookup with Redis L2 cache (5 min TTL).
+        # Before: db_load_profile = ~50-100ms PostgreSQL query EVERY TTS call.
+        # After: Redis hit ~1ms. Fail-open — if Redis down, falls back to DB.
         _profile_cache = None
         if uid:
             try:
-                from memory_helpers import db_load_profile
-                _profile_cache = db_load_profile(uid) or {}
+                from redis_cache import cache_get_json, cache_set_json
+                _profile_cache = cache_get_json(f'profile:{uid}')
+                if _profile_cache is None:
+                    from memory_helpers import db_load_profile
+                    _profile_cache = db_load_profile(uid) or {}
+                    cache_set_json(f'profile:{uid}', _profile_cache, ttl=300)
             except Exception:
-                _profile_cache = {}
+                # Fail-open: try direct DB load
+                try:
+                    from memory_helpers import db_load_profile
+                    _profile_cache = db_load_profile(uid) or {}
+                except Exception:
+                    _profile_cache = {}
 
-        # 1. Get brain mode for voice adaptation
+        # v8.19.63: Brain speech with Redis L2 cache (30s TTL).
+        # Before: brain_speech_fn = ~20-50ms compute every TTS call.
+        # After: Redis hit ~1ms for repeat callers within 30s window.
+        # Short TTL because brain Ψ(t) shifts with each conversation turn.
         brain_speech = None
         if uid and _brain_available:
             try:
-                brain_speech = _brain_speech_fn(str(uid))
+                from redis_cache import cache_get_json as _cge, cache_set_json as _cse
+                brain_speech = _cge(f'brain_speech:{uid}')
+                if brain_speech is None:
+                    brain_speech = _brain_speech_fn(str(uid))
+                    if brain_speech:
+                        _cse(f'brain_speech:{uid}', brain_speech, ttl=30)
                 if brain_speech:
                     ant_state = brain_speech.get('mode')
             except Exception:
-                pass
+                # Fail-open: direct call
+                try:
+                    brain_speech = _brain_speech_fn(str(uid))
+                    if brain_speech:
+                        ant_state = brain_speech.get('mode')
+                except Exception:
+                    pass
 
         if not text:
             return jsonify({'error': 'Text is required'}), 400

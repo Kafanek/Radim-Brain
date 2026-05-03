@@ -60,3 +60,7 @@ lxml>=5.0.0
 
 # Sprint R: Sentry error tracking (lazy init — only if SENTRY_DSN env var set)
 sentry-sdk[flask]>=2.0.0
+
+# v8.19.63: Redis cache (Heroku Redis Mini) — shared L2 cache across dynos.
+# Fail-open via redis_cache.py wrapper — cache miss never breaks the app.
+redis>=5.0.0
