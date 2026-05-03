@@ -432,6 +432,9 @@ socketio = SocketIO(
     ping_timeout=60,
     ping_interval=25
 )
+# v8.19.72: expose socketio instance pro modul senior_authorize_routes
+# (a další moduly co potřebují emit) přes app.config — fail-safe lookup.
+app.config['SOCKETIO_INSTANCE'] = socketio
 
 # ============================================
 # KONFIGURACE
@@ -777,6 +780,13 @@ try:
     logger.info("✅ Caregiver routes registered: /api/caregiver/* — family + pro partner view")
 except Exception as e:
     logger.warning(f"⚠️ Caregiver routes: {e}")
+
+try:
+    from senior_authorize_routes import senior_authorize_bp
+    app.register_blueprint(senior_authorize_bp)
+    logger.info("✅ Senior authorize routes registered: /api/caregiver/request-authorize, /pending-authorizations, /decide-authorize")
+except Exception as e:
+    logger.warning(f"⚠️ Senior authorize routes: {e}")
 
 try:
     from calls_routes import calls_bp
