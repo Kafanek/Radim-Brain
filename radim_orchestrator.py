@@ -579,11 +579,18 @@ def radim_chat():
                 })
 
         # ═══ ONBOARDING — detect new user, ask for basics ═══
+        # v8.19.85: SKIP onboarding when user_id is anonymous (anon-*) — without
+        # persistent identity onboarding loops forever (každá zpráva = nový anon-id).
+        # Plus require interaction_count==0 (předtím <3 → triggered i pro užívatele
+        # co prošli prvním krokem ale ne další = endless prompt).
         try:
-            from memory_helpers import db_load_profile, db_load_learning
-            _profile = db_load_profile(user_id) or {}
-            _learning = db_load_learning(user_id) or {}
-            _interaction_count = _learning.get('interaction_count', 0)
+            if user_id and not user_id.startswith('anon-'):
+                from memory_helpers import db_load_profile, db_load_learning
+                _profile = db_load_profile(user_id) or {}
+                _learning = db_load_learning(user_id) or {}
+                _interaction_count = _learning.get('interaction_count', 0)
+            else:
+                _profile, _learning, _interaction_count = {}, {}, 999  # skip onboarding
 
             # First 3 interactions → onboarding mode
             # But SKIP onboarding if message already contains personal info
