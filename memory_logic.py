@@ -444,11 +444,26 @@ def get_conversation_messages(user_id: str, limit: int = 10) -> list:
 # CRISIS ESCALATION
 # ============================================================================
 
+_CRISIS_ESCALATE_RATE_LIMIT = {}  # user_id → last_escalate_ts
+
+
 def _crisis_escalate(user_id: str, brain_C: float = None, message: str = ""):
     """
     v284: Eskalace krize — notifikace pečovatele.
     Volá se automaticky při brain_mode == CRISIS.
+
+    v8.19.103: rate limit 5 min per user — předtím každá zpráva v CRISIS módu
+    triggernula notifikaci → SMS spam → Twilio 50/day quota exhausted.
     """
+    # Rate limit: 5 min per user
+    import time as _t
+    now = _t.time()
+    last = _CRISIS_ESCALATE_RATE_LIMIT.get(user_id, 0)
+    if now - last < 300:  # 5 min
+        logger.debug(f"🚨 [v8.19.103] CRISIS escalation rate-limited for {user_id} ({int(now - last)}s ago)")
+        return
+    _CRISIS_ESCALATE_RATE_LIMIT[user_id] = now
+
     try:
         profile = db_load_profile(user_id)
         caregiver_id = profile.get("caregiver_id")
