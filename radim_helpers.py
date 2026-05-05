@@ -266,9 +266,28 @@ def detect_intent(message):
 
 def _safety_notify_caregivers(user_id, message, severity):
     """Send push + SMS notifications to caregivers (runs async from v398).
-    This is the CRITICAL C1 fix — previously the system said 'calling help'
-    but never actually sent anything.
+
+    v8.19.103: Wrap entire body in eventlet.spawn_n() — předtím SMS smyčka
+    BLOKOVALA eventlet pool (každá Twilio HTTP call ~100ms × 10 caregivers
+    = 1+s blokace), což shazovalo concurrent TTS requests s 503 (Service
+    Unavailable). Plus SMS broken cache — pokud Twilio FROM není SMS-capable,
+    cache fail po prvním pokusu a skip pro celou session.
     """
+    try:
+        import eventlet
+        eventlet.spawn_n(_safety_notify_caregivers_async, user_id, message, severity)
+    except ImportError:
+        # eventlet not available, run sync (legacy)
+        _safety_notify_caregivers_async(user_id, message, severity)
+
+
+# v8.19.103: cache pro Twilio SMS-capability check
+_TWILIO_SMS_BROKEN = False
+
+
+def _safety_notify_caregivers_async(user_id, message, severity):
+    """Actual implementation of caregiver notification — called via eventlet.spawn_n."""
+    global _TWILIO_SMS_BROKEN
     try:
         from database import db_context
 
@@ -299,6 +318,11 @@ def _safety_notify_caregivers(user_id, message, severity):
                 logger.warning("SAFETY: Cannot import send_push_notification")
 
         # 3. SMS (outside db_context — Twilio HTTP call can be slow)
+        # v8.19.103: skip if Twilio FROM number is not SMS-capable (cached fail).
+        if _TWILIO_SMS_BROKEN:
+            logger.debug("SAFETY: SMS skipped — TWILIO_PHONE_NUMBER not SMS-capable (cached)")
+            return
+
         try:
             twilio_sid = os.environ.get('TWILIO_ACCOUNT_SID')
             twilio_token = os.environ.get('TWILIO_AUTH_TOKEN')
@@ -321,7 +345,13 @@ def _safety_notify_caregivers(user_id, message, severity):
                             )
                             logger.info(f"SAFETY: SMS sent to {cg_name} at {cg_phone}")
                         except Exception as sms_err:
-                            logger.error(f"SAFETY: SMS failed to {cg_phone}: {sms_err}")
+                            err_str = str(sms_err)
+                            logger.error(f"SAFETY: SMS failed to {cg_phone}: {err_str}")
+                            # v8.19.103: cache "FROM not SMS-capable" → skip ALL further SMS
+                            if 'not SMS-capable' in err_str or "is not a valid SMS" in err_str:
+                                logger.warning(f"SAFETY: TWILIO_PHONE_NUMBER {twilio_from} is not SMS-capable — disabling SMS for session")
+                                _TWILIO_SMS_BROKEN = True
+                                return  # stop iteration — won't work for any number
         except ImportError:
             logger.warning("SAFETY: Twilio library not available for SMS")
 
