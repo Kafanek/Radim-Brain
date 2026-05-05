@@ -35,7 +35,7 @@ VOICE_PROFILES = {
         "rate": "-5%",           # mírně pomalejší než přirozený
         "pitch": "+0%",          # v10.23: neutrální přirozený
         "volume": "loud",
-        "pause_ms": 500,         # přirozené pauzy
+        "pause_ms": 300,         # v888: 500 → 300 — natural conversational flow
         "emphasis": False,
         # NO contour — Antonínova vlastní intonace je nejpřirozenější
     },
@@ -45,7 +45,7 @@ VOICE_PROFILES = {
         "rate": "-15%",          # pomalejší pro pochopení
         "pitch": "+0%",          # v10.23: mírně hlubší
         "volume": "loud",
-        "pause_ms": 800,
+        "pause_ms": 500,         # v888: 800 → 500 — empathetic but not robotic
         "emphasis": True,
     },
     "CRISIS": {

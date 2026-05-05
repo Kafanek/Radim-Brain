@@ -112,23 +112,24 @@ def compute_unified_speech(C, alpha, mode, user_id=None, ant_params=None,
         }
 
     # === Layer 1: Brain mode-based baseline ===
+    # v888: pause_ms reduced — user feedback "zbytečné pauzy, flow má být přirozená"
     if mode == "HARMONY":
         rate = 1.0
-        pause_ms = 618      # φ × 382
+        pause_ms = 350      # 618 → 350 — natural conversational flow
         pitch_st = 12
         phrasing = "natural"
         style = "friendly"
         styledegree = "1.2"
     elif mode == "ALERT":
         rate = 0.85
-        pause_ms = 1000     # φ midpoint
+        pause_ms = 550      # 1000 → 550 — empathetic but not robotic
         pitch_st = 8
         phrasing = "simplified"
         style = "empathetic"
         styledegree = "1.1"
     else:  # CRISIS
         rate = 0.7
-        pause_ms = 1618     # φ × 1000
+        pause_ms = 900      # 1618 → 900 — calming but not endless
         pitch_st = 4
         phrasing = "single_command"
         style = "calm"
@@ -148,12 +149,12 @@ def compute_unified_speech(C, alpha, mode, user_id=None, ant_params=None,
     pause_ms += adapt.get("pause_adjust_ms", 0)
 
     # Clamp
-    # v888: Senior cap at 0.95 — předtím (0.5, 1.2) = občas se spočítalo rate=1.0
-    # nebo víc (HARMONY baseline 1.0 + adaptace). 1.0 je NORMAL rychlost = příliš
-    # rychle pro seniora s pomalejším sluchem. Hard ceiling 0.95 (5% pomalší).
-    # User feedback: "Radim mluví extrémně rychle". Log: brain[ALERT/r=1.0/...].
-    rate = clamp(rate, 0.5, 0.95)
-    pause_ms = clamp(pause_ms, 200, 2500)
+    # v888: Senior cap at 0.92 (was 1.2) — "Radim extrémně rychle".
+    # Plus pause_ms cap snížen na 1200 (was 2500) — "zbytečné pauzy, flow".
+    # Senior NIKDY rychleji než 0.92 (8% pomalejší než normal) — pro pomalejší
+    # sluch + reaction time. Pause max 1200ms (1.2s) — žádné dramatické pauzy.
+    rate = clamp(rate, 0.5, 0.92)
+    pause_ms = clamp(pause_ms, 200, 1200)
     pitch_st = clamp(pitch_st, 0, 16)
 
     # === Layer 4: Wider pitch mapping (v2.1) ===
