@@ -31,7 +31,7 @@ CZECH_VOICES = {
 }
 
 SENIOR_DEFAULTS = {
-    'rate': '0.85',
+    'rate': '0.82',     # v888: 0.85 → 0.82 — user feedback "extrémně rychle"
     'pitch': '-5%',
     'volume': 'loud',
 }
