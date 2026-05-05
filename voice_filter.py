@@ -613,34 +613,42 @@ _CZECH_CONJUNCTIONS_LONG = frozenset({
 
 
 def _add_clause_pauses(text):
-    """Insert short SSML <break> tags at sub-sentence boundaries.
+    """Insert SSML <break> tags ONLY at SEMANTIC boundaries.
 
-    Idempotent — running twice produces the same result because the
-    inserted tags don't contain commas or semicolons (the trigger chars).
-    Safe to run before _apply_user_lexicon and friends.
+    v890: Reduced injection — předtím se vkládal <break> po KAŽDÉ čárce
+    (120ms) a u středníku/dvojtečky 250-400ms. To dělalo robotic feel:
+    "Dnes <pauza> je pondělí <pauza>, je deset hodin <pauza>...".
+
+    Teď: NO break u běžných čárek. Antonín neural má vlastní intonaci
+    a přirozeně pauzuje na čárkách. Insertujeme <break> JEN u:
+    - long conjunctions (a, ale, protože, takže) — 100ms (poloviční než dřív)
+    - semicolon — 200ms (z 400ms)
+    - colon — 150ms (z 250ms)
+    - em dash with spaces — 200ms (z 300ms)
+
+    Goal: natural conversational flow, ne pause-talk-pause-talk.
     """
-    # Comma followed by a Czech word — choose pause length by next word.
-    # (?P<word>\w+) captures the next token to inspect for conjunction class.
-    def _comma_break(m):
+    # Comma + LONG conjunction only (sense break) — krátký pauza
+    def _comma_conj_break(m):
         word = m.group('word')
-        ms = 180 if word.lower() in _CZECH_CONJUNCTIONS_LONG else 120
-        return f', <break time="{ms}ms"/>{word}'
+        if word.lower() in _CZECH_CONJUNCTIONS_LONG:
+            return f', <break time="100ms"/>{word}'
+        return m.group(0)  # No break for regular comma + word
 
     text = re.sub(
         r',\s+(?P<word>[A-Za-zÁČĎÉĚÍŇÓŘŠŤÚŮÝŽáčďéěíňóřšťúůýž]+)',
-        _comma_break,
+        _comma_conj_break,
         text,
     )
 
-    # Semicolon
-    text = re.sub(r';\s+', '; <break time="400ms"/>', text)
+    # Semicolon — kratší pauza (200ms místo 400ms)
+    text = re.sub(r';\s+', '; <break time="200ms"/>', text)
 
-    # Colon (often introduces a list / definition — slight pause)
-    text = re.sub(r':\s+(?=\S)', ': <break time="250ms"/>', text)
+    # Colon — minimální pauza (150ms místo 250ms)
+    text = re.sub(r':\s+(?=\S)', ': <break time="150ms"/>', text)
 
-    # Em / en dash WITH spaces on both sides — parenthetical insertion.
-    # Without spaces it's likely a date range / hyphen — leave alone.
-    text = re.sub(r'\s+[–—]\s+', ' <break time="300ms"/>— ', text)
+    # Em / en dash — parenthetical (200ms místo 300ms)
+    text = re.sub(r'\s+[–—]\s+', ' <break time="200ms"/>— ', text)
 
     return text
 
