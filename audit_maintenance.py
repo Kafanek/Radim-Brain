@@ -68,16 +68,28 @@ def run_integrity_check(window_days=7):
                             'window_days': window_days})
             logger.critical(f"🚨 AUDIT TAMPER DETECTED at id={result['broken_at']} "
                             f"(reason={result.get('reason')})")
-            # Notifikuj admina (best-effort)
+            # Notifikuj admina (best-effort) — pošleme push všem s rolí admin
             try:
-                from notification_helpers import notify_admin
-                notify_admin(
-                    title="🚨 AUDIT INTEGRITY BREACH",
-                    body=f"audit_log row {result['broken_at']} — {result.get('reason')}",
-                    severity='critical',
-                )
-            except Exception:
-                pass
+                from database import db_context
+                from notification_helpers import notify
+                with db_context() as db:
+                    admins = db.execute(
+                        "SELECT id FROM auth_users WHERE role IN ('admin','administrator','dpo')"
+                    ).fetchall() or []
+                for a in admins:
+                    admin_id = a[0]
+                    try:
+                        notify(to_user_id=str(admin_id), type='security',
+                               severity='crisis',
+                               title='🚨 AUDIT INTEGRITY BREACH',
+                               body=f"audit_log row {result['broken_at']} — "
+                                    f"{result.get('reason')}",
+                               data={'audit_id': result['broken_at'],
+                                     'reason': result.get('reason')})
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.warning(f"Could not notify admins of tamper: {e}")
 
         return result
     except Exception as e:
@@ -194,14 +206,32 @@ def run_retention_cleanup(retention_days=None, batch_size=1000):
                 if _archive_to_jsonl(batch, cutoff_iso):
                     archived += len(batch)
 
-                # Smaž z hot tabulky
+                # Smaž z hot tabulky.
+                # Pokud existuje audit_log_archive_delete (SECURITY DEFINER),
+                # použij ji — ta dočasně suspenduje no-delete trigger.
+                # Jinak fallback na přímý DELETE (selže pokud je trigger
+                # nainstalovaný, což je správné chování — admin musí
+                # explicitně povolit).
                 ids = [r[0] for r in rows]
-                placeholders = ','.join(['?'] * len(ids))
-                cur = db.execute(
-                    f"DELETE FROM audit_log WHERE id IN ({placeholders})",
-                    tuple(ids)
-                )
-                deleted += (cur.rowcount if hasattr(cur, 'rowcount') else len(ids))
+                try:
+                    if is_postgres():
+                        cur = db.execute(
+                            "SELECT audit_log_archive_delete(?::BIGINT[])",
+                            (ids,)
+                        )
+                        row = cur.fetchone() if hasattr(cur, 'fetchone') else None
+                        deleted_n = row[0] if row else len(ids)
+                    else:
+                        placeholders = ','.join(['?'] * len(ids))
+                        cur = db.execute(
+                            f"DELETE FROM audit_log WHERE id IN ({placeholders})",
+                            tuple(ids)
+                        )
+                        deleted_n = cur.rowcount if hasattr(cur, 'rowcount') else len(ids)
+                except Exception as del_err:
+                    logger.warning(f"Audit archive_delete failed: {del_err}")
+                    deleted_n = 0
+                deleted += deleted_n
 
             if len(rows) < batch_size:
                 break

@@ -25,6 +25,47 @@ API:
   • log_audit(...)           — backward-compat wrapper na audit()
   • verify_chain(start_id=)  — kontrola integrity hash chainu
   • get_audit_trail(...)     — query
+
+═══════════════════════════════════════════════════════════════════════════
+v2 CUTOVER POLICY (legacy rows)
+═══════════════════════════════════════════════════════════════════════════
+Tabulka audit_log existovala v "v0" formátu (database_schema.py v3.9) ještě
+před tímto modulem. Při deploy v903 obsahovala 17 467 řádků bez current_hash.
+
+Tyto pre-v2 řádky JSOU stále auditní (mají user_id, action, created_at, IP),
+ale NEMAJÍ kryptograficky ověřitelnou integritu. Hash chain začíná od
+prvního řádku se current_hash IS NOT NULL (po deploy v903).
+
+Pro ISO 27001 audit:
+  1. Pre-v2 řádky → "best-effort archive", označené v reportech jako
+     "integrity unverified" (current_hash IS NULL).
+  2. v2+ řádky → tamper-proof přes hash chain + append-only trigger.
+
+NEZKOUŠEJ retroaktivně doplnit hash legacy řádkům — bez původního prev_hash
+nelze dokázat, že nebyly mezitím změněny. Pseudo-hash by snížil důvěryhodnost
+celého chainu.
+
+═══════════════════════════════════════════════════════════════════════════
+CONCURRENCY MODEL
+═══════════════════════════════════════════════════════════════════════════
+INSERT používá pg_advisory_xact_lock(_HASH_CHAIN_LOCK_KEY) → pouze JEDEN
+zápis najednou napříč všemi dyna. Lock se uvolňuje s commit/rollback tx.
+Read of last_hash je UVNITŘ téže tx, takže snapshot je konzistentní.
+
+Bez tohoto: 2 dyna paralelně → oba čtou stejný last_hash → 2 různé current_hash
+s identickým prev_hash → chain ROZBIT na druhém zápisu.
+
+═══════════════════════════════════════════════════════════════════════════
+APPEND-ONLY ENFORCEMENT
+═══════════════════════════════════════════════════════════════════════════
+DB trigger audit_log_no_update / audit_log_no_delete blokuje veškeré
+UPDATE/DELETE. Lze obejít jen:
+  • SUPERUSER připojením (Heroku DBA, vyžaduje vlastní audit)
+  • SECURITY DEFINER funkcí audit_log_archive_delete(BIGINT[]) — používá
+    ji audit_maintenance.run_retention_cleanup pro >365-day archiv.
+
+Vypnutí pro debug: heroku config:set AUDIT_APPEND_ONLY=false (skip trigger
+install na příštím restartu — neodstraňuje již nainstalovaný).
 """
 
 import logging
@@ -93,6 +134,56 @@ AUDIT_SCHEMA_V2_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_audit_senior ON audit_log(senior_id)",
 ]
 
+# Append-only enforcement — trigger blokuje UPDATE i DELETE.
+# Lze obejít jen přímým SUPERUSER připojením (Heroku DBA), což je
+# explicit incident s vlastním auditem v platformě.
+#
+# Trigger se vytváří POSLEDNÍ — všechny ALTER ADD COLUMN proběhnou
+# bez problému, pak se uzamkne. ID, PK a indexy nejsou ovlivněny.
+AUDIT_APPEND_ONLY_TRIGGER = """
+CREATE OR REPLACE FUNCTION audit_log_append_only_guard()
+RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'audit_log is append-only (ISO 27001 A.12.4.2). '
+                    'Operation % is not permitted on row id=%', TG_OP, OLD.id
+        USING ERRCODE = '42501';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS audit_log_no_update ON audit_log;
+CREATE TRIGGER audit_log_no_update
+    BEFORE UPDATE ON audit_log
+    FOR EACH ROW
+    EXECUTE FUNCTION audit_log_append_only_guard();
+
+DROP TRIGGER IF EXISTS audit_log_no_delete ON audit_log;
+CREATE TRIGGER audit_log_no_delete
+    BEFORE DELETE ON audit_log
+    FOR EACH ROW
+    EXECUTE FUNCTION audit_log_append_only_guard();
+"""
+
+# Retention cleanup MUSÍ obejít trigger — proto session-local flag.
+# Před DELETE batch nastavit `SET LOCAL session_replication_role='replica'`
+# (pouze SUPERUSER), nebo lépe: použít separátní SECURITY DEFINER funkci
+# `audit_log_archive_delete(id_array)` s přímým DELETE bez triggeru.
+AUDIT_ARCHIVE_FN = """
+CREATE OR REPLACE FUNCTION audit_log_archive_delete(ids BIGINT[])
+RETURNS INT AS $$
+DECLARE
+    n INT;
+BEGIN
+    -- Disable triggers v rámci téhle session pro tuto operaci.
+    -- Funkce běží jako owner (SECURITY DEFINER), takže má právo.
+    ALTER TABLE audit_log DISABLE TRIGGER audit_log_no_delete;
+    DELETE FROM audit_log WHERE id = ANY(ids);
+    GET DIAGNOSTICS n = ROW_COUNT;
+    ALTER TABLE audit_log ENABLE TRIGGER audit_log_no_delete;
+    RETURN n;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+"""
+
 
 def init_audit_schema():
     """Idempotentní migrace base → v2. Bezpečné volat při každém boot.
@@ -130,6 +221,23 @@ def init_audit_schema():
                     db.execute(stmt)
             except Exception as e:
                 logger.debug(f"Audit index skip: {e}")
+
+        # Append-only trigger + archive function — POSLEDNÍ.
+        # Pokud něco selže, stále pokračujeme; chybí jen DB-level enforce
+        # (aplikace stejně nedělá UPDATE/DELETE explicitně).
+        if os.environ.get('AUDIT_APPEND_ONLY', 'true').lower() in ('1', 'true', 'yes'):
+            try:
+                with db_context(commit=True) as db:
+                    db.execute(AUDIT_APPEND_ONLY_TRIGGER)
+                logger.info("🔒 audit_log append-only triggers installed")
+            except Exception as e:
+                logger.warning(f"Audit triggers skip (likely insufficient privileges): {e}")
+            try:
+                with db_context(commit=True) as db:
+                    db.execute(AUDIT_ARCHIVE_FN)
+                logger.info("🔒 audit_log archive function installed")
+            except Exception as e:
+                logger.warning(f"Audit archive fn skip: {e}")
 
         logger.info("📋 audit_log schema v2 ready")
     except Exception as e:
@@ -251,7 +359,9 @@ def mask_pii(value):
 # ═══════════════════════════════════════════════════════════════════════════
 
 _GENESIS_HASH = '0' * 64
-_last_hash_cache = {'value': None, 'fetched_at': 0}
+# Advisory-lock key — used to serialize hash-chain INSERTs across dynos.
+# Arbitrary 64-bit constant; chosen to be unique to this app.
+_HASH_CHAIN_LOCK_KEY = 4242424243
 
 
 def _canonical_json(record):
@@ -270,25 +380,22 @@ def _canonical_json(record):
     return json.dumps(safe, sort_keys=True, separators=(',', ':'), default=_conv)
 
 
-def _last_hash():
-    """Poslední current_hash z DB. Cached 30 s."""
-    import time
-    now = time.time()
-    if _last_hash_cache['value'] is not None and (now - _last_hash_cache['fetched_at']) < 30:
-        return _last_hash_cache['value']
+def _read_last_hash_in_tx(db):
+    """V rámci běžící tx přečti poslední hash. Volá se po acquired
+    pg_advisory_xact_lock, takže nikdo jiný nemůže INSERTovat dokud
+    tx nezavřeme — pevný snapshot pro chain continuity."""
     try:
-        from database import db_context
-        with db_context() as db:
-            row = db.execute(
-                "SELECT current_hash FROM audit_log "
-                "WHERE current_hash IS NOT NULL ORDER BY id DESC LIMIT 1"
-            ).fetchone()
-            value = row[0] if row else _GENESIS_HASH
+        row = db.execute(
+            "SELECT current_hash FROM audit_log "
+            "WHERE current_hash IS NOT NULL "
+            "ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row:
+            # DictRow nebo tuple — both r[0] indexing works
+            return row[0] or _GENESIS_HASH
+        return _GENESIS_HASH
     except Exception:
-        value = _GENESIS_HASH
-    _last_hash_cache['value'] = value
-    _last_hash_cache['fetched_at'] = now
-    return value
+        return _GENESIS_HASH
 
 
 def _compute_hash(prev_hash, record):
@@ -318,10 +425,28 @@ def verify_chain(start_id=1, limit=10000):
             (start_id, limit)
         ).fetchall()
 
-    expected_prev = _GENESIS_HASH if start_id <= 1 else None
-    if start_id > 1 and rows:
-        # Vezmi prev_hash prvního řádku jako výchozí (continuing chain)
-        expected_prev = rows[0][1]
+    # SECURITY: pokud start_id > 1, MUSÍME načíst current_hash předchozího
+    # řádku (id < start_id) a použít ho jako expected_prev. Bez toho by stačilo
+    # smazat libovolný úsek řádků a chain by se "začal znovu" — neviditelně.
+    if start_id <= 1:
+        expected_prev = _GENESIS_HASH
+    else:
+        try:
+            with db_context() as db2:
+                anchor = db2.execute(
+                    "SELECT current_hash FROM audit_log "
+                    "WHERE id < ? AND current_hash IS NOT NULL "
+                    "ORDER BY id DESC LIMIT 1",
+                    (start_id,)
+                ).fetchone()
+            if anchor and anchor[0]:
+                expected_prev = anchor[0]
+            else:
+                # Žádný předchozí hashed row — toto je první segment
+                # (přechod z legacy bez-hash → v2 chain) → genesis OK
+                expected_prev = _GENESIS_HASH
+        except Exception:
+            expected_prev = _GENESIS_HASH
 
     checked = 0
     for r in rows:
@@ -454,14 +579,31 @@ def audit(action, **kwargs):
         if record.get('reason'):
             record['reason'] = _mask_pii_string(record['reason'])
 
-        # FÁZE 4 — hash chain
-        prev = _last_hash()
-        record['prev_hash'] = prev
-        record['current_hash'] = _compute_hash(prev, record)
-
-        # FÁZE 5 — persist
-        from database import db_context
+        # FÁZE 4+5 — hash chain INSIDE single transaction with advisory lock.
+        #
+        # Bez locku by 2 dyna paralelně mohla číst stejný last_hash, computnout
+        # 2 různé current_hash s identickým prev_hash → chain by se rozbil
+        # už na 2. zápisu v race situaci.
+        #
+        # pg_advisory_xact_lock serializuje INSERTy přes všechny dyna:
+        # druhý dyno čeká na lock, my INSERTneme, lock se uvolní s commit().
+        # Protože SELECT last_hash je uvnitř téže tx, vidí náš nezatím-
+        # commitnutý INSERT? Ne — vidí předchozí commitnutý stav, ale lock
+        # zaručí že jsme jediní kdo právě "v procesu zápisu".
+        from database import db_context, is_postgres
         with db_context(commit=True) as db:
+            if is_postgres():
+                # Acquire chain-write lock (auto-released on commit/rollback)
+                try:
+                    db.execute("SELECT pg_advisory_xact_lock(?)", (_HASH_CHAIN_LOCK_KEY,))
+                except Exception as lock_err:
+                    logger.debug(f"Audit chain lock failed (proceeding without): {lock_err}")
+
+            # Čti poslední hash UVNITŘ tx (po locku)
+            prev = _read_last_hash_in_tx(db)
+            record['prev_hash'] = prev
+            record['current_hash'] = _compute_hash(prev, record)
+
             db.execute(
                 "INSERT INTO audit_log "
                 "(created_at, user_id, user_email, user_role, action, "
@@ -482,9 +624,6 @@ def audit(action, **kwargs):
                  record['request_id'], record['release_version'], record['dyno'],
                  record['prev_hash'], record['current_hash'])
             )
-        # Refresh cache po úspěšném zápisu
-        _last_hash_cache['value'] = record['current_hash']
-        _last_hash_cache['fetched_at'] = __import__('time').time()
 
     except Exception as e:
         # FÁZE 5 fallback — never raise, never lose event

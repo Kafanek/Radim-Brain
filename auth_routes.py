@@ -248,11 +248,29 @@ def auth_login():
                         gdpr_consent = bool(consent.get("data_processing", False))
                     except Exception:
                         pass
+                    # ISO 27001 A.9.4.2 — auth audit
+                    try:
+                        from audit_log import audit, A
+                        audit(A.AUTH_LOGIN_OK, severity='info',
+                              actor_user_id=str(user_id), actor_role=role or 'subscriber',
+                              metadata={'auth_source': 'local', 'email_masked': True})
+                    except Exception:
+                        pass
                     return jsonify({
                         "success": True, "token": token,
                         "user": {"id": user_id, "email": user_email, "name": user_name, "role": role},
                         "gdpr_consent": gdpr_consent, "message": "Přihlášení úspěšné"
                     })
+                else:
+                    # Local user existuje, ale špatné heslo
+                    try:
+                        from audit_log import audit, A
+                        audit(A.AUTH_LOGIN_FAIL, outcome='failure', severity='warning',
+                              actor_user_id=str(user_id), actor_role=role or 'subscriber',
+                              reason='wrong_password',
+                              metadata={'auth_source': 'local'})
+                    except Exception:
+                        pass
 
             # Not found locally or wrong password -> try WordPress
             try:
@@ -281,6 +299,13 @@ def auth_login():
                             )
                     except Exception:
                         pass
+                    try:
+                        from audit_log import audit, A
+                        audit(A.AUTH_LOGIN_OK, severity='info',
+                              actor_user_id=str(wp_id), actor_role=wp_role,
+                              metadata={'auth_source': 'wordpress'})
+                    except Exception:
+                        pass
                     return jsonify({
                         "success": True, "token": token,
                         "user": {"id": wp_id, "email": email, "name": wp_name, "role": wp_role},
@@ -289,6 +314,14 @@ def auth_login():
             except Exception:
                 pass
 
+        # Žádný úspěch — neznámý uživatel nebo špatné heslo (vč. WP fallback)
+        try:
+            from audit_log import audit, A
+            audit(A.AUTH_LOGIN_FAIL, outcome='failure', severity='warning',
+                  reason='invalid_credentials',
+                  metadata={'auth_source': 'unknown_user'})
+        except Exception:
+            pass
         return jsonify({"success": False, "error": "Nesprávný email nebo heslo", "code": "invalid_credentials"}), 401
 
     except Exception as e:
