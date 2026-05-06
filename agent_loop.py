@@ -578,40 +578,61 @@ def _get_recent_iot(user_id, sensor_types, minutes=60):
 
 
 def _detect_no_motion_during_day(user_id):
-    """T100 motion_age_s — žádný pohyb 6+ hodin v aktivní době (8-22h).
+    """T100 motion_detected — žádný pohyb 6+ hodin v aktivní době (8-22h).
 
-    Pokud T100 hlásí motion_age_s > 6h v denním okně → senior buď spí,
-    je v jiné místnosti, nebo má problém. INFO úroveň (ne CRISIS), sestra
-    se může zeptat.
+    Pohyb se loguje event-style (1 = právě detekován, 0 = klid). Detektor
+    hledá poslední row s value=1 napříč všemi T100 senzory. Pokud >6h
+    a jsme v 8-22h → INFO observation.
     """
     hour = datetime.utcnow().hour
     if hour < 8 or hour > 22:
         return None  # noční doba — žádný pohyb je očekávaný
-    rows = _get_recent_iot(user_id, ['motion_age_s'], minutes=15)
-    if not rows:
+
+    try:
+        from database import db_context
+        with db_context() as db:
+            ph = '?'  # PgCursorWrapper převede
+            if is_postgres():
+                row = db.execute(
+                    f"SELECT MAX(s.recorded_at) FROM iot_sensor_data s "
+                    f"JOIN iot_devices d ON d.device_id = s.device_id "
+                    f"WHERE d.user_id = {ph} AND s.sensor_type = 'motion_detected' "
+                    f"AND s.value > 0",
+                    (user_id,)
+                ).fetchone()
+            else:
+                row = db.execute(
+                    f"SELECT MAX(s.recorded_at) FROM iot_sensor_data s "
+                    f"JOIN iot_devices d ON d.device_id = s.device_id "
+                    f"WHERE d.user_id = {ph} AND s.sensor_type = 'motion_detected' "
+                    f"AND s.value > 0",
+                    (user_id,)
+                ).fetchone()
+            last_motion = row[0] if row else None
+    except Exception as e:
+        logger.debug(f"no_motion check: {e}")
         return None
-    # Vezmi nejnovější hodnotu pro každý device
-    latest = {}
-    for r in rows:
-        dev = r[0] if not isinstance(r, dict) else r['device_id']
-        if dev not in latest:
-            try:
-                val = float(r[3] if not isinstance(r, dict) else r['value'])
-                latest[dev] = val
-            except Exception:
-                pass
-    if not latest:
-        return None
-    # Pokud VŠECHNY motion senzory hlásí >6h bez pohybu
-    six_hours = 6 * 3600
-    if all(v >= six_hours for v in latest.values()):
-        max_age_h = max(latest.values()) / 3600
+
+    if not last_motion:
+        return None  # zatím žádné motion data → neeskaluj
+
+    # Spočti age v hodinách
+    if isinstance(last_motion, str):
+        try:
+            last_dt = datetime.fromisoformat(last_motion.replace('Z', '').split('+')[0])
+        except Exception:
+            return None
+    else:
+        last_dt = last_motion
+    age_h = (datetime.utcnow() - last_dt).total_seconds() / 3600
+
+    if age_h >= 6:
         return {
             "type": "no_motion_during_day",
             "severity": INFO,
-            "message": f"Žádný pohyb v bytě posledních {max_age_h:.1f} h. "
+            "message": f"Žádný pohyb v bytě posledních {age_h:.1f} h. "
                        f"Zkontrolujte, zda je senior v pořádku.",
-            "details": {"max_age_hours": round(max_age_h, 1),
+            "details": {"hours_since_motion": round(age_h, 1),
                         "active_hour": hour}
         }
     return None
@@ -713,11 +734,12 @@ def _detect_kitchen_inactivity(user_id):
 
 
 def _detect_battery_low(user_id):
-    """T100/T110 battery_pct < 20 % — výměna baterie nutná.
+    """T100/T110 low_battery flag — výměna baterie nutná.
 
+    Tapo public API neposkytuje % baterie u T100/T110, jen on/off threshold flag.
     Maintenance alert — pošle se pečujícímu (rodina/sestra), ne seniorovi.
     """
-    rows = _get_recent_iot(user_id, ['battery_pct'], minutes=60 * 24)
+    rows = _get_recent_iot(user_id, ['low_battery'], minutes=60 * 24)
     if not rows:
         return None
     by_dev = {}
@@ -725,13 +747,66 @@ def _detect_battery_low(user_id):
         dev = r[0]
         if dev not in by_dev:
             by_dev[dev] = float(r[3])
-    low = {dev: pct for dev, pct in by_dev.items() if pct < 20}
+    low = [dev for dev, flag in by_dev.items() if flag > 0]
     if low:
         return {
             "type": "battery_low",
             "severity": INFO,
             "message": f"Slabá baterie v {len(low)} senzorech. Je potřeba vyměnit.",
             "details": {"devices": low}
+        }
+    return None
+
+
+def _detect_gateway_offline(user_id):
+    """v8.19.108: Mini PC gateway hlásí heartbeat každých 60s.
+    Pokud > 5 min žádný → systém v bytě nefunguje, IoT data neproudí.
+
+    WARNING (technický stav, ne stav seniora). Pošle se pečujícímu/adminovi.
+    """
+    try:
+        from database import db_context
+        ph = '?'
+        with db_context() as db:
+            if is_postgres():
+                row = db.execute(
+                    f"SELECT MAX(s.recorded_at) FROM iot_sensor_data s "
+                    f"JOIN iot_devices d ON d.device_id = s.device_id "
+                    f"WHERE d.user_id = {ph} AND s.sensor_type = 'gateway_heartbeat'",
+                    (user_id,)
+                ).fetchone()
+            else:
+                row = db.execute(
+                    f"SELECT MAX(s.recorded_at) FROM iot_sensor_data s "
+                    f"JOIN iot_devices d ON d.device_id = s.device_id "
+                    f"WHERE d.user_id = {ph} AND s.sensor_type = 'gateway_heartbeat'",
+                    (user_id,)
+                ).fetchone()
+            last_hb = row[0] if row else None
+    except Exception as e:
+        logger.debug(f"gateway_offline check: {e}")
+        return None
+
+    if not last_hb:
+        return None  # gateway zatím nikdy neposlal — pravděpodobně ještě nezapnut
+
+    if isinstance(last_hb, str):
+        try:
+            last_dt = datetime.fromisoformat(last_hb.replace('Z', '').split('+')[0])
+        except Exception:
+            return None
+    else:
+        last_dt = last_hb
+    age_min = (datetime.utcnow() - last_dt).total_seconds() / 60
+
+    if age_min >= 5:
+        return {
+            "type": "gateway_offline",
+            "severity": WARNING,
+            "message": f"IoT gateway (mini PC v bytě) je {int(age_min)} min "
+                       f"offline. Senzory pohybu, dveří a spotřebičů "
+                       f"nereportují. Zkontrolujte PC + Wi-Fi.",
+            "details": {"minutes_offline": int(age_min)}
         }
     return None
 
@@ -766,6 +841,7 @@ TAPO_DETECTORS = (
     _detect_kitchen_inactivity,
     _detect_battery_low,
     _detect_hub_offline,
+    _detect_gateway_offline,
 )
 
 

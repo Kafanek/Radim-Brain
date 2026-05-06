@@ -131,14 +131,15 @@ def main():
     ap.add_argument('--tapo-email')
     ap.add_argument('--tapo-password')
     ap.add_argument('--output-env', default='gateway/.env')
-    ap.add_argument('--admin-secret')
+    # v8.19.108: --admin-secret arg odstraněn (shell history leak).
+    # Použij ENV nebo nech CLI promptnout (getpass, neukáže se).
     ap.add_argument('--non-interactive', action='store_true',
                     help='Fail if any required field missing instead of prompting')
     args = ap.parse_args()
 
     # --- Resolve admin secret ---
-    admin_secret = (args.admin_secret
-                    or os.environ.get('ADMIN_SECRET')
+    # Bez CLI argu (shell history) — jen env, heroku CLI fallback, nebo prompt.
+    admin_secret = (os.environ.get('ADMIN_SECRET')
                     or _heroku_admin_secret())
     if not admin_secret:
         if args.non_interactive:

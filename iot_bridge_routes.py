@@ -376,4 +376,50 @@ def list_devices():
             pass
 
 
-logger.info("✅ IoT Bridge Blueprint loaded — data ingestion + device management")
+@iot_bridge_bp.route('/heartbeat', methods=['POST', 'OPTIONS'])
+@require_iot_auth
+def gateway_heartbeat():
+    """v8.19.108: Gateway heartbeat — mini PC v bytě seniora hlásí, že žije.
+
+    Body: {senior_id, gateway_id?, version?, uptime_s?}
+    Zápis: iot_sensor_data sensor_type='gateway_heartbeat' value=1.
+    Detektor _detect_gateway_offline hlídá > 5 min stáří → WARNING.
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    data = request.get_json(silent=True) or {}
+    senior_id = data.get('senior_id') or ''
+    gateway_id = data.get('gateway_id') or 'tapo_gateway'
+    version = str(data.get('version') or '1.0')
+    uptime_s = data.get('uptime_s') or 0
+
+    if not senior_id:
+        return jsonify({'error': 'senior_id required'}), 400
+
+    db, is_pg = _get_db()
+    ph = _ph(is_pg)
+
+    try:
+        meta = json.dumps({'gateway_id': gateway_id, 'version': version,
+                           'uptime_s': uptime_s})
+        room_id = data.get('room_id') or 'gateway'
+        db.execute(f'''
+            INSERT INTO iot_sensor_data
+                (device_id, room_id, sensor_type, value, unit, metadata, recorded_at)
+            VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
+        ''', (gateway_id, room_id, 'gateway_heartbeat', 1.0, 'bool',
+              meta, datetime.utcnow()))
+        db.execute(f'UPDATE iot_devices SET last_seen = {ph} WHERE device_id = {ph}',
+                   (datetime.utcnow(), gateway_id))
+        return jsonify({'success': True,
+                        'received_at': datetime.utcnow().isoformat()}), 201
+    except Exception as e:
+        logger.warning(f"Heartbeat ingest error: {e}")
+        return jsonify({'error': 'ingest_failed'}), 500
+    finally:
+        try: db.close()
+        except Exception: pass
+
+
+logger.info("✅ IoT Bridge Blueprint loaded — data ingestion + devices + heartbeat")

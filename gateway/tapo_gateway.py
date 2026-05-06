@@ -128,6 +128,9 @@ DEVICES = {
 
 # ─── Posting layer ─────────────────────────────────────────────────────────
 
+_START_TIME = time.time()
+
+
 async def _post_batch(session, readings):
     """POST batch of readings to Heroku /api/iot-bridge/data/batch."""
     if not readings:
@@ -149,6 +152,30 @@ async def _post_batch(session, readings):
                 logger.info(f"POSTed {len(readings)} readings → {resp.status}")
     except Exception as e:
         logger.warning(f"POST error (will retry next tick): {e}")
+
+
+async def _post_heartbeat(session):
+    """v8.19.108: POST gateway heartbeat — backend ví, že mini PC žije.
+
+    Detektor _detect_gateway_offline triggeruje, pokud > 5 min nedostane HB.
+    """
+    if not IOT_TOKEN or not SENIOR_ID:
+        return
+    url = f"{RADIM_API.rstrip('/')}/api/iot-bridge/heartbeat"
+    headers = {"X-IoT-Token": IOT_TOKEN, "Content-Type": "application/json"}
+    payload = {
+        "senior_id": SENIOR_ID,
+        "gateway_id": f"gw_{ROOM_PREFIX}",
+        "version": "1.0",
+        "uptime_s": int(time.time() - _START_TIME),
+        "room_id": f"{ROOM_PREFIX}_gateway",
+    }
+    try:
+        async with session.post(url, json=payload, headers=headers, timeout=5) as resp:
+            if resp.status >= 400:
+                logger.warning(f"HB failed {resp.status}")
+    except Exception as e:
+        logger.debug(f"HB error: {e}")
 
 
 def _reading(device_id, room_id, sensor_type, value, unit="", metadata=None):
@@ -212,64 +239,76 @@ async def _poll_l510(client, dev_id, conf):
 
 
 async def _poll_h110_children(client, hub_conf):
-    """H110: query hub for child devices (T100, T110)."""
+    """H100/H110 hub: query for child devices (T100, T110).
+
+    API podle mihai-dinculescu/tapo lib — ověřeno z tapo_h100.py example:
+      • client.h100(ip)  ← stejná metoda i pro H110 (kompatibilní API)
+      • hub.get_child_device_list()
+      • T100: child.detected (bool)
+      • T110: child.open (bool)
+      • battery: child.at_low_battery (bool flag) — procenta nejsou
+        v public API, jen low/normal flag
+
+    Pro 'no motion N hours' detektor zapisujeme RŮZNĚ:
+      • motion_detected: 1 když právě detekován, 0 když ne — historie v DB
+        nám dá "kdy naposled byla 1" → odečteme age v detektoru
+    """
     out = []
     if not hub_conf["ip"]:
         return out
     try:
-        hub = await client.h110(hub_conf["ip"])
+        # H110 používá stejné API jako H100 — metoda je client.h100()
+        hub = await client.h100(hub_conf["ip"])
         children = await hub.get_child_device_list()
-        # Map by device_id (each child has unique id), find matching config
         for child in children:
-            ch_id = getattr(child, "device_id", None) or getattr(child, "nickname", None)
-            ch_model = getattr(child, "model", "") or ""
-            ch_name = getattr(child, "nickname", "") or ch_id
+            ch_name = (getattr(child, "nickname", "") or
+                       getattr(child, "device_id", "")) or "unknown"
+            ch_model = (getattr(child, "model", "") or "").upper()
 
-            # Matchování podle modelu — uživatel pojmenuje v Tapo app
-            # podle naší konvence (T100 v obýváku → "obyvak", atd.)
+            # T100 motion sensor — .detected je bool (live)
             if "T100" in ch_model:
-                # Motion sensor
-                # T100 doesn't push live state; it reports last_motion_time
-                # via hub's child device list (varies by lib version)
-                last_motion = getattr(child, "last_motion_time", None) or 0
-                # Convert epoch to "seconds since detected"
-                age_s = max(0, time.time() - int(last_motion)) if last_motion else 99999
+                detected = bool(getattr(child, "detected", False))
                 room = _resolve_child_room(ch_name, "obyvak")
                 out.append(_reading(
-                    f"t100_{room}", room, "motion_age_s",
-                    age_s, "seconds",
-                    {"name": ch_name, "model": "T100", "last_motion_unix": last_motion}
+                    f"t100_{room}", room, "motion_detected",
+                    1 if detected else 0, "bool",
+                    {"name": ch_name, "model": "T100"}
                 ))
-                # Battery level
-                bat = getattr(child, "battery_level", None) or getattr(child, "at_low_battery", None)
-                if bat is not None:
+                # Low-battery flag (separátní, ne procenta — Tapo public
+                # API procenta nedává, jen on/off threshold)
+                low_bat = getattr(child, "at_low_battery", None)
+                if low_bat is not None:
                     out.append(_reading(
-                        f"t100_{room}", room, "battery_pct",
-                        100 if bat is True else (0 if bat is False else float(bat)),
-                        "percent", {"name": ch_name, "model": "T100"}
+                        f"t100_{room}", room, "low_battery",
+                        1 if bool(low_bat) else 0, "bool",
+                        {"name": ch_name, "model": "T100"}
                     ))
 
+            # T110 contact sensor — .open je bool (live)
             elif "T110" in ch_model:
-                # Contact sensor — open/closed state
-                opened = getattr(child, "open", None)
-                if opened is None:
-                    opened = getattr(child, "is_open", False)
+                opened = bool(getattr(child, "open", False))
                 room = _resolve_child_room(ch_name, "chodba")
                 out.append(_reading(
                     f"t110_{room}", room, "contact_state",
                     1 if opened else 0, "bool",
                     {"name": ch_name, "model": "T110"}
                 ))
+                low_bat = getattr(child, "at_low_battery", None)
+                if low_bat is not None:
+                    out.append(_reading(
+                        f"t110_{room}", room, "low_battery",
+                        1 if bool(low_bat) else 0, "bool",
+                        {"name": ch_name, "model": "T110"}
+                    ))
 
-        # Hub itself
+        # Hub samo o sobě — heartbeat
         out.append(_reading(
             "h110_hub", hub_conf["room"], "hub_online", 1, "bool",
             {"name": hub_conf["name"], "model": "H110",
              "children_count": len(children)}
         ))
     except Exception as e:
-        logger.warning(f"H110 hub poll failed: {e}")
-        # Hub offline event
+        logger.warning(f"H100/H110 hub poll failed: {e}")
         out.append(_reading(
             "h110_hub", hub_conf["room"], "hub_online", 0, "bool",
             {"error": str(e)[:100]}
@@ -321,8 +360,9 @@ async def main():
                 elif conf["type"] == "H110":
                     readings.extend(await _poll_h110_children(client, conf))
 
-            # Send batch
+            # Send batch + heartbeat
             await _post_batch(session, readings)
+            await _post_heartbeat(session)
 
             elapsed = time.time() - t0
             sleep_s = max(1, POLL_S - elapsed)

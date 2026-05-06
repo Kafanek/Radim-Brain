@@ -144,6 +144,31 @@ def require_auth(f):
         g.auth_user = payload.get('user', {})
         g.auth_payload = payload
 
+        # v8.19.108: track last_active (best-effort, non-blocking).
+        # Update jen pokud je předchozí hodnota >5 min stará — chrání
+        # hot path před zbytečnými UPDATE per request.
+        try:
+            uid = g.auth_user.get('id')
+            if uid:
+                from database import db_context, is_postgres
+                with db_context(commit=True) as _db:
+                    if is_postgres():
+                        _db.execute(
+                            "UPDATE auth_users SET last_active = NOW() "
+                            "WHERE id = ? AND (last_active IS NULL "
+                            "OR last_active < NOW() - INTERVAL '5 minutes')",
+                            (uid,)
+                        )
+                    else:
+                        _db.execute(
+                            "UPDATE auth_users SET last_active = CURRENT_TIMESTAMP "
+                            "WHERE id = ? AND (last_active IS NULL "
+                            "OR last_active < datetime('now', '-5 minutes'))",
+                            (uid,)
+                        )
+        except Exception:
+            pass  # never block request on telemetry
+
         return f(*args, **kwargs)
     return decorated
 
