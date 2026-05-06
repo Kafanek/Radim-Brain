@@ -43,7 +43,7 @@ def run_integrity_check(window_days=7):
         with db_context() as db:
             row = db.execute(
                 "SELECT MIN(id) FROM audit_log "
-                f"WHERE timestamp > NOW() - INTERVAL '{int(window_days)} days' "
+                f"WHERE created_at > NOW() - INTERVAL '{int(window_days)} days' "
                 "AND current_hash IS NOT NULL"
             ).fetchone()
             start_id = (row[0] if row and row[0] else 1)
@@ -153,25 +153,25 @@ def run_retention_cleanup(retention_days=None, batch_size=1000):
             with db_context(commit=True) as db:
                 if is_postgres():
                     rows = db.execute(
-                        "SELECT id, timestamp, user_id, user_email, user_role, "
+                        "SELECT id, created_at, user_id, user_email, user_role, "
                         "  action, outcome, severity, resource_type, resource_id, "
                         "  senior_id, reason, before_state, after_state, details, "
                         "  ip_address, user_agent, session_id, request_id, "
                         "  release_version, dyno, prev_hash, current_hash "
                         "FROM audit_log "
-                        f"WHERE timestamp < NOW() - INTERVAL '{int(days)} days' "
+                        f"WHERE created_at < NOW() - INTERVAL '{int(days)} days' "
                         "ORDER BY id ASC LIMIT ?",
                         (batch_size,)
                     ).fetchall()
                 else:
                     rows = db.execute(
-                        "SELECT id, timestamp, user_id, user_email, user_role, "
+                        "SELECT id, created_at, user_id, user_email, user_role, "
                         "  action, outcome, severity, resource_type, resource_id, "
                         "  senior_id, reason, before_state, after_state, details, "
                         "  ip_address, user_agent, session_id, request_id, "
                         "  release_version, dyno, prev_hash, current_hash "
                         "FROM audit_log "
-                        f"WHERE timestamp < datetime('now', '-{int(days)} days') "
+                        f"WHERE created_at < datetime('now', '-{int(days)} days') "
                         "ORDER BY id ASC LIMIT ?",
                         (batch_size,)
                     ).fetchall()

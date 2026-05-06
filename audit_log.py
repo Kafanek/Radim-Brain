@@ -42,32 +42,36 @@ logger = logging.getLogger(__name__)
 # SCHEMA — v2 migration (idempotentní)
 # ═══════════════════════════════════════════════════════════════════════════
 
-AUDIT_SCHEMA_V1 = """
+# Production base schema (database_schema.py v3.9): id, user_id, action,
+# resource, detail, ip_address, created_at. Code writes use created_at as
+# the canonical timestamp column.
+AUDIT_SCHEMA_BASE = """
     CREATE TABLE IF NOT EXISTS audit_log (
         id BIGSERIAL PRIMARY KEY,
-        timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         user_id TEXT,
-        user_email TEXT,
-        user_role TEXT,
         action TEXT NOT NULL,
-        resource_type TEXT,
-        resource_id TEXT,
-        senior_id TEXT,
-        details JSONB DEFAULT '{}',
+        resource TEXT,
+        detail TEXT,
         ip_address TEXT,
-        user_agent TEXT,
-        session_id TEXT,
-        success BOOLEAN DEFAULT true
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     );
-
-    CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
-    CREATE INDEX IF NOT EXISTS idx_audit_senior ON audit_log(senior_id);
-    CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
-    CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_log(timestamp DESC);
 """
 
-# v2 dodatečné sloupce (každý řádek samostatně, idempotentně)
+# v2 sloupce — všechno ADD COLUMN IF NOT EXISTS (idempotentní)
+# Pokrývají i v1 sloupce (user_email, user_role, etc.) protože staré
+# produkční schéma je přidávalo později.
 AUDIT_SCHEMA_V2_COLUMNS = [
+    # v1 columns that may not exist on old prod tables
+    "ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS user_email TEXT",
+    "ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS user_role TEXT",
+    "ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS resource_type TEXT",
+    "ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS resource_id TEXT",
+    "ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS senior_id TEXT",
+    "ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS details JSONB DEFAULT '{}'",
+    "ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS user_agent TEXT",
+    "ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS session_id TEXT",
+    "ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS success BOOLEAN DEFAULT true",
+    # v2 ISO 27001 columns
     "ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS outcome TEXT DEFAULT 'success'",
     "ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS severity TEXT DEFAULT 'info'",
     "ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS reason TEXT",
@@ -81,43 +85,52 @@ AUDIT_SCHEMA_V2_COLUMNS = [
 ]
 
 AUDIT_SCHEMA_V2_INDEXES = [
-    "CREATE INDEX IF NOT EXISTS idx_audit_outcome_ts ON audit_log(outcome, timestamp DESC) WHERE outcome != 'success'",
-    "CREATE INDEX IF NOT EXISTS idx_audit_severity_ts ON audit_log(severity, timestamp DESC) WHERE severity != 'info'",
+    "CREATE INDEX IF NOT EXISTS idx_audit_user_ts ON audit_log(user_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_action_ts ON audit_log(action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_outcome_ts ON audit_log(outcome, created_at DESC) WHERE outcome != 'success'",
+    "CREATE INDEX IF NOT EXISTS idx_audit_severity_ts ON audit_log(severity, created_at DESC) WHERE severity != 'info'",
     "CREATE INDEX IF NOT EXISTS idx_audit_resource ON audit_log(resource_type, resource_id)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_senior ON audit_log(senior_id)",
 ]
 
 
 def init_audit_schema():
-    """Idempotentní migrace v1 → v2. Bezpečné volat při každém boot."""
+    """Idempotentní migrace base → v2. Bezpečné volat při každém boot.
+
+    Každý ALTER/CREATE INDEX je v samostatné tx — pokud jeden selže (např.
+    starší PG, neexistující sloupec), ostatní pokračují.
+    """
     try:
         from database import db_context, is_postgres
         if not is_postgres():
-            # SQLite (lokální dev) — jen v1 schema
+            # SQLite (lokální dev) — jen base schema
             with db_context(commit=True) as db:
-                for stmt in AUDIT_SCHEMA_V1.strip().split(';'):
-                    s = stmt.strip()
-                    if s:
-                        db.execute(s)
+                db.execute(AUDIT_SCHEMA_BASE.strip())
             return
 
-        with db_context(commit=True) as db:
-            # v1 base
-            for stmt in AUDIT_SCHEMA_V1.strip().split(';'):
-                s = stmt.strip()
-                if s:
-                    db.execute(s)
-            # v2 columns (každý samostatná tx — některé už můžou existovat)
-            for stmt in AUDIT_SCHEMA_V2_COLUMNS:
-                try:
+        # PG: base table (CREATE IF NOT EXISTS = no-op pokud existuje)
+        try:
+            with db_context(commit=True) as db:
+                db.execute(AUDIT_SCHEMA_BASE.strip())
+        except Exception as e:
+            logger.debug(f"Audit base schema: {e}")
+
+        # Každý ALTER samostatně, aby selhání jednoho nezabilo zbytek
+        for stmt in AUDIT_SCHEMA_V2_COLUMNS:
+            try:
+                with db_context(commit=True) as db:
                     db.execute(stmt)
-                except Exception as e:
-                    logger.debug(f"Audit migration skip: {e}")
-            # v2 indexes
-            for stmt in AUDIT_SCHEMA_V2_INDEXES:
-                try:
+            except Exception as e:
+                logger.debug(f"Audit migration skip: {e}")
+
+        # Indexy taky každý zvlášť
+        for stmt in AUDIT_SCHEMA_V2_INDEXES:
+            try:
+                with db_context(commit=True) as db:
                     db.execute(stmt)
-                except Exception as e:
-                    logger.debug(f"Audit index skip: {e}")
+            except Exception as e:
+                logger.debug(f"Audit index skip: {e}")
+
         logger.info("📋 audit_log schema v2 ready")
     except Exception as e:
         logger.warning(f"Audit schema init failed: {e}")
@@ -291,7 +304,7 @@ def verify_chain(start_id=1, limit=10000):
     from database import db_context
     with db_context() as db:
         rows = db.execute(
-            "SELECT id, prev_hash, current_hash, timestamp, user_id, user_role, "
+            "SELECT id, prev_hash, current_hash, created_at, user_id, user_role, "
             "action, outcome, severity, resource_type, resource_id, reason, "
             "before_state, after_state, details, ip_address, user_agent, "
             "request_id, release_version, dyno, session_id "
@@ -313,7 +326,7 @@ def verify_chain(start_id=1, limit=10000):
             return {'ok': False, 'broken_at': rid, 'checked': checked,
                     'reason': 'prev_hash mismatch'}
         record = {
-            'timestamp': ts, 'user_id': uid, 'user_role': urole,
+            'created_at': ts, 'user_id': uid, 'user_role': urole,
             'action': act, 'outcome': outc, 'severity': sev,
             'resource_type': rtype, 'resource_id': rid_,
             'reason': reason, 'before_state': before, 'after_state': after,
@@ -378,7 +391,7 @@ def _normalize(action, kwargs):
         severity = 'info'
 
     return {
-        'timestamp': datetime.now(timezone.utc),
+        'created_at': datetime.now(timezone.utc),
         'user_id': actor_user_id or None,
         'user_email': actor_email or None,
         'user_role': actor_role,
@@ -433,13 +446,13 @@ def audit(action, **kwargs):
         with db_context(commit=True) as db:
             db.execute(
                 "INSERT INTO audit_log "
-                "(timestamp, user_id, user_email, user_role, action, "
+                "(created_at, user_id, user_email, user_role, action, "
                 " resource_type, resource_id, senior_id, details, "
                 " ip_address, user_agent, session_id, success, "
                 " outcome, severity, reason, before_state, after_state, "
                 " request_id, release_version, dyno, prev_hash, current_hash) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (record['timestamp'], record['user_id'], record['user_email'],
+                (record['created_at'], record['user_id'], record['user_email'],
                  record['user_role'], record['action'], record['resource_type'],
                  record['resource_id'], record['senior_id'],
                  json.dumps(record['details']) if record['details'] is not None else '{}',
@@ -518,16 +531,16 @@ def get_audit_trail(senior_id=None, user_id=None, action=None, outcome=None,
             conditions.append("severity = ?")
             params.append(severity)
 
-        conditions.append(f"timestamp > NOW() - INTERVAL '{int(days)} days'")
+        conditions.append(f"created_at > NOW() - INTERVAL '{int(days)} days'")
         where = " AND ".join(conditions) if conditions else "1=1"
 
         with db_context() as db:
             rows = db.execute(
-                f"SELECT id, timestamp, user_id, user_email, user_role, action, "
+                f"SELECT id, created_at, user_id, user_email, user_role, action, "
                 f"  outcome, severity, resource_type, resource_id, senior_id, "
                 f"  reason, details, ip_address, request_id, release_version, dyno "
                 f"FROM audit_log WHERE {where} "
-                f"ORDER BY timestamp DESC LIMIT ?",
+                f"ORDER BY created_at DESC LIMIT ?",
                 (*params, int(limit))
             ).fetchall()
 
@@ -606,7 +619,7 @@ def audit_stats():
         with db_context() as db:
             rows = db.execute(
                 "SELECT action, outcome, COUNT(*) FROM audit_log "
-                "WHERE timestamp > NOW() - INTERVAL '30 days' "
+                "WHERE created_at > NOW() - INTERVAL '30 days' "
                 "GROUP BY action, outcome ORDER BY action"
             ).fetchall()
         stats = {}
