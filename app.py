@@ -2008,6 +2008,275 @@ def admin_debug_prompt(user_id):
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 # v382: Admin seed demo data
+@app.route('/api/admin/pilot-setup', methods=['POST', 'OPTIONS'])
+def admin_pilot_setup():
+    """v8.19.108 — sjednocený setup pro 1 pilotní byt.
+
+    Idempotentní (find-or-create). Volej z scripts/setup_pilot.py.
+
+    Body:
+      {
+        "senior":     {"email": "...", "name": "...", "password": "..." | null,
+                        "age": 82},
+        "nurse":      {"email": "...", "name": "...", "password": "..." | null},
+        "apartment":  {"prefix": "byt_novakova", "address": "..." (optional)},
+        "tapo": {                  # zařízení s předpokládaným modelem
+          "h110_hub":         {"model": "H110", "room": "byt_novakova_chodba"},
+          "t100_obyvak":      {"model": "T100", "room": "byt_novakova_obyvak"},
+          "t110_dvere":       {"model": "T110", "room": "byt_novakova_chodba"},
+          "p115_rychlovarka": {"model": "P115", "room": "byt_novakova_kuchyne"},
+          "p115_mikrovlnka":  {"model": "P115", "room": "byt_novakova_kuchyne"},
+          "l510e_loznice":    {"model": "L510", "room": "byt_novakova_loznice"}
+        }
+      }
+
+    Co dělá (vše v jedné transakci):
+      1. auth_users — find_or_create senior (role='senior') a nurse (role='nurse').
+         Pokud password=None, vygeneruje 16-char random + vrátí v response.
+      2. memory_profiles — vytvoří/aktualizuje senior profil (name, age).
+      3. senior_family_links — vazba senior → nurse, relation='nurse',
+         confirmed_at=NOW, sos_priority=1, notify_on_sos=true.
+      4. iot_devices — pre-register 6 Tapo zařízení s user_id=senior, room_id,
+         device_type=model.
+      5. audit() — log admin.pilot.setup (ISO 27001).
+
+    Returns:
+      {
+        success, senior: {id, email, password_generated?},
+        nurse: {id, email, password_generated?},
+        link_id, iot_devices_registered: N,
+        gateway_env: {                    ← copy do mini PC .env
+          IOT_GATEWAY_TOKEN, RADIM_SENIOR_ID, RADIM_API_BASE, RADIM_ROOM_PREFIX
+        }
+      }
+    """
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    body = request.get_json(silent=True) or {}
+    senior_in = body.get('senior') or {}
+    nurse_in = body.get('nurse') or {}
+    apt = body.get('apartment') or {}
+    tapo_devs = body.get('tapo') or {}
+
+    if not senior_in.get('email') or not nurse_in.get('email'):
+        return jsonify({'error': 'senior.email + nurse.email required'}), 400
+
+    import secrets, string
+    def _gen_pwd():
+        alphabet = string.ascii_letters + string.digits
+        return ''.join(secrets.choice(alphabet) for _ in range(16))
+
+    try:
+        from auth_routes import _hash_password
+        from database import db_context, is_postgres, db_insert
+        import json as _json
+
+        result = {'success': True}
+
+        # ---- 1. SENIOR account ----
+        with db_context(commit=True) as db:
+            row = db.execute(
+                "SELECT id, role FROM auth_users WHERE email = ?",
+                (senior_in['email'],)
+            ).fetchone()
+            senior_pwd_returned = None
+            if row:
+                senior_id = row['id'] if isinstance(row, dict) else row[0]
+                # Update role to 'senior' if not already
+                db.execute("UPDATE auth_users SET role = 'senior' WHERE id = ?", (senior_id,))
+            else:
+                pwd = senior_in.get('password') or _gen_pwd()
+                pwd_hash = _hash_password(pwd)
+                if is_postgres():
+                    senior_id = db.execute(
+                        "INSERT INTO auth_users (email, password_hash, name, role) "
+                        "VALUES (?, ?, ?, 'senior') RETURNING id",
+                        (senior_in['email'], pwd_hash, senior_in.get('name', ''))
+                    ).fetchone()[0]
+                else:
+                    cur = db.execute(
+                        "INSERT INTO auth_users (email, password_hash, name, role) "
+                        "VALUES (?, ?, ?, 'senior')",
+                        (senior_in['email'], pwd_hash, senior_in.get('name', ''))
+                    )
+                    senior_id = cur.lastrowid
+                senior_pwd_returned = pwd
+
+            result['senior'] = {
+                'id': str(senior_id),
+                'email': senior_in['email'],
+                'name': senior_in.get('name', ''),
+                'password_generated': senior_pwd_returned,  # only if newly created
+            }
+
+            # ---- 2. NURSE account ----
+            row = db.execute(
+                "SELECT id FROM auth_users WHERE email = ?",
+                (nurse_in['email'],)
+            ).fetchone()
+            nurse_pwd_returned = None
+            if row:
+                nurse_id = row['id'] if isinstance(row, dict) else row[0]
+                db.execute("UPDATE auth_users SET role = 'nurse' WHERE id = ?", (nurse_id,))
+            else:
+                pwd = nurse_in.get('password') or _gen_pwd()
+                pwd_hash = _hash_password(pwd)
+                if is_postgres():
+                    nurse_id = db.execute(
+                        "INSERT INTO auth_users (email, password_hash, name, role) "
+                        "VALUES (?, ?, ?, 'nurse') RETURNING id",
+                        (nurse_in['email'], pwd_hash, nurse_in.get('name', ''))
+                    ).fetchone()[0]
+                else:
+                    cur = db.execute(
+                        "INSERT INTO auth_users (email, password_hash, name, role) "
+                        "VALUES (?, ?, ?, 'nurse')",
+                        (nurse_in['email'], pwd_hash, nurse_in.get('name', ''))
+                    )
+                    nurse_id = cur.lastrowid
+                nurse_pwd_returned = pwd
+
+            result['nurse'] = {
+                'id': str(nurse_id),
+                'email': nurse_in['email'],
+                'name': nurse_in.get('name', ''),
+                'password_generated': nurse_pwd_returned,
+            }
+
+            # ---- 3. memory_profiles (senior) ----
+            profile_data = {
+                'name': senior_in.get('name', ''),
+                'age': senior_in.get('age'),
+                'apartment': apt.get('address', ''),
+                'pilot_apartment_prefix': apt.get('prefix', 'byt'),
+            }
+            existing = db.execute(
+                "SELECT user_id FROM memory_profiles WHERE user_id = ?",
+                (str(senior_id),)
+            ).fetchone()
+            if existing:
+                db.execute(
+                    "UPDATE memory_profiles SET data = ?::jsonb, updated_at = NOW() WHERE user_id = ?"
+                    if is_postgres() else
+                    "UPDATE memory_profiles SET data = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+                    (_json.dumps(profile_data), str(senior_id))
+                )
+            else:
+                db.execute(
+                    "INSERT INTO memory_profiles (user_id, data) VALUES (?, ?)",
+                    (str(senior_id), _json.dumps(profile_data))
+                )
+
+            # ---- 4. senior_family_links (senior ↔ nurse) ----
+            link = db.execute(
+                "SELECT id FROM senior_family_links WHERE senior_id = ? AND family_user_id = ?",
+                (str(senior_id), str(nurse_id))
+            ).fetchone()
+            if link:
+                link_id = link['id'] if isinstance(link, dict) else link[0]
+                # Re-confirm if previously revoked
+                db.execute(
+                    "UPDATE senior_family_links SET confirmed_at = NOW(), revoked_at = NULL, "
+                    "relation = 'nurse', sos_priority = 1, notify_on_sos = true, "
+                    "notify_on_crisis = true, notify_on_daily = true WHERE id = ?"
+                    if is_postgres() else
+                    "UPDATE senior_family_links SET confirmed_at = CURRENT_TIMESTAMP, revoked_at = NULL, "
+                    "relation = 'nurse', sos_priority = 1, notify_on_sos = 1, "
+                    "notify_on_crisis = 1, notify_on_daily = 1 WHERE id = ?",
+                    (link_id,)
+                )
+            else:
+                if is_postgres():
+                    link_id = db.execute(
+                        "INSERT INTO senior_family_links "
+                        "(senior_id, family_user_id, family_email, family_name, relation, "
+                        " confirmed_at, sos_priority, notify_on_sos, notify_on_crisis, notify_on_daily) "
+                        "VALUES (?, ?, ?, ?, 'nurse', NOW(), 1, true, true, true) RETURNING id",
+                        (str(senior_id), str(nurse_id), nurse_in['email'],
+                         nurse_in.get('name', ''))
+                    ).fetchone()[0]
+                else:
+                    cur = db.execute(
+                        "INSERT INTO senior_family_links "
+                        "(senior_id, family_user_id, family_email, family_name, relation, "
+                        " confirmed_at, sos_priority, notify_on_sos, notify_on_crisis, notify_on_daily) "
+                        "VALUES (?, ?, ?, ?, 'nurse', CURRENT_TIMESTAMP, 1, 1, 1, 1)",
+                        (str(senior_id), str(nurse_id), nurse_in['email'],
+                         nurse_in.get('name', ''))
+                    )
+                    link_id = cur.lastrowid
+            result['link_id'] = link_id
+
+            # ---- 5. iot_devices (pre-register Tapo) ----
+            if not tapo_devs:
+                # Default sada pro 1 byt
+                prefix = apt.get('prefix', 'byt')
+                tapo_devs = {
+                    'h110_hub':         {'model': 'H110', 'room': f'{prefix}_chodba'},
+                    't100_obyvak':      {'model': 'T100', 'room': f'{prefix}_obyvak'},
+                    't110_dvere':       {'model': 'T110', 'room': f'{prefix}_chodba'},
+                    'p115_rychlovarka': {'model': 'P115', 'room': f'{prefix}_kuchyne'},
+                    'p115_mikrovlnka':  {'model': 'P115', 'room': f'{prefix}_kuchyne'},
+                    'l510e_loznice':    {'model': 'L510', 'room': f'{prefix}_loznice'},
+                }
+
+            registered = 0
+            for dev_id, conf in tapo_devs.items():
+                model = conf.get('model', '?')
+                room = conf.get('room', f"{apt.get('prefix','byt')}_unknown")
+                name = conf.get('name', dev_id.replace('_', ' ').title())
+                existing_dev = db.execute(
+                    "SELECT id FROM iot_devices WHERE device_id = ?",
+                    (dev_id,)
+                ).fetchone()
+                if existing_dev:
+                    db.execute(
+                        "UPDATE iot_devices SET user_id = ?, room_id = ?, device_type = ?, "
+                        "name = ?, status = 'pending_pairing' WHERE device_id = ?",
+                        (str(senior_id), room, model, name, dev_id)
+                    )
+                else:
+                    db.execute(
+                        "INSERT INTO iot_devices (device_id, user_id, room_id, device_type, "
+                        "name, status, config) VALUES (?, ?, ?, ?, ?, 'pending_pairing', ?)",
+                        (dev_id, str(senior_id), room, model, name, '{}')
+                    )
+                registered += 1
+            result['iot_devices_registered'] = registered
+
+        # ---- 6. ISO 27001 audit ----
+        try:
+            from audit_log import audit
+            audit('admin.pilot.setup',
+                  resource_type='pilot_apartment',
+                  resource_id=str(senior_id),
+                  metadata={
+                      'apartment_prefix': apt.get('prefix'),
+                      'nurse_id': str(nurse_id),
+                      'iot_devices': registered,
+                  })
+        except Exception:
+            pass
+
+        # ---- Output gateway env vars ----
+        result['gateway_env'] = {
+            'IOT_GATEWAY_TOKEN': os.environ.get('IOT_GATEWAY_TOKEN', '<SET-ON-HEROKU>'),
+            'RADIM_SENIOR_ID': str(senior_id),
+            'RADIM_API_BASE': 'https://radim-brain-2025-be1cd52b04dc.herokuapp.com',
+            'RADIM_ROOM_PREFIX': apt.get('prefix', 'byt'),
+            'POLL_INTERVAL_SECONDS': '30',
+        }
+
+        return jsonify(result), 201
+
+    except Exception as e:
+        logger.error(f"Pilot setup error: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)[:200]}), 500
+
+
 @app.route('/api/admin/seed-demo', methods=['POST', 'OPTIONS'])
 def admin_seed_demo():
     """Create demo senior with 7 days of brain_states for agent loop testing."""
