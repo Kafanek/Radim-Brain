@@ -304,10 +304,15 @@ def verify_chain(start_id=1, limit=10000):
     from database import db_context
     with db_context() as db:
         rows = db.execute(
-            "SELECT id, prev_hash, current_hash, created_at, user_id, user_role, "
-            "action, outcome, severity, resource_type, resource_id, reason, "
-            "before_state, after_state, details, ip_address, user_agent, "
-            "request_id, release_version, dyno, session_id "
+            # SELECT vrací VŠECHNY sloupce, které šly do hash při INSERT.
+            # Pořadí MUSÍ matchovat audit() insert recordu.
+            "SELECT id, prev_hash, current_hash, "
+            "       created_at, user_id, user_email, user_role, "
+            "       action, outcome, severity, "
+            "       resource_type, resource_id, senior_id, "
+            "       reason, before_state, after_state, details, "
+            "       ip_address, user_agent, session_id, "
+            "       request_id, release_version, dyno, success "
             "FROM audit_log WHERE id >= ? AND current_hash IS NOT NULL "
             "ORDER BY id ASC LIMIT ?",
             (start_id, limit)
@@ -315,29 +320,42 @@ def verify_chain(start_id=1, limit=10000):
 
     expected_prev = _GENESIS_HASH if start_id <= 1 else None
     if start_id > 1 and rows:
-        # Vezmi prev_hash prvního řádku jako výchozí
+        # Vezmi prev_hash prvního řádku jako výchozí (continuing chain)
         expected_prev = rows[0][1]
 
     checked = 0
     for r in rows:
-        (rid, prev_h, cur_h, ts, uid, urole, act, outc, sev, rtype, rid_,
-         reason, before, after, details, ip, ua, req_id, rel, dyno, sess) = r
+        # DictRow extends dict — tuple unpack would yield KEYS, not values.
+        # Always index positionally.
+        rid     = r[0];   prev_h  = r[1];   cur_h   = r[2]
+        ts      = r[3];   uid     = r[4];   email   = r[5];   urole   = r[6]
+        act     = r[7];   outc    = r[8];   sev     = r[9]
+        rtype   = r[10];  rid_    = r[11];  sen_id  = r[12]
+        reason  = r[13];  before  = r[14];  after   = r[15];  details = r[16]
+        ip      = r[17];  ua      = r[18];  sess    = r[19]
+        req_id  = r[20];  rel     = r[21];  dyno    = r[22];  succ    = r[23]
+
         if expected_prev is not None and prev_h != expected_prev:
-            return {'ok': False, 'broken_at': rid, 'checked': checked,
+            return {'ok': False, 'broken_at': int(rid), 'checked': checked,
                     'reason': 'prev_hash mismatch'}
+
+        # Pořadí klíčů nezáleží — canonical_json sortí klíče. Klíče MUSÍ
+        # přesně odpovídat audit() insert recordu (viz _normalize výše).
         record = {
-            'created_at': ts, 'user_id': uid, 'user_role': urole,
-            'action': act, 'outcome': outc, 'severity': sev,
-            'resource_type': rtype, 'resource_id': rid_,
-            'reason': reason, 'before_state': before, 'after_state': after,
-            'details': details, 'ip_address': ip, 'user_agent': ua,
+            'created_at': ts, 'user_id': uid, 'user_email': email,
+            'user_role': urole, 'action': act, 'outcome': outc,
+            'severity': sev, 'resource_type': rtype, 'resource_id': rid_,
+            'senior_id': sen_id, 'reason': reason,
+            'before_state': before, 'after_state': after, 'details': details,
+            'ip_address': ip, 'user_agent': ua, 'session_id': sess,
             'request_id': req_id, 'release_version': rel, 'dyno': dyno,
-            'session_id': sess,
+            'success': succ,
         }
         recomputed = _compute_hash(prev_h or _GENESIS_HASH, record)
         if recomputed != cur_h:
-            return {'ok': False, 'broken_at': rid, 'checked': checked,
-                    'reason': 'current_hash mismatch'}
+            return {'ok': False, 'broken_at': int(rid), 'checked': checked,
+                    'reason': 'current_hash mismatch',
+                    'expected': recomputed[:16], 'stored': (cur_h or '')[:16]}
         expected_prev = cur_h
         checked += 1
 
