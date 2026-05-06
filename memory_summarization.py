@@ -196,6 +196,13 @@ def _call_gemini_for_summary(prompt):
 
 def _call_claude_for_summary(prompt):
     """Fallback to Claude if Gemini unavailable."""
+    # v8.19.106: Master kill switch when Anthropic credit is depleted.
+    # Skips silently — caller already handles None as "summary unavailable".
+    if os.environ.get('DISABLE_ANTHROPIC', '').lower() in ('1', 'true', 'yes'):
+        return None
+    if os.environ.get('DISABLE_HEALTH_AGENT', '').lower() in ('1', 'true', 'yes'):
+        # Reuse the existing flag — semantically the same condition (no credit).
+        return None
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         return None
