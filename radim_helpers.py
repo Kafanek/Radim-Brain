@@ -371,11 +371,21 @@ def _safety_log_crisis_event(user_id, message, severity):
                 "INSERT INTO crisis_events (user_id, message_excerpt, brain_c) VALUES (?, ?, ?)",
                 (user_id, message[:300], 30.0 if severity == 'critical' else 20.0)
             )
-            db.execute(
-                "INSERT INTO audit_log (user_id, action, resource, detail) VALUES (?, ?, ?, ?)",
-                (user_id, 'crisis_alert', 'safety',
-                 json.dumps({'severity': severity, 'message': message[:200]}, ensure_ascii=False))
+
+        # v8.19.108: audit log nyní přes hash chain audit() místo přímého INSERT.
+        try:
+            from audit_log import audit
+            audit(
+                'safety.crisis_alert',
+                actor_user_id=user_id,
+                resource_type='safety',
+                severity='critical' if severity == 'critical' else 'warning',
+                outcome='success',
+                metadata={'severity': severity, 'message_excerpt': message[:200]},
             )
+        except Exception as audit_err:
+            logger.warning(f"SAFETY audit log failed: {audit_err}")
+
         logger.info(f"SAFETY: Crisis event logged for user {user_id}, severity={severity}")
 
     except Exception as e:

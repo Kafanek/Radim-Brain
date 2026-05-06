@@ -48,17 +48,38 @@ def get_gdpr_consent(user_id: str) -> dict:
 
 
 def audit_log(user_id: str, action: str, resource: str = None, detail: str = None, ip_address: str = None):
-    """Zapiš audit log záznam pro GDPR compliance."""
-    if not _DB_AVAILABLE:
-        return
+    """Zapiš audit log záznam — DELEGUJE na audit_log.audit() pro hash chain.
+
+    v8.19.108: Předtím direct INSERT bez hashování → ~99 % auditních řádků
+    mělo current_hash=NULL. Teď delegujeme na hashing audit() funkci,
+    všichni existující volači beze změny kódu.
+
+    Mapování:
+      user_id    → actor_user_id (override default z g.auth_user)
+      action     → action (zachováno)
+      resource   → resource_type
+      detail     → reason (krátké) nebo metadata.legacy_detail (delší)
+      ip_address → metadata.legacy_ip (audit() jinak vezme z request)
+    """
     try:
-        with db_context(commit=True) as db:
-            db.execute(
-                "INSERT INTO audit_log (user_id, action, resource, detail, ip_address) VALUES (?, ?, ?, ?, ?)",
-                (user_id, action, resource, detail, ip_address)
-            )
+        from audit_log import audit  # náš modul, ne self-recursion (jiný name space)
+        meta = {}
+        if ip_address:
+            meta['legacy_ip'] = ip_address
+        if detail and len(str(detail)) > 512:
+            meta['legacy_detail'] = str(detail)[:4096]
+            reason_arg = None
+        else:
+            reason_arg = detail
+        audit(
+            action,
+            actor_user_id=user_id,
+            resource_type=resource,
+            reason=reason_arg,
+            metadata=(meta or None),
+        )
     except Exception as e:
-        logger.warning(f"Audit log write error (non-fatal): {e}")
+        logger.warning(f"Audit log delegation error (non-fatal): {e}")
 
 
 def save_gdpr_consent(user_id: str, consent: dict):
