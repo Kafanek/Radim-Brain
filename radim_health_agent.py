@@ -876,6 +876,12 @@ QUICK_TOOLS = [t for t in TOOLS if t['name'] in (
 
 def run_health_check():
     """Run QUICK health check (fits in 30s Heroku timeout)."""
+    # v8.19.106: Belt-and-suspenders kill switch. Even if app.py scheduler
+    # registration somehow runs, this check stops the API call early. This
+    # is THE source of truth for "is the agent disabled" because it's
+    # checked at every invocation, not just at boot.
+    if os.environ.get('DISABLE_HEALTH_AGENT', '').lower() in ('1', 'true', 'yes'):
+        return {"status": "skipped", "reason": "DISABLE_HEALTH_AGENT env var"}
     if _AGENT_DISABLED:
         return {"status": "skipped", "reason": f"circuit open: {_AGENT_DISABLED_REASON}"}
     if not ANTHROPIC_API_KEY:
@@ -954,6 +960,8 @@ REPORT_TOOLS = [t for t in TOOLS if t['name'] in (
 
 def run_health_check_with_report():
     """Quick health check that saves result as admin report."""
+    if os.environ.get('DISABLE_HEALTH_AGENT', '').lower() in ('1', 'true', 'yes'):
+        return {"status": "skipped", "reason": "DISABLE_HEALTH_AGENT env var"}
     if _AGENT_DISABLED:
         return {"status": "skipped", "reason": f"circuit open: {_AGENT_DISABLED_REASON}"}
     if not ANTHROPIC_API_KEY:
@@ -1047,6 +1055,8 @@ SUMMARY_SYSTEM_PROMPT = """Jsi RadimCare Coordination Agent — píšeš 48-hodi
 
 def run_summary_report():
     """Run 48h summary report for admin."""
+    if os.environ.get('DISABLE_HEALTH_AGENT', '').lower() in ('1', 'true', 'yes'):
+        return {"status": "skipped", "reason": "DISABLE_HEALTH_AGENT env var"}
     if _AGENT_DISABLED:
         return {"status": "skipped", "reason": f"circuit open: {_AGENT_DISABLED_REASON}"}
     if not ANTHROPIC_API_KEY:
