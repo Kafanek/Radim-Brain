@@ -111,6 +111,14 @@ def require_auth(f):
         token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else ''
 
         if not token:
+            # ISO 27001 A.9.4.2 — log neoprávněný pokus o přístup
+            try:
+                from audit_log import audit, A
+                audit(A.AUTH_ACCESS_DENIED, outcome='denied', severity='warning',
+                      reason='token_required',
+                      metadata={'path': request.path, 'method': request.method})
+            except Exception:
+                pass
             return jsonify({
                 "success": False,
                 "error": "Authorization token je vyžadován",
@@ -119,6 +127,13 @@ def require_auth(f):
 
         payload = decode_jwt(token)
         if not payload:
+            try:
+                from audit_log import audit, A
+                audit(A.AUTH_TOKEN_FORGED, outcome='denied', severity='warning',
+                      reason='invalid_or_expired_token',
+                      metadata={'path': request.path, 'method': request.method})
+            except Exception:
+                pass
             return jsonify({
                 "success": False,
                 "error": "Neplatný nebo expirovaný token",

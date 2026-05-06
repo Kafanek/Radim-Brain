@@ -1343,6 +1343,21 @@ try:
     except ImportError:
         logger.warning("⚠️ weekly reports not available")
 
+    # 📋 Audit maintenance — denní integrity check + retention cleanup (ISO 27001)
+    try:
+        from audit_maintenance import run_integrity_check, run_retention_cleanup
+        scheduler.add_job(lambda: run_integrity_check(window_days=7),
+                          'cron', hour=2, minute=30,
+                          id='audit_integrity', max_instances=1,
+                          misfire_grace_time=3600)
+        scheduler.add_job(lambda: run_retention_cleanup(),
+                          'cron', hour=3, minute=30,
+                          id='audit_retention', max_instances=1,
+                          misfire_grace_time=3600)
+        logger.info("📋 Audit maintenance registered (integrity 02:30, retention 03:30)")
+    except ImportError:
+        logger.warning("⚠️ audit_maintenance not available")
+
     # 🤖 Health Agent — autonomous monitoring + auto-fix (every 15 min)
     # v8.19.106: Gated by DISABLE_HEALTH_AGENT env var. Set to "1" on Heroku
     # when Anthropic credit is depleted to silence log spam (every 15 min ×
@@ -2052,8 +2067,24 @@ def admin_news_briefing_test():
 def admin_agent_run():
     """Manually trigger one full agent loop cycle."""
     if not _check_admin():
+        # ISO 27001 A.9.4.2 — neoprávněný admin přístup je incident
+        try:
+            from audit_log import audit, A
+            audit(A.AUTH_ACCESS_DENIED, outcome='denied', severity='warning',
+                  resource_type='admin_endpoint',
+                  reason='admin.agent-run without secret/auth')
+        except Exception:
+            pass
         return jsonify({'error': 'Unauthorized'}), 401
     try:
+        # ISO 27001 A.12.1.2 — log change-management trigger
+        try:
+            from audit_log import audit, A
+            audit(A.ADMIN_TRIGGER, severity='info',
+                  resource_type='scheduler', resource_id='agent_loop',
+                  reason='manual_admin_run')
+        except Exception:
+            pass
         from agent_loop import run_agent_cycle
         run_agent_cycle(app)
         # Return observations created in last 5 min

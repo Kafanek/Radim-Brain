@@ -258,6 +258,16 @@ def sos_trigger():
     except Exception as e:
         logger.debug(f"sos_events insert: {e}")
 
+    # ISO 27001 A.16.1 — SOS je security incident, povinný audit
+    try:
+        from audit_log import audit, A
+        audit(A.SOS_TRIGGERED, severity='critical',
+              resource_type='sos_event', resource_id=sos_event_id,
+              senior_id=senior_id,
+              metadata={'source': source, 'has_custom_message': bool(custom_msg)})
+    except Exception:
+        pass
+
     # 1. Notify family accounts (in-app — replaces Twilio SMS)
     notif_ids = notify_senior_family(
         senior_id=senior_id,
@@ -421,6 +431,16 @@ def sos_ack(sos_id):
             except Exception:
                 pass
 
+        # ISO 27001 A.16.1 — incident handling audit
+        try:
+            from audit_log import audit, A
+            audit(A.SOS_ACK, severity='info',
+                  resource_type='sos_event', resource_id=sos_id,
+                  senior_id=str(senior_id),
+                  metadata={'acked_by_self': str(uid) == str(senior_id)})
+        except Exception:
+            pass
+
         return jsonify({
             "success": True, "sos_event_id": sos_id,
             "ack_by_user_id": str(uid),
@@ -480,6 +500,16 @@ def sos_resolve(sos_id):
                     "ack_by_user_id = COALESCE(ack_by_user_id, ?) "
                     "WHERE id = ?", (str(uid), sos_id)
                 )
+
+        # ISO 27001 A.16.1 — incident closure audit
+        try:
+            from audit_log import audit, A
+            audit(A.SOS_RESOLVED, severity='info',
+                  resource_type='sos_event', resource_id=sos_id,
+                  senior_id=str(senior_id),
+                  metadata={'resolved_by_self': str(uid) == str(senior_id)})
+        except Exception:
+            pass
 
         return jsonify({"success": True, "sos_event_id": sos_id,
                         "message": "Událost uzavřena."})
