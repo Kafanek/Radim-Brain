@@ -178,11 +178,31 @@ STAGE_HANDLERS = {
 # ──────────────────────────────────────────────────────────────────────────
 
 def run_escalator_tick(app=None):
-    """One pass through unresolved sos_events. Safe to call from scheduler."""
+    """One pass through unresolved sos_events. Safe to call from scheduler.
+
+    v8.19.106 hardening:
+    - statement_timeout=5s + lock_timeout=2s on PG session — caps tick time
+      so a hung query can never block subsequent ticks. Previously a slow
+      tick caused APScheduler to skip every 10s in a tight loop, piling up
+      DB connections until Postgres OOMed.
+    - Stage handlers run OUTSIDE the DB transaction. They do TTS / Twilio /
+      push, which can be slow — keeping the DB connection short means the
+      pool stays available even when an external service is degraded.
+    """
     try:
-        from database import db_context
+        from database import db_context, is_postgres
         advanced = 0
+        events_to_handle = []  # (event, next_stage) collected inside tx, fired outside
+
         with db_context(commit=True) as db:
+            # PG: cap query/lock time so a single bad tick can't snowball.
+            if is_postgres():
+                try:
+                    db.execute("SET LOCAL statement_timeout = '5s'")
+                    db.execute("SET LOCAL lock_timeout = '2s'")
+                except Exception:
+                    pass  # fall through — best-effort
+
             rows = db.execute(
                 "SELECT id, senior_id, source, message, escalation_stage, created_at "
                 "FROM sos_events "
@@ -209,12 +229,17 @@ def run_escalator_tick(app=None):
                 if next_stage <= target_stage and next_stage in STAGE_HANDLERS:
                     # Advance atomically — prevents double-fire if two ticks overlap
                     if _advance_stage(db, event["id"], next_stage):
-                        handler = STAGE_HANDLERS[next_stage]
-                        try:
-                            handler(event)
-                            advanced += 1
-                        except Exception as e:
-                            logger.error(f"SOS escalator stage {next_stage} handler failed: {e}")
+                        events_to_handle.append((event, next_stage))
+
+        # Fire handlers AFTER transaction closes — handlers do external I/O
+        # (Twilio, push, TTS) that must not hold a DB connection.
+        for event, next_stage in events_to_handle:
+            handler = STAGE_HANDLERS[next_stage]
+            try:
+                handler(event)
+                advanced += 1
+            except Exception as e:
+                logger.error(f"SOS escalator stage {next_stage} handler failed: {e}")
 
         if advanced:
             logger.info(f"🆘 [escalator] tick: advanced {advanced} event(s)")

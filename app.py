@@ -1158,13 +1158,19 @@ try:
         logger.info("ℹ️ Autonomous fix loop disabled "
                     "(set AUTONOMOUS_FIX_ENABLED=1 to enable)")
 
-    # v10.40: SOS escalation engine — every 10 s walks unresolved events through stages
+    # v10.40: SOS escalation engine — walks unresolved events through stages.
+    # v8.19.106: interval 10s → 30s (stage 1 fires at age=30s anyway, so 30s
+    # tick ≤ same UX); coalesce=True so a slow tick doesn't pile up — missed
+    # runs collapse into the next single execution. Combined with statement_timeout
+    # in run_escalator_tick, this prevents the connection-pool cascade that
+    # caused PG OOM under load.
     try:
         from sos_escalator import run_escalator_tick, is_enabled as sos_enabled
         if sos_enabled():
-            scheduler.add_job(lambda: run_escalator_tick(app), 'interval', seconds=10,
-                              id='sos_escalator', max_instances=1, misfire_grace_time=30)
-            logger.info("🆘 SOS escalator registered (every 10 s)")
+            scheduler.add_job(lambda: run_escalator_tick(app), 'interval', seconds=30,
+                              id='sos_escalator', max_instances=1,
+                              coalesce=True, misfire_grace_time=60)
+            logger.info("🆘 SOS escalator registered (every 30 s, coalesce)")
         else:
             logger.info("🆘 SOS escalator disabled via SOS_ESCALATION env")
     except ImportError:

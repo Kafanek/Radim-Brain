@@ -394,16 +394,47 @@ def close_db_for_flask(g_obj):
 
 
 def init_db():
-    """Initialize database schema — delegates to database_schema.py"""
+    """Initialize database schema — delegates to database_schema.py.
+
+    v8.19.106: Wraps PG schema init in pg_advisory_lock so only one dyno
+    runs DDL at a time. Previously two dynos starting in parallel would
+    race on CREATE TABLE / CREATE INDEX, leaving one in
+    InFailedSqlTransaction state and crashing that worker on boot.
+    The lock key (4242424242) is an arbitrary 64-bit constant unique to
+    this app's schema init.
+    """
     from database_schema import init_postgres_schema, init_sqlite_schema
     db = get_connection()
 
     if USE_POSTGRES:
-        init_postgres_schema(db)
+        # Serialize schema init across dynos. pg_advisory_lock is session-
+        # scoped and auto-released on connection close. Other dynos block
+        # here briefly, then see the schema is already current and exit fast.
+        SCHEMA_LOCK_KEY = 4242424242
+        try:
+            db.execute("SELECT pg_advisory_lock(?)", (SCHEMA_LOCK_KEY,))
+            try:
+                init_postgres_schema(db)
+                db.commit()
+            finally:
+                try:
+                    db.execute("SELECT pg_advisory_unlock(?)", (SCHEMA_LOCK_KEY,))
+                except Exception:
+                    pass
+        except Exception as e:
+            # Roll back the failed transaction so the connection is reusable
+            # before re-raising. Without this, subsequent statements on the
+            # same connection hit InFailedSqlTransaction (the symptom we saw
+            # on web.2 boot crash).
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            logger.error(f"PG schema init failed: {e}")
+            raise
     else:
         init_sqlite_schema(db)
-
-    db.commit()
+        db.commit()
 
     try:
         db.close()
