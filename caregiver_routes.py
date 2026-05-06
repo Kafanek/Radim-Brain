@@ -2110,6 +2110,144 @@ def caregiver_observation_ack(obs_id):
     return _inner(obs_id)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# IoT live status (v8.19.107) — sestra vidí Tapo senzory v reálném čase
+# ─────────────────────────────────────────────────────────────────────────────
+
+@caregiver_bp.route('/api/caregiver/senior/<senior_id>/iot-status', methods=['GET'])
+@require_auth
+def senior_iot_status(senior_id):
+    """Vrátí stav všech IoT senzorů přiřazených seniorovi.
+
+    Response:
+      {
+        "success": true,
+        "online": true,
+        "last_update_seconds_ago": 12,
+        "rooms": {
+          "byt_kuchyne": [
+            {"device_id": "p115_rychlovarka", "type": "P115",
+             "name": "Rychlovarka", "state": "off", "power_w": 0, ...}
+          ],
+          "byt_obyvak": [
+            {"device_id": "t100_obyvak", "type": "T100",
+             "motion_age_minutes": 4, "battery_pct": 87}
+          ]
+        }
+      }
+    """
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    if not _is_family_of(senior_id, uid):
+        return jsonify({'success': False, 'error': 'not linked'}), 403
+
+    try:
+        from audit_log import audit
+        audit('data.read.medical', resource_type='iot_status',
+              resource_id=str(senior_id), senior_id=str(senior_id),
+              metadata={'caller': 'caregiver_iot_status'})
+    except Exception:
+        pass
+
+    rooms = {}
+    last_seen_overall = None
+
+    try:
+        with db_context() as db:
+            if is_postgres():
+                rows = db.execute("""
+                    SELECT DISTINCT ON (s.device_id, s.sensor_type)
+                        s.device_id, s.room_id, s.sensor_type, s.value, s.unit,
+                        s.metadata, s.recorded_at
+                    FROM iot_sensor_data s
+                    JOIN iot_devices d ON d.device_id = s.device_id
+                    WHERE d.user_id = ?
+                      AND s.recorded_at > NOW() - INTERVAL '30 minutes'
+                    ORDER BY s.device_id, s.sensor_type, s.recorded_at DESC
+                """, (senior_id,)).fetchall()
+            else:
+                rows = db.execute("""
+                    SELECT s.device_id, s.room_id, s.sensor_type, s.value, s.unit,
+                           s.metadata, MAX(s.recorded_at) as recorded_at
+                    FROM iot_sensor_data s
+                    JOIN iot_devices d ON d.device_id = s.device_id
+                    WHERE d.user_id = ?
+                      AND s.recorded_at > datetime('now', '-30 minutes')
+                    GROUP BY s.device_id, s.sensor_type
+                    ORDER BY s.recorded_at DESC
+                """, (senior_id,)).fetchall()
+    except Exception as e:
+        logger.warning(f"iot_status query: {e}")
+        return jsonify({'success': True, 'online': False, 'rooms': {},
+                        'error': 'query_failed'})
+
+    by_device = {}
+    for r in rows:
+        device_id = r[0]
+        room_id = r[1]
+        sensor_type = r[2]
+        value = r[3]
+        try:
+            metadata = json.loads(r[5]) if isinstance(r[5], str) else (r[5] or {})
+        except Exception:
+            metadata = {}
+        recorded_at = r[6]
+        if isinstance(recorded_at, str):
+            try:
+                ts = datetime.fromisoformat(recorded_at.replace('Z', '').split('+')[0])
+            except Exception:
+                ts = None
+        else:
+            ts = recorded_at
+
+        if device_id not in by_device:
+            by_device[device_id] = {
+                'device_id': device_id,
+                'room_id': room_id,
+                'name': metadata.get('name', device_id),
+                'type': metadata.get('model', '?'),
+                'last_seen': ts.isoformat() if ts else None,
+            }
+
+        if sensor_type == 'plug_state':
+            by_device[device_id]['state'] = 'on' if value > 0 else 'off'
+        elif sensor_type == 'power_w':
+            by_device[device_id]['power_w'] = round(value, 1)
+        elif sensor_type == 'bulb_state':
+            by_device[device_id]['light'] = 'on' if value > 0 else 'off'
+        elif sensor_type == 'brightness':
+            by_device[device_id]['brightness_pct'] = int(value)
+        elif sensor_type == 'motion_age_s':
+            by_device[device_id]['motion_age_minutes'] = round(value / 60, 1)
+        elif sensor_type == 'contact_state':
+            by_device[device_id]['contact'] = 'open' if value > 0 else 'closed'
+        elif sensor_type == 'battery_pct':
+            by_device[device_id]['battery_pct'] = round(value, 0)
+        elif sensor_type == 'hub_online':
+            by_device[device_id]['hub_online'] = bool(value)
+
+        if ts and (last_seen_overall is None or ts > last_seen_overall):
+            last_seen_overall = ts
+
+    for dev in by_device.values():
+        room = dev['room_id']
+        rooms.setdefault(room, []).append(dev)
+
+    last_ago = None
+    if last_seen_overall:
+        last_ago = int((datetime.utcnow() - last_seen_overall).total_seconds())
+
+    return jsonify({
+        'success': True,
+        'senior_id': senior_id,
+        'online': last_ago is not None and last_ago < 300,
+        'last_update_seconds_ago': last_ago,
+        'rooms': rooms,
+        'device_count': len(by_device),
+    })
+
+
 def register_scheduler_jobs(scheduler):
     """Hook into main APScheduler. Safe to call twice — replace_existing=True."""
     try:

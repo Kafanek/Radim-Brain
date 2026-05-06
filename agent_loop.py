@@ -201,6 +201,18 @@ def _evaluate_user(user_id, app):
     if ha_obs and not _is_in_cooldown(user_id, ha_obs["type"]):
         observations.append(ha_obs)
 
+    # ── v8.19.107: Tapo IoT detektory ──
+    # T100 motion, T110 contact, P115 plug, L510E bulb, H110 hub
+    for tapo_check in TAPO_DETECTORS:
+        try:
+            tobs = tapo_check(user_id)
+            if tobs and not _is_in_cooldown(user_id, tobs["type"]):
+                if sensitivity < 0.8 and tobs["severity"] == INFO:
+                    continue
+                observations.append(tobs)
+        except Exception as e:
+            logger.debug(f"Tapo detector {tapo_check.__name__}: {e}")
+
     # ── v3.0: Advanced agents integration ──
     _run_advanced_agents(user_id, baselines, observations)
 
@@ -520,6 +532,241 @@ def _check_fall_detection(user_id, baselines):
         logger.debug(f"Fall detection check error: {e}")
 
     return None
+
+
+# ============================================================================
+# TAPO IoT DETECTORS (v8.19.107)
+# ============================================================================
+# Detektory specifické pro TP-Link Tapo zařízení (T100, T110, P115, L510E, H110).
+# Volány z run_agent_cycle pro každého aktivního seniora. Každý vrací buď
+# observation dict {type, severity, message, details} nebo None.
+#
+# Cooldown: každý observation_type má vlastní cooldown (60 min default), takže
+# se neopakuje příliš často.
+
+def _get_recent_iot(user_id, sensor_types, minutes=60):
+    """Helper — fetch recent iot_sensor_data for user's rooms."""
+    try:
+        with db_context(commit=False) as db:
+            # Map user_id → room_ids via iot_devices.user_id (set during enrollment)
+            ph_list = ','.join(['?'] * len(sensor_types))
+            cutoff = (datetime.utcnow() - timedelta(minutes=int(minutes))).isoformat()
+            if is_postgres():
+                rows = db.execute(
+                    f"SELECT s.device_id, s.room_id, s.sensor_type, s.value, s.metadata, s.recorded_at "
+                    f"FROM iot_sensor_data s "
+                    f"JOIN iot_devices d ON d.device_id = s.device_id "
+                    f"WHERE d.user_id = ? AND s.sensor_type IN ({ph_list}) "
+                    f"AND s.recorded_at > ? "
+                    f"ORDER BY s.recorded_at DESC LIMIT 200",
+                    (user_id, *sensor_types, cutoff)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    f"SELECT s.device_id, s.room_id, s.sensor_type, s.value, s.metadata, s.recorded_at "
+                    f"FROM iot_sensor_data s "
+                    f"JOIN iot_devices d ON d.device_id = s.device_id "
+                    f"WHERE d.user_id = ? AND s.sensor_type IN ({ph_list}) "
+                    f"AND s.recorded_at > ? "
+                    f"ORDER BY s.recorded_at DESC LIMIT 200",
+                    (user_id, *sensor_types, cutoff)
+                ).fetchall()
+            return rows or []
+    except Exception as e:
+        logger.debug(f"_get_recent_iot error: {e}")
+        return []
+
+
+def _detect_no_motion_during_day(user_id):
+    """T100 motion_age_s — žádný pohyb 6+ hodin v aktivní době (8-22h).
+
+    Pokud T100 hlásí motion_age_s > 6h v denním okně → senior buď spí,
+    je v jiné místnosti, nebo má problém. INFO úroveň (ne CRISIS), sestra
+    se může zeptat.
+    """
+    hour = datetime.utcnow().hour
+    if hour < 8 or hour > 22:
+        return None  # noční doba — žádný pohyb je očekávaný
+    rows = _get_recent_iot(user_id, ['motion_age_s'], minutes=15)
+    if not rows:
+        return None
+    # Vezmi nejnovější hodnotu pro každý device
+    latest = {}
+    for r in rows:
+        dev = r[0] if not isinstance(r, dict) else r['device_id']
+        if dev not in latest:
+            try:
+                val = float(r[3] if not isinstance(r, dict) else r['value'])
+                latest[dev] = val
+            except Exception:
+                pass
+    if not latest:
+        return None
+    # Pokud VŠECHNY motion senzory hlásí >6h bez pohybu
+    six_hours = 6 * 3600
+    if all(v >= six_hours for v in latest.values()):
+        max_age_h = max(latest.values()) / 3600
+        return {
+            "type": "no_motion_during_day",
+            "severity": INFO,
+            "message": f"Žádný pohyb v bytě posledních {max_age_h:.1f} h. "
+                       f"Zkontrolujte, zda je senior v pořádku.",
+            "details": {"max_age_hours": round(max_age_h, 1),
+                        "active_hour": hour}
+        }
+    return None
+
+
+def _detect_door_open_long(user_id):
+    """T110 contact_state — vstupní dveře otevřené déle než 30 minut.
+
+    Bezpečnostní indikátor — buď zapomenuté dveře, nebo někdo přišel a
+    zůstal. WARNING.
+    """
+    rows = _get_recent_iot(user_id, ['contact_state'], minutes=60)
+    if not rows:
+        return None
+    # Najdi nejnovější open=1 a poslední close=0 pro každý device
+    by_dev = {}
+    for r in rows:
+        dev = r[0]
+        sensor_type = r[2]
+        val = float(r[3])
+        ts = r[5]
+        if dev not in by_dev:
+            by_dev[dev] = []
+        by_dev[dev].append((ts, val))
+    for dev, events in by_dev.items():
+        # Latest first (DESC order from query)
+        if not events:
+            continue
+        latest_ts, latest_val = events[0]
+        if latest_val == 1:  # currently open
+            try:
+                if isinstance(latest_ts, str):
+                    open_dt = datetime.fromisoformat(latest_ts.replace('Z', ''))
+                else:
+                    open_dt = latest_ts
+                # Najdi poslední close před tímto open
+                duration_min = (datetime.utcnow() - open_dt).total_seconds() / 60
+                if duration_min >= 30:
+                    return {
+                        "type": "door_open_long",
+                        "severity": WARNING,
+                        "message": f"Vstupní dveře otevřené {int(duration_min)} min. "
+                                   f"Zkontrolujte, zda je vše v pořádku.",
+                        "details": {"device_id": dev,
+                                    "open_minutes": int(duration_min)}
+                    }
+            except Exception as e:
+                logger.debug(f"door_open_long parse: {e}")
+    return None
+
+
+def _detect_late_night_light(user_id):
+    """L510E bulb_state — světlo v ložnici svítí v 02-05 (rušený spánek).
+
+    Indikátor nespavosti / zmatenosti / nutnosti na WC v noci.
+    INFO úroveň — tracking pattern, eskaluje když se opakuje.
+    """
+    hour = datetime.utcnow().hour
+    if hour < 2 or hour > 5:
+        return None
+    rows = _get_recent_iot(user_id, ['bulb_state'], minutes=30)
+    if not rows:
+        return None
+    # Pokud nejnovější stav je on (1) v noční hodině
+    by_dev = {}
+    for r in rows:
+        dev = r[0]
+        if dev not in by_dev:
+            by_dev[dev] = float(r[3])
+    if any(v == 1 for v in by_dev.values()):
+        return {
+            "type": "late_night_light",
+            "severity": INFO,
+            "message": f"V noci svítí světlo ({hour}:00). Senior může mít rušený spánek.",
+            "details": {"hour": hour, "active_lights": list(by_dev.keys())}
+        }
+    return None
+
+
+def _detect_kitchen_inactivity(user_id):
+    """P115 power_w — žádná spotřeba na kuchyňských zásuvkách 24+ h.
+
+    Senior pravděpodobně nevařil → nejedl → check-in.
+    """
+    rows = _get_recent_iot(user_id, ['power_w'], minutes=60 * 26)
+    if not rows:
+        return None
+    # Pokud žádný odečet nebyl > 5W za posledních 24h
+    has_usage = any(float(r[3]) > 5.0 for r in rows)
+    if not has_usage and len(rows) >= 5:  # alespoň 5 měření = poller funguje
+        return {
+            "type": "kitchen_inactivity_24h",
+            "severity": WARNING,
+            "message": "24+ hodin žádná aktivita v kuchyni (spotřebiče). "
+                       "Senior možná nejedl.",
+            "details": {"readings_count": len(rows)}
+        }
+    return None
+
+
+def _detect_battery_low(user_id):
+    """T100/T110 battery_pct < 20 % — výměna baterie nutná.
+
+    Maintenance alert — pošle se pečujícímu (rodina/sestra), ne seniorovi.
+    """
+    rows = _get_recent_iot(user_id, ['battery_pct'], minutes=60 * 24)
+    if not rows:
+        return None
+    by_dev = {}
+    for r in rows:
+        dev = r[0]
+        if dev not in by_dev:
+            by_dev[dev] = float(r[3])
+    low = {dev: pct for dev, pct in by_dev.items() if pct < 20}
+    if low:
+        return {
+            "type": "battery_low",
+            "severity": INFO,
+            "message": f"Slabá baterie v {len(low)} senzorech. Je potřeba vyměnit.",
+            "details": {"devices": low}
+        }
+    return None
+
+
+def _detect_hub_offline(user_id):
+    """H110 hub_online = 0 — hub je offline déle než 10 minut.
+
+    Technická vážná chyba — bez hubu nefungují T100, T110.
+    WARNING (ne CRISIS — nejde o seniora, ale o systém).
+    """
+    rows = _get_recent_iot(user_id, ['hub_online'], minutes=15)
+    if not rows:
+        return None
+    # Vezmi nejnovější hodnotu
+    latest = float(rows[0][3])
+    if latest == 0:
+        return {
+            "type": "hub_offline",
+            "severity": WARNING,
+            "message": "IoT hub je offline. Senzory pohybu a dveří nefungují. "
+                       "Zkontrolujte Wi-Fi a hub.",
+            "details": {"checked_minutes_ago": 15}
+        }
+    return None
+
+
+# Registry — volá z run_agent_cycle
+TAPO_DETECTORS = (
+    _detect_no_motion_during_day,
+    _detect_door_open_long,
+    _detect_late_night_light,
+    _detect_kitchen_inactivity,
+    _detect_battery_low,
+    _detect_hub_offline,
+)
 
 
 # ============================================================================
