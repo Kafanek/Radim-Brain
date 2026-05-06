@@ -412,10 +412,13 @@ def gateway_heartbeat():
               meta, datetime.utcnow()))
         db.execute(f'UPDATE iot_devices SET last_seen = {ph} WHERE device_id = {ph}',
                    (datetime.utcnow(), gateway_id))
+        db.commit()  # ⚠ _get_db() vrací raw connection — explicit commit MUSÍ
         return jsonify({'success': True,
                         'received_at': datetime.utcnow().isoformat()}), 201
     except Exception as e:
         logger.warning(f"Heartbeat ingest error: {e}")
+        try: db.rollback()
+        except Exception: pass
         return jsonify({'error': 'ingest_failed'}), 500
     finally:
         try: db.close()
