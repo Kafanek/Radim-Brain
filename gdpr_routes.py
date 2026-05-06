@@ -340,19 +340,37 @@ def gdpr_full_erase(user_id):
 @gdpr_bp.route('/gdpr/retention/run', methods=['POST'])
 @require_auth
 def gdpr_retention_run():
-    """Spustí automatickou likvidaci dat dle retencí (admin only).
-    Volat z Heroku Scheduler nebo manuálně."""
-    # TODO: přidat admin role check
+    """Spustí automatickou likvidaci dat dle retencí (admin/dpo only).
+    Volat z Heroku Scheduler nebo manuálně.
+
+    v8.19.108:
+      • Přidán explicit admin/dpo role check (předtím TODO bez ochrany)
+      • audit_log retention nyní přes audit_log_archive_delete()
+        SECURITY DEFINER fn — bypass append-only triggeru
+    """
+    # SEC FIX: pouze admin / dpo
+    role = (g.auth_user or {}).get('role', '')
+    if role not in ('administrator', 'admin', 'dpo'):
+        try:
+            from audit_log import audit, A
+            audit(A.AUTH_ACCESS_DENIED, outcome='denied', severity='warning',
+                  reason=f'role={role} attempted /gdpr/retention/run',
+                  resource_type='gdpr_retention')
+        except Exception:
+            pass
+        return jsonify({"success": False, "error": "Vyžaduje admin/DPO roli",
+                        "code": "admin_required"}), 403
+
     if not _DB_AVAILABLE:
         return jsonify({"success": False, "error": "Databáze není dostupná"}), 503
 
     results = {}
     # Retention policies: table → (PG interval, SQLite interval)
+    # Pozor: audit_log MUSÍ použít archive_delete fn (append-only trigger)
     _retention = [
         ("iot_sensor_data", "recorded_at", "30 days", "-30 days", "iot_sensor_data_30d"),
         ("memory_history", "created_at", "90 days", "-90 days", "memory_history_90d"),
         ("iot_alerts", "created_at", "24 months", "-24 months", "iot_alerts_24m"),
-        ("audit_log", "created_at", "36 months", "-36 months", "audit_log_36m"),
     ]
     try:
         with db_context(commit=True) as db:
@@ -364,7 +382,33 @@ def gdpr_retention_run():
                         cur = db.execute(f"DELETE FROM {table} WHERE {col} < datetime('now', '{sqlite_interval}')")
                     results[key] = cur.rowcount if hasattr(cur, 'rowcount') else 0
                 except Exception as e:
-                    results[key] = f"error: {e}"
+                    results[key] = f"error: {str(e)[:120]}"
+
+            # audit_log — přes archive_delete fn (bypass trigger)
+            try:
+                if is_postgres():
+                    # Najdi staré IDčka, pak je všechny smaž přes fn
+                    rows = db.execute(
+                        "SELECT id FROM audit_log WHERE created_at < NOW() - INTERVAL '36 months' "
+                        "LIMIT 5000"
+                    ).fetchall()
+                    if rows:
+                        ids = [r[0] for r in rows]
+                        cur = db.execute(
+                            "SELECT audit_log_archive_delete(?::BIGINT[])",
+                            (ids,)
+                        )
+                        n = cur.fetchone()[0] if hasattr(cur, 'fetchone') else len(ids)
+                        results["audit_log_36m"] = n
+                    else:
+                        results["audit_log_36m"] = 0
+                else:
+                    cur = db.execute(
+                        "DELETE FROM audit_log WHERE created_at < datetime('now', '-36 months')"
+                    )
+                    results["audit_log_36m"] = cur.rowcount if hasattr(cur, 'rowcount') else 0
+            except Exception as e:
+                results["audit_log_36m"] = f"error: {str(e)[:120]}"
 
     except Exception as e:
         logger.error(f"GDPR retention error: {e}")

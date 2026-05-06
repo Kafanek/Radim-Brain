@@ -225,6 +225,92 @@ def require_teacher(f):
     return decorated
 
 
+def require_admin(f):
+    """v8.19.108: explicit admin decorator. Sjednocuje s app.py _check_admin
+    + experience_routes._require_admin + admin_routes._require_admin (předtím
+    3 různé implementace).
+
+    Vyžaduje role in ('administrator', 'admin'). Musí být použit PO @require_auth.
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        user = getattr(g, 'auth_user', {})
+        if user.get('role') not in ('administrator', 'admin'):
+            try:
+                from audit_log import audit, A
+                audit(A.AUTH_ACCESS_DENIED, outcome='denied', severity='warning',
+                      reason=f"role={user.get('role','anon')} (admin required)",
+                      resource_type='admin_endpoint',
+                      metadata={'path': request.path, 'method': request.method})
+            except Exception:
+                pass
+            return jsonify({
+                "success": False,
+                "error": "Vyžaduje administrátorská práva",
+                "code": "admin_required"
+            }), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
+def require_caregiver(f):
+    """v8.19.108: profesionální nebo rodinný pečovatel.
+
+    Povolené role: nurse, social_worker, doctor, caregiver, family,
+                   coordinator, administrator, dpo.
+    Pro endpoint specifický pro 1 seniora použij _is_family_of() check
+    NAVÍC k tomuto decoratoru — viz caregiver_routes pattern.
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        user = getattr(g, 'auth_user', {})
+        allowed = ('nurse', 'social_worker', 'doctor', 'caregiver',
+                   'family', 'coordinator', 'administrator', 'admin', 'dpo')
+        if user.get('role') not in allowed:
+            try:
+                from audit_log import audit, A
+                audit(A.AUTH_ACCESS_DENIED, outcome='denied', severity='warning',
+                      reason=f"role={user.get('role','anon')} (caregiver required)",
+                      resource_type='caregiver_endpoint',
+                      metadata={'path': request.path})
+            except Exception:
+                pass
+            return jsonify({
+                "success": False,
+                "error": "Tento přístup je vyhrazen pečujícím",
+                "code": "caregiver_required"
+            }), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
+def require_nurse(f):
+    """v8.19.108: zdravotní personál (nurse, doctor) nebo admin.
+
+    Užší než require_caregiver — explicitně pro medical-relevantní akce
+    (medication, vital signs alerts, health note approval).
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        user = getattr(g, 'auth_user', {})
+        if user.get('role') not in ('nurse', 'doctor', 'administrator', 'admin'):
+            try:
+                from audit_log import audit, A
+                audit(A.AUTH_ACCESS_DENIED, outcome='denied', severity='warning',
+                      reason=f"role={user.get('role','anon')} (nurse/doctor required)",
+                      resource_type='medical_endpoint',
+                      metadata={'path': request.path})
+            except Exception:
+                pass
+            return jsonify({
+                "success": False,
+                "error": "Vyžaduje zdravotnickou roli",
+                "code": "nurse_required"
+            }), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
 def optional_auth(f):
     """
     Decorator: JWT je volitelný — pokud je přítomen, ověří se.
