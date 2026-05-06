@@ -1338,32 +1338,39 @@ try:
         logger.warning("⚠️ weekly reports not available")
 
     # 🤖 Health Agent — autonomous monitoring + auto-fix (every 15 min)
-    try:
-        from radim_health_agent import run_health_check, run_summary_report
-        def _run_health_agent():
-            try:
-                with app.app_context():
-                    result = run_health_check()
-                    logger.info(f"🤖 Health Agent: {result.get('status')} in {result.get('turns', '?')} turns")
-            except Exception as e:
-                logger.warning(f"🤖 Health Agent error (non-fatal): {e}")
+    # v8.19.106: Gated by DISABLE_HEALTH_AGENT env var. Set to "1" on Heroku
+    # when Anthropic credit is depleted to silence log spam (every 15 min ×
+    # multiple turns = ~60 errors/hr). Module-level circuit breaker in
+    # radim_health_agent.py also self-disables on first "credit too low".
+    if os.environ.get('DISABLE_HEALTH_AGENT', '').lower() in ('1', 'true', 'yes'):
+        logger.info("🤖 Health Agent DISABLED via DISABLE_HEALTH_AGENT env var")
+    else:
+        try:
+            from radim_health_agent import run_health_check, run_summary_report
+            def _run_health_agent():
+                try:
+                    with app.app_context():
+                        result = run_health_check()
+                        logger.info(f"🤖 Health Agent: {result.get('status')} in {result.get('turns', '?')} turns")
+                except Exception as e:
+                    logger.warning(f"🤖 Health Agent error (non-fatal): {e}")
 
-        def _run_summary_report():
-            try:
-                with app.app_context():
-                    result = run_summary_report()
-                    logger.info(f"🤖 Summary Report: {result.get('status')} in {result.get('turns', '?')} turns")
-            except Exception as e:
-                logger.warning(f"🤖 Summary Report error (non-fatal): {e}")
+            def _run_summary_report():
+                try:
+                    with app.app_context():
+                        result = run_summary_report()
+                        logger.info(f"🤖 Summary Report: {result.get('status')} in {result.get('turns', '?')} turns")
+                except Exception as e:
+                    logger.warning(f"🤖 Summary Report error (non-fatal): {e}")
 
-        scheduler.add_job(_run_health_agent, 'interval', minutes=15,
-                          id='health_agent', max_instances=1, misfire_grace_time=300)
-        # 48h summary report — runs at 9:00 every other day (Mon, Wed, Fri)
-        scheduler.add_job(_run_summary_report, 'cron', day_of_week='mon,wed,fri', hour=9, minute=0,
-                          id='summary_report', max_instances=1, misfire_grace_time=3600)
-        logger.info("✅ Health Agent registered (15 min) + Summary Report (Mon/Wed/Fri 9:00)")
-    except ImportError:
-        logger.warning("⚠️ Health Agent not available")
+            scheduler.add_job(_run_health_agent, 'interval', minutes=15,
+                              id='health_agent', max_instances=1, misfire_grace_time=300)
+            # 48h summary report — runs at 9:00 every other day (Mon, Wed, Fri)
+            scheduler.add_job(_run_summary_report, 'cron', day_of_week='mon,wed,fri', hour=9, minute=0,
+                              id='summary_report', max_instances=1, misfire_grace_time=3600)
+            logger.info("✅ Health Agent registered (15 min) + Summary Report (Mon/Wed/Fri 9:00)")
+        except ImportError:
+            logger.warning("⚠️ Health Agent not available")
 
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))

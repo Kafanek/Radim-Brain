@@ -32,6 +32,34 @@ ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 BACKEND_URL = os.environ.get('BACKEND_URL', 'https://radim-brain-2025-be1cd52b04dc.herokuapp.com')
 ADMIN_SECRET = os.environ.get('ADMIN_SECRET', '')
 
+# v8.19.106: Circuit breaker — when Claude API returns "credit too low" or
+# auth/permanent errors, disable agent for the rest of this dyno's lifetime.
+# Prevents log spam (every 15 min × every Claude turn = ~60 errors/hr).
+# Reset by restart (heroku ps:restart) or env var DISABLE_HEALTH_AGENT.
+_AGENT_DISABLED = False
+_AGENT_DISABLED_REASON = None
+
+
+def _is_permanent_anthropic_error(exc) -> bool:
+    """True if this Anthropic error means we should stop calling for the session."""
+    msg = str(exc).lower()
+    permanent_signals = (
+        'credit balance is too low',
+        'insufficient credit',
+        'invalid api key',
+        'authentication',
+        'permission_error',
+        'billing',
+    )
+    return any(sig in msg for sig in permanent_signals)
+
+
+def _disable_agent(reason: str):
+    global _AGENT_DISABLED, _AGENT_DISABLED_REASON
+    _AGENT_DISABLED = True
+    _AGENT_DISABLED_REASON = reason
+    logger.warning(f"🤖 Health Agent CIRCUIT OPEN — disabled for session: {reason}")
+
 
 def check_backend_health():
     """Check all backend services health status."""
@@ -848,6 +876,8 @@ QUICK_TOOLS = [t for t in TOOLS if t['name'] in (
 
 def run_health_check():
     """Run QUICK health check (fits in 30s Heroku timeout)."""
+    if _AGENT_DISABLED:
+        return {"status": "skipped", "reason": f"circuit open: {_AGENT_DISABLED_REASON}"}
     if not ANTHROPIC_API_KEY:
         logger.warning("🤖 Health Agent: ANTHROPIC_API_KEY not set, skipping")
         return {"status": "skipped", "reason": "no API key"}
@@ -864,13 +894,21 @@ def run_health_check():
     while turn < max_turns:
         turn += 1
 
-        response = client.messages.create(
-            model="claude-haiku-4-5",
-            max_tokens=2000,
-            system=SYSTEM_PROMPT,
-            tools=QUICK_TOOLS,
-            messages=messages
-        )
+        try:
+            response = client.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=2000,
+                system=SYSTEM_PROMPT,
+                tools=QUICK_TOOLS,
+                messages=messages
+            )
+        except Exception as e:
+            if _is_permanent_anthropic_error(e):
+                _disable_agent(str(e)[:200])
+                return {"status": "disabled", "reason": str(e)[:200], "turns": turn}
+            # Transient — log and bail this run, but don't disable
+            logger.warning(f"🤖 Health Agent transient error: {e}")
+            return {"status": "error", "error": str(e)[:200], "turns": turn}
 
         # If done
         if response.stop_reason == "end_turn":
@@ -916,6 +954,8 @@ REPORT_TOOLS = [t for t in TOOLS if t['name'] in (
 
 def run_health_check_with_report():
     """Quick health check that saves result as admin report."""
+    if _AGENT_DISABLED:
+        return {"status": "skipped", "reason": f"circuit open: {_AGENT_DISABLED_REASON}"}
     if not ANTHROPIC_API_KEY:
         return {"status": "skipped", "reason": "no API key"}
 
@@ -930,10 +970,17 @@ Report: stav služeb, DB latence, aktivita agentů, doporučení.
     turn = 0
     while turn < max_turns:
         turn += 1
-        response = client.messages.create(
-            model="claude-haiku-4-5", max_tokens=3000, system=prompt,
-            tools=REPORT_TOOLS, messages=messages
-        )
+        try:
+            response = client.messages.create(
+                model="claude-haiku-4-5", max_tokens=3000, system=prompt,
+                tools=REPORT_TOOLS, messages=messages
+            )
+        except Exception as e:
+            if _is_permanent_anthropic_error(e):
+                _disable_agent(str(e)[:200])
+                return {"status": "disabled", "reason": str(e)[:200], "turns": turn}
+            logger.warning(f"🤖 Health report transient error: {e}")
+            return {"status": "error", "error": str(e)[:200], "turns": turn}
         if response.stop_reason == "end_turn":
             final_text = next((b.text for b in response.content if b.type == "text"), "")
             # Always save final report to DB (don't rely on agent calling save tool)
@@ -1000,6 +1047,8 @@ SUMMARY_SYSTEM_PROMPT = """Jsi RadimCare Coordination Agent — píšeš 48-hodi
 
 def run_summary_report():
     """Run 48h summary report for admin."""
+    if _AGENT_DISABLED:
+        return {"status": "skipped", "reason": f"circuit open: {_AGENT_DISABLED_REASON}"}
     if not ANTHROPIC_API_KEY:
         return {"status": "skipped", "reason": "no API key"}
 
@@ -1014,13 +1063,20 @@ def run_summary_report():
 
     while turn < max_turns:
         turn += 1
-        response = client.messages.create(
-            model="claude-haiku-4-5",
-            max_tokens=8000,
-            system=SUMMARY_SYSTEM_PROMPT,
-            tools=TOOLS,
-            messages=messages
-        )
+        try:
+            response = client.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=8000,
+                system=SUMMARY_SYSTEM_PROMPT,
+                tools=TOOLS,
+                messages=messages
+            )
+        except Exception as e:
+            if _is_permanent_anthropic_error(e):
+                _disable_agent(str(e)[:200])
+                return {"status": "disabled", "reason": str(e)[:200], "turns": turn}
+            logger.warning(f"🤖 Summary report transient error: {e}")
+            return {"status": "error", "error": str(e)[:200], "turns": turn}
 
         if response.stop_reason == "end_turn":
             final_text = next((b.text for b in response.content if b.type == "text"), "")
@@ -1169,6 +1225,8 @@ Pokud admin chce změnit chování agenta — vysvětli co je možné a doporuč
 
 def run_agent_chat(user_message):
     """Run agent chat — admin asks, agent answers with tools."""
+    if _AGENT_DISABLED:
+        return {"status": "error", "response": f"Agent vypnutý (circuit open): {_AGENT_DISABLED_REASON}"}
     if not ANTHROPIC_API_KEY:
         return {"status": "error", "response": "ANTHROPIC_API_KEY není nastaven"}
 
@@ -1180,13 +1238,20 @@ def run_agent_chat(user_message):
 
     while turn < max_turns:
         turn += 1
-        response = client.messages.create(
-            model="claude-haiku-4-5",
-            max_tokens=3000,
-            system=CHAT_SYSTEM_PROMPT,
-            tools=TOOLS,
-            messages=messages
-        )
+        try:
+            response = client.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=3000,
+                system=CHAT_SYSTEM_PROMPT,
+                tools=TOOLS,
+                messages=messages
+            )
+        except Exception as e:
+            if _is_permanent_anthropic_error(e):
+                _disable_agent(str(e)[:200])
+                return {"status": "error", "response": f"Agent vypnut: {str(e)[:120]}", "turns": turn}
+            logger.warning(f"🤖 Agent chat transient error: {e}")
+            return {"status": "error", "response": f"Chyba: {str(e)[:120]}", "turns": turn}
 
         if response.stop_reason == "end_turn":
             final_text = next((b.text for b in response.content if b.type == "text"), "")
