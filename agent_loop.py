@@ -141,30 +141,50 @@ def _track_agent(agent_name, generated_obs=False):
 # ============================================================================
 
 def _get_active_users():
-    """Find users with recent brain_states or IoT data (last 24h)."""
+    """Find users with recent brain_states or IoT data (last 24h).
+
+    v8.19.109: vylučuje role IN ('administrator', 'admin') — admini jsou
+    operátoři systému, ne pacienti. Bez filtru spustil admin user 1
+    32× emergency_protocol CRISIS / 24h ('Žádný dotazník za 16 dní'),
+    bezvýznamné pro real monitoring. LEFT JOIN: pokud user_id nematchuje
+    auth_users (např. UUID-style senior z mobile registrace), přesto
+    zahrnut (default-allow).
+    """
     try:
         with db_context() as db:
             if is_postgres():
                 rows = db.execute("""
-                    SELECT DISTINCT user_id FROM (
+                    SELECT DISTINCT sub.user_id FROM (
                         SELECT user_id FROM brain_states WHERE created_at > NOW() - INTERVAL '24 hours'
                         UNION
                         SELECT DISTINCT d.user_id FROM iot_devices d
                         JOIN iot_sensor_data s ON s.device_id = d.device_id
                         WHERE s.recorded_at > NOW() - INTERVAL '24 hours' AND d.user_id IS NOT NULL
-                    ) sub LIMIT 100
+                    ) sub
+                    LEFT JOIN auth_users au ON au.id::text = sub.user_id
+                    WHERE au.role IS NULL OR au.role NOT IN ('administrator', 'admin')
+                    LIMIT 100
                 """).fetchall()
             else:
                 rows = db.execute("""
-                    SELECT DISTINCT user_id FROM (
+                    SELECT DISTINCT sub.user_id FROM (
                         SELECT user_id FROM brain_states WHERE created_at > datetime('now', '-24 hours')
                         UNION
                         SELECT DISTINCT d.user_id FROM iot_devices d
                         JOIN iot_sensor_data s ON s.device_id = d.device_id
                         WHERE s.recorded_at > datetime('now', '-24 hours') AND d.user_id IS NOT NULL
-                    ) LIMIT 100
+                    ) sub
+                    LEFT JOIN auth_users au ON CAST(au.id AS TEXT) = sub.user_id
+                    WHERE au.role IS NULL OR au.role NOT IN ('administrator', 'admin')
+                    LIMIT 100
                 """).fetchall()
-            return [r['user_id'] or r[0] for r in rows if (r.get('user_id') or r[0])]
+            uids = []
+            for r in rows:
+                # DictRow vs tuple safe access
+                uid = r['user_id'] if hasattr(r, 'get') and r.get('user_id') is not None else r[0]
+                if uid:
+                    uids.append(uid)
+            return uids
     except Exception as e:
         logger.debug(f"get_active_users error: {e}")
         return []
