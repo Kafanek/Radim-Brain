@@ -454,24 +454,63 @@ def _handle_who_am_i(**kwargs):
 # 🏠 HOME ASSISTANT HANDLERS
 # ============================================================================
 
-def _handle_ha_light_on(**kwargs):
-    """Turn on lights."""
+def _resolve_assigned_entity(user_id, room: str, role_keyword: str) -> str | None:
+    """If the senior has explicitly assigned a device to (room, role) in
+    Domácnost, prefer that entity over HA's auto-discovered ones. This is
+    what makes 'zhasni v ložnici' actually hit babičkina lampička, not a
+    random light HA suggested first.
+
+    role_keyword can be 'light', 'lock', 'cover', 'climate', 'speaker',
+    'sos_button', 'smoke', 'motion', 'wearable'.
+    """
+    if not (user_id and room):
+        return None
     try:
-        from home_assistant import ha
+        from ha_pairing_routes import find_assignment_by_room_role
+        # First try exact role match
+        assignment = find_assignment_by_room_role(user_id, room, role_keyword)
+        if assignment:
+            return assignment.get('entity_id')
+        # Fallback: assignments where role contains the keyword
+        from database import db_context
+        with db_context() as db:
+            row = db.execute(
+                "SELECT entity_id FROM device_assignments "
+                "WHERE user_id = ? AND room = ? AND role LIKE ? LIMIT 1",
+                (user_id, room, f'%{role_keyword}%')
+            ).fetchone()
+        if row:
+            return row[0] if isinstance(row, (list, tuple)) else row['entity_id']
+    except Exception:
+        pass
+    return None
+
+
+def _handle_ha_light_on(**kwargs):
+    """Turn on lights — uses caller's per-user HA + assignments."""
+    try:
+        from home_assistant import ha_for
+        uid = kwargs.get('user_id')
+        client = ha_for(uid)
         msg = kwargs.get('message', '').lower()
         # Detect room from message
         room = _detect_room(msg)
-        entity_id = None
+        # 1. PRIORITA: assignment (uživatelem přiřazené světlo v té místnosti)
         if room:
-            result = ha().execute_agent_action('light_on', {'room': room, 'device_type': 'light'})
+            assigned = _resolve_assigned_entity(uid, room, 'light')
+            if assigned:
+                result = client.execute_agent_action('light_on', {'entity_id': assigned})
+                return result.get('message', 'Světlo zapnuto.')
+        if room:
+            result = client.execute_agent_action('light_on', {'room': room, 'device_type': 'light'})
         else:
             # Turn on all lights or first found
-            devices = ha().get_devices_by_type('light')
+            devices = client.get_devices_by_type('light')
             lights = devices.get('light', [])
             if lights:
                 off_lights = [l for l in lights if l['state'] == 'off']
                 target = off_lights[0] if off_lights else lights[0]
-                result = ha().execute_agent_action('light_on', {'entity_id': target['entity_id']})
+                result = client.execute_agent_action('light_on', {'entity_id': target['entity_id']})
             else:
                 return "Nemám žádná světla k ovládání."
         return result.get('message', 'Světlo zapnuto.')
@@ -480,17 +519,24 @@ def _handle_ha_light_on(**kwargs):
 
 def _handle_ha_light_off(**kwargs):
     try:
-        from home_assistant import ha
+        from home_assistant import ha_for
+        uid = kwargs.get('user_id')
+        client = ha_for(uid)
         msg = kwargs.get('message', '').lower()
         room = _detect_room(msg)
         if room:
-            result = ha().execute_agent_action('light_off', {'room': room, 'device_type': 'light'})
+            assigned = _resolve_assigned_entity(uid, room, 'light')
+            if assigned:
+                result = client.execute_agent_action('light_off', {'entity_id': assigned})
+                return result.get('message', 'Světlo vypnuto.')
+        if room:
+            result = client.execute_agent_action('light_off', {'room': room, 'device_type': 'light'})
         else:
-            devices = ha().get_devices_by_type('light')
+            devices = client.get_devices_by_type('light')
             lights = devices.get('light', [])
             on_lights = [l for l in lights if l['state'] == 'on']
             if on_lights:
-                result = ha().execute_agent_action('light_off', {'entity_id': on_lights[0]['entity_id']})
+                result = client.execute_agent_action('light_off', {'entity_id': on_lights[0]['entity_id']})
             else:
                 return "Všechna světla jsou už zhasnutá."
         return result.get('message', 'Světlo vypnuto.')
@@ -499,35 +545,36 @@ def _handle_ha_light_off(**kwargs):
 
 def _handle_ha_temperature(**kwargs):
     try:
-        from home_assistant import ha
-        result = ha().execute_agent_action('get_temperature')
+        from home_assistant import ha_for
+        result = ha_for(kwargs.get('user_id')).execute_agent_action('get_temperature')
         return result.get('message', 'Nemám data o teplotě.')
     except Exception:
         return None  # Pass to AI
 
 def _handle_ha_home_status(**kwargs):
     try:
-        from home_assistant import ha
-        result = ha().execute_agent_action('get_status')
+        from home_assistant import ha_for
+        result = ha_for(kwargs.get('user_id')).execute_agent_action('get_status')
         return result.get('message', 'Stav domácnosti není dostupný.')
     except Exception:
         return None
 
 def _handle_ha_lock(**kwargs):
     try:
-        from home_assistant import ha
+        from home_assistant import ha_for
+        client = ha_for(kwargs.get('user_id'))
         msg = kwargs.get('message', '').lower()
         if any(w in msg for w in ['odemkni', 'odemknout', 'otevři zámek', 'otevrit zamek']):
-            devices = ha().get_devices_by_type('lock')
+            devices = client.get_devices_by_type('lock')
             locks = devices.get('lock', [])
             if locks:
-                result = ha().execute_agent_action('unlock', {'entity_id': locks[0]['entity_id']})
+                result = client.execute_agent_action('unlock', {'entity_id': locks[0]['entity_id']})
                 return result.get('message', 'Odemčeno.')
         else:
-            devices = ha().get_devices_by_type('lock')
+            devices = client.get_devices_by_type('lock')
             locks = devices.get('lock', [])
             if locks:
-                result = ha().execute_agent_action('lock', {'entity_id': locks[0]['entity_id']})
+                result = client.execute_agent_action('lock', {'entity_id': locks[0]['entity_id']})
                 return result.get('message', 'Zamčeno.')
         return "Nemám žádný zámek k ovládání."
     except Exception:
@@ -535,7 +582,8 @@ def _handle_ha_lock(**kwargs):
 
 def _handle_ha_climate(**kwargs):
     try:
-        from home_assistant import ha
+        from home_assistant import ha_for
+        client = ha_for(kwargs.get('user_id'))
         import re
         msg = kwargs.get('message', '').lower()
         # Extract temperature number
@@ -543,10 +591,10 @@ def _handle_ha_climate(**kwargs):
         if temp_match:
             temp = int(temp_match.group(1))
             temp = max(15, min(30, temp))  # Safety limits
-            devices = ha().get_devices_by_type('climate')
+            devices = client.get_devices_by_type('climate')
             climates = devices.get('climate', [])
             if climates:
-                result = ha().execute_agent_action('climate_set', {
+                result = client.execute_agent_action('climate_set', {
                     'entity_id': climates[0]['entity_id'],
                     'temperature': temp
                 })
@@ -554,22 +602,22 @@ def _handle_ha_climate(**kwargs):
         # No specific temp — adjust based on request
         if any(w in msg for w in ['zima', 'studeno', 'chladno', 'přitop', 'pritop', 'zatop']):
             # Raise by 2°C
-            devices = ha().get_devices_by_type('climate')
+            devices = client.get_devices_by_type('climate')
             climates = devices.get('climate', [])
             if climates:
                 current = climates[0].get('attributes', {}).get('temperature', 20)
                 new_temp = min(25, current + 2)
-                result = ha().execute_agent_action('climate_set', {
+                client.execute_agent_action('climate_set', {
                     'entity_id': climates[0]['entity_id'], 'temperature': new_temp
                 })
                 return f"🌡️ Zvýšil jsem topení na {new_temp}°C."
         elif any(w in msg for w in ['teplo', 'horko', 'moc topí']):
-            devices = ha().get_devices_by_type('climate')
+            devices = client.get_devices_by_type('climate')
             climates = devices.get('climate', [])
             if climates:
                 current = climates[0].get('attributes', {}).get('temperature', 22)
                 new_temp = max(18, current - 2)
-                result = ha().execute_agent_action('climate_set', {
+                client.execute_agent_action('climate_set', {
                     'entity_id': climates[0]['entity_id'], 'temperature': new_temp
                 })
                 return f"🌡️ Snížil jsem topení na {new_temp}°C."
@@ -622,10 +670,10 @@ def _handle_ha_radio_play(**kwargs):
     url = RADIO_STATIONS[station]
     pretty_name = station.capitalize()
 
-    # Try Home Assistant first
+    # Try Home Assistant first — per-user
     try:
-        from home_assistant import ha, get_ha_client
-        client = get_ha_client()
+        from home_assistant import ha_for
+        client = ha_for(kwargs.get('user_id'))
         # Skip HA if client is simulated/disabled (no real HA configured)
         if client and hasattr(client, 'play_media') and getattr(client, 'is_real', True):
             entity_id = client.find_default_media_player()
@@ -641,10 +689,10 @@ def _handle_ha_radio_play(**kwargs):
 
 
 def _handle_ha_radio_stop(**kwargs):
-    """v8.19.35: zastav rádio (HA nebo lokální)."""
+    """v8.19.35: zastav rádio (HA nebo lokální). Per-user HA."""
     try:
-        from home_assistant import ha, get_ha_client
-        client = get_ha_client()
+        from home_assistant import ha_for
+        client = ha_for(kwargs.get('user_id'))
         if client and hasattr(client, 'media_stop') and getattr(client, 'is_real', True):
             entity_id = client.find_default_media_player()
             if entity_id:
@@ -657,16 +705,17 @@ def _handle_ha_radio_stop(**kwargs):
 
 def _handle_ha_cover(**kwargs):
     try:
-        from home_assistant import ha
+        from home_assistant import ha_for
+        client = ha_for(kwargs.get('user_id'))
         msg = kwargs.get('message', '').lower()
-        devices = ha().get_devices_by_type('cover')
+        devices = client.get_devices_by_type('cover')
         covers = devices.get('cover', [])
         if not covers:
             return "Nemám žádné rolety k ovládání."
         if any(w in msg for w in ['otevři', 'otevrit', 'nahoru', 'vytas', 'vytáhni']):
-            result = ha().execute_agent_action('cover_open', {'entity_id': covers[0]['entity_id']})
+            result = client.execute_agent_action('cover_open', {'entity_id': covers[0]['entity_id']})
         else:
-            result = ha().execute_agent_action('cover_close', {'entity_id': covers[0]['entity_id']})
+            result = client.execute_agent_action('cover_close', {'entity_id': covers[0]['entity_id']})
         return result.get('message', 'Hotovo.')
     except Exception:
         return None

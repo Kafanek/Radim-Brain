@@ -169,7 +169,7 @@ def run_night_activity_check(app):
         return {'skipped': 'not_night'}
 
     try:
-        from home_assistant import ha
+        from home_assistant import ha_for
     except Exception as e:
         logger.debug(f'run_night_activity_check HA import: {e}')
         return {'error': 'ha import'}
@@ -178,14 +178,13 @@ def run_night_activity_check(app):
     if not user_ids:
         return {'checked': 0}
 
-    # The shared ha() client is per-server, so we snapshot once per tick
-    client = ha()
-    snapshot = _detect_night_activity(client)
-
     checked = 0
     pushed = 0
     for uid in user_ids:
         checked += 1
+        # Per-user HA: each senior has their own home, snapshot per-user
+        client = ha_for(uid)
+        snapshot = _detect_night_activity(client)
         if not snapshot['has_activity']:
             continue
 
@@ -295,9 +294,9 @@ def _detect_maintenance_issues(ha_client):
 
 
 def run_maintenance_check(app):
-    """Scheduler entry — runs daily at 09:00."""
+    """Scheduler entry — runs daily at 09:00. Per-user iteration."""
     try:
-        from home_assistant import ha
+        from home_assistant import ha_for
     except Exception as e:
         logger.debug(f'run_maintenance_check HA import: {e}')
         return {'error': 'ha import'}
@@ -306,15 +305,18 @@ def run_maintenance_check(app):
     if not user_ids:
         return {'checked': 0}
 
-    client = ha()
-    issues = _detect_maintenance_issues(client)
-
-    if not issues['low_batteries'] and not issues['stale_sensors']:
-        logger.info("🔧 Maintenance check: all clear")
-        return {'checked': len(user_ids), 'issues': 0}
-
     pushed = 0
+    total_low = 0
+    total_stale = 0
     for uid in user_ids:
+        # Per-user HA — each senior has their own sensors/batteries
+        client = ha_for(uid)
+        issues = _detect_maintenance_issues(client)
+        total_low += len(issues['low_batteries'])
+        total_stale += len(issues['stale_sensors'])
+        if not issues['low_batteries'] and not issues['stale_sensors']:
+            continue
+
         # Track per-device last nudge
         try:
             from memory_helpers import db_load_learning
@@ -379,12 +381,11 @@ def run_maintenance_check(app):
 
     logger.info(
         f"🔧 Maintenance check: users={len(user_ids)} "
-        f"low_batt={len(issues['low_batteries'])} stale={len(issues['stale_sensors'])} "
-        f"pushed={pushed}"
+        f"low_batt={total_low} stale={total_stale} pushed={pushed}"
     )
     return {
         'checked': len(user_ids),
-        'low_batteries': len(issues['low_batteries']),
-        'stale_sensors': len(issues['stale_sensors']),
+        'low_batteries': total_low,
+        'stale_sensors': total_stale,
         'pushed': pushed,
     }

@@ -203,14 +203,26 @@ def _calc_safety(user_id, learning):
 
 
 def _calc_home(user_id, learning):
-    """How well Radim manages the smart home."""
+    """How well Radim manages the smart home — per-user HA client."""
     score = 10
     reasons = []
 
-    # HA connected
+    # HA connected — prefer per-user, fall back to global env-var client
     try:
-        from home_assistant import ha
-        client = ha()
+        client = None
+        try:
+            from ha_user_config import ha_for_user
+            client = ha_for_user(user_id)
+        except Exception:
+            client = None
+        if client is None:
+            from home_assistant import ha
+            client = ha()
+        # Probe connection so .connected is populated for fresh clients
+        try:
+            client.check_connection()
+        except Exception:
+            pass
         if client.connected:
             score += 20
 

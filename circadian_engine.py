@@ -219,8 +219,8 @@ def check_proactive_triggers(user_id, app=None):
     hour = now.hour
 
     try:
-        from home_assistant import ha
-        client = ha()
+        from home_assistant import ha_for
+        client = ha_for(user_id)
         if not client.connected:
             return triggers
 

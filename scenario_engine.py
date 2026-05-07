@@ -328,7 +328,7 @@ def execute_scenario_actions(actions, user_id, app=None):
             if action == 'notify_caregiver':
                 _notify_caregiver_scenario(user_id, app)
             elif action == 'ha_lights_on':
-                _ha_lights_on()
+                _ha_lights_on(user_id)
             elif action == 'log_crisis':
                 _log_event(user_id, 'crisis')
             elif action == 'log_mood_low':
@@ -363,10 +363,10 @@ def _notify_caregiver_scenario(user_id, app):
         pass
 
 
-def _ha_lights_on():
+def _ha_lights_on(user_id=None):
     try:
-        from home_assistant import ha
-        client = ha()
+        from home_assistant import ha_for
+        client = ha_for(user_id)
         if client.connected:
             devices = client.get_devices_by_type('light')
             for light in devices.get('light', []):

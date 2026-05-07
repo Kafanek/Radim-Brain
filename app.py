@@ -679,6 +679,34 @@ except Exception as e:
     logger.warning(f"⚠️ Home Assistant routes: {e}")
 
 try:
+    from ha_config_routes import ha_config_bp
+    app.register_blueprint(ha_config_bp)
+    logger.info("✅ HA config routes registered: /api/ha/config (per-user homes)")
+except Exception as e:
+    logger.warning(f"⚠️ HA config routes: {e}")
+
+try:
+    from ha_component_routes import ha_component_bp
+    app.register_blueprint(ha_component_bp)
+    logger.info("✅ HA-component routes registered: /api/ha-component/* (HA Custom Component)")
+except Exception as e:
+    logger.warning(f"⚠️ HA-component routes: {e}")
+
+try:
+    from ha_pairing_routes import ha_pairing_bp
+    app.register_blueprint(ha_pairing_bp)
+    logger.info("✅ HA pairing + assignments registered: /api/ha/{devices/catalog,pair,assignments}")
+except Exception as e:
+    logger.warning(f"⚠️ HA pairing routes: {e}")
+
+try:
+    from voice_choice_routes import voice_choice_bp
+    app.register_blueprint(voice_choice_bp)
+    logger.info("✅ Voice choice routes registered: /api/voice/{choices,profile,preview}")
+except Exception as e:
+    logger.warning(f"⚠️ Voice choice routes: {e}")
+
+try:
     from predictive_agent import prediction_bp
     app.register_blueprint(prediction_bp)
     logger.info("✅ Predictive Agent routes registered: /api/predict/*")
@@ -4231,6 +4259,15 @@ with app.app_context():
                 db.close()
             except Exception:
                 pass
+
+    # Start per-user HA WebSocket supervisor (real-time state_changed push)
+    # Skipped when DISABLE_HA_WS=1 (e.g. during pytest collection).
+    if os.environ.get('DISABLE_HA_WS') != '1':
+        try:
+            from ha_user_config import start_websocket_supervisor
+            start_websocket_supervisor()
+        except Exception as e:
+            logger.warning(f"⚠️  HA WS supervisor: {e}")
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

@@ -375,13 +375,13 @@ class WeatherAgent:
     """Generate weather-based activity suggestions."""
 
     @staticmethod
-    def get_suggestions(temperature=None, conditions=None):
-        """Generate suggestions based on weather."""
+    def get_suggestions(temperature=None, conditions=None, user_id=None):
+        """Generate suggestions based on weather. user_id picks per-user HA."""
         # If no weather data, get from HA
         if temperature is None:
             try:
-                from home_assistant import ha
-                sensors = ha().get_sensors_summary()
+                from home_assistant import ha_for
+                sensors = ha_for(user_id).get_sensors_summary()
                 temps = sensors.get('temperature', [])
                 if temps:
                     temperature = sum(t['value'] for t in temps) / len(temps)
@@ -633,10 +633,10 @@ class EmergencyProtocol:
         audit_log(user_id, "emergency_protocol", "system", f"Trigger: {trigger}")
         actions_taken.append("📝 Crisis logged")
 
-        # 2. HA actions
+        # 2. HA actions (per-user)
         try:
-            from home_assistant import ha
-            client = ha()
+            from home_assistant import ha_for
+            client = ha_for(user_id)
             if client.connected:
                 devices = client.get_devices_by_type()
                 for light in devices.get('light', []):

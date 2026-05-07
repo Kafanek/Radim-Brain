@@ -335,9 +335,9 @@ def _emergency_log(user_id, trigger, app):
 
 
 def _emergency_ha(user_id, trigger, app):
-    """Turn on all lights + unlock doors via Home Assistant."""
-    from home_assistant import ha
-    client = ha()
+    """Turn on all lights + unlock doors via Home Assistant (per-user)."""
+    from home_assistant import ha_for
+    client = ha_for(user_id)
     if not client.connected:
         raise ConnectionError("HA not connected")
     devices = client.get_devices_by_type()

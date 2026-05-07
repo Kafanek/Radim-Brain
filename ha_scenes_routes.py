@@ -417,13 +417,13 @@ def family_home_status(senior_id):
     if not _verify_family_link(senior_id, uid):
         return jsonify({'success': False, 'error': 'not linked'}), 403
 
-    # Get the shared HA client state — whatever the senior sees, family sees
+    # Family reads the SENIOR's HA — not their own. Per-user lookup.
     status = {'connected': False}
     low_batteries = []
     open_doors = []
     try:
-        from home_assistant import ha
-        client = ha()
+        from home_assistant import ha_for
+        client = ha_for(senior_id)
         conn = client.check_connection()
         if conn.get('connected'):
             status.update(conn)

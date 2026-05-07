@@ -92,11 +92,11 @@ def _signal_activity_drop(user_id, baselines):
     except Exception:
         pass
 
-    # Fallback: HA sensors
+    # Fallback: HA sensors (per-user)
     if current is None or current == 0:
         try:
-            from home_assistant import ha as _get_ha
-            client = _get_ha()
+            from home_assistant import ha_for
+            client = ha_for(user_id)
             if client.connected:
                 sensors = client.get_sensors_summary()
                 active_motion = sum(1 for m in sensors.get('motion', []) if m.get('state') == 'on')
@@ -291,10 +291,10 @@ def _signal_survey_risk(user_id, baselines):
 
 
 def _signal_environment(user_id):
-    """Environmental risk from HA sensors."""
+    """Environmental risk from HA sensors (per-user)."""
     try:
-        from home_assistant import ha
-        client = ha()
+        from home_assistant import ha_for
+        client = ha_for(user_id)
         if not client.connected:
             return 0.0
 

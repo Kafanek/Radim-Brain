@@ -1441,6 +1441,11 @@ def init_postgres_schema(db):
             settings = EXCLUDED.settings
     ''', ('radim', 'Radim Asistent', 'ai_assistant', 1, '{"ai_enabled": true, "voice": "radim"}'))
 
+    # HA per-user homes
+    init_ha_homes_schema(db)
+    # Device assignments (v397)
+    init_device_assignments_schema(db)
+
 
 def init_sqlite_schema(db):
     """Apply full SQLite schema to database connection."""
@@ -1458,6 +1463,152 @@ def init_sqlite_schema(db):
         INSERT OR REPLACE INTO chat_users (id, name, role, online, settings)
         VALUES (?, ?, ?, ?, ?)
     ''', ('radim', 'Radim Asistent', 'ai_assistant', 1, '{"ai_enabled": true, "voice": "radim"}'))
+
+    # HA per-user homes
+    init_ha_homes_schema(db)
+    # Device assignments (v397)
+    init_device_assignments_schema(db)
+
+
+# ============================================
+# HA HOMES — per-user / per-home Home Assistant config (v395)
+# ============================================
+# Each row = one Home Assistant instance owned by a specific user.
+# A user can register multiple homes (main residence + cottage, or family
+# member managing multiple seniors). Tokens are encrypted at rest with
+# Fernet — see ha_user_config.py. The webhook secret is per-home so HA's
+# rest_command POST hits /api/ha/webhook/<home_id> with X-HA-Secret.
+
+HA_HOMES_SCHEMA_PG = """
+    CREATE TABLE IF NOT EXISTS user_ha_homes (
+        home_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        ha_url TEXT NOT NULL,
+        ha_token_encrypted TEXT NOT NULL,
+        ha_webhook_secret TEXT NOT NULL,
+        is_default BOOLEAN DEFAULT FALSE,
+        last_connected_at TIMESTAMP,
+        last_error TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_user_ha_homes_user
+        ON user_ha_homes(user_id);
+"""
+
+HA_HOMES_SCHEMA_SQLITE = """
+    CREATE TABLE IF NOT EXISTS user_ha_homes (
+        home_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        ha_url TEXT NOT NULL,
+        ha_token_encrypted TEXT NOT NULL,
+        ha_webhook_secret TEXT NOT NULL,
+        is_default INTEGER DEFAULT 0,
+        last_connected_at TIMESTAMP,
+        last_error TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_user_ha_homes_user
+        ON user_ha_homes(user_id);
+"""
+
+
+def init_ha_homes_schema(db):
+    """Create user_ha_homes table. Idempotent."""
+    try:
+        from database import is_postgres
+        sql = HA_HOMES_SCHEMA_PG if is_postgres() else HA_HOMES_SCHEMA_SQLITE
+        for stmt in sql.strip().split(';'):
+            stmt = stmt.strip()
+            if stmt:
+                db.execute(stmt)
+        logger.info("✅ HA homes schema created")
+    except Exception as e:
+        logger.debug(f"HA homes schema: {e}")
+
+
+# ============================================
+# DEVICE ASSIGNMENTS — entity → user / room / role mapping (v397)
+# ============================================
+# Each row binds a HA entity (or a non-HA wearable) to a senior + room +
+# role. Drives:
+#   - intent_resolver: "zhasni v ložnici" → resolves entity by room+role
+#   - agent_loop: SOS triple-click → looks up role='sos_button' assignments
+#   - family dashboard: filters by user_id
+#   - skill_map._calc_home: counts only assigned devices
+
+DEVICE_ASSIGNMENTS_SCHEMA_PG = """
+    CREATE TABLE IF NOT EXISTS device_assignments (
+        assignment_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        home_id TEXT,
+        entity_id TEXT NOT NULL,
+        device_type TEXT NOT NULL,
+        room TEXT,
+        role TEXT,
+        custom_label TEXT,
+        manufacturer TEXT,
+        model TEXT,
+        protocol TEXT,
+        config JSONB DEFAULT '{}'::jsonb,
+        auto_actions JSONB DEFAULT '{}'::jsonb,
+        last_seen_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (user_id, entity_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_device_assignments_user
+        ON device_assignments(user_id);
+    CREATE INDEX IF NOT EXISTS idx_device_assignments_room_role
+        ON device_assignments(user_id, room, role);
+"""
+
+DEVICE_ASSIGNMENTS_SCHEMA_SQLITE = """
+    CREATE TABLE IF NOT EXISTS device_assignments (
+        assignment_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        home_id TEXT,
+        entity_id TEXT NOT NULL,
+        device_type TEXT NOT NULL,
+        room TEXT,
+        role TEXT,
+        custom_label TEXT,
+        manufacturer TEXT,
+        model TEXT,
+        protocol TEXT,
+        config TEXT DEFAULT '{}',
+        auto_actions TEXT DEFAULT '{}',
+        last_seen_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (user_id, entity_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_device_assignments_user
+        ON device_assignments(user_id);
+    CREATE INDEX IF NOT EXISTS idx_device_assignments_room_role
+        ON device_assignments(user_id, room, role);
+"""
+
+
+def init_device_assignments_schema(db):
+    """Create device_assignments table. Idempotent."""
+    try:
+        from database import is_postgres
+        sql = DEVICE_ASSIGNMENTS_SCHEMA_PG if is_postgres() else DEVICE_ASSIGNMENTS_SCHEMA_SQLITE
+        for stmt in sql.strip().split(';'):
+            stmt = stmt.strip()
+            if stmt:
+                db.execute(stmt)
+        logger.info("✅ Device assignments schema created")
+    except Exception as e:
+        logger.debug(f"Device assignments schema: {e}")
 
 
 # ============================================

@@ -20,6 +20,9 @@ requests==2.31.0
 # Falls back to SQLite if DATABASE_URL not set
 psycopg2-binary==2.9.9
 
+# Crypto — Fernet for encrypting per-user HA tokens at rest (v395)
+cryptography>=42.0.0
+
 # Push Notifications
 pywebpush==1.14.0
 

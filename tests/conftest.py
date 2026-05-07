@@ -14,6 +14,14 @@ _test_db = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
 _test_db.close()
 os.environ['DATABASE_PATH'] = _test_db.name
 
+# Disable HA WebSocket supervisor — tests don't need real HA connections
+os.environ.setdefault('DISABLE_HA_WS', '1')
+# Stable Fernet key for token encryption tests (test only — not a real secret)
+os.environ.setdefault(
+    'HA_TOKEN_ENCRYPTION_KEY',
+    'oNDYTq18C8qhGfgW-Uqj7Lm5M5yMFysR0ZTTF4fekBo='
+)
+
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

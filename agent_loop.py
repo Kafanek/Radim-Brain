@@ -206,7 +206,7 @@ def _evaluate_user(user_id, app):
     # Sprint AF: _check_recent_chat_crisis added FIRST so a single safety
     # event (fall, pain, suicide-talk) triggers caregiver notification within
     # one 5-min cycle, not blocked by avg-of-5 in _check_c_trend.
-    for check in (_check_recent_chat_crisis, _check_c_trend, _check_activity_drop, _check_vitals, _check_interaction_silence, _check_fall_detection):
+    for check in (_check_recent_chat_crisis, _check_c_trend, _check_activity_drop, _check_vitals, _check_interaction_silence, _check_fall_detection, _check_smoke):
         obs = check(user_id, baselines)
         if obs and not _is_in_cooldown(user_id, obs["type"]):
             # Apply sensitivity filter: if sensitivity < 1.0, skip low-severity
@@ -550,6 +550,70 @@ def _check_fall_detection(user_id, baselines):
 
     except Exception as e:
         logger.debug(f"Fall detection check error: {e}")
+
+    return None
+
+
+def _check_smoke(user_id, baselines):
+    """Detect smoke alarm triggers — CRISIS severity (calls 150 fire dept).
+
+    Reads from two sources:
+      1. iot_sensor_data with sensor_type='smoke' (custom Zigbee gateway)
+      2. HA per-user binary_sensor with device_class='smoke' (live state)
+
+    Smoke alarm is the highest-severity event we handle: triggers crisis
+    protocol immediately (lights ON, doors UNLOCKED, voice call to senior,
+    SMS to family, push to caregiver).
+    """
+    # Path 1: IoT sensor table
+    try:
+        with db_context(commit=False) as db:
+            row = db.execute("""
+                SELECT s.device_id, s.value, s.recorded_at, d.device_name, da.room
+                FROM iot_sensor_data s
+                LEFT JOIN iot_devices d ON s.device_id = d.device_id
+                LEFT JOIN device_assignments da
+                  ON da.entity_id = d.device_id AND da.user_id = ?
+                WHERE d.user_id = ? AND s.sensor_type = 'smoke'
+                  AND s.recorded_at > ?
+                  AND s.value > 0
+                ORDER BY s.recorded_at DESC LIMIT 1
+            """, (user_id, user_id,
+                  (datetime.utcnow() - timedelta(minutes=10)).isoformat())).fetchone()
+            if row:
+                device_name = row[3] or row[0]
+                room = row[4] or 'neznámá místnost'
+                return {
+                    "type": "smoke_detected",
+                    "severity": CRISIS,
+                    "message": f"🔥 KOUŘ DETEKOVÁN — {device_name} ({room}). Volám 150.",
+                    "details": {
+                        "device_id": row[0], "value": row[1],
+                        "time": str(row[2]), "room": room,
+                    },
+                }
+    except Exception as e:
+        logger.debug(f"Smoke check (DB) error: {e}")
+
+    # Path 2: Live HA state via per-user client
+    try:
+        from home_assistant import ha_for
+        client = ha_for(user_id)
+        if client and client.connected:
+            for s in client.get_all_states() or []:
+                eid = s.get('entity_id', '')
+                attrs = s.get('attributes', {}) or {}
+                if (attrs.get('device_class') == 'smoke'
+                        and s.get('state') == 'on'):
+                    name = attrs.get('friendly_name', eid)
+                    return {
+                        "type": "smoke_detected",
+                        "severity": CRISIS,
+                        "message": f"🔥 KOUŘ DETEKOVÁN — {name}. Volám 150.",
+                        "details": {"entity_id": eid, "name": name},
+                    }
+    except Exception as e:
+        logger.debug(f"Smoke check (HA) error: {e}")
 
     return None
 
@@ -2519,79 +2583,98 @@ def _run_advanced_agents(user_id, baselines, observations):
 # ============================================================================
 
 def _sync_ha_sensors():
-    """Sync Home Assistant sensors → iot_sensor_data DB.
+    """Sync Home Assistant sensors → iot_sensor_data DB (per-user).
 
-    Called every 5 min at start of agent cycle.
-    Writes temperature, humidity, motion, door data from HA to DB
-    so all existing detectors (_check_activity, _check_vitals) work.
+    Called every 5 min at start of agent cycle. Iterates active seniors,
+    pulls each one's HA, writes their sensor data tagged with user_id so
+    subsequent room-scoped queries (_check_activity, _check_vitals) see
+    the right user's data.
+
+    Falls back to the global env-var HA when a user has no per-user
+    config — this preserves single-tenant dev behavior.
     """
     if not _HAS_HA:
         return
 
     try:
-        ha_client = _get_ha()
-        if not ha_client.connected:
-            return
+        from home_assistant import ha_for
+    except Exception:
+        return
 
-        sensors = ha_client.get_sensors_summary()
-        if not sensors:
-            return
+    # Pull list of active users (same definition as the agent loop itself).
+    try:
+        active_uids = _get_active_users() or []
+    except Exception:
+        active_uids = []
 
-        synced = 0
-        with db_context(commit=True) as db:
-            # Sync temperature sensors
-            for s in sensors.get('temperature', []):
-                _upsert_sensor(db, s['entity_id'], 'temperature', s['value'], s.get('name', ''))
-                synced += 1
+    # If no per-user setup yet, sync once with the global client (legacy mode).
+    targets = active_uids if active_uids else [None]
 
-            # Sync humidity sensors
-            for s in sensors.get('humidity', []):
-                _upsert_sensor(db, s['entity_id'], 'humidity', s['value'], s.get('name', ''))
-                synced += 1
+    total_synced = 0
+    for uid in targets:
+        try:
+            ha_client = ha_for(uid) if uid else _get_ha()
+            if not ha_client.connected:
+                # Try to wake it via REST ping (cold cache)
+                try:
+                    ha_client.check_connection()
+                except Exception:
+                    continue
+                if not ha_client.connected:
+                    continue
 
-            # Sync motion sensors
-            for s in sensors.get('motion', []):
-                val = 1.0 if s['state'] == 'on' else 0.0
-                _upsert_sensor(db, s['entity_id'], 'motion', val, s.get('name', ''))
-                synced += 1
+            sensors = ha_client.get_sensors_summary()
+            if not sensors:
+                continue
 
-            # Sync door sensors
-            for s in sensors.get('door', []):
-                val = 1.0 if s['state'] == 'on' else 0.0
-                _upsert_sensor(db, s['entity_id'], 'door', val, s.get('name', ''))
-                synced += 1
+            with db_context(commit=True) as db:
+                for s in sensors.get('temperature', []):
+                    _upsert_sensor(db, s['entity_id'], 'temperature', s['value'], s.get('name', ''), uid)
+                    total_synced += 1
+                for s in sensors.get('humidity', []):
+                    _upsert_sensor(db, s['entity_id'], 'humidity', s['value'], s.get('name', ''), uid)
+                    total_synced += 1
+                for s in sensors.get('motion', []):
+                    val = 1.0 if s['state'] == 'on' else 0.0
+                    _upsert_sensor(db, s['entity_id'], 'motion', val, s.get('name', ''), uid)
+                    total_synced += 1
+                for s in sensors.get('door', []):
+                    val = 1.0 if s['state'] == 'on' else 0.0
+                    _upsert_sensor(db, s['entity_id'], 'door', val, s.get('name', ''), uid)
+                    total_synced += 1
+                for s in sensors.get('battery', []):
+                    _upsert_sensor(db, s['entity_id'], 'battery', s['value'], s.get('name', ''), uid)
+                    total_synced += 1
+        except Exception as e:
+            logger.debug(f"HA sensor sync error for user={uid}: {e}")
 
-            # Sync battery (for low battery alerts)
-            for s in sensors.get('battery', []):
-                _upsert_sensor(db, s['entity_id'], 'battery', s['value'], s.get('name', ''))
-                synced += 1
-
-        if synced > 0:
-            logger.debug(f"HA sync: {synced} sensors → DB")
-
-    except Exception as e:
-        logger.debug(f"HA sensor sync error: {e}")
+    if total_synced > 0:
+        logger.debug(f"HA sync: {total_synced} sensors → DB across {len(targets)} user(s)")
 
 
-def _upsert_sensor(db, entity_id, sensor_type, value, name=''):
-    """Insert or update sensor data in iot_sensor_data."""
+def _upsert_sensor(db, entity_id, sensor_type, value, name='', user_id=None):
+    """Insert or update sensor data. user_id tags the device row so
+    per-user queries see only their senior's HA-derived sensors."""
     try:
         # Extract room from entity_id (e.g., sensor.living_room_temperature → living_room)
         parts = entity_id.split('.')
         room_id = parts[1].rsplit('_', 1)[0] if len(parts) > 1 else 'unknown'
 
-        # Ensure device exists
+        # Ensure device exists. Tag with user_id when known so different
+        # seniors don't overwrite each other's device rows.
         if is_postgres():
             db.execute(
-                "INSERT INTO iot_devices (device_id, device_type, room_id, device_name) "
-                "VALUES (?, ?, ?, ?) ON CONFLICT (device_id) DO UPDATE SET device_name = ?",
-                (entity_id, sensor_type, room_id, name, name)
+                "INSERT INTO iot_devices (device_id, device_type, room_id, device_name, user_id) "
+                "VALUES (?, ?, ?, ?, ?) ON CONFLICT (device_id) DO UPDATE SET "
+                "device_name = EXCLUDED.device_name, "
+                "user_id = COALESCE(EXCLUDED.user_id, iot_devices.user_id)",
+                (entity_id, sensor_type, room_id, name, user_id)
             )
         else:
             db.execute(
-                "INSERT OR REPLACE INTO iot_devices (device_id, device_type, room_id, device_name) "
-                "VALUES (?, ?, ?, ?)",
-                (entity_id, sensor_type, room_id, name)
+                "INSERT OR REPLACE INTO iot_devices (device_id, device_type, room_id, device_name, user_id) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (entity_id, sensor_type, room_id, name, user_id)
             )
 
         # Insert sensor reading
@@ -2604,7 +2687,7 @@ def _upsert_sensor(db, entity_id, sensor_type, value, name=''):
 
 
 def _ha_crisis_actions(user_id, obs):
-    """Execute Home Assistant emergency actions on CRISIS/ALERT.
+    """Execute Home Assistant emergency actions on CRISIS/ALERT (per-user).
 
     - CRISIS: Turn on ALL lights, unlock front door (for paramedics)
     - ALERT: Turn on lights in user's room, flash hallway light
@@ -2613,7 +2696,8 @@ def _ha_crisis_actions(user_id, obs):
         return
 
     try:
-        ha_client = _get_ha()
+        from home_assistant import ha_for
+        ha_client = ha_for(user_id)
         if not ha_client.connected:
             return
 

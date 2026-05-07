@@ -1127,12 +1127,57 @@ def _current_uid():
     return str(au.get('id') or au.get('user_id') or '')
 
 
+def ha_for(user_id, home_id=None):
+    """Return the appropriate HA client for a given user.
+
+    Resolution order:
+      1. Per-user / per-home from user_ha_homes (DB lookup, decrypts token)
+      2. Global env-var-based singleton (admin / dev fallback)
+      3. SimulatedHomeAssistant (demo)
+
+    Returns the client; never None — callers can always operate on it.
+    Use this from agents, intent handlers, background jobs, anywhere a
+    user_id is in scope. If user_id is empty / None, returns the global
+    singleton (env-var-based).
+    """
+    if user_id:
+        try:
+            from ha_user_config import ha_for_user
+            client = ha_for_user(str(user_id), home_id)
+            if client is not None:
+                return client
+        except Exception as e:
+            logger.warning(f"ha_for({str(user_id)[:8]}, {home_id}) failed: {e}")
+    return ha()
+
+
+def _client_for_request(uid):
+    """Convenience for Flask handlers — honors ?home=<home_id> query param."""
+    home_id = (request.args.get('home') or '').strip() or None
+    return ha_for(uid, home_id)
+
+
 @ha_bp.route('/api/ha/status', methods=['GET'])
 @_require_auth
 def ha_status():
-    """Check HA connection and get home status."""
-    client = ha()
+    """Check HA connection and get home status.
+
+    Per-user: resolves to the authenticated user's default home (or
+    ?home=<home_id>). Falls back to env-var global if user has no config.
+    """
+    uid = _current_uid()
+    client = _client_for_request(uid)
     conn = client.check_connection()
+    # Diagnostic: tag which home answered
+    if hasattr(client, '_home_id'):
+        conn['home_id'] = client._home_id
+        # Persist last_connected / last_error
+        try:
+            from ha_user_config import record_connection_status
+            record_connection_status(client._home_id, conn.get('connected', False),
+                                     None if conn.get('connected') else conn.get('reason'))
+        except Exception:
+            pass
     if conn.get('connected'):
         status = client._get_home_status()
         return jsonify({**conn, **status})
@@ -1142,7 +1187,8 @@ def ha_status():
 @_require_auth
 def ha_devices():
     """Get all devices, optionally grouped by room or type."""
-    client = ha()
+    uid = _current_uid()
+    client = _client_for_request(uid)
     group_by = request.args.get('group', 'room')  # room or type
     if group_by == 'room':
         return jsonify({'success': True, 'rooms': client.get_devices_by_room()})
@@ -1153,7 +1199,8 @@ def ha_devices():
 @_require_auth
 def ha_device_state(entity_id):
     """Get single device state."""
-    client = ha()
+    uid = _current_uid()
+    client = _client_for_request(uid)
     state = client.get_state(entity_id)
     if state:
         return jsonify({'success': True, 'state': state})
@@ -1230,12 +1277,13 @@ def ha_action():
             params['device_type'] = 'switch'
 
     # Audit trail — any command touching the physical home goes in the log
+    client = _client_for_request(uid)
+    home_tag = getattr(client, '_home_id', 'global')
     logger.info(
-        f"HA action: user={uid[:8]} action={action} "
+        f"HA action: user={uid[:8]} home={home_tag} action={action} "
         f"entity={params.get('entity_id', '?')} room={params.get('room', '?')}"
     )
 
-    client = ha()
     try:
         result = client.execute_agent_action(action, params)
     except Exception as e:
@@ -1247,7 +1295,8 @@ def ha_action():
 @_require_auth
 def ha_sensors():
     """Get sensor summary (temperature, humidity, motion, etc.)."""
-    client = ha()
+    uid = _current_uid()
+    client = _client_for_request(uid)
     sensors = client.get_sensors_summary()
     return jsonify({'success': True, 'sensors': sensors})
 
@@ -1255,7 +1304,8 @@ def ha_sensors():
 @_require_auth
 def ha_rooms():
     """Get room list with device counts."""
-    client = ha()
+    uid = _current_uid()
+    client = _client_for_request(uid)
     rooms = client.get_devices_by_room()
     summary = {}
     for room_id, room_data in rooms.items():
@@ -1266,15 +1316,70 @@ def ha_rooms():
         }
     return jsonify({'success': True, 'rooms': summary})
 
+@ha_bp.route('/api/ha/webhook/<home_id>', methods=['POST'])
+def ha_webhook_per_home(home_id):
+    """Receive events from HA automations for a specific user's home.
+
+    Auth: X-HA-Secret header must match the home's ha_webhook_secret
+    (per-home, generated server-side). Constant-time compare. Fail-closed.
+
+    HA-side configuration.yaml example:
+        rest_command:
+          radim_webhook:
+            url: "https://app.radimcare.cz/api/ha/webhook/<home_id>"
+            method: POST
+            headers:
+              X-HA-Secret: "!secret radim_webhook_secret"
+            payload: '{"event_type":"motion_detected","entity_id":"...","new_state":"on"}'
+    """
+    import hmac
+    try:
+        from ha_user_config import get_home_by_id
+        home = get_home_by_id(home_id)
+    except Exception as e:
+        logger.warning(f"webhook lookup failed: {e}")
+        return jsonify({'error': 'webhook_disabled'}), 503
+
+    if not home:
+        return jsonify({'error': 'unknown_home'}), 404
+    expected = home.get('ha_webhook_secret') or ''
+    if not expected:
+        return jsonify({'error': 'webhook_disabled'}), 503
+    secret = request.headers.get('X-HA-Secret', '')
+    if not hmac.compare_digest(secret, expected):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    event_type = data.get('event_type', 'unknown')
+    entity_id = data.get('entity_id', '')
+    new_state = data.get('new_state', '')
+
+    user_id = home['user_id']
+    logger.info(
+        f'HA webhook: user={user_id[:8]} home={home_id[:8]} '
+        f'{event_type} {entity_id} → {new_state}'
+    )
+
+    # Update the per-user client's cache so subsequent reads see fresh state
+    try:
+        from ha_user_config import ha_for_user
+        client = ha_for_user(user_id, home_id)
+        if client and entity_id:
+            client._cache.setdefault(entity_id, {'entity_id': entity_id})['state'] = new_state
+    except Exception:
+        pass
+
+    return jsonify({'success': True, 'processed': event_type, 'home_id': home_id})
+
+
+# Legacy global webhook — kept for backwards compat with HA_WEBHOOK_SECRET
+# env var (admin / dev). Prefer the per-home variant above.
 @ha_bp.route('/api/ha/webhook', methods=['POST'])
 def ha_webhook():
-    """Receive events from HA automations (HA → Radim).
+    """Legacy global webhook (env-var-based secret).
 
-    Auth: X-HA-Secret header must match HA_WEBHOOK_SECRET env var.
-    Fail-closed: if HA_WEBHOOK_SECRET is not configured on the server,
-    the webhook REJECTS every request. This prevents the "I forgot to
-    set the env var" footgun where the webhook accidentally becomes
-    public to anyone who finds the URL.
+    Use /api/ha/webhook/<home_id> for per-user homes. This stays for
+    admin / single-tenant dev setups that rely on HA_WEBHOOK_SECRET env.
     """
     if not HA_WEBHOOK_SECRET:
         return jsonify({
@@ -1282,7 +1387,6 @@ def ha_webhook():
             'detail': 'HA_WEBHOOK_SECRET not configured on the server',
         }), 503
     secret = request.headers.get('X-HA-Secret', '')
-    # Constant-time compare to avoid timing side channels
     import hmac
     if not hmac.compare_digest(secret, HA_WEBHOOK_SECRET):
         return jsonify({'error': 'Unauthorized'}), 401
@@ -1292,18 +1396,9 @@ def ha_webhook():
     entity_id = data.get('entity_id', '')
     new_state = data.get('new_state', '')
 
-    logger.info(f'HA webhook: {event_type} {entity_id} → {new_state}')
-
-    # Process events for agent loop
-    if event_type == 'motion_detected' and 'motion' in entity_id:
-        # Update cache
-        ha()._cache.setdefault(entity_id, {})['state'] = 'on'
-    elif event_type == 'door_opened':
-        ha()._cache.setdefault(entity_id, {})['state'] = 'on'
-    elif event_type == 'temperature_alert':
-        # Could trigger agent loop alert
-        pass
-
+    logger.info(f'HA webhook (global): {event_type} {entity_id} → {new_state}')
+    if entity_id:
+        ha()._cache.setdefault(entity_id, {'entity_id': entity_id})['state'] = new_state
     return jsonify({'success': True, 'processed': event_type})
 
 
