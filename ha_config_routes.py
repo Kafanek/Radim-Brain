@@ -85,8 +85,45 @@ def _validate_input(data, *, partial=False):
 
 
 def _test_connection(ha_url, ha_token):
-    """Hit GET /api/ on the given HA. Returns (ok, message)."""
+    """Hit GET /api/ on the given HA. Returns (ok, message).
+
+    Pre-flight checks for unreachable URLs *before* trying to connect:
+    - localhost / 127.x → Heroku se tam nikdy nedostane
+    - 192.168.x / 10.x / 172.16-31.x (RFC1918 private) → stejná situace
+    Vrací srozumitelnou hlášku místo HTTPConnectionPool tracebacku.
+    """
+    import re
     import requests
+    from urllib.parse import urlparse
+
+    # Pre-flight: detect unreachable hosts before HTTP attempt
+    try:
+        parsed = urlparse(ha_url.strip())
+        host = (parsed.hostname or '').lower()
+    except Exception:
+        host = ''
+
+    if host in ('localhost', '127.0.0.1', '0.0.0.0', '::1') or host.startswith('127.'):
+        return False, (
+            'URL ukazuje na localhost — z Radim cloudu (Heroku) tam '
+            'nedosáhneme. Vystav HA přes Cloudflare Tunnel '
+            '(viz docs/DEPLOY.md krok 2) a zadej veřejnou URL '
+            '(např. https://radim-ha-tvuj-byt.radimcare.cz).'
+        )
+
+    # RFC1918 private ranges
+    if re.match(r'^10\.', host) or \
+       re.match(r'^192\.168\.', host) or \
+       re.match(r'^172\.(1[6-9]|2[0-9]|3[0-1])\.', host):
+        return False, (
+            f'URL je v privátní síti ({host}) — z Radim cloudu tam '
+            'nedosáhneme. Použij Cloudflare Tunnel a zadej veřejnou '
+            'URL (např. https://radim-ha-tvuj-byt.radimcare.cz).'
+        )
+
+    if not host:
+        return False, 'Neplatná URL — chybí hostname.'
+
     try:
         r = requests.get(
             f'{ha_url.rstrip("/")}/api/',
@@ -102,9 +139,15 @@ def _test_connection(ha_url, ha_token):
             return False, 'Token byl odmítnut (401). Zkontroluj long-lived token v HA.'
         return False, f'HA vrátil HTTP {r.status_code}'
     except requests.exceptions.ConnectTimeout:
-        return False, f'Timeout — HA na {ha_url} neodpovídá (5s).'
-    except requests.exceptions.ConnectionError as e:
-        return False, f'Nelze se připojit: {str(e)[:100]}'
+        return False, (
+            f'Timeout — HA na {host} neodpovídá za 5s. Ověř, že tunel '
+            'běží a HA je zapnuté.'
+        )
+    except requests.exceptions.ConnectionError:
+        return False, (
+            f'Nelze se připojit k {host}. Ověř, že URL je veřejně '
+            'dostupná (Cloudflare Tunnel běží) a port je otevřený.'
+        )
     except Exception as e:
         return False, f'Chyba: {str(e)[:120]}'
 
