@@ -495,14 +495,19 @@ def _stop_zigbee_pair(user_id: str):
 # ════════════════════════════════════════════════════════════════════
 
 def _start_ha_flow_pair(user_id: str, session: dict, catalog_entry: dict):
-    """HA-side discovery: snapshot existing entities in the target domain,
-    poll HA every 3s, and the first newly-appearing entity wins.
+    """HA-side discovery: snapshot existing entities, poll for NEW.
+
+    Two outcomes:
+      • Within first 30s a NEW entity appears → auto-pair (status='paired')
+      • After 30s no new entity → fallback to "adopt existing" picker
+        (status='choose_candidate' with existing entities matching the
+        target domain). Real-world UX: senior may have set up Tapo via
+        Tapo app earlier; we let them attach existing entity to Radim.
+      • After full duration with no entity at all → status='timeout'
 
     Works for:
-      - PAIR_TPLINK_DISCOVERY (Tapo plugs, bulbs, Hub) — HA's `tplink`
-        integration auto-discovers via mDNS once the device joins Wi-Fi
-      - PAIR_TAPO_HUB_SUBDEVICE (T100, T110) — they appear as
-        binary_sensor.* attached to the Hub once paired in Tapo app
+      - PAIR_TPLINK_DISCOVERY (Tapo plugs, bulbs, Hub)
+      - PAIR_TAPO_HUB_SUBDEVICE (T100, T110)
       - PAIR_HA_CONFIG_FLOW (generic HA discovery — Sonos etc.)
     """
     from home_assistant import ha_for
@@ -512,28 +517,32 @@ def _start_ha_flow_pair(user_id: str, session: dict, catalog_entry: dict):
 
     # Determine which domain(s) to watch
     primary_domain = catalog_entry.get('ha_domain') or 'sensor'
-    # For Tapo Hub sub-devices, also watch sensor.* (battery indicator
-    # often appears alongside the binary_sensor)
     domains_to_watch = {primary_domain}
     if catalog_entry.get('requires_device') == 'tapo_hub':
         domains_to_watch.add('binary_sensor')
         domains_to_watch.add('sensor')
 
-    # Snapshot
+    # Snapshot existing
     before: set[str] = set()
+    before_states: dict[str, dict] = {}
     states = client.get_all_states(use_cache=False) or []
     for s in states:
         eid = s['entity_id']
         if any(eid.startswith(f'{d}.') for d in domains_to_watch):
             before.add(eid)
+            before_states[eid] = s
     session['ha_flow_before'] = list(before)
     session['ha_flow_domains'] = sorted(domains_to_watch)
 
     pair_id = session['pair_id']
     duration = int(catalog_entry['pairing']['duration_seconds'])
+    # Switch to fallback after this much time
+    fallback_after = min(30, max(15, duration // 2))
 
     def _watcher():
         end_at = time.time() + duration
+        fallback_at = time.time() + fallback_after
+        fallback_offered = False
         while time.time() < end_at:
             time.sleep(3)
             with _PAIR_LOCK:
@@ -542,27 +551,94 @@ def _start_ha_flow_pair(user_id: str, session: dict, catalog_entry: dict):
                     return
             try:
                 fresh_states = client.get_all_states(use_cache=False) or []
+                # Pass 1 — look for NEW entity (the happy path)
                 for s in fresh_states:
                     eid = s['entity_id']
                     if eid in before:
                         continue
                     if not any(eid.startswith(f'{d}.') for d in domains_to_watch):
                         continue
-                    # Found a new entity — accept the most relevant one
                     with _PAIR_LOCK:
                         sess = _PAIR_SESSIONS.get(pair_id)
                         if sess and sess['status'] == 'waiting':
                             sess['discovered_entity_id'] = eid
                             sess['status'] = 'paired'
                             logger.info(
-                                f'HA flow paired: pair={pair_id[:8]} entity={eid} '
-                                f'method={sess["method"]}'
+                                f'HA flow paired (NEW): pair={pair_id[:8]} '
+                                f'entity={eid} method={sess["method"]}'
                             )
                     return
+
+                # Pass 2 — after fallback_after seconds, offer existing entities
+                if not fallback_offered and time.time() >= fallback_at:
+                    candidates = _collect_existing_candidates(
+                        fresh_states, domains_to_watch, catalog_entry
+                    )
+                    if candidates:
+                        with _PAIR_LOCK:
+                            sess = _PAIR_SESSIONS.get(pair_id)
+                            if sess and sess['status'] == 'waiting':
+                                sess['bt_candidates'] = candidates  # reuse same field
+                                sess['fallback_mode'] = True
+                                sess['status'] = 'choose_candidate'
+                                logger.info(
+                                    f'HA flow fallback: pair={pair_id[:8]} '
+                                    f'offering {len(candidates)} existing entities'
+                                )
+                        fallback_offered = True
+                        return
+
             except Exception as e:
                 logger.debug(f'HA flow watcher error: {e}')
 
     threading.Thread(target=_watcher, daemon=True).start()
+
+
+def _collect_existing_candidates(states, domains_to_watch, catalog_entry):
+    """For fallback adoption: return existing entities matching the
+    target domain. Prefer ones that look like Tapo (manufacturer/model
+    hints), fall back to all matching entities. Excludes entities already
+    assigned to a Radim user (TODO: pass user_id to filter).
+    """
+    out = []
+    # Manufacturer hints help us prioritize Tapo entities over random ones
+    mfr_hints = []
+    for hint in catalog_entry.get('manufacturer_hints', []):
+        h = (hint or '').lower()
+        for token in ('tapo', 'tp-link', 'p115', 'l510', 't100', 't110', 'h110'):
+            if token in h and token not in mfr_hints:
+                mfr_hints.append(token)
+
+    def _match_score(s):
+        eid = s['entity_id'].lower()
+        attrs = s.get('attributes', {}) or {}
+        text = (eid + ' ' + (attrs.get('friendly_name') or '').lower()
+                + ' ' + (attrs.get('manufacturer') or '').lower()
+                + ' ' + (attrs.get('model') or '').lower())
+        return sum(1 for t in mfr_hints if t in text)
+
+    for s in states:
+        eid = s.get('entity_id', '')
+        if not any(eid.startswith(f'{d}.') for d in domains_to_watch):
+            continue
+        # Skip system entities that aren't user-controllable
+        if eid.endswith('.last_alert') or '_battery' in eid:
+            continue
+        out.append({
+            'entity_id': eid,
+            'name': s.get('attributes', {}).get('friendly_name', eid),
+            'manufacturer': s.get('attributes', {}).get('manufacturer', ''),
+            'model': s.get('attributes', {}).get('model', ''),
+            'state': s.get('state', ''),
+            '_score': _match_score(s),
+        })
+
+    # Sort: Tapo-looking first, then alphabetically
+    out.sort(key=lambda c: (-c['_score'], c['name'].lower()))
+    # Strip internal score before returning
+    for c in out:
+        c.pop('_score', None)
+    return out[:10]  # cap at 10 to keep UI manageable
 
 
 def _start_bluetooth_ha_scan(user_id: str, session: dict, catalog_entry: dict):
