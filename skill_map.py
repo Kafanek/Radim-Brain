@@ -203,11 +203,19 @@ def _calc_safety(user_id, learning):
 
 
 def _calc_home(user_id, learning):
-    """How well Radim manages the smart home — per-user HA client."""
+    """How well Radim manages the smart home — per-user HA client.
+
+    v397.6 fix: don't block on check_connection() — it makes a sync HTTP
+    request to HA via tunnel which can take 10s on slow links and pushes
+    /api/skills/<uid>/summary over Heroku's 30s timeout (→ 503).
+
+    Strategy: get_devices_by_type uses cached states (TTL 30s). If cache
+    is stale, the underlying request has 10s timeout but most calls hit
+    cache. Skip check_connection entirely — empty devices means HA down.
+    """
     score = 10
     reasons = []
 
-    # HA connected — prefer per-user, fall back to global env-var client
     try:
         client = None
         try:
@@ -218,15 +226,23 @@ def _calc_home(user_id, learning):
         if client is None:
             from home_assistant import ha
             client = ha()
-        # Probe connection so .connected is populated for fresh clients
+
+        # Try to fetch devices — uses cached states (TTL 30s) so fast.
+        # If empty → HA unreachable or no devices → demo mode.
+        devices = {}
         try:
-            client.check_connection()
+            devices = client.get_devices_by_type()
         except Exception:
-            pass
-        if client.connected:
+            devices = {}
+
+        total_devices = sum(len(v) for v in devices.values())
+        if total_devices > 0:
             score += 20
 
-            sensors = client.get_sensors_summary()
+            try:
+                sensors = client.get_sensors_summary()
+            except Exception:
+                sensors = {}
             temp_count = len(sensors.get('temperature', []))
             motion_count = len(sensors.get('motion', []))
 
@@ -237,11 +253,8 @@ def _calc_home(user_id, learning):
                 score += 10
                 reasons.append(f'{motion_count} pohybových senzorů')
 
-            devices = client.get_devices_by_type()
-            total_devices = sum(len(v) for v in devices.values())
             score += min(20, total_devices * 2)
-            if total_devices > 0:
-                reasons.append(f'{total_devices} ovládaných zařízení')
+            reasons.append(f'{total_devices} ovládaných zařízení')
 
             # Behavioral profile from sensors
             bp = learning.get('behavioral_profile', {})

@@ -173,10 +173,13 @@ class HomeAssistantClient:
             return None
 
     def check_connection(self):
-        """Test HA connection."""
+        """Test HA connection. v397.6: 5s timeout (down from default 10s)
+        — fail fast on slow / dead tunnels so /api/ha/status doesn't push
+        Heroku request close to its 30s limit.
+        """
         if not self.available:
             return {'connected': False, 'reason': 'HA_URL or HA_TOKEN not configured'}
-        result = self._request('GET', '')
+        result = self._request('GET', '', timeout=5)
         if result and 'message' in result:
             self.connected = True
             return {'connected': True, 'message': result['message'], 'url': self.url}
