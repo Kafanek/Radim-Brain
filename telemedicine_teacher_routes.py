@@ -379,7 +379,7 @@ def telemed_start(consultation_id):
               actor_consultation_role='organizer',
               metadata={'room_code': room_code, 'is_multiparty': is_mp})
 
-    frontend_url = os.environ.get('FRONTEND_URL', 'https://polite-bush-001303503.6.azurestaticapps.net')
+    frontend_url = os.environ.get('FRONTEND_URL', 'https://app.radimcare.cz')
     join_page = f"{frontend_url}/call.html?room={room_code}&from=Terapeut&type=video"
 
     _notify_user(student_id, 'telemedicine_starting', {

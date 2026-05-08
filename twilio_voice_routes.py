@@ -544,7 +544,7 @@ def send_call_invitation():
         if not join_url:
             join_url = f"https://meet.jit.si/{room_code}"
 
-        frontend_url = os.environ.get('FRONTEND_URL', 'https://polite-bush-001303503.6.azurestaticapps.net')
+        frontend_url = os.environ.get('FRONTEND_URL', 'https://app.radimcare.cz')
         import urllib.parse
         caller_encoded = urllib.parse.quote(caller_name)
         nice_url = f"{frontend_url}/call.html?room={room_code}&from={caller_encoded}&type={call_type}"

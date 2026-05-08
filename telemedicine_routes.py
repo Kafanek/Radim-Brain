@@ -273,7 +273,7 @@ def telemed_join(consultation_id):
     # Generate short-lived join token instead of permanent URL
     join_token = generate_join_token(consultation_id, user_id)
 
-    frontend_url = os.environ.get('FRONTEND_URL', 'https://polite-bush-001303503.6.azurestaticapps.net')
+    frontend_url = os.environ.get('FRONTEND_URL', 'https://app.radimcare.cz')
     join_page = f"{frontend_url}/call.html?room={room_code}&type={consultation.get('consultation_type', 'video')}"
     if join_token:
         join_page += f"&token={join_token}"
