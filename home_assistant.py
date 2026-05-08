@@ -1372,8 +1372,10 @@ def _fetch_logbook(client, entity_id, hours=24, limit=50):
     """Fetch recent state changes from HA logbook for one entity."""
     import requests
     from datetime import datetime, timedelta, timezone
-    if not (client and client.connected):
+    if not client or not getattr(client, 'url', None) or not getattr(client, 'token', None):
         return []
+    # Note: don't gate on client.connected — that flag is only set by
+    # check_connection(). Just try the fetch; network errors are caught below.
     try:
         start = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime('%Y-%m-%dT%H:%M:%S+00:00')
         url = f'{client.url}/api/logbook/{start}'
@@ -1384,7 +1386,7 @@ def _fetch_logbook(client, entity_id, hours=24, limit=50):
             timeout=10,
         )
         if resp.status_code != 200:
-            logger.debug(f'logbook {entity_id}: HTTP {resp.status_code}')
+            logger.debug(f'logbook {entity_id}: HTTP {resp.status_code} {resp.text[:120]}')
             return []
         items = resp.json() or []
         # Normalize for frontend — keep most useful fields
