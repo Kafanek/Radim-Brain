@@ -111,6 +111,9 @@ ROOM_NAMES = {
     'garage': '🚗 Garáž',
     'garden': '🌳 Zahrada',
     'office': '💼 Pracovna',
+    # v397.4: catch-all bucket for entities without area_id assigned
+    # (typical for fresh Tapo Controller install before user assigns areas)
+    '_unassigned': '📦 Nezařazené',
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -211,15 +214,26 @@ class HomeAssistantClient:
         return state
 
     def _build_rooms(self):
-        """Build room→entities mapping from entity attributes."""
+        """Build room→entities mapping from entity attributes.
+
+        v397.4: entities without area_id AND without guessable room name
+        land in `_unassigned` bucket. Frontend can show them under
+        "Nezařazené" so user sees their Tapo P115 etc. even when HA
+        Tapo Controller didn't auto-set area_id.
+        """
         self._rooms = {}
         for entity_id, state in self._cache.items():
+            # Skip noise: HA system entities and meta entities aren't
+            # rooms-relevant (sun, weather, person, zone, todo, tts, ...)
+            domain = entity_id.split('.')[0]
+            if domain not in DEVICE_TYPES:
+                continue
             area = state.get('attributes', {}).get('area_id', '')
             friendly = state.get('attributes', {}).get('friendly_name', '')
-            # Try to guess room from entity_id or friendly_name
             room = area or self._guess_room(entity_id, friendly)
-            if room:
-                self._rooms.setdefault(room, []).append(entity_id)
+            if not room:
+                room = '_unassigned'
+            self._rooms.setdefault(room, []).append(entity_id)
 
     def _guess_room(self, entity_id, friendly_name):
         """Guess room from entity naming patterns."""
@@ -376,7 +390,12 @@ class HomeAssistantClient:
         return rooms
 
     def get_sensors_summary(self):
-        """Get sensor readings summary for agent loop."""
+        """Get sensor readings summary for agent loop.
+
+        v397.4: added energy / power / signal_strength / runtime
+        categories so Tapo P115 sensors (current_power, today_energy)
+        appear in Radim Domácnost UI.
+        """
         states = self.get_all_states()
         sensors = {
             'temperature': [],
@@ -386,6 +405,10 @@ class HomeAssistantClient:
             'light_level': [],
             'air_quality': [],
             'battery': [],
+            'power': [],          # v397.4 — Tapo P115 current_power
+            'energy': [],         # v397.4 — Tapo P115 today/month energy
+            'signal': [],         # v397.4 — Tapo signal_level
+            'runtime': [],        # v397.4 — Tapo today/month runtime
         }
         for s in states:
             eid = s['entity_id']
@@ -419,6 +442,19 @@ class HomeAssistantClient:
             elif device_class in ('pm25', 'pm10', 'co2', 'aqi'):
                 if val is not None:
                     sensors['air_quality'].append({'name': name, 'value': val, 'device_class': device_class, 'entity_id': eid})
+            # v397.4 — Tapo P115 power/energy/signal sensors
+            elif device_class == 'power' or unit in ('W', 'kW'):
+                if val is not None:
+                    sensors['power'].append({'name': name, 'value': val, 'unit': unit or 'W', 'entity_id': eid})
+            elif device_class == 'energy' or unit in ('kWh', 'Wh'):
+                if val is not None:
+                    sensors['energy'].append({'name': name, 'value': val, 'unit': unit or 'kWh', 'entity_id': eid})
+            elif device_class == 'signal_strength' or unit == 'dBm':
+                if val is not None:
+                    sensors['signal'].append({'name': name, 'value': val, 'unit': 'dBm', 'entity_id': eid})
+            elif unit in ('min', 'minutes', 'm') and 'runtime' in eid.lower():
+                if val is not None:
+                    sensors['runtime'].append({'name': name, 'value': val, 'unit': 'min', 'entity_id': eid})
 
         return sensors
 
@@ -594,12 +630,20 @@ class HomeAssistantClient:
         return None
 
     def _get_home_status(self):
-        """Get overall home status summary."""
+        """Get overall home status summary.
+
+        v397.4: counts switches as part of "controllable" devices
+        (Tapo P115 is a switch, not light — but UI should still see it).
+        """
         sensors = self.get_sensors_summary()
         devices = self.get_devices_by_type()
 
-        lights_on = sum(1 for d in devices.get('light', []) if d['state'] == 'on')
-        lights_total = len(devices.get('light', []))
+        # Lights + switches both count as "things that can be on/off"
+        lights = devices.get('light', [])
+        switches = devices.get('switch', [])
+        on_lights_switches = sum(1 for d in lights + switches if d['state'] == 'on')
+        total_lights_switches = len(lights) + len(switches)
+
         locks_locked = sum(1 for d in devices.get('lock', []) if d['state'] == 'locked')
         locks_total = len(devices.get('lock', []))
         doors_open = sum(1 for s in sensors.get('door', []) if s['state'] == 'on')
@@ -610,13 +654,19 @@ class HomeAssistantClient:
 
         low_battery = [s for s in sensors.get('battery', []) if s['value'] < 20]
 
+        # Total entity count across all controllable types
+        total_devices = sum(len(devices.get(d, [])) for d in (
+            'light', 'switch', 'climate', 'lock', 'cover', 'media_player'
+        ))
+
         status = {
-            'lights': f'{lights_on}/{lights_total} zapnuto',
+            'lights': f'{on_lights_switches}/{total_lights_switches} zapnuto',
             'locks': f'{locks_locked}/{locks_total} zamčeno',
             'doors_open': doors_open,
             'motion': motion_detected > 0,
             'temperature': f'{avg_temp:.1f}°C' if avg_temp else 'N/A',
             'low_battery': [{'name': s['name'], 'level': s['value']} for s in low_battery],
+            'total_devices': total_devices,
         }
 
         msg_parts = [
