@@ -46,23 +46,55 @@ ha_pairing_bp = Blueprint('ha_pairing', __name__)
 
 
 # ════════════════════════════════════════════════════════════════════
-# IN-MEMORY PAIRING SESSIONS
+# REDIS-BACKED PAIRING SESSIONS (v397.3 — multi-dyno safe)
 # ════════════════════════════════════════════════════════════════════
-# Pairing is a short-lived (max 3min) operation; store in-memory + lock.
-# If the dyno restarts mid-pair, frontend simply reports timeout and the
-# user retries — no DB persistence needed.
+# Pairing was previously dict in memory which broke on Heroku's 2 dyno
+# setup (pair/start landed on web.1, pair/status on web.2 → 404). Now
+# in Redis with 5-minute TTL. Threading lock kept for in-process race
+# protection during background watcher updates.
 
-_PAIR_SESSIONS: dict[str, dict] = {}
 _PAIR_LOCK = threading.Lock()
-_PAIR_MAX_AGE_SECONDS = 300  # 5 min — anything older gets GC'd
+_PAIR_MAX_AGE_SECONDS = 300  # 5 min — Redis TTL
+
+
+def _pair_key(pair_id: str) -> str:
+    return f'pair_session:{pair_id}'
+
+
+class _PairSessionsProxy:
+    """Dict-like proxy over Redis so existing code paths work unchanged."""
+
+    def __getitem__(self, pair_id):
+        from redis_cache import cache_get_json
+        v = cache_get_json(_pair_key(pair_id))
+        if v is None:
+            raise KeyError(pair_id)
+        return v
+
+    def __setitem__(self, pair_id, session):
+        from redis_cache import cache_set_json
+        cache_set_json(_pair_key(pair_id), session, ttl=_PAIR_MAX_AGE_SECONDS)
+
+    def get(self, pair_id, default=None):
+        from redis_cache import cache_get_json
+        v = cache_get_json(_pair_key(pair_id))
+        return default if v is None else v
+
+    def pop(self, pair_id, default=None):
+        from redis_cache import cache_get_json, cache_delete
+        v = cache_get_json(_pair_key(pair_id))
+        if v is not None:
+            cache_delete(_pair_key(pair_id))
+            return v
+        return default
+
+
+_PAIR_SESSIONS = _PairSessionsProxy()
 
 
 def _gc_pair_sessions():
-    cutoff = time.time() - _PAIR_MAX_AGE_SECONDS
-    with _PAIR_LOCK:
-        stale = [pid for pid, sess in _PAIR_SESSIONS.items() if sess['created_at'] < cutoff]
-        for pid in stale:
-            _PAIR_SESSIONS.pop(pid, None)
+    """Redis TTL handles expiry automatically — no-op kept for API compat."""
+    pass
 
 
 def _uid() -> str:
@@ -366,6 +398,8 @@ def pair_status():
             exp = datetime.fromisoformat(session['expires_at'].rstrip('Z'))
             if datetime.utcnow() > exp:
                 session['status'] = 'timeout'
+                with _PAIR_LOCK:
+                    _PAIR_SESSIONS[pair_id] = session  # writeback to Redis
         except Exception:
             pass
 
@@ -416,6 +450,7 @@ def pair_confirm():
         session['status'] = 'paired'
         session['extra_fields'] = {**(session.get('extra_fields') or {}),
                                    **(data.get('extra_fields') or {})}
+        _PAIR_SESSIONS[pair_id] = session  # writeback to Redis
     logger.info(f'pair confirmed manually: pair={pair_id[:8]} entity={entity_id}')
     return jsonify({'success': True, 'discovered_entity_id': entity_id})
 
@@ -431,6 +466,7 @@ def pair_cancel():
         session = _PAIR_SESSIONS.get(pair_id)
         if session and session['user_id'] == _uid():
             session['status'] = 'cancelled'
+            _PAIR_SESSIONS[pair_id] = session  # writeback to Redis
             # If Zigbee, close permit_join
             if session.get('method') == 'zigbee_permit_join':
                 _stop_zigbee_pair(session['user_id'])
@@ -471,6 +507,7 @@ def _start_zigbee_pair(user_id: str, session: dict, duration: int):
                     sess['discovered_entity_id'] = entity_id
                     sess['status'] = 'paired'
                     sess['raw_event'] = payload
+                    _PAIR_SESSIONS[pair_id] = sess  # writeback to Redis
                     logger.info(f'Zigbee paired: pair={pair_id[:8]} entity={entity_id}')
 
     bridge.on_sensor_update(_handler)
@@ -563,6 +600,7 @@ def _start_ha_flow_pair(user_id: str, session: dict, catalog_entry: dict):
                         if sess and sess['status'] == 'waiting':
                             sess['discovered_entity_id'] = eid
                             sess['status'] = 'paired'
+                            _PAIR_SESSIONS[pair_id] = sess  # writeback
                             logger.info(
                                 f'HA flow paired (NEW): pair={pair_id[:8]} '
                                 f'entity={eid} method={sess["method"]}'
@@ -581,6 +619,7 @@ def _start_ha_flow_pair(user_id: str, session: dict, catalog_entry: dict):
                                 sess['bt_candidates'] = candidates  # reuse same field
                                 sess['fallback_mode'] = True
                                 sess['status'] = 'choose_candidate'
+                                _PAIR_SESSIONS[pair_id] = sess  # writeback
                                 logger.info(
                                     f'HA flow fallback: pair={pair_id[:8]} '
                                     f'offering {len(candidates)} existing entities'
@@ -731,6 +770,7 @@ def _start_bluetooth_ha_scan(user_id: str, session: dict, catalog_entry: dict):
                             if len(new_bt_entities) == 1:
                                 sess['discovered_entity_id'] = new_bt_entities[0]['entity_id']
                                 sess['status'] = 'paired'
+                                _PAIR_SESSIONS[pair_id] = sess  # writeback
                                 logger.info(
                                     f'BT scan auto-paired: pair={pair_id[:8]} '
                                     f'entity={sess["discovered_entity_id"]}'
@@ -738,6 +778,7 @@ def _start_bluetooth_ha_scan(user_id: str, session: dict, catalog_entry: dict):
                                 return
                             # Multiple devices — wait for user to pick
                             sess['status'] = 'choose_candidate'
+                            _PAIR_SESSIONS[pair_id] = sess  # writeback
                             logger.info(
                                 f'BT scan found {len(new_bt_entities)} devices, '
                                 f'waiting for user pick: pair={pair_id[:8]}'
