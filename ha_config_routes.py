@@ -7,7 +7,7 @@ instances. Each user can store multiple homes (default + secondary). A
 home is identified by `home_id` (UUID, server-generated). Tokens are
 encrypted at rest — see ha_user_config.py.
 
-Endpoints (all require_auth):
+Endpoints (all require_auth except where noted):
     GET    /api/ha/config              — list my homes (no tokens)
     GET    /api/ha/config/<home_id>    — read one (no token)
     POST   /api/ha/config              — register new home
@@ -17,8 +17,16 @@ Endpoints (all require_auth):
     DELETE /api/ha/config/<home_id>    — remove
     POST   /api/ha/config/<home_id>/test     — test connection now
     POST   /api/ha/config/<home_id>/default  — promote to default
+
+    POST   /api/ha/refresh-tunnel-url   — webhook-secret authed (no JWT)
+        v397.8 (Sprint X5/E): Used by tunnel-keeper.sh to update
+        ha_url after Cloudflare quick-tunnel restart, without needing
+        a JWT (which expires in 7 days). Authenticated via per-home
+        webhook secret in X-Radim-Tunnel-Secret header.
+        body: {"home_id": "<uuid>", "ha_url": "https://..."}
 """
 
+import hmac
 import logging
 import re
 from flask import Blueprint, g, jsonify, request
@@ -285,4 +293,61 @@ def set_default(home_id):
     return jsonify({'success': False, 'error': 'not_found'}), 404
 
 
-logger.info("🏠 HA config routes loaded (per-user / per-home)")
+# ═══════════════════════════════════════════════════════════════════
+# Tunnel refresh — webhook-secret authed (no JWT)
+# ═══════════════════════════════════════════════════════════════════
+# Quick Cloudflare tunnels (https://*.trycloudflare.com) get a new URL
+# every restart. The keeper script (radim-tunnel-keeper.sh) needs to push
+# that URL to this backend so Heroku knows where to forward HA requests.
+# Until v397.8 the keeper used a JWT — but JWTs expire in 7 days, so the
+# keeper would silently break and need manual re-paste from the user's
+# browser localStorage. This endpoint replaces that with a per-home
+# webhook secret that never expires.
+
+@ha_config_bp.route('/api/ha/refresh-tunnel-url', methods=['POST'])
+def refresh_tunnel_url():
+    data = request.get_json(silent=True) or {}
+    home_id = (data.get('home_id') or '').strip()
+    new_url = (data.get('ha_url') or '').strip().rstrip('/')
+
+    if not home_id or not new_url:
+        return jsonify({'success': False, 'error': 'missing_fields'}), 400
+    if not _URL_RE.match(new_url):
+        return jsonify({'success': False, 'error': 'invalid_url'}), 400
+
+    provided_secret = request.headers.get('X-Radim-Tunnel-Secret', '').strip()
+    if not provided_secret:
+        return jsonify({'success': False, 'error': 'missing_secret'}), 401
+
+    home = cfg.get_home_by_id(home_id, with_token=True)
+    if not home:
+        return jsonify({'success': False, 'error': 'home_not_found'}), 404
+
+    expected = home.get('ha_webhook_secret') or ''
+    if not expected or not hmac.compare_digest(expected, provided_secret):
+        # Don't reveal whether home exists vs secret wrong (timing-safe)
+        logger.warning(f"refresh-tunnel-url: bad secret for home={home_id[:8]}")
+        return jsonify({'success': False, 'error': 'bad_secret'}), 401
+
+    # Update only ha_url, preserve everything else
+    saved = cfg.save_home(
+        user_id=home['user_id'],
+        label=home.get('label') or '',
+        ha_url=new_url,
+        ha_token=home.get('ha_token') or '',
+        home_id=home_id,
+        is_default=home.get('is_default', False),
+        ha_webhook_secret=expected,
+    )
+    logger.info(
+        f"🌐 Tunnel URL refreshed: home={home_id[:8]} url={new_url}"
+    )
+    return jsonify({
+        'success': True,
+        'home_id': home_id,
+        'ha_url': new_url,
+        'updated_at': saved.get('updated_at'),
+    })
+
+
+logger.info("🏠 HA config routes loaded (per-user / per-home + tunnel refresh)")
