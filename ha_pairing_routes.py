@@ -114,6 +114,69 @@ def devices_catalog():
     return jsonify({'success': True, 'devices': list_for_wizard()})
 
 
+@ha_pairing_bp.route('/api/ha/integration-deeplink', methods=['GET'])
+@require_auth
+def integration_deeplink():
+    """v397.6 (Sprint X3): vrátí URL na HA's Add Integration page.
+
+    Senior klikne v Radim wizardu „Otevřít HA pro spárování" → backend
+    složí URL `<ha_url>/_my_redirect/config_flow_start?domain=<x>` →
+    frontend ji otevře v novém tabu. Senior projde HA's wizard +
+    spáruje fyzické zařízení. Po návratu do Radim wizard fallback
+    flow detekuje nové entity → adopt.
+
+    Query: ?domain=tplink|bluetooth|zwave|...|""
+    """
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    domain = (request.args.get('domain') or '').strip()
+
+    # Resolve user's HA URL (per-user config takes priority over global env)
+    ha_url = ''
+    try:
+        from ha_user_config import get_home
+        home = get_home(uid)
+        if home and home.get('ha_url'):
+            ha_url = home['ha_url']
+        else:
+            import os
+            ha_url = os.environ.get('HA_URL', '')
+    except Exception as e:
+        logger.debug(f'integration-deeplink: get_home: {e}')
+
+    if not ha_url:
+        return jsonify({
+            'success': False,
+            'error': 'no_ha_configured',
+            'message': 'Žádná Home Assistant instance není nakonfigurovaná.',
+        }), 412
+
+    # HA's "my_redirect" universal links for config flow:
+    #   /_my_redirect/config_flow_start?domain=<integration_domain>
+    # Falls back to /config/integrations/dashboard for unknown domains.
+    base = ha_url.rstrip('/')
+    if domain:
+        deeplink = f'{base}/_my_redirect/config_flow_start?domain={domain}'
+    else:
+        deeplink = f'{base}/config/integrations/dashboard'
+
+    return jsonify({
+        'success': True,
+        'deeplink': deeplink,
+        'ha_url': ha_url,
+        'domain': domain,
+        'instructions': (
+            f'Otevře se HA. Najdi a vyber {domain or "integraci"}, '
+            'projdi HA wizardem (přihlášení, párování). '
+            'Po dokončení se vrať do Radimu — wizard najde nové zařízení.'
+            if domain else
+            'Otevře se Home Assistant. Vyber integraci a spáruj zařízení. '
+            'Po návratu se vrať do Radim wizardu.'
+        ),
+    })
+
+
 # ════════════════════════════════════════════════════════════════════
 # 1b. NETWORK INFO — preflight pro Tapo párování
 # ════════════════════════════════════════════════════════════════════
