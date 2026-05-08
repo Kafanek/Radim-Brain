@@ -1256,6 +1256,153 @@ def ha_device_state(entity_id):
         return jsonify({'success': True, 'state': state})
     return jsonify({'success': False, 'error': 'Device not found'}), 404
 
+
+@ha_bp.route('/api/ha/device/<entity_id>/detail', methods=['GET'])
+@_require_auth
+def ha_device_detail(entity_id):
+    """v397.5 (Sprint X2): enriched device detail.
+
+    Returns:
+        {
+          state: <full HA state>,
+          related: [<sensors that share entity_id prefix>],
+          assignment: <device_assignments row if user assigned this entity>,
+          history: [<last 20 logbook entries from HA>]
+        }
+
+    Used by Domácnost device detail page — shows toggle + sensors +
+    activity log for a single device (e.g. Tapo P115 with its 5 sensor
+    siblings).
+    """
+    import re
+    uid = _current_uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    client = _client_for_request(uid)
+
+    state = client.get_state(entity_id)
+    if not state:
+        return jsonify({'success': False, 'error': 'Device not found'}), 404
+
+    # ─── Related entities (share entity_id prefix) ───
+    # Tapo P115: switch.tapo_p115 + sensor.tapo_p115_signal + sensor.tapo_p115_current_power
+    # Match: strip domain + numeric/long suffix, find common stem
+    stem_match = re.match(r'^[^.]+\.([a-z0-9_]+?)(_signal|_current_power|_today_energy|_month_energy|_today_runtime|_month_runtime|_battery|_temperature|_humidity)?$', entity_id.lower())
+    stem = stem_match.group(1) if stem_match else entity_id.split('.', 1)[1].lower()
+
+    related = []
+    all_states = client.get_all_states(use_cache=True) or []
+    for s in all_states:
+        eid = s['entity_id']
+        if eid == entity_id:
+            continue
+        # Match by stem prefix
+        eid_local = eid.split('.', 1)[1].lower() if '.' in eid else eid.lower()
+        if eid_local.startswith(stem):
+            related.append({
+                'entity_id': eid,
+                'name': s.get('attributes', {}).get('friendly_name', eid),
+                'state': s.get('state'),
+                'unit': s.get('attributes', {}).get('unit_of_measurement', ''),
+                'device_class': s.get('attributes', {}).get('device_class', ''),
+                'icon': s.get('attributes', {}).get('icon', ''),
+            })
+
+    # ─── User's assignment (if any) ───
+    assignment = None
+    try:
+        from database import db_context
+        with db_context() as db:
+            row = db.execute(
+                "SELECT assignment_id, room, role, custom_label, manufacturer, model "
+                "FROM device_assignments WHERE user_id = ? AND entity_id = ?",
+                (uid, entity_id)
+            ).fetchone()
+        if row:
+            if hasattr(row, 'keys'):
+                assignment = dict(row)
+            else:
+                assignment = {
+                    'assignment_id': row[0], 'room': row[1], 'role': row[2],
+                    'custom_label': row[3], 'manufacturer': row[4], 'model': row[5],
+                }
+    except Exception as e:
+        logger.debug(f'detail: assignment lookup: {e}')
+
+    # ─── Recent history from HA logbook ───
+    history = _fetch_logbook(client, entity_id, hours=24, limit=20)
+
+    return jsonify({
+        'success': True,
+        'state': state,
+        'related': related,
+        'assignment': assignment,
+        'history': history,
+        'home_id': getattr(client, '_home_id', None),
+    })
+
+
+@ha_bp.route('/api/ha/device/<entity_id>/history', methods=['GET'])
+@_require_auth
+def ha_device_history(entity_id):
+    """v397.5: HA logbook proxy — last N entries for the entity.
+
+    Query params:
+        hours: lookback window (default 24)
+        limit: max entries (default 50)
+    """
+    uid = _current_uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'unauthorized'}), 401
+    client = _client_for_request(uid)
+
+    try:
+        hours = int(request.args.get('hours', 24))
+        limit = int(request.args.get('limit', 50))
+    except ValueError:
+        return jsonify({'success': False, 'error': 'invalid_params'}), 400
+    hours = max(1, min(168, hours))  # clamp 1h–7d
+    limit = max(1, min(200, limit))
+
+    history = _fetch_logbook(client, entity_id, hours=hours, limit=limit)
+    return jsonify({'success': True, 'history': history, 'count': len(history)})
+
+
+def _fetch_logbook(client, entity_id, hours=24, limit=50):
+    """Fetch recent state changes from HA logbook for one entity."""
+    import requests
+    from datetime import datetime, timedelta, timezone
+    if not (client and client.connected):
+        return []
+    try:
+        start = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime('%Y-%m-%dT%H:%M:%S+00:00')
+        url = f'{client.url}/api/logbook/{start}'
+        resp = requests.get(
+            url,
+            headers={'Authorization': f'Bearer {client.token}'},
+            params={'entity': entity_id},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            logger.debug(f'logbook {entity_id}: HTTP {resp.status_code}')
+            return []
+        items = resp.json() or []
+        # Normalize for frontend — keep most useful fields
+        out = []
+        for item in items[:limit]:
+            out.append({
+                'when': item.get('when', ''),
+                'name': item.get('name', ''),
+                'state': item.get('state', ''),
+                'message': item.get('message', ''),
+                'icon': item.get('icon', ''),
+                'context_user_id': item.get('context_user_id'),
+            })
+        return out
+    except Exception as e:
+        logger.debug(f'logbook fetch error: {e}')
+        return []
+
 @ha_bp.route('/api/ha/action', methods=['POST'])
 @_require_auth
 def ha_action():
