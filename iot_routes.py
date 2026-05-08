@@ -351,6 +351,10 @@ def get_vitals(senior_id):
     Sprint T: demo-safe fallback — when senior_id is unknown (e.g. numeric
     '1' or user_id without sensors configured), serve first available
     demo senior instead of 404. Logs the mismatch for ops to fix.
+
+    Sprint X6 Phase 1C: Cached 5s per senior_id. Vitals don't change at
+    sub-5-second granularity in real life either, and the frontend polls
+    every ~10s. Cache miss / Redis down → graceful fall-through.
     """
     resolved_id = senior_id
     if senior_id not in ROOM_SENSORS:
@@ -364,6 +368,15 @@ def get_vitals(senior_id):
                 "error": "Žádné senzory nejsou nakonfigurovány.",
                 "available_ids": []
             }), 503
+
+    # Cache check (per resolved senior_id, 5s TTL)
+    try:
+        from redis_cache import cache_get_json
+        cached = cache_get_json(f"vitals:{resolved_id}")
+        if cached is not None:
+            return jsonify(cached)
+    except Exception:
+        pass
 
     config = ROOM_SENSORS[resolved_id]
     senior_id = resolved_id  # so downstream uses the resolved id
@@ -391,7 +404,7 @@ def get_vitals(senior_id):
     elif warnings:
         overall = "attention"
 
-    return jsonify({
+    payload = {
         "success": True,
         "senior_id": senior_id,
         "room": config["room"],
@@ -403,7 +416,16 @@ def get_vitals(senior_id):
         "sensors_active": len(config["sensors"]),
         "phi_note": "Vitální hodnoty oscilují podle Fibonacci vzorců (φ = 1.618)",
         "timestamp": now_iso()
-    })
+    }
+
+    # Populate cache (best-effort)
+    try:
+        from redis_cache import cache_set_json
+        cache_set_json(f"vitals:{senior_id}", payload, ttl=5)
+    except Exception:
+        pass
+
+    return jsonify(payload)
 
 
 @iot_bp.route('/api/iot/sensors/<senior_id>/history', methods=['GET'])

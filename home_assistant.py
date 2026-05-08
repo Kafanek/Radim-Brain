@@ -1210,6 +1210,60 @@ def _client_for_request(uid):
     return ha_for(uid, home_id)
 
 
+# ═══════════════════════════════════════════════════════════════════
+# Per-request HA-read cache (Sprint X6 Phase 1B)
+# ═══════════════════════════════════════════════════════════════════
+# /api/ha/rooms, /api/ha/sensors, /api/ha/status are polled ~10×/min
+# by the SmartHome module per active user. Each call goes through the
+# tunnel to the user's local HA, which adds ~150-450ms (transatlantic
+# RTT × 2 plus HA REST roundtrip). Cache the assembled response in
+# Redis with a short TTL (3s) — enough to absorb burst polls but
+# short enough that a state change shows in the UI within ~3s.
+#
+# Cache is invalidated immediately after /api/ha/action so a toggle
+# from the UI reflects in the next room/sensor refresh without lag.
+
+_HA_CACHE_TTL = 3  # seconds — short enough that toggles feel instant
+
+
+def _ha_cache_key(prefix, uid, home_qs=''):
+    return f"ha:{prefix}:{uid}:{home_qs}"
+
+
+def _ha_cache_get(prefix, uid, home_qs=''):
+    """Return cached JSON for (prefix, uid, home) or None on miss."""
+    if not uid:
+        return None
+    try:
+        from redis_cache import cache_get_json
+        return cache_get_json(_ha_cache_key(prefix, uid, home_qs))
+    except Exception:
+        return None
+
+
+def _ha_cache_set(prefix, uid, payload, home_qs=''):
+    if not uid:
+        return
+    try:
+        from redis_cache import cache_set_json
+        cache_set_json(_ha_cache_key(prefix, uid, home_qs), payload, ttl=_HA_CACHE_TTL)
+    except Exception:
+        pass
+
+
+def _ha_cache_invalidate(uid, home_qs=''):
+    """Drop all cached HA reads for this (uid, home). Called after every
+    successful /api/ha/action so the next read sees fresh state."""
+    if not uid:
+        return
+    try:
+        from redis_cache import cache_delete
+        for prefix in ('rooms', 'sensors', 'status'):
+            cache_delete(_ha_cache_key(prefix, uid, home_qs))
+    except Exception:
+        pass
+
+
 @ha_bp.route('/api/ha/status', methods=['GET'])
 @_require_auth
 def ha_status():
@@ -1217,8 +1271,14 @@ def ha_status():
 
     Per-user: resolves to the authenticated user's default home (or
     ?home=<home_id>). Falls back to env-var global if user has no config.
+    Cached 3s per (uid, home).
     """
     uid = _current_uid()
+    home_qs = (request.args.get('home') or '').strip()
+    cached = _ha_cache_get('status', uid, home_qs)
+    if cached is not None:
+        return jsonify(cached)
+
     client = _client_for_request(uid)
     conn = client.check_connection()
     # Diagnostic: tag which home answered
@@ -1233,8 +1293,11 @@ def ha_status():
             pass
     if conn.get('connected'):
         status = client._get_home_status()
-        return jsonify({**conn, **status})
-    return jsonify(conn)
+        payload = {**conn, **status}
+    else:
+        payload = conn
+    _ha_cache_set('status', uid, payload, home_qs)
+    return jsonify(payload)
 
 @ha_bp.route('/api/ha/devices', methods=['GET'])
 @_require_auth
@@ -1491,22 +1554,41 @@ def ha_action():
     except Exception as e:
         logger.error(f"HA action execution error: {e}")
         return jsonify({'success': False, 'error': str(e)[:120]}), 500
+
+    # Invalidate cached HA reads so the next /api/ha/status,sensors,rooms
+    # request returns the post-action state immediately, not the 3s-stale one.
+    _ha_cache_invalidate(uid, (request.args.get('home') or '').strip())
+
     return jsonify(result)
 
 @ha_bp.route('/api/ha/sensors', methods=['GET'])
 @_require_auth
 def ha_sensors():
-    """Get sensor summary (temperature, humidity, motion, etc.)."""
+    """Get sensor summary (temperature, humidity, motion, etc.).
+    Cached 3s per (uid, home)."""
     uid = _current_uid()
+    home_qs = (request.args.get('home') or '').strip()
+    cached = _ha_cache_get('sensors', uid, home_qs)
+    if cached is not None:
+        return jsonify(cached)
+
     client = _client_for_request(uid)
     sensors = client.get_sensors_summary()
-    return jsonify({'success': True, 'sensors': sensors})
+    payload = {'success': True, 'sensors': sensors}
+    _ha_cache_set('sensors', uid, payload, home_qs)
+    return jsonify(payload)
 
 @ha_bp.route('/api/ha/rooms', methods=['GET'])
 @_require_auth
 def ha_rooms():
-    """Get room list with device counts."""
+    """Get room list with device counts.
+    Cached 3s per (uid, home)."""
     uid = _current_uid()
+    home_qs = (request.args.get('home') or '').strip()
+    cached = _ha_cache_get('rooms', uid, home_qs)
+    if cached is not None:
+        return jsonify(cached)
+
     client = _client_for_request(uid)
     rooms = client.get_devices_by_room()
     summary = {}
@@ -1516,7 +1598,9 @@ def ha_rooms():
             'device_count': len(room_data['devices']),
             'devices': room_data['devices']
         }
-    return jsonify({'success': True, 'rooms': summary})
+    payload = {'success': True, 'rooms': summary}
+    _ha_cache_set('rooms', uid, payload, home_qs)
+    return jsonify(payload)
 
 @ha_bp.route('/api/ha/webhook/<home_id>', methods=['POST'])
 def ha_webhook_per_home(home_id):
