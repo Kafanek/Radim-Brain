@@ -20,6 +20,34 @@ from database import db_context, db_insert, is_postgres
 
 logger = logging.getLogger(__name__)
 
+
+# ═══════════════════════════════════════════════════════════════════
+# UNREAD COUNT — Redis cache (Sprint X6: perf)
+# ═══════════════════════════════════════════════════════════════════
+# This endpoint is hit ~30×/min per active user (frontend polls for the
+# bell-icon badge). A trivial COUNT() query that takes 470ms across the
+# Atlantic adds up. Cache 10s per user; invalidate on write paths
+# (notify, mark_read, mark_all_read). Worst-case staleness: 10s, which
+# is invisible because frontend itself polls every 2-5s.
+
+_UNREAD_TTL = 10  # seconds
+
+
+def _unread_cache_key(user_id):
+    return f"unread:{user_id}"
+
+
+def _invalidate_unread(user_id):
+    """Drop the cached unread count for this user. Safe to call from any
+    write path; silent no-op if Redis is unavailable."""
+    if not user_id:
+        return
+    try:
+        from redis_cache import cache_delete
+        cache_delete(_unread_cache_key(user_id))
+    except Exception:
+        pass  # cache is best-effort, never block the write path
+
 # ═══════════════════════════════════════════════════════════════════
 # NOTIFICATION TYPES (documented — do not free-type)
 # ═══════════════════════════════════════════════════════════════════
@@ -125,6 +153,10 @@ def notify(to_user_id, type, title, body=None, from_user_id=None,
     except Exception as e:
         logger.error(f"notify DB insert failed: {e}")
         return None
+
+    # Invalidate unread cache so the new notification shows in the badge
+    # within ~1 polling tick instead of waiting up to 10s.
+    _invalidate_unread(to_user_id)
 
     suppressed = _should_suppress_push(to_user_id, type, severity)
 
@@ -360,6 +392,16 @@ def list_notifications(user_id, limit=50, unread_only=False, before_id=None):
 def unread_count(user_id):
     if not user_id:
         return 0
+
+    # Try cache first (10s TTL). Cache miss / Redis unavailable → fall to DB.
+    try:
+        from redis_cache import cache_get_json
+        cached = cache_get_json(_unread_cache_key(user_id))
+        if cached is not None and isinstance(cached, dict) and "count" in cached:
+            return int(cached["count"])
+    except Exception:
+        pass
+
     try:
         with db_context() as db:
             row = db.execute(
@@ -367,7 +409,20 @@ def unread_count(user_id):
                 "WHERE to_user_id = ? AND read_at IS NULL",
                 (str(user_id),)
             ).fetchone()
-            return int(row[0]) if row else 0
+            count = int(row[0]) if row else 0
+
+            # Populate cache (best-effort)
+            try:
+                from redis_cache import cache_set_json
+                cache_set_json(
+                    _unread_cache_key(user_id),
+                    {"count": count},
+                    ttl=_UNREAD_TTL,
+                )
+            except Exception:
+                pass
+
+            return count
     except Exception:
         return 0
 
@@ -389,6 +444,7 @@ def mark_read(notif_id, user_id):
                     "WHERE id = ? AND to_user_id = ? AND read_at IS NULL",
                     (int(notif_id), str(user_id))
                 )
+        _invalidate_unread(user_id)
         return True
     except Exception as e:
         logger.debug(f"mark_read: {e}")
@@ -412,6 +468,8 @@ def mark_all_read(user_id):
                     "WHERE to_user_id = ? AND read_at IS NULL",
                     (str(user_id),)
                 )
-            return cur.rowcount if hasattr(cur, 'rowcount') else 0
+            n = cur.rowcount if hasattr(cur, 'rowcount') else 0
+        _invalidate_unread(user_id)
+        return n
     except Exception:
         return 0
