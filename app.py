@@ -366,13 +366,13 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 
 # CORS - Production origins (HTTPS only)
+# v397.9 (Sprint X5/C): removed dead brain.radimcare.cz + app.mykolibri-academy.cz
+# (both return HTTP 000, verified 2026-05-08).
 PRODUCTION_ORIGINS = [
     "https://app.radimcare.cz",
-    "https://brain.radimcare.cz",
     "https://radimcare-app.pages.dev",
     "https://polite-bush-001303503.6.azurestaticapps.net",
     "https://mykolibri-academy.cz",
-    "https://app.mykolibri-academy.cz",
 ]
 
 # Development origins (only added when not in production)
