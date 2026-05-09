@@ -362,6 +362,16 @@ if EMAIL_AVAILABLE:
     app.register_blueprint(email_bp)
     logger.info("✅ Email routes registered: /api/email/*")
 
+# 🧠 Sprint X20.1 — Agent runtime (math engine + heartbeat)
+try:
+    from agent.context_routes import agent_bp
+    app.register_blueprint(agent_bp)
+    logger.info("✅ Agent routes registered: /api/agent/* (Sprint X20.1)")
+    AGENT_RUNTIME_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"⚠️ Agent runtime not available: {e}")
+    AGENT_RUNTIME_AVAILABLE = False
+
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 
@@ -1156,6 +1166,17 @@ try:
         logger.info("✅ Agent loop registered (every 5 min)")
     except ImportError:
         logger.warning("⚠️ agent_loop not available — proactive agent disabled")
+
+    # Sprint X20.1 — Math-engine heartbeat runtime
+    # Initializes the per-senior heartbeat registry (lazy: no heartbeats
+    # start until the first /api/agent/* call or socket event).
+    if AGENT_RUNTIME_AVAILABLE:
+        try:
+            from agent.runtime import init_runtime
+            init_runtime(socketio=socketio)
+            logger.info("✅ Agent heartbeat runtime initialized (Sprint X20.1)")
+        except Exception as e:
+            logger.warning(f"⚠️ Agent runtime init failed: {e}")
 
     # Claude Autonomous Agent — Sonnet 4.5 + tool use, every 30 min
     if os.getenv('ANTHROPIC_API_KEY') and os.getenv('CLAUDE_AGENT_ENABLED', '0') == '1':
