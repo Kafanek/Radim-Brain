@@ -78,11 +78,34 @@ def _canonical_json(payload: Any) -> str:
                       ensure_ascii=False, default=str)
 
 
+def _normalize_ts(ts: Any) -> str:
+    """Canonicalize a timestamp into a hash-stable string.
+    Ensures insert-time string = verify-time string after PG roundtrip
+    (which strips timezone info on TIMESTAMP-without-tz columns).
+
+    Format: 'YYYY-MM-DDTHH:MM:SS+00:00' (UTC, second precision, no µs).
+    """
+    if ts is None:
+        ts = datetime.now(timezone.utc)
+    if isinstance(ts, str):
+        try:
+            ts = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+        except ValueError:
+            return ts  # opaque string — return as-is
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    else:
+        ts = ts.astimezone(timezone.utc)
+    return ts.replace(microsecond=0).isoformat()
+
+
 def _compute_entry_hash(prev_hash: Optional[str], canonical_payload: str,
                         ts_iso: str, actor: str, action: str,
                         user_id: str) -> str:
     """SHA-256 of (prev_hash | payload | ts | actor | action | user_id).
     Pipe separator is fixed to prevent boundary-shifting attacks."""
+    # Always normalize ts before hashing so insert and verify agree.
+    ts_iso = _normalize_ts(ts_iso)
     h = hashlib.sha256()
     h.update((prev_hash or '0' * 64).encode('utf-8'))
     h.update(b'|')
