@@ -1188,6 +1188,25 @@ try:
         except Exception as e:
             logger.warning(f"⚠️ Agent runtime init failed: {e}")
 
+    # Sprint X20.1 / Fix 4 — monthly audit retention cleanup.
+    # 1st of each month @ 03:30 UTC. Default retention 7 years (2555 days),
+    # configurable via AUDIT_RETENTION_DAYS env var. max_instances=1 +
+    # misfire_grace_time=1h prevent snowballing if a dyno is down at fire time.
+    if AUDIT_AVAILABLE:
+        try:
+            from agent.cron import audit_retention_cleanup_job
+            scheduler.add_job(
+                audit_retention_cleanup_job,
+                'cron', day=1, hour=3, minute=30,
+                id='audit_retention_cleanup',
+                max_instances=1,
+                misfire_grace_time=3600,
+            )
+            logger.info("✅ Audit retention cleanup scheduled (1st @ 03:30 UTC, "
+                        "Sprint X20.1/Fix 4)")
+        except Exception as e:
+            logger.warning(f"⚠️ Audit retention cron registration failed: {e}")
+
     # Claude Autonomous Agent — Sonnet 4.5 + tool use, every 30 min
     if os.getenv('ANTHROPIC_API_KEY') and os.getenv('CLAUDE_AGENT_ENABLED', '0') == '1':
         try:
