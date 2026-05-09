@@ -130,13 +130,27 @@ _DIAGNOSTIC_ID_PATTERNS = (
     'backup_', '_backup', 'supervisor', '_disk_', '_memory',
     '_cpu', '_load_', '_uptime', '_version', 'integration_health',
     'home_assistant_core', 'home_assistant_supervisor',
-    'home_assistant_operating_system', '_signal_strength',
+    'home_assistant_operating_system',
     'next_scheduled', 'update_available', 'check_for_updates',
     'system_health', 'pi_hole', 'hacs_',
     # v397.16: HA "sun" integration exposes these as `sensor.*` so the
     # domain blacklist above doesn't catch them — match on entity_id pattern.
     'next_dawn', 'next_dusk', 'next_setting', 'next_rising',
     'next_midnight', 'next_noon', 'sun_next_',
+    # v397.17: signal/connectivity diagnostics (Tapo P115 / Tapo Hub +
+    # most other integrations expose RSSI + signal-level + linkquality
+    # as user-non-actionable metrics). Push them to "Systémové".
+    '_signal_strength', '_signal_level', 'signal_level',
+    '_rssi', '_wifi_strength', '_link_quality', 'linkquality',
+    '_battery_state', '_charging_state',
+    # v397.17: Tapo zero-value sensors that confuse users (when a P115
+    # is OFF, current_power = 0.0 W which looks like a broken sensor).
+    # Energy-today is useful (cumulative), live power isn't until plug
+    # is being used. Filter only `current_power`; keep `today_energy`,
+    # `month_energy`, `total_energy`.
+    '_current_power', 'current_power',
+    # Generic "test" / "ping" / "uptime" sensors that integrations expose
+    '_ping', 'restart_required', '_uptime_seconds',
 )
 
 
