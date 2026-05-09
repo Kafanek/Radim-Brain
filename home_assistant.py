@@ -118,7 +118,13 @@ DEVICE_TYPES = {
 #   3. entity_id substring patterns for older integrations / community
 #      add-ons that haven't adopted entity_category yet.
 
-_DIAGNOSTIC_DOMAINS = {'update', 'button', 'event'}
+_DIAGNOSTIC_DOMAINS = {
+    'update', 'button', 'event',
+    # v397.16: sun, weather, person, zone, todo, tts, group are HA meta
+    # entities that aren't physical devices. Filter at domain level so we
+    # don't have to enumerate every variant in patterns.
+    'sun', 'weather', 'person', 'zone', 'todo', 'tts', 'group',
+}
 
 _DIAGNOSTIC_ID_PATTERNS = (
     'backup_', '_backup', 'supervisor', '_disk_', '_memory',
@@ -127,6 +133,10 @@ _DIAGNOSTIC_ID_PATTERNS = (
     'home_assistant_operating_system', '_signal_strength',
     'next_scheduled', 'update_available', 'check_for_updates',
     'system_health', 'pi_hole', 'hacs_',
+    # v397.16: HA "sun" integration exposes these as `sensor.*` so the
+    # domain blacklist above doesn't catch them — match on entity_id pattern.
+    'next_dawn', 'next_dusk', 'next_setting', 'next_rising',
+    'next_midnight', 'next_noon', 'sun_next_',
 )
 
 
@@ -424,6 +434,53 @@ class HomeAssistantClient:
                 'last_changed': s.get('last_changed', ''),
             })
         return devices
+
+    def get_system_entities(self):
+        """Sprint X9 / B: Return entities that _build_rooms filtered out
+        as 'diagnostic' so the frontend can show them in a separate
+        collapsible "Systémové" section. Includes the entity_id, name,
+        state, and a guess at category for grouping."""
+        states = self.get_all_states()
+        items = []
+        for s in states:
+            eid = s.get('entity_id', '')
+            domain = eid.split('.')[0] if eid else ''
+            attrs = s.get('attributes', {}) or {}
+            if not _is_diagnostic_entity(eid, attrs):
+                continue
+            # Skip noise that is technically diagnostic but truly useless
+            # (sun, weather metadata, person, zone trackers — those weren't
+            # in DEVICE_TYPES so wouldn't appear anyway, but defensive)
+            if domain in ('sun', 'person', 'zone', 'weather', 'tts', 'todo', 'group'):
+                continue
+            # Pick a category label for grouping in UI
+            eid_lower = eid.lower()
+            if 'backup' in eid_lower:
+                cat = 'backup'
+            elif 'update' in eid_lower or domain == 'update':
+                cat = 'updates'
+            elif 'supervisor' in eid_lower or 'home_assistant_' in eid_lower:
+                cat = 'supervisor'
+            elif '_signal' in eid_lower or '_rssi' in eid_lower:
+                cat = 'signal'
+            elif domain in ('button', 'event'):
+                cat = 'controls'
+            else:
+                cat = 'other'
+            items.append({
+                'entity_id': eid,
+                'name': attrs.get('friendly_name', eid),
+                'state': s.get('state', 'unknown'),
+                'category': cat,
+                'domain': domain,
+            })
+        # Sort: backup → updates → supervisor → signal → controls → other,
+        # then alphabetical by name within category
+        cat_order = {'backup': 0, 'updates': 1, 'supervisor': 2,
+                     'signal': 3, 'controls': 4, 'other': 5}
+        items.sort(key=lambda x: (cat_order.get(x['category'], 9),
+                                  x['name'].lower()))
+        return items
 
     def get_devices_by_room(self):
         """Get devices grouped by room."""
@@ -1638,7 +1695,13 @@ def ha_sensors():
 @ha_bp.route('/api/ha/rooms', methods=['GET'])
 @_require_auth
 def ha_rooms():
-    """Get room list with device counts.
+    """Get room list with device counts + system entities.
+
+    Sprint X9 / B: response now includes a `system` array with the
+    HA-internal diagnostic entities filtered out of the main rooms.
+    Frontend renders them in a collapsed "Systémové" section so
+    admins can still see backup/update/supervisor state.
+
     Cached 3s per (uid, home)."""
     uid = _current_uid()
     home_qs = (request.args.get('home') or '').strip()
@@ -1655,7 +1718,12 @@ def ha_rooms():
             'device_count': len(room_data['devices']),
             'devices': room_data['devices']
         }
-    payload = {'success': True, 'rooms': summary}
+    system = []
+    try:
+        system = client.get_system_entities()
+    except Exception as e:
+        logger.debug(f'get_system_entities failed: {e}')
+    payload = {'success': True, 'rooms': summary, 'system': system}
     _ha_cache_set('rooms', uid, payload, home_qs)
     return jsonify(payload)
 
