@@ -100,6 +100,51 @@ DEVICE_TYPES = {
     'alarm_control_panel': {'icon': '🚨', 'name': 'Alarm', 'domain': 'alarm_control_panel'},
 }
 
+# ═══════════════════════════════════════════════════════════════════
+# Diagnostic / system entity filter (Sprint X9)
+# ═══════════════════════════════════════════════════════════════════
+# HA REST API returns ALL entities including the platform's internal
+# diagnostic + system entities (backup manager, supervisor health,
+# update checkers, signal strength sensors, ...). These pollute the
+# senior-facing device list. Skip them in `_build_rooms` — they're
+# admin-tier, not living-room-tier.
+#
+# Strategy:
+#   1. attribute `entity_category` = 'diagnostic' | 'config' (HA 2022+
+#      standard, set by integration developers for non-user-facing
+#      entities). Most reliable.
+#   2. domain blacklist (`update`, `button`, `event`) — these never
+#      represent a thing in the home; they're meta controls for HA itself.
+#   3. entity_id substring patterns for older integrations / community
+#      add-ons that haven't adopted entity_category yet.
+
+_DIAGNOSTIC_DOMAINS = {'update', 'button', 'event'}
+
+_DIAGNOSTIC_ID_PATTERNS = (
+    'backup_', '_backup', 'supervisor', '_disk_', '_memory',
+    '_cpu', '_load_', '_uptime', '_version', 'integration_health',
+    'home_assistant_core', 'home_assistant_supervisor',
+    'home_assistant_operating_system', '_signal_strength',
+    'next_scheduled', 'update_available', 'check_for_updates',
+    'system_health', 'pi_hole', 'hacs_',
+)
+
+
+def _is_diagnostic_entity(entity_id, attributes):
+    """Heuristic: is this a HA-internal entity that should be hidden
+    from the senior-facing UI? Keep behavior conservative — false
+    negatives just mean a noisy device list; false positives could hide
+    something the user actually cares about."""
+    domain = entity_id.split('.')[0]
+    if domain in _DIAGNOSTIC_DOMAINS:
+        return True
+    cat = (attributes or {}).get('entity_category')
+    if cat in ('diagnostic', 'config'):
+        return True
+    eid_lower = entity_id.lower()
+    return any(p in eid_lower for p in _DIAGNOSTIC_ID_PATTERNS)
+
+
 # Room mappings for Czech seniors
 ROOM_NAMES = {
     'living_room': '🛋️ Obývák',
@@ -223,6 +268,11 @@ class HomeAssistantClient:
         land in `_unassigned` bucket. Frontend can show them under
         "Nezařazené" so user sees their Tapo P115 etc. even when HA
         Tapo Controller didn't auto-set area_id.
+
+        v397.15 (Sprint X9): also skip HA diagnostic entities (backup
+        manager, system updates, supervisor health, etc.) — they pollute
+        the user-facing device list. They're still queryable via the
+        admin endpoint if needed.
         """
         self._rooms = {}
         for entity_id, state in self._cache.items():
@@ -231,8 +281,11 @@ class HomeAssistantClient:
             domain = entity_id.split('.')[0]
             if domain not in DEVICE_TYPES:
                 continue
-            area = state.get('attributes', {}).get('area_id', '')
-            friendly = state.get('attributes', {}).get('friendly_name', '')
+            attrs = state.get('attributes', {}) or {}
+            if _is_diagnostic_entity(entity_id, attrs):
+                continue
+            area = attrs.get('area_id', '')
+            friendly = attrs.get('friendly_name', '')
             room = area or self._guess_room(entity_id, friendly)
             if not room:
                 room = '_unassigned'
@@ -356,14 +409,18 @@ class HomeAssistantClient:
                 continue
             if domain not in DEVICE_TYPES:
                 continue
+            attrs = s.get('attributes', {}) or {}
+            # Sprint X9: skip HA-internal diagnostic/config entities
+            if _is_diagnostic_entity(eid, attrs):
+                continue
             dtype = DEVICE_TYPES[domain]
             devices.setdefault(domain, []).append({
                 'entity_id': eid,
-                'name': s.get('attributes', {}).get('friendly_name', eid),
+                'name': attrs.get('friendly_name', eid),
                 'state': s.get('state', 'unknown'),
                 'icon': dtype['icon'],
                 'type_name': dtype['name'],
-                'attributes': s.get('attributes', {}),
+                'attributes': attrs,
                 'last_changed': s.get('last_changed', ''),
             })
         return devices
