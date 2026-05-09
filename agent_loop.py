@@ -1140,6 +1140,25 @@ def _save_observation(user_id, obs):
         audit_log(user_id, "agent_observation", "agent_loop",
                   f"[{obs['severity']}] {obs['type']}: {obs['message']}")
 
+        # Sprint X20.3 — ISO 27001 hash-chained audit log entry.
+        # Best-effort; never raises, never blocks.
+        try:
+            from agent.audit import log_event as _audit_log_event
+            _audit_log_event(
+                user_id=user_id,
+                actor='agent_loop',
+                action='observation',
+                detector_id=obs.get('type'),
+                severity=obs.get('severity'),
+                payload={
+                    'observation_id': obs_id,
+                    'message':        obs.get('message', ''),
+                    'details':        obs.get('details', {}),
+                },
+            )
+        except Exception as _ae:
+            logger.debug(f"[audit] log_event failed: {_ae}")
+
         # v10.59: Push observation to subscribed devices (Sprint D D6)
         sev_up = (obs.get("severity") or "").upper()
         if sev_up in ("WARNING", "ALERT", "CRISIS"):

@@ -602,6 +602,48 @@ PG_IOT_TABLES = [
         "CREATE INDEX IF NOT EXISTS idx_agent_obs_severity ON agent_observations(severity)",
     ]),
 
+    # Sprint X20.3 — ISO 27001 audit log (tamper-evident hash chain).
+    # Every agent observation, action, and external view of agent data
+    # appends one row. entry_hash = SHA-256(prev_hash | canonical_payload |
+    # ts | actor | action | user_id). Tampering with any past row breaks
+    # every subsequent hash → verify_chain() detects.
+    # ISO 27001 controls: A.12.4.1 (event logging), A.12.4.2 (tamper),
+    # A.12.4.3 (admin/operator), A.12.4.4 (clock — Heroku NTP UTC).
+    # GDPR: art. 15/20 export, art. 17 pseudonymization (see agent/audit.py).
+    ('''CREATE TABLE IF NOT EXISTS agent_audit_log (
+            id BIGSERIAL PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            action TEXT NOT NULL,
+            detector_id TEXT,
+            payload TEXT NOT NULL,
+            severity TEXT,
+            prev_hash TEXT,
+            entry_hash TEXT NOT NULL,
+            ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''', [
+        "CREATE INDEX IF NOT EXISTS idx_audit_log_user ON agent_audit_log(user_id, ts DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON agent_audit_log(actor, ts DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_audit_log_action ON agent_audit_log(action)",
+        "CREATE INDEX IF NOT EXISTS idx_audit_log_ts ON agent_audit_log(ts DESC)",
+    ]),
+
+    # Sprint X20.3 — Audit access log (who viewed which entry, when, why).
+    # ISO 27001 A.12.4.3 administrator/operator activity log.
+    ('''CREATE TABLE IF NOT EXISTS agent_audit_access (
+            id BIGSERIAL PRIMARY KEY,
+            viewer_id TEXT NOT NULL,
+            subject_user_id TEXT NOT NULL,
+            audit_entry_id BIGINT,
+            reason TEXT,
+            ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''', [
+        "CREATE INDEX IF NOT EXISTS idx_audit_access_subject ON agent_audit_access(subject_user_id, ts DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_audit_access_viewer ON agent_audit_access(viewer_id, ts DESC)",
+    ]),
+
     # Sprint AG.4 — agent_messages bus.
     # Single source of truth for "what agents currently know about user X".
     # Three layers (chat coordinator, agent_loop, specialists) emit AND read

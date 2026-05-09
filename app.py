@@ -372,6 +372,16 @@ except ImportError as e:
     logger.warning(f"⚠️ Agent runtime not available: {e}")
     AGENT_RUNTIME_AVAILABLE = False
 
+# 🛡️ Sprint X20.3 — ISO 27001 audit log (hash-chained, GDPR export)
+try:
+    from agent.audit_routes import audit_bp
+    app.register_blueprint(audit_bp)
+    logger.info("✅ Audit routes registered: /api/audit/* (Sprint X20.3, ISO 27001)")
+    AUDIT_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"⚠️ Audit module not available: {e}")
+    AUDIT_AVAILABLE = False
+
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 

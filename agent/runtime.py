@@ -363,14 +363,33 @@ class AgentRuntime:
             except Exception as e:  # noqa: BLE001
                 logger.debug(f"socketio emit failed: {e}")
 
-        # Audit-light: log preemptive flag at INFO level (full audit table
-        # comes in X20.3)
+        # Sprint X20.3 — full ISO 27001 audit log entry on every preemptive.
+        # Non-preemptive ticks are NOT logged (would flood; one entry per
+        # 30s in CRISIS = ~2880/day per senior). Only meaningful events.
         if snap.preemptive.crosses_up:
             logger.info(
                 f"[agent_runtime:{user_id}] preemptive {snap.mode} → "
                 f"{snap.preemptive.predicted_mode} in "
                 f"{snap.preemptive.peak_at_minute} min"
             )
+            try:
+                from .audit import log_event
+                log_event(
+                    user_id=user_id,
+                    actor='agent_runtime',
+                    action='preemptive_trigger',
+                    severity=snap.preemptive.predicted_mode,
+                    payload={
+                        'current_mode':   snap.mode,
+                        'predicted_mode': snap.preemptive.predicted_mode,
+                        'peak_c':         round(snap.preemptive.peak_c, 2),
+                        'peak_at_min':    snap.preemptive.peak_at_minute,
+                        'c_total':        round(snap.c_total, 2),
+                        'alpha':          round(snap.state.alpha, 3),
+                    },
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"audit log_event failed: {e}")
 
 
 # ─── Snapshot serialization for SocketIO / REST ─────────────────────────────
