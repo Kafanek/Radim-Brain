@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import os
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from .math_engine import PERSONA_WEIGHTS
 from .runtime import get_runtime, _serialize_snapshot
@@ -38,26 +38,51 @@ def _admin_authorized() -> bool:
     return request.headers.get('X-Admin-Secret') == expected
 
 
-def _user_authorized(user_id: str) -> bool:
-    """Lightweight check — same JWT helper used elsewhere in the app.
-    Reads from request.user (set by global before_request middleware)
-    and matches user_id; admin bypass via X-Admin-Secret."""
-    if _admin_authorized():
-        return True
-    # Try Flask `g.user` or request.user — we accept any auth that
-    # produces a user identifier matching the path.
+def _decode_jwt_from_header():
+    """Read JWT from Authorization header and return (payload, user) or (None, None)."""
     try:
-        from flask import g
-        u = getattr(g, 'user', None)
-        if u and (u.get('id') == user_id or u.get('user_id') == user_id):
-            return True
-    except Exception:  # noqa: BLE001
-        pass
-    return False
+        from auth_middleware import decode_jwt
+    except ImportError:
+        return None, None
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return None, None
+    token = auth_header[7:].strip()
+    if not token:
+        return None, None
+    payload = decode_jwt(token)
+    if not payload:
+        return None, None
+    user = payload.get('user') or {}
+    return payload, user
+
+
+def _user_authorized(user_id: str):
+    """Returns (ok, jwt_user). ok=True if admin OR JWT user matches path uid.
+    Path uid is normalized to string for comparison (JWT may carry int id)."""
+    if _admin_authorized():
+        return True, None
+    _, jwt_user = _decode_jwt_from_header()
+    if not jwt_user:
+        return False, None
+    # Coerce both to string for comparison — WP user ids are integers in JWT
+    # but the frontend sends them as strings in the URL path.
+    jwt_id = jwt_user.get('id') or jwt_user.get('user_id')
+    if jwt_id is None:
+        return False, jwt_user
+    if str(jwt_id) == str(user_id):
+        # Stash on g so handlers can reuse without re-decoding
+        try:
+            g.auth_user = jwt_user
+        except Exception:
+            pass
+        return True, jwt_user
+    return False, jwt_user
 
 
 def _require_auth(user_id: str):
-    if not _user_authorized(user_id):
+    ok, _ = _user_authorized(user_id)
+    if not ok:
         return jsonify({'success': False, 'error': 'unauthorized',
                         'code': 'token_required'}), 401
     return None

@@ -40,31 +40,43 @@ def _admin_authorized() -> bool:
     return request.headers.get('X-Admin-Secret') == expected
 
 
+def _decode_jwt_user():
+    """Decode JWT from Authorization header, return user dict or None."""
+    try:
+        from auth_middleware import decode_jwt
+    except ImportError:
+        return None
+    h = request.headers.get('Authorization', '')
+    if not h.startswith('Bearer '):
+        return None
+    token = h[7:].strip()
+    if not token:
+        return None
+    payload = decode_jwt(token)
+    if not payload:
+        return None
+    return (payload.get('user') or {})
+
+
 def _self_authorized(user_id: str) -> bool:
-    """User can export their own data (GDPR art. 15)."""
+    """User can export their own data (GDPR art. 15). Admin bypass via secret.
+    String-coerce both sides — JWT carries int id, path is string."""
     if _admin_authorized():
         return True
-    try:
-        from flask import g
-        u = getattr(g, 'user', None)
-        if u and (u.get('id') == user_id or u.get('user_id') == user_id):
-            return True
-    except Exception:
-        pass
-    return False
+    user = _decode_jwt_user()
+    if not user:
+        return False
+    uid = user.get('id') or user.get('user_id')
+    return uid is not None and str(uid) == str(user_id)
 
 
 def _viewer_id() -> str:
     """Identify the caller for the access log."""
     if _admin_authorized():
         return 'admin'
-    try:
-        from flask import g
-        u = getattr(g, 'user', None)
-        if u:
-            return str(u.get('id') or u.get('user_id') or 'unknown')
-    except Exception:
-        pass
+    user = _decode_jwt_user()
+    if user:
+        return str(user.get('id') or user.get('user_id') or 'unknown')
     return 'anonymous'
 
 
