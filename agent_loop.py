@@ -290,6 +290,26 @@ def _evaluate_user(user_id, app):
     if ha_obs and not _is_in_cooldown(user_id, ha_obs["type"]):
         observations.append(ha_obs)
 
+    # ── Sprint X20.1/Fix 6: Goal-driven planner ──
+    # Proactive layer above detectors. Reads agent_user_goals for this user,
+    # measures current state vs target over each goal's horizon, emits
+    # observations when drift is detected (with severity escalation curve).
+    try:
+        from agent.planner import evaluate as _plan_evaluate
+        goal_obs = _plan_evaluate(user_id) or []
+        for gobs in goal_obs:
+            # Skip INFO observations to avoid cluttering caregiver inbox —
+            # they're recorded in agent_goal_progress for analytics. Only
+            # WARNING+ surface as observations.
+            if gobs.get('severity') == 'INFO':
+                continue
+            if not _is_in_cooldown(user_id, gobs['type']):
+                if sensitivity < 0.6 and gobs['severity'] == 'WARNING':
+                    continue
+                observations.append(gobs)
+    except Exception as e:
+        logger.debug(f"planner evaluate failed for {user_id}: {e}")
+
     # ── v8.19.107: Tapo IoT detektory ──
     # T100 motion, T110 contact, P115 plug, L510E bulb, H110 hub
     for tapo_check in TAPO_DETECTORS:

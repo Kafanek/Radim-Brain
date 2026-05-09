@@ -282,3 +282,133 @@ def ha_realtime_init_user(user_id):
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ─── Sprint X20.1/Fix 6 — Goal-driven planner endpoints ──────────────────
+
+
+@agent_bp.route('/goals/<user_id>', methods=['GET'])
+def list_user_goals(user_id):
+    """List active goals for user — self or admin."""
+    err = _require_auth(user_id)
+    if err:
+        return err
+    try:
+        from .planner import list_active_goals
+        from .goals import list_goal_types
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'goals': list_active_goals(user_id),
+            'available_types': list_goal_types(),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@agent_bp.route('/goals/<user_id>', methods=['POST'])
+def upsert_user_goal(user_id):
+    """Admin: create or update a goal.
+    Body: {"goal_type": "...", "target": {...}, "horizon_hours": 24}"""
+    if not _admin_authorized():
+        return jsonify({'success': False, 'error': 'admin_required'}), 401
+    body = request.get_json(silent=True) or {}
+    goal_type = body.get('goal_type')
+    target = body.get('target', {})
+    horizon_hours = body.get('horizon_hours', 24)
+    if not goal_type:
+        return jsonify({'success': False, 'error': 'missing_goal_type'}), 400
+    try:
+        from .planner import upsert_goal
+        from .goals import GOAL_MEASURES
+        if goal_type not in GOAL_MEASURES:
+            return jsonify({'success': False,
+                            'error': f'unknown_goal_type:{goal_type}'}), 400
+        gid = upsert_goal(user_id, goal_type, target, horizon_hours)
+        # Audit
+        try:
+            from .audit import log_event
+            log_event(user_id, 'admin', 'goal_upsert',
+                      payload={'goal_id': gid, 'goal_type': goal_type,
+                               'target': target,
+                               'horizon_hours': horizon_hours})
+        except Exception:
+            pass
+        return jsonify({'success': True, 'goal_id': gid})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@agent_bp.route('/goals/<user_id>/<int:goal_id>', methods=['DELETE'])
+def deactivate_user_goal(user_id, goal_id):
+    """Admin: deactivate a goal (preserve history, just stop evaluating)."""
+    if not _admin_authorized():
+        return jsonify({'success': False, 'error': 'admin_required'}), 401
+    try:
+        from .planner import deactivate_goal
+        ok = deactivate_goal(user_id, goal_id)
+        if ok:
+            try:
+                from .audit import log_event
+                log_event(user_id, 'admin', 'goal_deactivated',
+                          payload={'goal_id': goal_id})
+            except Exception:
+                pass
+        return jsonify({'success': ok, 'goal_id': goal_id})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@agent_bp.route('/goals/<user_id>/init-defaults', methods=['POST'])
+def init_default_goals(user_id):
+    """Admin: bulk-create the persona's default goal set for this user.
+    Reads persona from memory_profiles.data (set via /api/agent/persona)."""
+    if not _admin_authorized():
+        return jsonify({'success': False, 'error': 'admin_required'}), 401
+    try:
+        from .personas import get_persona_id
+        from .planner import initialize_default_goals
+        persona = get_persona_id(user_id)
+        created = initialize_default_goals(user_id, persona)
+        try:
+            from .audit import log_event
+            log_event(user_id, 'admin', 'goals_init_defaults',
+                      payload={'persona_id': persona, 'created': created})
+        except Exception:
+            pass
+        return jsonify({'success': True, 'persona_id': persona,
+                        'created_or_updated': created})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@agent_bp.route('/goals/<user_id>/progress', methods=['GET'])
+def goal_progress(user_id):
+    """Recent goal-progress measurements (last N samples)."""
+    err = _require_auth(user_id)
+    if err:
+        return err
+    try:
+        from .planner import get_goal_progress
+        limit = max(1, min(500, int(request.args.get('limit', 50))))
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'progress': get_goal_progress(user_id, limit=limit),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@agent_bp.route('/goals/<user_id>/evaluate', methods=['POST'])
+def force_evaluate_goals(user_id):
+    """Admin: manually trigger goal evaluation (debugging / testing)."""
+    if not _admin_authorized():
+        return jsonify({'success': False, 'error': 'admin_required'}), 401
+    try:
+        from .planner import evaluate
+        obs = evaluate(user_id) or []
+        return jsonify({'success': True, 'observations': obs,
+                        'count': len(obs)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500

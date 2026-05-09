@@ -644,6 +644,40 @@ PG_IOT_TABLES = [
         "CREATE INDEX IF NOT EXISTS idx_audit_access_viewer ON agent_audit_access(viewer_id, ts DESC)",
     ]),
 
+    # Sprint X20.1/Fix 6 — Goal-driven agent (proactive layer above detectors)
+    # One row per (user_id, goal_type). target = JSONB threshold spec,
+    # horizon_hours = how far back to measure, consecutive_drift_count
+    # drives severity escalation (1=INFO, 2=WARNING, 3+=ALERT).
+    ('''CREATE TABLE IF NOT EXISTS agent_user_goals (
+            id BIGSERIAL PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            goal_type TEXT NOT NULL,
+            target JSONB NOT NULL DEFAULT '{}',
+            horizon_hours INTEGER NOT NULL DEFAULT 24,
+            active BOOLEAN DEFAULT TRUE,
+            consecutive_drift_count INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (user_id, goal_type)
+        )
+    ''', [
+        "CREATE INDEX IF NOT EXISTS idx_goals_user_active ON agent_user_goals(user_id, active)",
+    ]),
+
+    # Per-cycle goal progress measurements. agent_loop appends one row per
+    # goal per cycle. Caregiver UI / analytics can render trends.
+    ('''CREATE TABLE IF NOT EXISTS agent_goal_progress (
+            id BIGSERIAL PRIMARY KEY,
+            goal_id BIGINT NOT NULL,
+            value TEXT,
+            met BOOLEAN,
+            detail JSONB DEFAULT '{}',
+            measured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''', [
+        "CREATE INDEX IF NOT EXISTS idx_goal_progress_goal ON agent_goal_progress(goal_id, measured_at DESC)",
+    ]),
+
     # Sprint AG.4 — agent_messages bus.
     # Single source of truth for "what agents currently know about user X".
     # Three layers (chat coordinator, agent_loop, specialists) emit AND read
