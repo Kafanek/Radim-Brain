@@ -140,17 +140,79 @@ def force_tick(user_id):
 
 @agent_bp.route('/personas', methods=['GET'])
 def list_personas():
-    return jsonify({
-        'personas': {
-            pid: {
-                'emotional':     w.emotional,
-                'environmental': w.environmental,
-                'social':        w.social,
-                'physical':      w.physical,
+    """List available personas with their weight + threshold profiles."""
+    out = {}
+    try:
+        from .personas import PERSONA_THRESHOLDS
+        for pid, w in PERSONA_WEIGHTS.items():
+            out[pid] = {
+                'weights': {
+                    'emotional':     w.emotional,
+                    'environmental': w.environmental,
+                    'social':        w.social,
+                    'physical':      w.physical,
+                },
+                'thresholds': PERSONA_THRESHOLDS.get(pid, {}),
             }
-            for pid, w in PERSONA_WEIGHTS.items()
-        }
-    })
+    except ImportError:
+        for pid, w in PERSONA_WEIGHTS.items():
+            out[pid] = {
+                'weights': {
+                    'emotional':     w.emotional,
+                    'environmental': w.environmental,
+                    'social':        w.social,
+                    'physical':      w.physical,
+                },
+            }
+    return jsonify({'personas': out})
+
+
+@agent_bp.route('/persona/<user_id>', methods=['GET'])
+def get_user_persona(user_id):
+    """Get persona_id assigned to user. Self or admin."""
+    err = _require_auth(user_id)
+    if err:
+        return err
+    try:
+        from .personas import get_persona_id, get_thresholds
+        pid = get_persona_id(user_id)
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'persona_id': pid,
+            'thresholds': get_thresholds(pid),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@agent_bp.route('/persona/<user_id>', methods=['POST'])
+def set_user_persona(user_id):
+    """Set persona_id for user. Admin-only (caregiver-driven from dashboard).
+    Body: {"persona_id": "senior" | "child_autism" | "child_adhd"}"""
+    if not _admin_authorized():
+        return jsonify({'success': False, 'error': 'admin_required'}), 401
+    body = request.get_json(silent=True) or {}
+    pid = body.get('persona_id')
+    if not pid:
+        return jsonify({'success': False, 'error': 'missing_persona_id'}), 400
+    try:
+        from .personas import set_persona_id, get_thresholds
+        ok = set_persona_id(user_id, pid)
+        if not ok:
+            return jsonify({'success': False,
+                            'error': 'unknown_persona_or_db_error'}), 400
+        # Audit-log the change
+        try:
+            from .audit import log_event
+            log_event(user_id, 'admin', 'persona_changed',
+                      payload={'persona_id': pid})
+        except Exception:
+            pass
+        return jsonify({'success': True, 'persona_id': pid,
+                        'thresholds': get_thresholds(pid)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @agent_bp.route('/health', methods=['GET'])

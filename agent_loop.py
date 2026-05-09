@@ -242,6 +242,17 @@ def _evaluate_user(user_id, app):
     # math-engine runtime isn't loaded — detectors fall back gracefully.
     snap = _get_heartbeat_snapshot(user_id)
 
+    # ── Sprint X20.1/Fix 3: persona-aware thresholds ──
+    # Each detector reads from per-user persona thresholds (senior /
+    # child_autism / child_adhd) instead of hardcoded T1/T2 globals.
+    # Stored once per cycle so all detectors share the same view.
+    try:
+        from agent.personas import get_thresholds_for_user
+        thresholds = get_thresholds_for_user(user_id)
+    except Exception as e:
+        logger.debug(f"persona thresholds unavailable for {user_id}: {e}")
+        thresholds = None  # detectors fall back to legacy T1/T2
+
     # ── v3.1: Get adaptive sensitivity from Learning Agent ──
     sensitivity = _get_user_sensitivity(user_id)
 
@@ -254,15 +265,18 @@ def _evaluate_user(user_id, app):
     for check in (_check_recent_chat_crisis, _check_c_trend, _check_heartbeat_preemptive,
                   _check_activity_drop, _check_vitals, _check_interaction_silence,
                   _check_fall_detection, _check_smoke):
-        # Detectors that opt-in to snapshot accept it as 3rd arg; legacy
+        # Detectors that opt-in to snapshot/thresholds use kwargs; legacy
         # detectors keep the (user_id, baselines) signature.
         try:
             import inspect
             sig = inspect.signature(check)
-            params = len(sig.parameters)
+            params = sig.parameters
+            kwargs = {}
+            if 'snap' in params:        kwargs['snap'] = snap
+            if 'thresholds' in params:  kwargs['thresholds'] = thresholds
         except (ValueError, TypeError):
-            params = 2
-        obs = check(user_id, baselines, snap) if params >= 3 else check(user_id, baselines)
+            kwargs = {}
+        obs = check(user_id, baselines, **kwargs) if kwargs else check(user_id, baselines)
         if obs and not _is_in_cooldown(user_id, obs["type"]):
             # Apply sensitivity filter: if sensitivity < 1.0, skip low-severity
             if sensitivity < 0.8 and obs["severity"] == INFO:
@@ -300,7 +314,7 @@ def _evaluate_user(user_id, app):
 # ANOMALY DETECTORS
 # ============================================================================
 
-def _check_recent_chat_crisis(user_id, baselines):
+def _check_recent_chat_crisis(user_id, baselines, thresholds=None):
     """Sprint AF: detect a fresh CRISIS row in brain_states (chat-induced).
 
     Why this exists separately from _check_c_trend:
@@ -348,7 +362,11 @@ def _check_recent_chat_crisis(user_id, baselines):
             C_val = float(row[0] or 0)
             mode = (row[1] or '').upper()
 
-        if mode == 'CRISIS' or C_val >= T2:
+        # Sprint X20.1/Fix 3 — persona-aware thresholds (fallback to T1/T2)
+        t_crisis = (thresholds or {}).get('c_crisis', T2)
+        t_alert  = (thresholds or {}).get('c_alert',  T1)
+
+        if mode == 'CRISIS' or C_val >= t_crisis:
             # Sprint AG.4 dedupe: if any sender already emitted a recent
             # CRISIS observation for this user under the SAME topic in the
             # last 15 min (e.g. safety branch from Sprint AD already wrote
@@ -369,7 +387,7 @@ def _check_recent_chat_crisis(user_id, baselines):
                 "message": f"Uživatel právě hlásil krizovou situaci v rozhovoru (C={C_val:.0f}, mode={mode}). Okamžitá kontrola doporučena.",
                 "details": {"C": C_val, "mode": mode, "source": "brain_states_recent"},
             }
-        elif mode == 'ALERT' or C_val >= T1:
+        elif mode == 'ALERT' or C_val >= t_alert:
             try:
                 from agent_bus import dedupe as _bus_dedupe
                 if _bus_dedupe(user_id, sender=None, topic='recent_chat_alert',
@@ -391,7 +409,7 @@ def _check_recent_chat_crisis(user_id, baselines):
     return None
 
 
-def _check_c_trend(user_id, baselines, snap=None):
+def _check_c_trend(user_id, baselines, snap=None, thresholds=None):
     """Detect rising C trend: recent avg vs baseline.
 
     Sprint X20.1: prefer the heartbeat snapshot's c_total (if available)
@@ -399,6 +417,9 @@ def _check_c_trend(user_id, baselines, snap=None):
     fresh at the start of each cycle by _get_heartbeat_snapshot, so it
     reflects current state across all 4 domains weighted by persona —
     not just the chat-derived C of the legacy code.
+
+    Sprint X20.1/Fix 3: persona-aware thresholds (c_alert / c_crisis)
+    replace global T1/T2 when available.
 
     Falls back to the legacy path when no snapshot is available (runtime
     not loaded, cold start, etc.).
@@ -421,14 +442,19 @@ def _check_c_trend(user_id, baselines, snap=None):
     if baseline_std < 0.5:
         baseline_std = 0.5  # minimum to avoid false positives
 
-    common_details = {"recent_value": recent_value, "baseline_avg": baseline_avg,
-                      "source": source}
+    # Sprint X20.1/Fix 3 — per-persona alert/crisis thresholds
+    t_crisis = (thresholds or {}).get('c_crisis', T2)
+    t_alert  = (thresholds or {}).get('c_alert',  T1)
+    persona_id = (thresholds or {}).get('_persona_id')  # informational
 
-    if recent_value > T2:
+    common_details = {"recent_value": recent_value, "baseline_avg": baseline_avg,
+                      "source": source, "t_alert": t_alert, "t_crisis": t_crisis}
+
+    if recent_value > t_crisis:
         return {"type": "c_trend_rising", "severity": CRISIS,
                 "message": "Uživatel je ve velmi silném stresu a potřebuje okamžitou pomoc.",
                 "details": common_details}
-    elif recent_value > T1:
+    elif recent_value > t_alert:
         return {"type": "c_trend_rising", "severity": ALERT,
                 "message": "Uživatel je ve zvýšeném stresu — buďte extra klidný a empatický.",
                 "details": common_details}
@@ -538,11 +564,20 @@ def _check_activity_drop(user_id, baselines):
     return None
 
 
-def _check_vitals(user_id, baselines):
-    """Detect vital signs outside personal baseline."""
+def _check_vitals(user_id, baselines, thresholds=None):
+    """Detect vital signs outside personal baseline.
+
+    Sprint X20.1/Fix 3: persona-tuned absolute thresholds for HR and SpO2
+    (in addition to baseline-deviation logic which stays the same).
+    """
     vitals_bl = baselines.get("vitals", {})
     if not vitals_bl:
         return None
+
+    t = thresholds or {}
+    hr_high   = t.get('hr_high', 100)
+    hr_low    = t.get('hr_low',   50)
+    spo2_low  = t.get('spo2_low', 95)
 
     try:
         with db_context() as db:
@@ -574,11 +609,28 @@ def _check_vitals(user_id, baselines):
                 std = max(bl.get("std", 1.0), 0.5)
                 deviation = abs(val - avg) / std
 
-                # SpO2 < 90 is always crisis
+                # SpO2 < 90 is always CRISIS regardless of baseline (life safety).
                 if sensor == 'spo2' and val < 90:
                     return {"type": "vital_anomaly", "severity": CRISIS,
                             "message": f"Hladina kyslíku v krvi je nebezpečně nízká ({val:.0f}%). Je třeba zavolat pomoc.",
                             "details": {"sensor": sensor, "value": val, "baseline_avg": avg}}
+
+                # Sprint X20.1/Fix 3 — persona-tuned ABSOLUTE thresholds.
+                # SpO2 below persona's spo2_low triggers ALERT (e.g. 95 senior,
+                # 95 child — same in current presets but tunable).
+                if sensor == 'spo2' and val < spo2_low:
+                    return {"type": "vital_anomaly", "severity": ALERT,
+                            "message": f"Hladina kyslíku ({val:.0f}%) je pod doporučenou hranicí ({spo2_low}%). Zkontrolujte, jak se cítí.",
+                            "details": {"sensor": sensor, "value": val, "threshold": spo2_low,
+                                        "kind": "persona_absolute"}}
+                # HR outside persona band → WARNING (baseline σ check below
+                # may upgrade to ALERT for sustained anomaly).
+                if sensor == 'heart_rate' and (val > hr_high or val < hr_low):
+                    return {"type": "vital_anomaly", "severity": WARNING,
+                            "message": f"Tepová frekvence ({val:.0f}) je mimo obvyklý rozsah ({hr_low}–{hr_high}). Jak se cítíte?",
+                            "details": {"sensor": sensor, "value": val,
+                                        "band": [hr_low, hr_high],
+                                        "kind": "persona_absolute"}}
 
                 sensor_name = "tepová frekvence" if sensor == "heart_rate" else "hladina kyslíku"
                 if deviation > 3:
@@ -594,8 +646,13 @@ def _check_vitals(user_id, baselines):
     return None
 
 
-def _check_interaction_silence(user_id, baselines):
-    """Detect prolonged silence (no interactions)."""
+def _check_interaction_silence(user_id, baselines, thresholds=None):
+    """Detect prolonged silence (no interactions).
+
+    Sprint X20.1/Fix 3: silence windows are persona-tuned —
+    child_adhd has 6h warning / 12h alert (engagement matters),
+    senior has 24h / 48h (default), child_autism has 12h / 24h.
+    """
     learning = db_load_learning(user_id)
     last = learning.get("last_interaction")
     if not last:
@@ -607,14 +664,26 @@ def _check_interaction_silence(user_id, baselines):
     except (ValueError, TypeError):
         return None
 
-    if hours_since > 48:
+    t = thresholds or {}
+    h_warn   = t.get('silence_warning_hours', 24)
+    h_alert  = t.get('silence_alert_hours',   48)
+    h_crisis = t.get('silence_crisis_hours',  72)
+
+    if hours_since > h_crisis:
+        return {"type": "no_interaction", "severity": CRISIS,
+                "message": f"Uživatel se neozval už {hours_since:.0f} hodin. Doporučujeme okamžitou kontrolu.",
+                "details": {"hours_since": round(hours_since, 1), "last": str(last),
+                            "threshold_h": h_crisis}}
+    elif hours_since > h_alert:
         return {"type": "no_interaction", "severity": ALERT,
                 "message": f"Uživatel se neozval už {hours_since:.0f} hodin. Zeptejte se, jak se má, a nabídněte pomoc.",
-                "details": {"hours_since": round(hours_since, 1), "last": str(last)}}
-    elif hours_since > 24:
+                "details": {"hours_since": round(hours_since, 1), "last": str(last),
+                            "threshold_h": h_alert}}
+    elif hours_since > h_warn:
         return {"type": "no_interaction", "severity": WARNING,
                 "message": "Nebyli jsme spolu v kontaktu celý den. Rád bych věděl, jak se vám daří.",
-                "details": {"hours_since": round(hours_since, 1)}}
+                "details": {"hours_since": round(hours_since, 1),
+                            "threshold_h": h_warn}}
     elif hours_since > 12:
         return {"type": "no_interaction", "severity": INFO,
                 "message": "Uživatel se delší dobu neozval. Při příštím rozhovoru se zeptejte, jak se má.",
