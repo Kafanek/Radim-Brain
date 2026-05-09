@@ -51,6 +51,43 @@ OBSERVATION_COOLDOWN_MINUTES = 60
 
 
 # ============================================================================
+# Sprint X20.1 — Heartbeat snapshot integration
+# ============================================================================
+# The math-engine heartbeat (agent/heartbeat.py + agent/runtime.py) is the
+# single source of truth for live user state (C, α, mode, 30-min predicted
+# horizon, preemptive trigger). agent_loop reads its snapshot once per cycle
+# and detectors consume it instead of recomputing C themselves.
+#
+# Backward-compatible: if runtime / snapshot is unavailable, detectors fall
+# back to the legacy learning.C_history path.
+
+def _get_heartbeat_snapshot(user_id):
+    """Force a fresh tick of the per-user heartbeat and return the snapshot.
+
+    Returns None if the runtime isn't initialized (e.g. agent module failed
+    to load, or in an isolated unit-test environment). Detectors must
+    gracefully handle this.
+    """
+    try:
+        from agent.runtime import get_runtime
+    except ImportError:
+        return None
+    rt = get_runtime()
+    if not rt:
+        return None
+    try:
+        # force_tick is idempotent — it computes a snapshot from real DB
+        # data and stores it in the per-user heartbeat. This means:
+        #   1) agent_loop refreshes the snapshot for ALL active seniors,
+        #      including those without an open browser tab.
+        #   2) Subsequent /api/agent/heartbeat reads return fresh data.
+        return rt.force_tick(user_id)
+    except Exception as e:
+        logger.debug(f"[agent_loop] heartbeat tick failed for {user_id}: {e}")
+        return None
+
+
+# ============================================================================
 # MAIN ENTRY POINT
 # ============================================================================
 
@@ -199,6 +236,12 @@ def _evaluate_user(user_id, app):
     baselines = get_baselines(user_id)
     observations = []
 
+    # ── Sprint X20.1: refresh heartbeat snapshot once per cycle ──
+    # All detectors below read from this single snapshot instead of
+    # recomputing C/alpha/mode independently. Snapshot may be None if the
+    # math-engine runtime isn't loaded — detectors fall back gracefully.
+    snap = _get_heartbeat_snapshot(user_id)
+
     # ── v3.1: Get adaptive sensitivity from Learning Agent ──
     sensitivity = _get_user_sensitivity(user_id)
 
@@ -206,8 +249,20 @@ def _evaluate_user(user_id, app):
     # Sprint AF: _check_recent_chat_crisis added FIRST so a single safety
     # event (fall, pain, suicide-talk) triggers caregiver notification within
     # one 5-min cycle, not blocked by avg-of-5 in _check_c_trend.
-    for check in (_check_recent_chat_crisis, _check_c_trend, _check_activity_drop, _check_vitals, _check_interaction_silence, _check_fall_detection, _check_smoke):
-        obs = check(user_id, baselines)
+    # Sprint X20.1: _check_heartbeat_preemptive added AFTER _check_c_trend so
+    # rising trends get caught proactively (30-min lookahead).
+    for check in (_check_recent_chat_crisis, _check_c_trend, _check_heartbeat_preemptive,
+                  _check_activity_drop, _check_vitals, _check_interaction_silence,
+                  _check_fall_detection, _check_smoke):
+        # Detectors that opt-in to snapshot accept it as 3rd arg; legacy
+        # detectors keep the (user_id, baselines) signature.
+        try:
+            import inspect
+            sig = inspect.signature(check)
+            params = len(sig.parameters)
+        except (ValueError, TypeError):
+            params = 2
+        obs = check(user_id, baselines, snap) if params >= 3 else check(user_id, baselines)
         if obs and not _is_in_cooldown(user_id, obs["type"]):
             # Apply sensitivity filter: if sensitivity < 1.0, skip low-severity
             if sensitivity < 0.8 and obs["severity"] == INFO:
@@ -336,33 +391,103 @@ def _check_recent_chat_crisis(user_id, baselines):
     return None
 
 
-def _check_c_trend(user_id, baselines):
-    """Detect rising C trend: recent avg vs baseline."""
-    learning = db_load_learning(user_id)
-    c_history = [float(v) for v in learning.get("C_history", []) if v is not None]
-    if len(c_history) < 5:
-        return None
+def _check_c_trend(user_id, baselines, snap=None):
+    """Detect rising C trend: recent avg vs baseline.
 
-    recent_avg, _ = _mean_std(c_history[-5:])
+    Sprint X20.1: prefer the heartbeat snapshot's c_total (if available)
+    over the legacy learning.C_history path. The snapshot is computed
+    fresh at the start of each cycle by _get_heartbeat_snapshot, so it
+    reflects current state across all 4 domains weighted by persona —
+    not just the chat-derived C of the legacy code.
+
+    Falls back to the legacy path when no snapshot is available (runtime
+    not loaded, cold start, etc.).
+    """
+    # Determine `recent_value` — the "C right now" we'll compare to baseline.
+    source = "legacy"
+    if snap is not None:
+        # snap.c_total is the persona-weighted composite C; use it directly.
+        recent_value = float(snap.c_total)
+        source = "heartbeat"
+    else:
+        learning = db_load_learning(user_id)
+        c_history = [float(v) for v in learning.get("C_history", []) if v is not None]
+        if len(c_history) < 5:
+            return None
+        recent_value, _ = _mean_std(c_history[-5:])
+
     baseline_avg = baselines.get("avg_C", 5.0)
     baseline_std = baselines.get("std_C", 3.0)
-
     if baseline_std < 0.5:
         baseline_std = 0.5  # minimum to avoid false positives
 
-    if recent_avg > T2:
+    common_details = {"recent_value": recent_value, "baseline_avg": baseline_avg,
+                      "source": source}
+
+    if recent_value > T2:
         return {"type": "c_trend_rising", "severity": CRISIS,
                 "message": "Uživatel je ve velmi silném stresu a potřebuje okamžitou pomoc.",
-                "details": {"recent_avg": recent_avg, "baseline_avg": baseline_avg}}
-    elif recent_avg > T1:
+                "details": common_details}
+    elif recent_value > T1:
         return {"type": "c_trend_rising", "severity": ALERT,
                 "message": "Uživatel je ve zvýšeném stresu — buďte extra klidný a empatický.",
-                "details": {"recent_avg": recent_avg, "baseline_avg": baseline_avg}}
-    elif recent_avg > baseline_avg + 1.5 * baseline_std:
+                "details": common_details}
+    elif recent_value > baseline_avg + 1.5 * baseline_std:
         return {"type": "c_trend_rising", "severity": WARNING,
                 "message": "Všimli jsme si, že jste v posledních rozhovorech napjatější než obvykle. Je vše v pořádku?",
-                "details": {"recent_avg": recent_avg, "baseline_avg": baseline_avg, "std": baseline_std}}
+                "details": {**common_details, "std": baseline_std}}
     return None
+
+
+def _check_heartbeat_preemptive(user_id, baselines, snap=None):
+    """Sprint X20.1: act BEFORE the senior's state crosses into CRISIS.
+
+    The math engine produces a 30-min predicted horizon based on EMA-smoothed
+    trends + alpha coupling. When that horizon predicts an upward mode
+    crossing (e.g. currently HARMONY but predicted to hit ALERT or CRISIS
+    within 30 minutes), we fire a WARNING observation. This is the core
+    proactive behavior — Radim acts ~5 minutes before legacy threshold-only
+    detectors would catch it.
+
+    Severity rules:
+      HARMONY → CRISIS predicted   = ALERT
+      HARMONY → ALERT  predicted   = WARNING
+      ALERT   → CRISIS predicted   = ALERT
+      ALERT   → ALERT  predicted   = (no obs — already covered by c_trend)
+      CRISIS  → anything           = (no obs — c_trend already fires CRISIS)
+
+    Cooldown of 60 min prevents repeated preemptive observations during a
+    sustained climb.
+    """
+    if snap is None or not snap.preemptive.crosses_up:
+        return None
+
+    current_mode = snap.preemptive.current_mode
+    predicted_mode = snap.preemptive.predicted_mode
+    peak_c = snap.preemptive.peak_c
+    peak_min = snap.preemptive.peak_at_minute
+
+    if current_mode == "CRISIS":
+        return None  # already in crisis — c_trend fires CRISIS
+    if current_mode == "ALERT" and predicted_mode == "ALERT":
+        return None  # no escalation predicted
+
+    severity = ALERT if predicted_mode == "CRISIS" else WARNING
+    msg = (f"Stav by se mohl během {peak_min} minut zhoršit "
+           f"({current_mode} → {predicted_mode}). Reagujte preventivně.")
+    return {
+        "type": "heartbeat_preemptive",
+        "severity": severity,
+        "message": msg,
+        "details": {
+            "current_mode": current_mode,
+            "predicted_mode": predicted_mode,
+            "peak_c": round(peak_c, 2),
+            "peak_at_minute": peak_min,
+            "current_c": round(snap.c_total, 2),
+            "alpha": round(snap.state.alpha, 3),
+        },
+    }
 
 
 def _check_activity_drop(user_id, baselines):
