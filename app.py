@@ -1207,6 +1207,31 @@ try:
         except Exception as e:
             logger.warning(f"⚠️ Audit retention cron registration failed: {e}")
 
+    # Sprint X20.1 / Fix 5 — real-time HA WebSocket subscription.
+    # Subscribes to state_changed events on every configured HA home.
+    # On critical event (smoke/gas/CO/leak/safety/tamper) → instant
+    # observation via _save_observation (push, SMS, caregiver alert)
+    # without waiting for the 5-min agent_loop poll.
+    if AGENT_RUNTIME_AVAILABLE:
+        try:
+            from agent.ha_realtime import init_registry
+            ha_reg = init_registry(app=app)
+            # Defer init_all() to a short-lived background thread so a slow
+            # HA tunnel handshake doesn't block app startup.
+            def _ha_init_async():
+                try:
+                    started = ha_reg.init_all()
+                    logger.info(f"✅ HA realtime subscriber: {started} HA homes "
+                                f"online (Sprint X20.1/Fix 5)")
+                except Exception as e:
+                    logger.warning(f"⚠️ HA realtime async init failed: {e}")
+            import threading as _th
+            _th.Thread(target=_ha_init_async, daemon=True,
+                       name='ha-realtime-init').start()
+            logger.info("✅ HA realtime registry initialized (async startup)")
+        except Exception as e:
+            logger.warning(f"⚠️ HA realtime registry init failed: {e}")
+
     # Claude Autonomous Agent — Sonnet 4.5 + tool use, every 30 min
     if os.getenv('ANTHROPIC_API_KEY') and os.getenv('CLAUDE_AGENT_ENABLED', '0') == '1':
         try:

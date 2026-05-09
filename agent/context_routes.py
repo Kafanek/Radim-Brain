@@ -219,8 +219,66 @@ def set_user_persona(user_id):
 def agent_health():
     """Public — light health check, no auth required."""
     rt = get_runtime()
-    return jsonify({
+    out = {
         'available': bool(rt),
         'active_heartbeats': len(rt._heartbeats) if rt else 0,
         'version': '1.0.0',
-    })
+    }
+    # Sprint X20.1/Fix 5 — surface ha_realtime registry status
+    try:
+        from .ha_realtime import get_registry
+        reg = get_registry()
+        out['ha_realtime'] = reg.status() if reg else {'available': False}
+    except Exception:
+        pass
+    return jsonify(out)
+
+
+@agent_bp.route('/ha-realtime/init', methods=['POST'])
+def ha_realtime_init():
+    """Admin: kick off WebSocket subscription for all configured HA homes.
+    Useful after a Heroku restart or after a new home was added without
+    waiting for the next agent_loop cycle to discover it."""
+    if not _admin_authorized():
+        return jsonify({'success': False, 'error': 'admin_required'}), 401
+    try:
+        from .ha_realtime import get_registry, init_registry
+        reg = get_registry() or init_registry()
+        # Fetch the running Flask app for context binding
+        try:
+            from flask import current_app
+            reg.app = reg.app or current_app._get_current_object()
+        except Exception:
+            pass
+        started = reg.init_all()
+        return jsonify({
+            'success': True,
+            'newly_started': started,
+            'status': reg.status(),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@agent_bp.route('/ha-realtime/init/<user_id>', methods=['POST'])
+def ha_realtime_init_user(user_id):
+    """Admin: subscribe to a single user's HA. Idempotent."""
+    if not _admin_authorized():
+        return jsonify({'success': False, 'error': 'admin_required'}), 401
+    try:
+        from .ha_realtime import get_registry, init_registry
+        reg = get_registry() or init_registry()
+        try:
+            from flask import current_app
+            reg.app = reg.app or current_app._get_current_object()
+        except Exception:
+            pass
+        ok = reg.init_user(user_id)
+        return jsonify({
+            'success': True,
+            'newly_started': ok,
+            'user_id': user_id,
+            'status': reg.status(),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
