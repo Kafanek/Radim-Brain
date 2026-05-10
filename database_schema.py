@@ -678,6 +678,22 @@ PG_IOT_TABLES = [
         "CREATE INDEX IF NOT EXISTS idx_goal_progress_goal ON agent_goal_progress(goal_id, measured_at DESC)",
     ]),
 
+    # Sprint X20.8 — Per-user correlation matrix (cached result).
+    # One row per user. matrix = 6×6 Pearson on hourly buckets over 7-day window.
+    # insights = top-N caregiver-readable findings (|r| ≥ 0.3, samples ≥ 20).
+    ('''CREATE TABLE IF NOT EXISTS agent_correlation_matrix (
+            user_id TEXT PRIMARY KEY,
+            persona_id TEXT,
+            window_days INTEGER DEFAULT 7,
+            matrix JSONB,
+            samples JSONB,
+            insights JSONB,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''', [
+        "CREATE INDEX IF NOT EXISTS idx_corr_updated ON agent_correlation_matrix(updated_at DESC)",
+    ]),
+
     # Sprint X20.7 — Federated baseline learning.
     # Anonymized population aggregates per persona cohort. Numbers are
     # already DP-noised (Laplace, ε=1.0 default). k-anonymity ≥ 5

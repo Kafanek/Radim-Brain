@@ -412,6 +412,52 @@ def force_evaluate_goals(user_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+# ─── Sprint X20.8 — Per-user correlation analysis ────────────────────────
+
+
+@agent_bp.route('/correlations/<user_id>', methods=['GET'])
+def get_user_correlations(user_id):
+    """Self/admin — read latest cached correlation matrix + insights."""
+    err = _require_auth(user_id)
+    if err:
+        return err
+    try:
+        from .correlation import get_correlation_matrix
+        result = get_correlation_matrix(user_id)
+        if not result:
+            return jsonify({'success': True, 'available': False,
+                            'note': 'No correlation matrix yet — POST /recompute first.'})
+        return jsonify({'success': True, 'available': True, **result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@agent_bp.route('/correlations/<user_id>/recompute', methods=['POST'])
+def recompute_user_correlations(user_id):
+    """Admin — recompute now (debug / manual trigger). Cron does this weekly."""
+    if not _admin_authorized():
+        return jsonify({'success': False, 'error': 'admin_required'}), 401
+    try:
+        from .correlation import recompute_for_user
+        from .personas import get_persona_id
+        body = request.get_json(silent=True) or {}
+        window_days = int(body.get('window_days', 7))
+        persona = get_persona_id(user_id)
+        result = recompute_for_user(user_id, persona_id=persona,
+                                      window_days=window_days)
+        # Audit
+        try:
+            from .audit import log_event
+            log_event(user_id, 'admin', 'correlations_recomputed',
+                      payload={'window_days': window_days,
+                               'insights_count': len(result.get('insights', []))})
+        except Exception:
+            pass
+        return jsonify({'success': True, **result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 # ─── Sprint X20.7 — Federated baseline learning ──────────────────────────
 
 
