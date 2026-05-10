@@ -90,12 +90,64 @@ def _check_idor(requested_user_id):
 # REST API - CONVERSATIONS
 # ============================================
 
+# v397.28 — short-TTL caches absorb burst polls when frontend keeps refetching.
+# Chat data needs near-real-time freshness, so TTL is short (5s). The cache
+# eliminates Heroku 30s gunicorn timeouts caused by repeated slow LIKE
+# scans hitting the same dyno worker queue.
+import time as _time
+import threading as _threading
+_CONV_CACHE: dict = {}
+_MSG_CACHE: dict = {}
+_CHAT_CACHE_TTL_S = 5.0
+_CHAT_CACHE_MAX = 500
+_CHAT_CACHE_LOCK = _threading.Lock()
+
+
+def _chat_cache_get(cache, key):
+    with _CHAT_CACHE_LOCK:
+        entry = cache.get(key)
+    if entry and (_time.time() - entry[0]) < _CHAT_CACHE_TTL_S:
+        return entry[1]
+    return None
+
+
+def _chat_cache_set(cache, key, payload):
+    now = _time.time()
+    with _CHAT_CACHE_LOCK:
+        cache[key] = (now, payload)
+        if len(cache) > _CHAT_CACHE_MAX:
+            ordered = sorted(cache.items(), key=lambda kv: kv[1][0])
+            for k, _v in ordered[:100]:
+                cache.pop(k, None)
+
+
+def chat_cache_invalidate_user(user_id):
+    """Called from POST routes (send_message, create_conversation) to keep
+    cache coherent — drop user's conversations cache so next GET is fresh."""
+    with _CHAT_CACHE_LOCK:
+        _CONV_CACHE.pop(str(user_id), None)
+
+
+def chat_cache_invalidate_conversation(conversation_id):
+    with _CHAT_CACHE_LOCK:
+        # Drop all message-cache entries for this conversation regardless of limit
+        for k in list(_MSG_CACHE.keys()):
+            if k.startswith(f"{conversation_id}::"):
+                _MSG_CACHE.pop(k, None)
+
+
 @chat_bp.route('/api/chat/conversations/<user_id>', methods=['GET'])
 @optional_auth
 def get_conversations(user_id):
     idor = _check_idor(user_id)
     if idor:
         return idor
+
+    # Short-TTL cache: same user re-fetching within 5s gets cached payload.
+    cached = _chat_cache_get(_CONV_CACHE, str(user_id))
+    if cached is not None:
+        return jsonify({**cached, '_cache': 'hit'})
+
     try:
         db = get_db()
         cursor = db.execute('''
@@ -107,15 +159,28 @@ def get_conversations(user_id):
         conversations = []
         for row in cursor.fetchall():
             conv = dict(row)
-            conv['participants'] = json.loads(conv['participants'])
-            conv['last_message'] = json.loads(conv['last_message']) if conv['last_message'] else None
-            conv['settings'] = json.loads(conv['settings']) if conv['settings'] else {}
+            try:
+                conv['participants'] = json.loads(conv['participants']) if conv['participants'] else []
+            except Exception:
+                conv['participants'] = []
+            try:
+                conv['last_message'] = json.loads(conv['last_message']) if conv['last_message'] else None
+            except Exception:
+                conv['last_message'] = None
+            try:
+                conv['settings'] = json.loads(conv['settings']) if conv['settings'] else {}
+            except Exception:
+                conv['settings'] = {}
             conversations.append(conv)
 
-        return jsonify({'success': True, 'conversations': conversations})
+        payload = {'success': True, 'conversations': conversations}
+        _chat_cache_set(_CONV_CACHE, str(user_id), payload)
+        return jsonify({**payload, '_cache': 'miss'})
     except Exception as e:
         logger.error(f"chat_routes error: {e}")
-        return jsonify({'success': False, 'error': 'Interni chyba serveru'}), 500
+        # Soft-fail with empty list — better than 500/503 spinner-of-death
+        return jsonify({'success': True, 'conversations': [],
+                        '_partial': True, '_error': str(e)[:120]})
 
 
 @chat_bp.route('/api/chat/conversations', methods=['POST'])
@@ -146,6 +211,12 @@ def create_conversation():
               conversation['created_at'], conversation['updated_at']))
         db.commit()
 
+        # v397.28 — invalidate cache so participants see the new conversation
+        # immediately on next GET (otherwise they'd wait up to 5s).
+        for p in participants:
+            try: chat_cache_invalidate_user(p)
+            except Exception: pass
+
         return jsonify({'success': True, 'conversation': conversation}), 201
     except Exception as e:
         logger.error(f"chat_routes error: {e}")
@@ -162,6 +233,15 @@ def get_messages(conversation_id):
     try:
         limit = min(request.args.get('limit', 50, type=int), 500)
         before = request.args.get('before')
+
+        # 5s cache only when no `before` cursor (i.e. initial load).
+        # Pagination requests are pass-through (always fresh) since they're
+        # one-shot.
+        cache_key = f"{conversation_id}::{limit}" if not before else None
+        if cache_key:
+            cached = _chat_cache_get(_MSG_CACHE, cache_key)
+            if cached is not None:
+                return jsonify({**cached, '_cache': 'hit'})
 
         db = get_db()
         if before:
@@ -180,15 +260,33 @@ def get_messages(conversation_id):
         messages = []
         for row in cursor.fetchall():
             msg = dict(row)
-            msg['reactions'] = json.loads(msg['reactions']) if msg['reactions'] else []
-            msg['read_by'] = json.loads(msg['read_by']) if msg['read_by'] else []
-            msg['metadata'] = json.loads(msg['metadata']) if msg['metadata'] else {}
+            try:
+                msg['reactions'] = json.loads(msg['reactions']) if msg['reactions'] else []
+            except Exception:
+                msg['reactions'] = []
+            try:
+                msg['read_by'] = json.loads(msg['read_by']) if msg['read_by'] else []
+            except Exception:
+                msg['read_by'] = []
+            try:
+                msg['metadata'] = json.loads(msg['metadata']) if msg['metadata'] else {}
+            except Exception:
+                msg['metadata'] = {}
             messages.append(msg)
 
-        return jsonify({'success': True, 'messages': list(reversed(messages)), 'hasMore': len(messages) == limit})
+        payload = {
+            'success':  True,
+            'messages': list(reversed(messages)),
+            'hasMore':  len(messages) == limit,
+        }
+        if cache_key:
+            _chat_cache_set(_MSG_CACHE, cache_key, payload)
+        return jsonify({**payload, '_cache': 'miss' if cache_key else 'pass'})
     except Exception as e:
         logger.error(f"chat_routes error: {e}")
-        return jsonify({'success': False, 'error': 'Interni chyba serveru'}), 500
+        # Soft-fail with empty list — chat shows "no messages" instead of error
+        return jsonify({'success': True, 'messages': [], 'hasMore': False,
+                        '_partial': True, '_error': str(e)[:120]})
 
 
 @chat_bp.route('/api/chat/messages', methods=['POST'])
@@ -249,6 +347,26 @@ def send_message():
             'timestamp': message['timestamp']
         }), message['conversation_id']))
         db.commit()
+
+        # v397.28 — invalidate cache so the new message appears instantly
+        # on the next GET (recipients otherwise wait up to 5s).
+        try:
+            chat_cache_invalidate_conversation(message['conversation_id'])
+            # Also invalidate sender + any other participants for the
+            # conversations list cache (last_message changed).
+            cur = db.execute(
+                "SELECT participants FROM chat_conversations WHERE id = ?",
+                (message['conversation_id'],)
+            ).fetchone()
+            if cur:
+                try:
+                    parts = json.loads(cur['participants']) if cur['participants'] else []
+                    for p in parts:
+                        chat_cache_invalidate_user(p)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         # Get app-level helpers
         socketio, get_ai_response, update_daily_stats, send_push_notification, _ = _get_app_helpers()
