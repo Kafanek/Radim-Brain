@@ -263,6 +263,231 @@ def measure_medication_compliance(user_id: str, target: dict,
     }
 
 
+# ─── Custom goals (Sprint X20.6) ────────────────────────────────────────────
+#
+# Caregivers can define custom goals from the dashboard without writing
+# Python. Safety: SQL is fixed per source (no user input concatenation).
+# The caregiver only chooses {source, filter params, operator, threshold}.
+#
+# target schema:
+#   {
+#     "_source":  "iot_motion_count" | "sensor_value_avg" | "medication_count"
+#                | "chat_count" | "sensor_in_band_pct",
+#     "_filter":  {sensor_type?, room_id?, ...},  # source-specific
+#     "_op":      "gte" | "lte" | "eq" | "between",
+#     "_value":   numeric or [lo, hi],
+#     "_label":   "human-readable label"
+#   }
+
+
+def _hours_ago(hours: float) -> datetime:
+    return datetime.now(timezone.utc) - timedelta(hours=hours)
+
+
+CUSTOM_DATA_SOURCES = {
+    # Count of motion events in user's rooms within horizon.
+    'iot_motion_count': {
+        'name':   'Počet pohybových událostí',
+        'agg':    'count',
+        'filter_keys': [],  # no extra params
+        'sql':    "SELECT COUNT(*) FROM iot_sensor_data "
+                  "WHERE sensor_type = 'motion' AND value > 0 "
+                  "AND room_id IN (SELECT room_id FROM iot_devices WHERE user_id = ?) "
+                  "AND recorded_at > ?",
+        'params': lambda uid, cfg, cutoff: (str(uid), cutoff),
+    },
+    # Average sensor value (e.g. avg CO2 over last 24h).
+    'sensor_value_avg': {
+        'name':   'Průměr hodnoty senzoru',
+        'agg':    'avg',
+        'filter_keys': ['sensor_type'],
+        'sql':    "SELECT AVG(value) FROM iot_sensor_data "
+                  "WHERE sensor_type = ? "
+                  "AND room_id IN (SELECT room_id FROM iot_devices WHERE user_id = ?) "
+                  "AND recorded_at > ?",
+        'params': lambda uid, cfg, cutoff: (
+            str(cfg.get('sensor_type', '')), str(uid), cutoff),
+    },
+    # Count of medication log entries within horizon.
+    'medication_count': {
+        'name':   'Počet záznamů léků',
+        'agg':    'count',
+        'filter_keys': [],
+        'sql':    "SELECT COUNT(*) FROM radim_medication_log "
+                  "WHERE user_id = ? AND taken_at > ?",
+        'params': lambda uid, cfg, cutoff: (str(uid), cutoff),
+    },
+    # Count of chat messages from this user.
+    'chat_count': {
+        'name':   'Počet zpráv v chatu',
+        'agg':    'count',
+        'filter_keys': [],
+        'sql':    "SELECT COUNT(*) FROM chat_messages "
+                  "WHERE conversation_id IN ("
+                  "  SELECT id FROM chat_conversations WHERE participants LIKE ?"
+                  ") AND created_at > ?",
+        'params': lambda uid, cfg, cutoff: (f'%{uid}%', cutoff),
+    },
+    # Percent of readings within [lo, hi] band — useful for vitals/env.
+    'sensor_in_band_pct': {
+        'name':   'Procento hodnot v pásmu',
+        'agg':    'pct_in_band',
+        'filter_keys': ['sensor_type'],
+        'sql':    "SELECT value FROM iot_sensor_data "
+                  "WHERE sensor_type = ? "
+                  "AND room_id IN (SELECT room_id FROM iot_devices WHERE user_id = ?) "
+                  "AND recorded_at > ? "
+                  "ORDER BY recorded_at DESC LIMIT 500",
+        'params': lambda uid, cfg, cutoff: (
+            str(cfg.get('sensor_type', '')), str(uid), cutoff),
+    },
+}
+
+
+OPERATORS: dict[str, Callable] = {
+    'gte':     lambda actual, target: actual >= target,
+    'lte':     lambda actual, target: actual <= target,
+    'eq':      lambda actual, target: float(actual) == float(target),
+    'between': lambda actual, target: (
+        isinstance(target, (list, tuple)) and len(target) == 2
+        and target[0] <= actual <= target[1]),
+}
+
+
+def list_custom_sources() -> list[dict]:
+    """Public — caregiver UI calls this to populate source dropdown."""
+    return [
+        {
+            'id':          src_id,
+            'name':        info['name'],
+            'agg':         info['agg'],
+            'filter_keys': info.get('filter_keys', []),
+        }
+        for src_id, info in CUSTOM_DATA_SOURCES.items()
+    ]
+
+
+def list_operators() -> list[dict]:
+    return [
+        {'id': 'gte',     'label': '≥ (alespoň)'},
+        {'id': 'lte',     'label': '≤ (nejvýše)'},
+        {'id': 'eq',      'label': '= (přesně)'},
+        {'id': 'between', 'label': 'mezi [lo, hi]'},
+    ]
+
+
+def measure_custom(user_id: str, target: dict,
+                   horizon_hours: int = 24) -> dict:
+    """Caregiver-defined custom goal — interprets `target` config against
+    a safe predefined data source and applies the chosen operator."""
+    source_id = (target or {}).get('_source')
+    src = CUSTOM_DATA_SOURCES.get(source_id) if source_id else None
+    if not src:
+        return _empty_measure(target, horizon_hours,
+                              reason=f'unknown_source:{source_id}')
+
+    op_name = (target or {}).get('_op', 'gte')
+    op = OPERATORS.get(op_name)
+    if not op:
+        return _empty_measure(target, horizon_hours,
+                              reason=f'unknown_op:{op_name}')
+
+    threshold = (target or {}).get('_value')
+    label = (target or {}).get('_label') or source_id
+    cfg = (target or {}).get('_filter') or {}
+    cutoff = _hours_ago(horizon_hours)
+
+    # Run the safe SQL with bound params
+    try:
+        from database import db_context
+    except ImportError:
+        return _empty_measure(target, horizon_hours, reason='db_unavailable')
+
+    try:
+        with db_context() as db:
+            cur = db.execute(src['sql'], src['params'](user_id, cfg, cutoff))
+            rows_or_row = cur.fetchall() if src['agg'] == 'pct_in_band' else cur.fetchone()
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"[goals.custom] {label}: db read failed: {e}")
+        return _empty_measure(target, horizon_hours, reason=str(e))
+
+    # Compute the actual value depending on aggregation type
+    if src['agg'] == 'pct_in_band':
+        rows = rows_or_row or []
+        if not rows:
+            actual, total = 0.0, 0
+        else:
+            band = threshold if isinstance(threshold, (list, tuple)) else [None, None]
+            lo, hi = band[0], band[1]
+            in_band = 0
+            total = 0
+            for r in rows:
+                v = r[0] if isinstance(r, (list, tuple)) else list(r)[0]
+                if v is None:
+                    continue
+                total += 1
+                v = float(v)
+                if lo is not None and hi is not None and lo <= v <= hi:
+                    in_band += 1
+            actual = (in_band / total * 100.0) if total else 0.0
+        # For pct_in_band, semantics: "actual is the % met"; the operator
+        # compares pct to threshold pct (e.g. >= 80%)
+        # Hijack: when source is pct_in_band, _value should be the band [lo, hi]
+        # and an additional _min_pct controls the threshold.
+        min_pct = (target or {}).get('_min_pct', 80)
+        met = (actual >= min_pct) if total > 0 else None
+        return {
+            'value':         round(actual, 1),
+            'target':        target,
+            'met':           met,
+            'samples':       total,
+            'horizon_hours': horizon_hours,
+            'detail': {
+                'source':  source_id,
+                'label':   label,
+                'in_band_pct': round(actual, 1),
+                'min_pct': min_pct,
+                'band':    threshold,
+                'samples': total,
+            },
+        }
+
+    # count / avg / sum cases
+    if rows_or_row is None:
+        actual = 0.0
+    else:
+        first = rows_or_row[0] if isinstance(rows_or_row, (list, tuple)) else list(rows_or_row.values())[0]
+        try:
+            actual = float(first or 0)
+        except (TypeError, ValueError):
+            actual = 0.0
+
+    if threshold is None:
+        met = None
+    else:
+        try:
+            met = bool(op(actual, threshold))
+        except Exception:  # noqa: BLE001
+            met = None
+
+    return {
+        'value':         round(actual, 2),
+        'target':        target,
+        'met':           met,
+        'samples':       int(actual) if src['agg'] == 'count' else 0,
+        'horizon_hours': horizon_hours,
+        'detail': {
+            'source':    source_id,
+            'agg':       src['agg'],
+            'label':     label,
+            'op':        op_name,
+            'threshold': threshold,
+            'actual':    actual,
+            'filter':    cfg,
+        },
+    }
+
+
 # ─── Registry ───────────────────────────────────────────────────────────────
 
 
@@ -271,6 +496,7 @@ GOAL_MEASURES: dict[str, Callable[[str, dict, int], dict]] = {
     'sleep_quality':          measure_sleep_quality,
     'environment_comfort':    measure_environment_comfort,
     'medication_compliance':  measure_medication_compliance,
+    'custom':                 measure_custom,  # Sprint X20.6 — caregiver-defined
 }
 
 

@@ -410,3 +410,21 @@ def force_evaluate_goals(user_id):
                         'count': len(obs)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@agent_bp.route('/goals/sources', methods=['GET'])
+def list_goal_sources():
+    """Public/self — list available custom goal data sources + operators
+    for the dashboard's custom-goal builder UI (Sprint X20.6)."""
+    try:
+        from .goals import list_custom_sources, list_operators, list_goal_types
+        return jsonify({
+            'success':         True,
+            'data_sources':    list_custom_sources(),
+            'operators':       list_operators(),
+            'builtin_types':   list_goal_types(),
+            'note': ("Custom goals are stored under goal_type='custom' with "
+                     "target = {_source, _filter, _op, _value, _label}."),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500

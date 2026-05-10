@@ -225,6 +225,14 @@ def _message_for_drift(goal_type: str, measurement: dict, severity: str) -> str:
     if goal_type == 'medication_compliance':
         return (f"Compliance léků: {val} % (cíl ≥ {detail.get('min_required')} %). "
                 f"Připomeňte vzít léky.")
+    # Sprint X20.6 — caregiver-defined custom goal
+    if goal_type == 'custom':
+        label = detail.get('label') or 'Vlastní cíl'
+        op = detail.get('op')
+        threshold = detail.get('threshold')
+        op_human = {'gte': '≥', 'lte': '≤', 'eq': '=', 'between': 'mezi'}.get(op, op)
+        return (f"Vlastní cíl '{label}' není plněn: {detail.get('actual', val)} "
+                f"{op_human} {threshold} (zdroj: {detail.get('source')}).")
     return f"Cíl {goal_type} není plněn (hodnota={val})."
 
 
