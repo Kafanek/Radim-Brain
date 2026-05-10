@@ -19,6 +19,8 @@ Direction: empathetic_guide / safety_assistant / daily_organizer / companion
 import json
 import logging
 import math
+import threading
+import time
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify
 
@@ -675,21 +677,71 @@ def api_direction(user_id):
     return jsonify({'success': True, **direction})
 
 
+# Memoization cache — keeps p99 < 5s. Each user keyed independently.
+# 60s TTL is a balance: skills change slowly (chat / IoT events update every
+# few minutes anyway), and Heroku's 30s timeout is the hard ceiling we must
+# stay under. Most callers (frontend profile load) re-fetch < 1× per minute.
+_SUMMARY_CACHE: dict[str, tuple[float, dict]] = {}
+_SUMMARY_CACHE_TTL_S = 60.0
+_SUMMARY_CACHE_LOCK = threading.Lock()
+_SUMMARY_CACHE_MAX = 1000
+
+
+def _safe_compute(name, fn, fallback, user_id):
+    """Run a sub-component with timeout-tolerance. Returns fallback on
+    exception so one slow/broken piece doesn't 503 the entire summary."""
+    try:
+        return fn(user_id)
+    except Exception as e:
+        logger.warning(f"[skills.summary:{user_id}] {name} failed: {e}")
+        return fallback
+
+
 @skill_bp.route('/api/skills/<user_id>/summary', methods=['GET'])
 def api_summary(user_id):
-    """Get growth summary."""
-    summary = compute_growth_summary(user_id)
-    skills = compute_all_skills(user_id)
-    insights = generate_insights(user_id)
-    direction = compute_direction(user_id)
+    """Get growth summary.
 
-    return jsonify({
-        'success': True,
-        'summary': summary,
-        'skills': skills,
-        'insights': insights[:5],
-        'direction': direction,
-    })
+    Resiliency (v397.27 / X20.10 hotfix):
+      - 60s in-memory TTL cache per user — repeated polls hit O(1) lookup
+        instead of running 4× sequential computes
+      - Each sub-computation wrapped in try/except so partial failure returns
+        a partial response (_partial=true) instead of 503
+      - Cache size capped at 1000 entries (drop oldest 200 when full) to
+        avoid unbounded growth from drive-by /api/skills/<random>/summary
+    """
+    now = time.time()
+    with _SUMMARY_CACHE_LOCK:
+        cached = _SUMMARY_CACHE.get(str(user_id))
+    if cached and (now - cached[0]) < _SUMMARY_CACHE_TTL_S:
+        # Hit — return cached payload (avoid recompute window)
+        return jsonify({**cached[1], '_cache': 'hit',
+                        '_age_s': round(now - cached[0], 1)})
+
+    summary   = _safe_compute('summary',   compute_growth_summary, {}, user_id)
+    skills    = _safe_compute('skills',    compute_all_skills,     {}, user_id)
+    insights  = _safe_compute('insights',  generate_insights,      [], user_id)
+    direction = _safe_compute('direction', compute_direction,      {}, user_id)
+
+    partial = (not summary) or (not skills) or direction is None or direction == {}
+    payload = {
+        'success':  True,
+        'summary':  summary,
+        'skills':   skills,
+        'insights': (insights or [])[:5],
+        'direction': direction or {},
+        '_cache':   'miss',
+        '_partial': bool(partial),
+    }
+
+    with _SUMMARY_CACHE_LOCK:
+        _SUMMARY_CACHE[str(user_id)] = (now, payload)
+        if len(_SUMMARY_CACHE) > _SUMMARY_CACHE_MAX:
+            # Drop oldest 200 entries
+            ordered = sorted(_SUMMARY_CACHE.items(), key=lambda kv: kv[1][0])
+            for k, _ in ordered[:200]:
+                _SUMMARY_CACHE.pop(k, None)
+
+    return jsonify(payload)
 
 
 logger.info("🗺️ Skill Map v1.0 loaded — 6 skills, insights, direction, growth summary")
