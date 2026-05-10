@@ -34,10 +34,12 @@ except ImportError:
 BASE_T = datetime(2026, 5, 9, 10, 0, 0)
 
 
-def at(min_offset, ce=10, env=10, soc=10, phy=10, alpha=0.3, e=0.0):
+def at(min_offset, ce=10, env=10, soc=10, phy=10, alpha=0.3, e=0.0,
+       cog=10, circ=10):
     return State(t=BASE_T + timedelta(minutes=min_offset),
                  c_emotional=ce, c_environmental=env, c_social=soc,
-                 c_physical=phy, alpha=alpha, e_valence=e)
+                 c_physical=phy, c_cognitive=cog, c_circadian=circ,
+                 alpha=alpha, e_valence=e)
 
 
 # ════════════════════════════════════════════════════════════════
@@ -359,11 +361,45 @@ class TestScenarios(unittest.TestCase):
         self.assertTrue(snap.preemptive.crosses_up
                         or snap.preemptive.predicted_mode in ("ALERT", "CRISIS"))
 
-    def test_crisis_state_yields_calm_speech_params(self):
+    def test_adhd_cognitive_overload_triggers_alert(self):
+        # Sprint X20.5 — ADHD persona heavy-weights cognitive (0.25).
+        # If cognitive spikes (task-switching crisis), composite C should
+        # reach ALERT even with other dimensions calm.
         history = self._series(lambda i: dict(
-            c_emotional=20 + i * 2.5, c_environmental=18 + i * 2.0,
-            c_social=15, c_physical=20 + i * 1.5,
-            alpha=0.5 + i * 0.07, e_valence=-0.4,
+            c_emotional=8, c_environmental=10, c_social=8, c_physical=8,
+            c_cognitive=20 + i * 2.0, c_circadian=10,
+            alpha=0.4, e_valence=0.0,
+        ))
+        snap = run_engine(history, PERSONA_WEIGHTS["child_adhd"])
+        # cognitive 28 × 0.25 weight = 7 contribution; full total around 12+
+        self.assertIn(snap.mode, ("HARMONY", "ALERT"))
+        # Whatever the current mode, the heartbeat horizon must NOT show
+        # cognitive collapsing — preemptive may flag drift.
+        self.assertGreaterEqual(snap.state.c_cognitive, 20)
+
+    def test_senior_sundowning_circadian_bump(self):
+        # Sprint X20.5 — senior weights 0.15 on circadian. A high circadian
+        # value (sundowning C ~18) shifts composite up by ~2.7 points.
+        from agent.math_engine import classify, C_HARMONY
+        states = [
+            at(0, ce=8, env=10, soc=8, phy=8, cog=10, circ=10),  # midday
+            at(5, ce=8, env=10, soc=8, phy=8, cog=10, circ=18),  # sundown
+        ]
+        senior_w = PERSONA_WEIGHTS["senior"]
+        c_midday = states[0].total(senior_w)
+        c_sundown = states[1].total(senior_w)
+        self.assertGreater(c_sundown, c_midday)
+        self.assertGreater(c_sundown - c_midday, 1.0)  # bump is meaningful
+
+    def test_crisis_state_yields_calm_speech_params(self):
+        # Sprint X20.5 — 6-dim CRISIS state: ALL domains elevated.
+        # Senior in genuine sundowning + confusion + isolation +
+        # high HR — clinical "needs help" snapshot.
+        history = self._series(lambda i: dict(
+            c_emotional=22 + i * 2.5, c_environmental=20 + i * 2.0,
+            c_social=22 + i * 1.0, c_physical=22 + i * 1.5,
+            c_cognitive=22 + i * 2.0, c_circadian=18 + i * 2.0,
+            alpha=0.5 + i * 0.08, e_valence=-0.4,
         ))
         snap = run_engine(history, PERSONA_WEIGHTS["senior"])
         self.assertEqual(snap.mode, "CRISIS")

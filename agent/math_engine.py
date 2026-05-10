@@ -5,10 +5,21 @@ Radim Multi-Domain Anticipation Engine
 Pure-Python mathematical core for proactive senior/child agent.
 Standalone — no Flask, no DB, no external deps. Fully unit-testable.
 
-State vector:
-    C = (C_emotional, C_environmental, C_social, C_physical)   ∈ [0, 40]^4
+State vector (Sprint X20.5: extended to 6 domains):
+    C = (C_emotional, C_environmental, C_social, C_physical,
+         C_cognitive, C_circadian)                            ∈ [0, 40]^6
     α = stress factor                                          ∈ [0, 1]
     E = emotional valence                                      ∈ [-1, 1]
+
+Domain semantics:
+    emotional     — current affect / mood from chat sentiment
+    environmental — sensory load (noise/light/CO2/temp deviation)
+    social        — connection/isolation signal (chat freq vs baseline)
+    physical      — heart rate / SpO2 / motion anomaly
+    cognitive     — task switching / attention regulation (ADHD-relevant,
+                    autism transition struggle, senior word-finding)
+    circadian     — time-of-day driven baseline (senior sundowning,
+                    ADHD morning fog, autism schedule predictability)
 
 Composite consciousness (per persona):
     C_total = Σ wᵢ · Cᵢ      with Σ wᵢ = 1
@@ -114,28 +125,42 @@ def mode_severity(mode: str) -> int:
 
 @dataclass
 class DomainWeights:
-    emotional: float = 0.4
-    environmental: float = 0.2
-    social: float = 0.2
-    physical: float = 0.2
+    """Per-persona dimension weights for composite C. Sprint X20.5: 6 dims.
+
+    Default = senior baseline. cognitive + circadian default to 0 for
+    backward compat (any caller passing 4-arg DomainWeights still works).
+    """
+    emotional: float = 0.40
+    environmental: float = 0.20
+    social: float = 0.20
+    physical: float = 0.20
+    cognitive: float = 0.00
+    circadian: float = 0.00
 
     def normalized(self) -> "DomainWeights":
-        s = self.emotional + self.environmental + self.social + self.physical
+        s = (self.emotional + self.environmental + self.social
+             + self.physical + self.cognitive + self.circadian)
         if s == 0:
             return DomainWeights()
         return DomainWeights(
-            emotional=self.emotional / s,
-            environmental=self.environmental / s,
-            social=self.social / s,
-            physical=self.physical / s,
+            emotional     = self.emotional     / s,
+            environmental = self.environmental / s,
+            social        = self.social        / s,
+            physical      = self.physical      / s,
+            cognitive     = self.cognitive     / s,
+            circadian     = self.circadian     / s,
         )
 
 
-# Pre-canned persona weight presets (also live in personas/*.yaml later)
+# Pre-canned persona weight presets — Sprint X20.5: 6-dim per persona.
+# Each row sums to 1.0. Tuned for the persona's primary risk axes:
+#   senior:       circadian non-zero (sundowning); cognitive moderate
+#   child_autism: env-heavy + cognitive (transitions); circadian low
+#   child_adhd:   cognitive HIGH (task switching is the core challenge)
 PERSONA_WEIGHTS = {
-    "senior":       DomainWeights(0.40, 0.20, 0.20, 0.20),
-    "child_autism": DomainWeights(0.30, 0.40, 0.10, 0.20),
-    "child_adhd":   DomainWeights(0.40, 0.20, 0.20, 0.20),
+    "senior":       DomainWeights(0.30, 0.15, 0.15, 0.15, 0.10, 0.15),
+    "child_autism": DomainWeights(0.25, 0.30, 0.10, 0.15, 0.15, 0.05),
+    "child_adhd":   DomainWeights(0.25, 0.15, 0.15, 0.15, 0.25, 0.05),
 }
 
 
@@ -144,13 +169,19 @@ PERSONA_WEIGHTS = {
 
 @dataclass
 class State:
-    """A single point-in-time sample."""
+    """A single point-in-time sample. Sprint X20.5: 6 dimensions.
+
+    cognitive + circadian default to 10 (neutral) so existing callers that
+    construct State without those args still get a valid 6-dim sample.
+    """
     t: datetime
     c_emotional: float
     c_environmental: float
     c_social: float
     c_physical: float
     alpha: float
+    c_cognitive: float = 10.0
+    c_circadian: float = 10.0
     e_valence: float = 0.0  # informational; not currently in prediction loop
 
     def total(self, weights: DomainWeights) -> float:
@@ -158,16 +189,21 @@ class State:
         return (w.emotional      * self.c_emotional
                 + w.environmental * self.c_environmental
                 + w.social        * self.c_social
-                + w.physical      * self.c_physical)
+                + w.physical      * self.c_physical
+                + w.cognitive     * self.c_cognitive
+                + w.circadian     * self.c_circadian)
 
 
 @dataclass
 class Trend:
-    """EMA-smoothed change-rate per dimension, in units per 5-min step."""
+    """EMA-smoothed change-rate per dimension, in units per 5-min step.
+    Sprint X20.5: cognitive + circadian dimensions added (default 0.0)."""
     c_emotional: float = 0.0
     c_environmental: float = 0.0
     c_social: float = 0.0
     c_physical: float = 0.0
+    c_cognitive: float = 0.0
+    c_circadian: float = 0.0
     alpha: float = 0.0
 
 
@@ -186,11 +222,13 @@ def update_trend(prev_trend: Trend,
         return lam * (curr_v - prev_v) / norm + (1 - lam) * prev_t
 
     return Trend(
-        c_emotional   = ema(prev_trend.c_emotional,   prev_state.c_emotional,   curr_state.c_emotional),
+        c_emotional     = ema(prev_trend.c_emotional,     prev_state.c_emotional,     curr_state.c_emotional),
         c_environmental = ema(prev_trend.c_environmental, prev_state.c_environmental, curr_state.c_environmental),
-        c_social      = ema(prev_trend.c_social,      prev_state.c_social,      curr_state.c_social),
-        c_physical    = ema(prev_trend.c_physical,    prev_state.c_physical,    curr_state.c_physical),
-        alpha         = ema(prev_trend.alpha,         prev_state.alpha,         curr_state.alpha),
+        c_social        = ema(prev_trend.c_social,        prev_state.c_social,        curr_state.c_social),
+        c_physical      = ema(prev_trend.c_physical,      prev_state.c_physical,      curr_state.c_physical),
+        c_cognitive     = ema(prev_trend.c_cognitive,     prev_state.c_cognitive,     curr_state.c_cognitive),
+        c_circadian     = ema(prev_trend.c_circadian,     prev_state.c_circadian,     curr_state.c_circadian),
+        alpha           = ema(prev_trend.alpha,           prev_state.alpha,           curr_state.alpha),
     )
 
 
@@ -198,19 +236,30 @@ def update_trend(prev_trend: Trend,
 
 
 def predict_step(state: State, trend: Trend) -> State:
-    """Project one 5-minute step forward."""
-    # Stress coupling on emotional + physical (each gets ¼ of the K2 push,
-    # because we split the legacy single-domain K2 across two coupled
-    # dimensions instead of dumping it all on emotional).
-    stress_kick = K2 * (state.alpha - ALPHA_TARGET) / 4.0
+    """Project one 5-minute step forward.
+
+    Stress coupling (alpha above target) pushes:
+      emotional + physical : K2/4   (legacy split — most direct mapping)
+      cognitive            : K2/6   (smaller — cognition degrades but slower)
+    Environmental + social + circadian : trend only (no alpha coupling).
+
+    Sprint X20.5: circadian extrapolated via trend during horizon. A
+    higher-fidelity caller can overwrite c_circadian via compute_circadian_c
+    after each step (see runtime layer). For 30-min horizons trend-based
+    extrapolation tracks the curve closely enough.
+    """
+    stress_kick     = K2 * (state.alpha - ALPHA_TARGET) / 4.0
+    cog_stress_kick = K2 * (state.alpha - ALPHA_TARGET) / 6.0
     return State(
         t = state.t + timedelta(minutes=5),
-        c_emotional   = clamp(state.c_emotional   + K1 * trend.c_emotional   + stress_kick, 0.0, C_MAX),
-        c_environmental = clamp(state.c_environmental + K1 * trend.c_environmental,             0.0, C_MAX),
-        c_social      = clamp(state.c_social      + K1 * trend.c_social,                       0.0, C_MAX),
-        c_physical    = clamp(state.c_physical    + K1 * trend.c_physical    + stress_kick,    0.0, C_MAX),
-        alpha         = clamp(state.alpha         + GAMMA * trend.alpha,                       0.0, 1.0),
-        e_valence     = state.e_valence,
+        c_emotional     = clamp(state.c_emotional     + K1 * trend.c_emotional     + stress_kick,     0.0, C_MAX),
+        c_environmental = clamp(state.c_environmental + K1 * trend.c_environmental,                   0.0, C_MAX),
+        c_social        = clamp(state.c_social        + K1 * trend.c_social,                          0.0, C_MAX),
+        c_physical      = clamp(state.c_physical      + K1 * trend.c_physical      + stress_kick,     0.0, C_MAX),
+        c_cognitive     = clamp(state.c_cognitive     + K1 * trend.c_cognitive     + cog_stress_kick, 0.0, C_MAX),
+        c_circadian     = clamp(state.c_circadian     + K1 * trend.c_circadian,                       0.0, C_MAX),
+        alpha           = clamp(state.alpha           + GAMMA * trend.alpha,                          0.0, 1.0),
+        e_valence       = state.e_valence,
     )
 
 
@@ -218,18 +267,21 @@ def predict_horizon(state: State,
                     trend: Trend,
                     steps: int = PREDICT_STEPS_30MIN,
                     damping: float = DAMPING_30MIN) -> list[State]:
-    """Multi-step prediction with trend reversion toward 0 (damping)."""
+    """Multi-step prediction with trend reversion toward 0 (damping).
+    Sprint X20.5: damping applied to all 6 dimensions + alpha."""
     out: list[State] = []
     cur_state = state
     cur_trend = trend
     for _ in range(steps):
         cur_state = predict_step(cur_state, cur_trend)
         cur_trend = Trend(
-            c_emotional   = cur_trend.c_emotional   * damping,
+            c_emotional     = cur_trend.c_emotional     * damping,
             c_environmental = cur_trend.c_environmental * damping,
-            c_social      = cur_trend.c_social      * damping,
-            c_physical    = cur_trend.c_physical    * damping,
-            alpha         = cur_trend.alpha         * damping,
+            c_social        = cur_trend.c_social        * damping,
+            c_physical      = cur_trend.c_physical      * damping,
+            c_cognitive     = cur_trend.c_cognitive     * damping,
+            c_circadian     = cur_trend.c_circadian     * damping,
+            alpha           = cur_trend.alpha           * damping,
         )
         out.append(cur_state)
     return out

@@ -142,6 +142,75 @@ def _derive_social_c(user_id: str) -> float:
     return min(40.0, DEFAULT_DOMAIN_BASELINE + extra)
 
 
+def _derive_cognitive_c(user_id: str) -> float:
+    """C_cognitive from chat-pattern proxies — Sprint X20.5.
+
+    Lightweight v1 heuristic: rapid topic switching + high message rate
+    in last 60 min = elevated cognitive load. Real NLP-based scoring
+    (semantic coherence, repetition rate) comes in a later sprint —
+    for now this gives ADHD a meaningful signal without expensive
+    inference per cycle.
+
+    Signals:
+      msg_rate > 2/min  AND distinct_conversations > 2  → +12 (load)
+      msg_rate > 1/min  AND distinct_conversations > 1  → +6
+      otherwise → baseline (10)
+    """
+    try:
+        from database import db_context
+    except ImportError:
+        return DEFAULT_DOMAIN_BASELINE
+    try:
+        with db_context(commit=False) as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS msg_n, "
+                "       COUNT(DISTINCT conversation_id) AS conv_n "
+                "FROM chat_messages "
+                "WHERE created_at > ? "
+                "AND conversation_id IN ("
+                "  SELECT id FROM chat_conversations WHERE participants LIKE ?"
+                ")",
+                (datetime.utcnow() - timedelta(minutes=60),
+                 f'%{user_id}%')
+            )
+            row = cur.fetchone()
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"derive_cognitive_c: DB read failed: {e}")
+        return DEFAULT_DOMAIN_BASELINE
+
+    if not row:
+        return DEFAULT_DOMAIN_BASELINE
+
+    msg_n  = (row[0] if isinstance(row, (list, tuple)) else row['msg_n']) or 0
+    conv_n = (row[1] if isinstance(row, (list, tuple)) else row['conv_n']) or 0
+    rate = float(msg_n) / 60.0  # msg/min
+    base = DEFAULT_DOMAIN_BASELINE
+
+    if rate > 2.0 and conv_n > 2:
+        return min(40.0, base + 12.0)
+    if rate > 1.0 and conv_n > 1:
+        return min(40.0, base + 6.0)
+    return base
+
+
+def _derive_circadian_c(persona_id: str, user_id: str) -> float:
+    """C_circadian from persona curve + per-user offset (chronotype).
+    Sprint X20.5 — pure time-driven. See agent/circadian.py."""
+    try:
+        from .circadian import compute_circadian_c
+    except ImportError:
+        return DEFAULT_DOMAIN_BASELINE
+    # Per-user phase offset stored in memory_profiles.data
+    offset_hours = 0.0
+    try:
+        from memory_helpers import db_load_profile
+        profile = db_load_profile(str(user_id)) or {}
+        offset_hours = float(profile.get('circadian_offset_hours', 0) or 0)
+    except Exception:
+        pass
+    return compute_circadian_c(persona_id, datetime.utcnow(), offset_hours)
+
+
 def _derive_physical_c(user_id: str) -> float:
     """C_physical from heart-rate / motion telemetry.
     Heart rate above 100 bpm at rest → grows. Below 50 → grows (bradycardia).
@@ -220,10 +289,14 @@ def collect_state_history(user_id: str,
     env_now = _derive_environmental_c(user_id)
     phy_now = _derive_physical_c(user_id)
     soc_now = _derive_social_c(user_id)
+    cog_now = _derive_cognitive_c(user_id)
+    persona_id = _persona_for_user(user_id)
+    circ_now = _derive_circadian_c(persona_id, user_id)
 
     if not rows:
         s = _neutral_state(now=datetime.utcnow(),
-                           env=env_now, phy=phy_now, soc=soc_now)
+                           env=env_now, phy=phy_now, soc=soc_now,
+                           cog=cog_now, circ=circ_now)
         return [s]
 
     states: list[State] = []
@@ -244,17 +317,24 @@ def collect_state_history(user_id: str,
             c_environmental=env_now,
             c_social=soc_now,
             c_physical=phy_now,
+            c_cognitive=cog_now,
+            c_circadian=circ_now,
             alpha=max(0.0, min(1.0, _safe_float(alpha, 0.3))),
             e_valence=max(-1.0, min(1.0, _safe_float(e_raw, 0.0) / 40.0)),
         ))
     return states
 
 
-def _neutral_state(now: datetime, env=DEFAULT_DOMAIN_BASELINE,
-                   phy=DEFAULT_DOMAIN_BASELINE, soc=DEFAULT_DOMAIN_BASELINE) -> State:
+def _neutral_state(now: datetime,
+                   env=DEFAULT_DOMAIN_BASELINE,
+                   phy=DEFAULT_DOMAIN_BASELINE,
+                   soc=DEFAULT_DOMAIN_BASELINE,
+                   cog=DEFAULT_DOMAIN_BASELINE,
+                   circ=DEFAULT_DOMAIN_BASELINE) -> State:
     return State(
         t=now,
         c_emotional=10.0, c_environmental=env, c_social=soc, c_physical=phy,
+        c_cognitive=cog, c_circadian=circ,
         alpha=0.3, e_valence=0.0,
     )
 
@@ -398,6 +478,16 @@ class AgentRuntime:
 def _serialize_snapshot(snap) -> dict:
     """Convert EngineSnapshot to a JSON-safe dict matching context_hints
     schema, with horizon details for advanced UIs."""
+    # Sprint X20.5 — circadian phase label for explainability
+    circ_phase = None
+    try:
+        from .circadian import describe_circadian_phase
+        # Note: persona resolution is best-effort here; serializer doesn't
+        # have user_id context, so we omit if unable to derive.
+        circ_phase = None
+    except Exception:
+        pass
+
     return {
         'mode': snap.mode,
         'c_total': round(snap.c_total, 2),
@@ -407,9 +497,12 @@ def _serialize_snapshot(snap) -> dict:
             'environmental': round(snap.state.c_environmental, 2),
             'social':        round(snap.state.c_social, 2),
             'physical':      round(snap.state.c_physical, 2),
+            'cognitive':     round(snap.state.c_cognitive, 2),
+            'circadian':     round(snap.state.c_circadian, 2),
         },
         'trend': {
             'c_emotional': round(snap.trend.c_emotional, 3),
+            'c_cognitive': round(snap.trend.c_cognitive, 3),
             'alpha':       round(snap.trend.alpha, 3),
         },
         'preemptive': {
