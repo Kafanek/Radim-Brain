@@ -412,6 +412,91 @@ def force_evaluate_goals(user_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+# ─── Sprint X20.7 — Federated baseline learning ──────────────────────────
+
+
+@agent_bp.route('/population/baselines', methods=['GET'])
+def get_population_baselines():
+    """List published (k-anon-passing) population baselines.
+    Public — already anonymized, no per-user data."""
+    try:
+        from .federated import list_population_baselines
+        persona = request.args.get('persona')
+        return jsonify({
+            'success':   True,
+            'baselines': list_population_baselines(persona_id=persona),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@agent_bp.route('/population/baseline/<persona_id>/<metric>', methods=['GET'])
+def get_population_baseline_one(persona_id, metric):
+    """Get one population baseline. Public — k-anonymity enforced."""
+    try:
+        from .federated import get_population_baseline
+        time_window = request.args.get('window', '7d')
+        baseline = get_population_baseline(persona_id, metric, time_window)
+        if not baseline:
+            return jsonify({'success': False,
+                            'error': 'not_found_or_below_k_anonymity'}), 404
+        return jsonify({'success': True, 'baseline': baseline})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@agent_bp.route('/population/aggregate', methods=['POST'])
+def trigger_population_aggregate():
+    """Admin: manually run federated aggregation across all personas."""
+    if not _admin_authorized():
+        return jsonify({'success': False, 'error': 'admin_required'}), 401
+    try:
+        from .federated import aggregate_population_baselines
+        persona = request.args.get('persona')
+        upserted = aggregate_population_baselines(persona_id=persona)
+        return jsonify({
+            'success': True,
+            'rows_upserted': upserted,
+            'persona': persona or 'all',
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@agent_bp.route('/population/opt-in/<user_id>', methods=['GET', 'POST'])
+def federated_opt_in(user_id):
+    """Per-user opt-in toggle. GET returns current state; POST {enabled: bool}.
+    GET self-or-admin; POST admin (caregiver-driven from dashboard)."""
+    if request.method == 'GET':
+        err = _require_auth(user_id)
+        if err:
+            return err
+        try:
+            from .federated import is_federated_enabled
+            return jsonify({'success': True, 'user_id': user_id,
+                            'enabled': is_federated_enabled(user_id)})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+    # POST
+    if not _admin_authorized():
+        return jsonify({'success': False, 'error': 'admin_required'}), 401
+    body = request.get_json(silent=True) or {}
+    enabled = bool(body.get('enabled'))
+    try:
+        from .federated import set_federated_enabled
+        ok = set_federated_enabled(user_id, enabled)
+        # Audit
+        try:
+            from .audit import log_event
+            log_event(user_id, 'admin', 'federated_opt_in',
+                      payload={'enabled': enabled})
+        except Exception:
+            pass
+        return jsonify({'success': ok, 'user_id': user_id, 'enabled': enabled})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @agent_bp.route('/goals/sources', methods=['GET'])
 def list_goal_sources():
     """Public/self — list available custom goal data sources + operators

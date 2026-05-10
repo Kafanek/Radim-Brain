@@ -1207,6 +1207,25 @@ try:
         except Exception as e:
             logger.warning(f"⚠️ Audit retention cron registration failed: {e}")
 
+    # Sprint X20.7 — Federated baseline learning weekly aggregation.
+    # Sundays at 04:30 UTC (after retention cleanup at 03:30 on the 1st).
+    # Aggregates anonymized population stats per persona cohort with
+    # k-anonymity ≥ 5 + Laplace noise (ε=1.0).
+    if AUDIT_AVAILABLE:
+        try:
+            from agent.cron import federated_aggregation_job
+            scheduler.add_job(
+                federated_aggregation_job,
+                'cron', day_of_week='sun', hour=4, minute=30,
+                id='federated_aggregation',
+                max_instances=1,
+                misfire_grace_time=3600,
+            )
+            logger.info("✅ Federated aggregation scheduled "
+                        "(Sunday 04:30 UTC, Sprint X20.7)")
+        except Exception as e:
+            logger.warning(f"⚠️ Federated cron registration failed: {e}")
+
     # Sprint X20.1 / Fix 5 — real-time HA WebSocket subscription.
     # Subscribes to state_changed events on every configured HA home.
     # On critical event (smoke/gas/CO/leak/safety/tamper) → instant

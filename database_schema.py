@@ -678,6 +678,30 @@ PG_IOT_TABLES = [
         "CREATE INDEX IF NOT EXISTS idx_goal_progress_goal ON agent_goal_progress(goal_id, measured_at DESC)",
     ]),
 
+    # Sprint X20.7 — Federated baseline learning.
+    # Anonymized population aggregates per persona cohort. Numbers are
+    # already DP-noised (Laplace, ε=1.0 default). k-anonymity ≥ 5
+    # enforced at write time AND read time.
+    # No PII here — only summary statistics over cohorts.
+    ('''CREATE TABLE IF NOT EXISTS agent_population_baselines (
+            id BIGSERIAL PRIMARY KEY,
+            persona_id TEXT NOT NULL,
+            metric TEXT NOT NULL,
+            time_window TEXT NOT NULL DEFAULT '7d',
+            cohort_size INTEGER NOT NULL,
+            mean REAL,
+            std REAL,
+            p25 REAL,
+            p50 REAL,
+            p75 REAL,
+            epsilon REAL DEFAULT 1.0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (persona_id, metric, time_window)
+        )
+    ''', [
+        "CREATE INDEX IF NOT EXISTS idx_pop_baselines_persona ON agent_population_baselines(persona_id, metric)",
+    ]),
+
     # Sprint AG.4 — agent_messages bus.
     # Single source of truth for "what agents currently know about user X".
     # Three layers (chat coordinator, agent_loop, specialists) emit AND read

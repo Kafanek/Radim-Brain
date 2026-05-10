@@ -87,3 +87,30 @@ def audit_retention_cleanup_job() -> None:
         logger.info(f"[cron] audit_retention_cleanup OK — removed {removed} "
                     f"rows in {elapsed_s:.2f}s")
     return None
+
+
+def federated_aggregation_job() -> None:
+    """Sprint X20.7 — Weekly: rebuild agent_population_baselines for all
+    persona cohorts. Drops cohorts with N < 5 (k-anonymity) and adds
+    Laplace noise (ε=1.0 default) to numeric aggregates."""
+    try:
+        from .federated import aggregate_population_baselines, K_ANONYMITY_MIN, DEFAULT_EPSILON
+    except ImportError:
+        logger.warning("[cron] federated module unavailable — skipping aggregation")
+        return
+
+    started = datetime.now(timezone.utc)
+    logger.info(f"[cron] federated_aggregation START "
+                f"(K_min={K_ANONYMITY_MIN}, ε={DEFAULT_EPSILON})")
+    upserted = 0
+    error: str | None = None
+    try:
+        upserted = aggregate_population_baselines() or 0
+    except Exception as e:  # noqa: BLE001
+        error = str(e)
+        logger.error(f"[cron] federated_aggregation FAILED: {e}")
+
+    elapsed_s = (datetime.now(timezone.utc) - started).total_seconds()
+    if error is None:
+        logger.info(f"[cron] federated_aggregation OK — {upserted} rows "
+                    f"upserted in {elapsed_s:.2f}s")
