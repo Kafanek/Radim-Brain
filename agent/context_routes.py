@@ -140,30 +140,28 @@ def force_tick(user_id):
 
 @agent_bp.route('/personas', methods=['GET'])
 def list_personas():
-    """List available personas with their weight + threshold profiles."""
+    """List available personas with their weight + threshold profiles.
+    Sprint X20.5: weights include all 6 dimensions (cognitive + circadian)."""
+    def _w_dict(w):
+        return {
+            'emotional':     w.emotional,
+            'environmental': w.environmental,
+            'social':        w.social,
+            'physical':      w.physical,
+            'cognitive':     w.cognitive,
+            'circadian':     w.circadian,
+        }
     out = {}
     try:
         from .personas import PERSONA_THRESHOLDS
         for pid, w in PERSONA_WEIGHTS.items():
             out[pid] = {
-                'weights': {
-                    'emotional':     w.emotional,
-                    'environmental': w.environmental,
-                    'social':        w.social,
-                    'physical':      w.physical,
-                },
+                'weights': _w_dict(w),
                 'thresholds': PERSONA_THRESHOLDS.get(pid, {}),
             }
     except ImportError:
         for pid, w in PERSONA_WEIGHTS.items():
-            out[pid] = {
-                'weights': {
-                    'emotional':     w.emotional,
-                    'environmental': w.environmental,
-                    'social':        w.social,
-                    'physical':      w.physical,
-                },
-            }
+            out[pid] = {'weights': _w_dict(w)}
     return jsonify({'personas': out})
 
 
