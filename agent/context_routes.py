@@ -412,6 +412,150 @@ def force_evaluate_goals(user_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+# ─── Sprint X20.9 — Caregiver IFTTT automations ──────────────────────────
+
+
+@agent_bp.route('/automations/<user_id>', methods=['GET'])
+def list_automations(user_id):
+    """Self/admin — list user's automation rules."""
+    err = _require_auth(user_id)
+    if err:
+        return err
+    try:
+        from .automations import list_user_automations
+        return jsonify({
+            'success':     True,
+            'user_id':     user_id,
+            'automations': list_user_automations(user_id),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@agent_bp.route('/automations/<user_id>', methods=['POST'])
+def create_automation(user_id):
+    """Admin — create a new rule. Body:
+       {name, trigger_type, trigger_config, condition_config, action_config, enabled?}
+    """
+    if not _admin_authorized():
+        return jsonify({'success': False, 'error': 'admin_required'}), 401
+    body = request.get_json(silent=True) or {}
+    try:
+        from .automations import upsert_automation
+        rid = upsert_automation(
+            user_id=user_id,
+            name=body.get('name', 'Automatizace'),
+            trigger_type=body.get('trigger_type', ''),
+            trigger_config=body.get('trigger_config') or {},
+            condition_config=body.get('condition_config') or {},
+            action_config=body.get('action_config') or {},
+            enabled=bool(body.get('enabled', False)),
+        )
+        if not rid:
+            return jsonify({'success': False,
+                            'error': 'invalid_or_capped_or_unsafe'}), 400
+        try:
+            from .audit import log_event
+            log_event(user_id, 'admin', 'automation_created',
+                      payload={'rule_id': rid, 'name': body.get('name'),
+                               'trigger_type': body.get('trigger_type'),
+                               'action_type': (body.get('action_config') or {}).get('type')})
+        except Exception:
+            pass
+        return jsonify({'success': True, 'rule_id': rid})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@agent_bp.route('/automations/<user_id>/<int:rule_id>', methods=['PUT'])
+def update_automation(user_id, rule_id):
+    """Admin — update existing rule."""
+    if not _admin_authorized():
+        return jsonify({'success': False, 'error': 'admin_required'}), 401
+    body = request.get_json(silent=True) or {}
+    try:
+        from .automations import upsert_automation
+        rid = upsert_automation(
+            user_id=user_id,
+            name=body.get('name', 'Automatizace'),
+            trigger_type=body.get('trigger_type', ''),
+            trigger_config=body.get('trigger_config') or {},
+            condition_config=body.get('condition_config') or {},
+            action_config=body.get('action_config') or {},
+            enabled=bool(body.get('enabled', False)),
+            rule_id=rule_id,
+        )
+        return jsonify({'success': bool(rid), 'rule_id': rid})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@agent_bp.route('/automations/<user_id>/<int:rule_id>', methods=['DELETE'])
+def delete_automation_route(user_id, rule_id):
+    if not _admin_authorized():
+        return jsonify({'success': False, 'error': 'admin_required'}), 401
+    try:
+        from .automations import delete_automation
+        ok = delete_automation(user_id, rule_id)
+        try:
+            from .audit import log_event
+            log_event(user_id, 'admin', 'automation_deleted',
+                      payload={'rule_id': rule_id})
+        except Exception:
+            pass
+        return jsonify({'success': ok, 'rule_id': rule_id})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@agent_bp.route('/automations/<user_id>/<int:rule_id>/enabled', methods=['POST'])
+def toggle_automation(user_id, rule_id):
+    if not _admin_authorized():
+        return jsonify({'success': False, 'error': 'admin_required'}), 401
+    body = request.get_json(silent=True) or {}
+    enabled = bool(body.get('enabled', False))
+    try:
+        from .automations import set_enabled
+        ok = set_enabled(user_id, rule_id, enabled)
+        return jsonify({'success': ok, 'enabled': enabled})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@agent_bp.route('/automations/<user_id>/<int:rule_id>/test', methods=['POST'])
+def test_fire_automation(user_id, rule_id):
+    """Admin — force-fire one rule for testing. Bypasses trigger + cooldown
+    but still respects sensitive-action gates."""
+    if not _admin_authorized():
+        return jsonify({'success': False, 'error': 'admin_required'}), 401
+    try:
+        from .automations import test_fire
+        result = test_fire(user_id, rule_id)
+        return jsonify({'success': True, 'result': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@agent_bp.route('/automations/types', methods=['GET'])
+def list_automation_types():
+    """Public — UI dropdowns for trigger + action types."""
+    try:
+        from .automations import (
+            list_trigger_types, list_action_types,
+            MAX_RULES_PER_USER, DEFAULT_COOLDOWN_MIN, SENSITIVE_HA_DOMAINS,
+        )
+        return jsonify({
+            'success':         True,
+            'triggers':        list_trigger_types(),
+            'actions':         list_action_types(),
+            'max_per_user':    MAX_RULES_PER_USER,
+            'default_cooldown_minutes': DEFAULT_COOLDOWN_MIN,
+            'sensitive_ha_domains':     sorted(SENSITIVE_HA_DOMAINS),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 # ─── Sprint X20.8 — Per-user correlation analysis ────────────────────────
 
 

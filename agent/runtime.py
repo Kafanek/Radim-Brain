@@ -433,7 +433,23 @@ class AgentRuntime:
     # ── tick handler ──
 
     def _on_tick(self, user_id: str, snap) -> None:
+        # Sprint X20.9 — detect mode change vs prior snapshot
+        prev_snap = self._latest_snapshots.get(user_id)
+        prev_mode = (prev_snap.mode if prev_snap else None)
         self._latest_snapshots[user_id] = snap
+
+        # Mode change → automation trigger
+        if snap.mode and snap.mode != prev_mode:
+            try:
+                from .automations import evaluate_for_user as _automation_eval
+                _automation_eval(user_id, ctx={
+                    'event':        'mode_change',
+                    'prev_mode':    prev_mode or 'IDLE',
+                    'new_mode':     snap.mode,
+                    'current_mode': snap.mode,
+                })
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[automations] mode_change hook failed: {e}")
 
         # Emit via SocketIO (best-effort, never block heartbeat)
         if self.socketio:

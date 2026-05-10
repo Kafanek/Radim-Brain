@@ -678,6 +678,29 @@ PG_IOT_TABLES = [
         "CREATE INDEX IF NOT EXISTS idx_goal_progress_goal ON agent_goal_progress(goal_id, measured_at DESC)",
     ]),
 
+    # Sprint X20.9 — Caregiver-defined automations (IFTTT for Radim agents).
+    # Trigger types: agent_mode_change, observation_emitted, goal_drift,
+    #                time_of_day
+    # Action types:  ha_service_call, notify_caregiver, send_sms, radim_say
+    ('''CREATE TABLE IF NOT EXISTS agent_automations (
+            id BIGSERIAL PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            enabled BOOLEAN DEFAULT FALSE,
+            trigger_type TEXT NOT NULL,
+            trigger_config JSONB NOT NULL DEFAULT '{}',
+            condition_config JSONB NOT NULL DEFAULT '{}',
+            action_config JSONB NOT NULL DEFAULT '{}',
+            last_fired_at TIMESTAMP,
+            fire_count INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''', [
+        "CREATE INDEX IF NOT EXISTS idx_automations_user ON agent_automations(user_id, enabled)",
+        "CREATE INDEX IF NOT EXISTS idx_automations_trigger ON agent_automations(trigger_type)",
+    ]),
+
     # Sprint X20.8 — Per-user correlation matrix (cached result).
     # One row per user. matrix = 6×6 Pearson on hourly buckets over 7-day window.
     # insights = top-N caregiver-readable findings (|r| ≥ 0.3, samples ≥ 20).

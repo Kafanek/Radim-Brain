@@ -290,6 +290,19 @@ def _evaluate_user(user_id, app):
     if ha_obs and not _is_in_cooldown(user_id, ha_obs["type"]):
         observations.append(ha_obs)
 
+    # ── Sprint X20.9: Automation triggers — time_of_day cycle tick ──
+    # Run BEFORE goal evaluation so a "daily 22:00 → lock all doors" rule
+    # fires before any new observations would conflict.
+    try:
+        from agent.automations import evaluate_for_user as _automation_eval
+        _automation_eval(user_id, ctx={
+            'event': 'cycle_tick',
+            'now': datetime.now(),
+            'current_mode': (snap.mode if snap else None),
+        })
+    except Exception as e:
+        logger.debug(f"automations cycle_tick failed for {user_id}: {e}")
+
     # ── Sprint X20.1/Fix 6: Goal-driven planner ──
     # Proactive layer above detectors. Reads agent_user_goals for this user,
     # measures current state vs target over each goal's horizon, emits
@@ -1247,6 +1260,28 @@ def _save_observation(user_id, obs):
             )
         except Exception as _ae:
             logger.debug(f"[audit] log_event failed: {_ae}")
+
+        # Sprint X20.9 — observation_emitted automation trigger
+        try:
+            from agent.automations import evaluate_for_user as _automation_eval
+            _automation_eval(user_id, ctx={
+                'event':            'observation',
+                'observation_type': obs.get('type'),
+                'severity':         (obs.get('severity') or '').upper(),
+                'goal_type':        (obs.get('details') or {}).get('goal_type'),
+                'drift_count':      (obs.get('details') or {}).get('consecutive_drift'),
+                'current_mode':     (obs.get('severity') or '').upper(),
+            })
+            # If observation is a goal_drift, also fire goal_drift trigger
+            if obs.get('type', '').startswith('goal_drift_'):
+                _automation_eval(user_id, ctx={
+                    'event':       'goal_drift',
+                    'goal_type':   (obs.get('details') or {}).get('goal_type'),
+                    'drift_count': (obs.get('details') or {}).get('consecutive_drift', 1),
+                    'current_mode': (obs.get('severity') or '').upper(),
+                })
+        except Exception as _ae:
+            logger.debug(f"[automations] observation hook failed: {_ae}")
 
         # v10.59: Push observation to subscribed devices (Sprint D D6)
         sev_up = (obs.get("severity") or "").upper()
