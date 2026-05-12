@@ -164,6 +164,16 @@ def auth_register():
         return jsonify({"success": False, "error": "Email a heslo jsou povinné", "code": "missing_fields"}), 400
     if len(password) < 6:
         return jsonify({"success": False, "error": "Heslo musí mít alespoň 6 znaků", "code": "password_weak"}), 400
+    # X20.19: basic email format check (frontend uses HTML5 type=email but
+    # never trust the client). Also require a name so Radim can greet the
+    # user by name (better senior UX — frontend already enforces minlength=2).
+    name = (name or '').strip()
+    if '@' not in email or '.' not in email.split('@')[-1]:
+        return jsonify({"success": False, "error": "Neplatný email", "code": "invalid_email"}), 400
+    if len(name) < 2:
+        return jsonify({"success": False, "error": "Jméno je povinné (alespoň 2 znaky)", "code": "name_required"}), 400
+    if len(name) > 60:
+        name = name[:60]  # truncate, not reject
 
     try:
         with db_context(commit=True) as db:
