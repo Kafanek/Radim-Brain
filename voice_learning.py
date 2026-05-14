@@ -214,15 +214,7 @@ def should_use_melody(user_id):
     return prefs['response_to_melody'] > 0.5
 
 
-def should_sing(user_id):
-    """Měl by Radim zpívat pro tohoto seniora?
-
-    Returns: True pokud senior má rád zpěv (response_to_singing > 0.5)
-    """
-    prefs = get_voice_prefs(user_id)
-    if prefs['interactions'] < 10:
-        return True  # Default: zkus zpěv
-    return prefs['response_to_singing'] > 0.5
-
+# X21.29: should_sing() retired — zero callers. The singing decision is now
+# centralised in radim_orchestrator (voice_mode == 'SINGING' selection logic).
 
 logger.info("🧒 Voice Learning v1.0 loaded — φ-blend adaptive per-user preferences")

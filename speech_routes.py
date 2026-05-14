@@ -47,7 +47,9 @@ from speech_helpers import (
     # Functions
     get_tts_url, get_tts_headers,
     get_anticipation_tts, apply_state_style,
-    get_brain_speech, radim_speak,
+    get_brain_speech,
+    # X21.29: radim_speak removed from imports — re-exported here but never
+    # called by any route after X21.28 removed /synthesize and /voices.
     get_cached_token,
 )
 

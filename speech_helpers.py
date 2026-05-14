@@ -134,80 +134,10 @@ def get_brain_speech(user_id):
         return None
 
 
-# ============================================================================
-# RADIM SPEAK (helper function)
-# ============================================================================
-
-def radim_speak(text, emotion='friendly', C=None, alpha=None, user_id=None):
-    """
-    Helper funkce pro Radima - prevede text na audio data.
-    Accepts optional C/alpha from Anticipation Engine for adaptive speech.
-    If user_id provided, loads Brain Engine Psi(t) speech params from DB.
-    Vraci bytes audio data nebo None pri chybe.
-    """
-    if not AZURE_SPEECH_KEY or not text:
-        return None
-
-    try:
-        style, degree = EMOTION_STYLES.get(emotion, ('friendly', '1.2'))
-
-        # Adaptive params from Anticipation Engine
-        rate = SENIOR_DEFAULTS['rate']
-        pitch = SENIOR_DEFAULTS['pitch']
-        if C is not None and alpha is not None:
-            ant_result = get_anticipation_tts(float(C), float(alpha))
-            if ant_result:
-                rate, pitch, ant_state, _ = ant_result
-                s, d = apply_state_style(ant_state)
-                if s:
-                    style, degree = s, d
-
-        # Brain Engine: override with per-user Psi(t) if available
-        brain_speech = get_brain_speech(user_id)
-        if brain_speech:
-            rate = str(brain_speech['rate'])
-            pitch = f"{brain_speech['pitch_pct']:+d}%"
-            s, d = apply_state_style(brain_speech['mode'])
-            if s:
-                style, degree = s, d
-
-        # v389: Use rich SSML from voice_filter (emotion + pauses + emphasis)
-        # v403: Pass user_id for per-user adaptive voice (fatigue, recovery, pace)
-        _mode = brain_speech.get("mode", "HARMONY") if brain_speech else "HARMONY"
-        try:
-            from voice_filter import build_radim_ssml
-            # v10.29: Pass RTCF Beat Engine voice modifiers if available
-            _rtcf_voice = brain_speech.get('rtcf_voice') if brain_speech else None
-            # Sprint AA: pass full brain_speech so SSML uses Ψ(t)-driven
-            # rate/pitch/pause from compute_unified_speech (4-layer output).
-            ssml = build_radim_ssml(text, mode=_mode, user_id=user_id,
-                                    rtcf_voice=_rtcf_voice, brain_speech=brain_speech)
-        except ImportError:
-            safe_text = xml_escape(text)
-            ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
-                   xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="cs-CZ">
-                <voice name="cs-CZ-AntoninNeural">
-                    <mstts:express-as style="{style}" styledegree="{degree}">
-                        <prosody rate="{rate}" pitch="{pitch}">
-                            {safe_text}
-                        </prosody>
-                    </mstts:express-as>
-                </voice>
-            </speak>'''
-
-        response = requests.post(
-            get_tts_url(), headers=get_tts_headers(),
-            data=ssml.encode('utf-8'), timeout=30
-        )
-
-        if response.status_code == 200:
-            return response.content
-
-        return None
-
-    except Exception as e:
-        logger.error(f"Radim speak error: {e}")
-        return None
+# X21.29: radim_speak() retired — last caller was speech_routes.synthesize,
+# which was removed in X21.28. Production TTS now goes exclusively through
+# tts_proxy_routes.azure_tts_proxy → voice_filter.build_radim_ssml.
+# Helper is preserved in git history (commit pre-X21.29) if ever needed.
 
 
 # ============================================================================

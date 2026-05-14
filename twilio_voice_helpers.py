@@ -228,7 +228,8 @@ except ImportError:
     AZURE_SPEECH_KEY = os.environ.get("AZURE_SPEECH_KEY")
     AZURE_SPEECH_REGION = os.environ.get("AZURE_SPEECH_REGION", "germanywestcentral")
 
-RADIM_VOICE_GOOGLE = "Google.cs-CZ-Standard-A"
+# X21.29: RADIM_VOICE_GOOGLE retired — defined but never read by any caller.
+# Twilio fallback uses RADIM_VOICE_BASIC ("man") instead.
 RADIM_VOICE_BASIC = "man"
 RADIM_LANG = "cs-CZ"
 RADIM_AZURE_VOICE = "cs-CZ-AntoninNeural"
