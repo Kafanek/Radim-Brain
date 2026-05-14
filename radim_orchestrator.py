@@ -325,6 +325,13 @@ def radim_chat():
         mode = data.get('mode', 'senior')
         context = data.get('context', {})
         emotional_context = data.get('emotional_context', '')
+        # X21.16: language preference — used as final argument to call_gemini_whatsapp
+        # so the response is in the user's selected app language. Falls back to
+        # Accept-Language header, finally to 'cs'. Validated against allowlist.
+        _raw_lang = (data.get('lang')
+                     or (request.headers.get('Accept-Language') or '').split(',')[0].split('-')[0].strip().lower()
+                     or 'cs')
+        chat_lang = _raw_lang if _raw_lang in ('cs', 'sk', 'pl', 'hu', 'en') else 'cs'
 
         if not message:
             return jsonify({'success': False, 'error': 'Zpráva je povinná'}), 400
@@ -1193,7 +1200,8 @@ def radim_chat():
                             text_response, action_json = call_gemini_whatsapp(
                                 message, context, mode, personalized, history,
                                 anticipation_prompt, gen_config,
-                                voice_mode=_identity_voice_mode
+                                voice_mode=_identity_voice_mode,
+                                lang=chat_lang
                             )
                             if text_response:
                                 gemini_breaker.record_success()
@@ -1211,7 +1219,8 @@ def radim_chat():
                 # No self-healing — try Gemini directly
                 text_response, action_json = call_gemini_whatsapp(
                     message, context, mode, personalized, history,
-                    anticipation_prompt, gen_config
+                    anticipation_prompt, gen_config,
+                    lang=chat_lang
                 )
 
         if not text_response:
@@ -1620,7 +1629,8 @@ def radim_chat_internal(message, user_id=None, mode="senior"):
                     pass
 
             text_response, _ = call_gemini_whatsapp(
-                message, {}, mode, personalized, history, "", None
+                message, {}, mode, personalized, history, "", None,
+                lang=chat_lang
             )
 
         if not text_response:

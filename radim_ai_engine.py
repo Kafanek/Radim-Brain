@@ -25,11 +25,13 @@ logger = logging.getLogger(__name__)
 # ============================================
 # GEMINI AI CALL
 # ============================================
-def call_gemini_whatsapp(message, context=None, mode='senior', personalized_prompt='', history=None, anticipation_prompt='', gen_config=None, voice_mode='HARMONY'):
+def call_gemini_whatsapp(message, context=None, mode='senior', personalized_prompt='', history=None, anticipation_prompt='', gen_config=None, voice_mode='HARMONY', lang='cs'):
     """Volání Gemini s WhatsApp promptem + personalizace + historie + rytmus.
 
     v8.19.32 (Sprint 3-B): voice_mode (HARMONY/ALERT/CRISIS) propaguje
     do identity layeru — ALERT/CRISIS modus identitu zkrátí nebo ztichne.
+    X21.16: `lang` param (cs/sk/pl/hu/en) appended to system prompt so the
+    response uses the user's selected app language.
     """
     if not GEMINI_API_KEY:
         return None, None
@@ -45,6 +47,17 @@ def call_gemini_whatsapp(message, context=None, mode='senior', personalized_prom
         # 🎵 Add anticipation-driven text rhythm instructions
         if anticipation_prompt:
             system += anticipation_prompt
+
+        # X21.16: language directive — ensures Radim responds in the user's
+        # selected app language. CS is the default, no extra instruction needed.
+        LANG_INSTRUCTION = {
+            'sk': "\n\nDÔLEŽITÉ: Odpovedaj v slovenčine.",
+            'pl': "\n\nWAŻNE: Odpowiadaj po polsku.",
+            'hu': "\n\nFONTOS: Magyarul válaszolj.",
+            'en': "\n\nIMPORTANT: Respond in English. Stay warm and senior-friendly.",
+        }
+        if lang in LANG_INSTRUCTION:
+            system += LANG_INSTRUCTION[lang]
 
         context_text = ""
         if context:
