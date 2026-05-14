@@ -68,189 +68,147 @@ RETENTION = {
     "identity_activations": 60,
     "brain_feedback":       30,
     "brain_adaptation":     180,
-    "user_notifications_delivered": 14,
-    "user_notifications_other":     60,
+    "user_notifications_read":  14,   # read_at IS NOT NULL → 14d
+    "user_notifications_other": 60,   # everything else → 60d
     "iot_sensor_data":      7,
 }
 
 
-def _pg_delete(db, sql, days):
-    """Run a PG INTERVAL delete and return rowcount."""
-    cur = db.execute(sql.replace("__DAYS__", str(days)))
-    return cur.rowcount if cur else 0
+def _safe_delete(label, sql_pg, sql_sqlite, is_pg):
+    """Run a DELETE in its own transaction so a failure here doesn't
+    poison the next prune. Returns rowcount or 0 on error.
 
-
-def _sqlite_delete(db, sql, days):
-    """Run a SQLite datetime delete and return rowcount."""
-    cur = db.execute(sql.replace("__DAYS__", str(days)))
-    return cur.rowcount if cur else 0
-
-
-def prune_expired(db, is_pg):
-    """Drop rows older than per-table retention. Returns dict of counts."""
-    counts = {}
-
-    PRUNES = [
-        # (table_label, sql_template_pg, sql_template_sqlite, retention_key)
-        (
-            "identity_activations",
-            "DELETE FROM identity_activations WHERE fired_at < NOW() - INTERVAL '__DAYS__ days'",
-            "DELETE FROM identity_activations WHERE fired_at < datetime('now', '-__DAYS__ days')",
-            "identity_activations",
-        ),
-        (
-            "brain_feedback",
-            "DELETE FROM brain_feedback WHERE created_at < NOW() - INTERVAL '__DAYS__ days'",
-            "DELETE FROM brain_feedback WHERE created_at < datetime('now', '-__DAYS__ days')",
-            "brain_feedback",
-        ),
-        (
-            "brain_adaptation",
-            "DELETE FROM brain_adaptation WHERE updated_at < NOW() - INTERVAL '__DAYS__ days'",
-            "DELETE FROM brain_adaptation WHERE updated_at < datetime('now', '-__DAYS__ days')",
-            "brain_adaptation",
-        ),
-        (
-            "iot_sensor_data",
-            "DELETE FROM iot_sensor_data WHERE created_at < NOW() - INTERVAL '__DAYS__ days'",
-            "DELETE FROM iot_sensor_data WHERE created_at < datetime('now', '-__DAYS__ days')",
-            "iot_sensor_data",
-        ),
-    ]
-
-    for label, sql_pg, sql_sqlite, retention_key in PRUNES:
-        days = RETENTION[retention_key]
-        try:
-            n = _pg_delete(db, sql_pg, days) if is_pg else _sqlite_delete(db, sql_sqlite, days)
-            counts[label] = n
+    X21.23: PG aborts the WHOLE transaction on any error (e.g. missing
+    column) and refuses subsequent statements until rollback. By isolating
+    each delete into its own db_context, one bad query can't cascade.
+    """
+    from database import db_context
+    sql = sql_pg if is_pg else sql_sqlite
+    try:
+        with db_context(commit=True) as db:
+            cur = db.execute(sql)
+            n = cur.rowcount if cur else 0
             if n > 0:
-                logger.info(f"🌙 [sleep.prune] {label}: {n} rows >{days}d removed")
-        except Exception as e:
-            counts[label] = 0
-            logger.warning(f"🌙 [sleep.prune] {label} skipped: {e}")
-
-    # user_notifications: split rule. Delivered+read older than 14d, others older than 60d.
-    try:
-        if is_pg:
-            cur = db.execute(
-                "DELETE FROM user_notifications "
-                "WHERE delivered_at IS NOT NULL AND read_at IS NOT NULL "
-                "AND created_at < NOW() - INTERVAL '%d days'"
-                % RETENTION["user_notifications_delivered"]
-            )
-        else:
-            cur = db.execute(
-                "DELETE FROM user_notifications "
-                "WHERE delivered_at IS NOT NULL AND read_at IS NOT NULL "
-                "AND created_at < datetime('now', '-%d days')"
-                % RETENTION["user_notifications_delivered"]
-            )
-        counts["user_notifications_read"] = cur.rowcount if cur else 0
+                logger.info(f"🌙 [sleep.prune] {label}: {n} rows removed")
+            return n
     except Exception as e:
-        counts["user_notifications_read"] = 0
-        logger.warning(f"🌙 [sleep.prune] user_notifications (read) skipped: {e}")
-
-    try:
-        if is_pg:
-            cur = db.execute(
-                "DELETE FROM user_notifications "
-                "WHERE created_at < NOW() - INTERVAL '%d days'"
-                % RETENTION["user_notifications_other"]
-            )
-        else:
-            cur = db.execute(
-                "DELETE FROM user_notifications "
-                "WHERE created_at < datetime('now', '-%d days')"
-                % RETENTION["user_notifications_other"]
-            )
-        counts["user_notifications_old"] = cur.rowcount if cur else 0
-    except Exception as e:
-        counts["user_notifications_old"] = 0
-        logger.warning(f"🌙 [sleep.prune] user_notifications (old) skipped: {e}")
-
-    return counts
+        logger.warning(f"🌙 [sleep.prune] {label} skipped: {str(e)[:120]}")
+        return 0
 
 
-def filter_bad_logs(db, is_pg):
-    """Drop entries that are functionally useless:
-      - assistant rows containing known error-fallback strings
-      - identity_activations with empty text
+def prune_expired(is_pg):
+    """Drop rows older than per-table retention. Each delete is independent.
     Returns dict of counts.
     """
     counts = {}
 
-    # 1. Bad assistant responses in memory_history.
-    # We OR together LIKE patterns for each known fallback.
-    placeholder = "%s" if is_pg else "?"
-    where_clauses = " OR ".join(["content LIKE " + placeholder for _ in _BAD_RESPONSE_NEEDLES])
-    params = tuple("%" + s + "%" for s in _BAD_RESPONSE_NEEDLES)
-    try:
-        cur = db.execute(
-            "DELETE FROM memory_history WHERE role IN ('assistant','radim') AND (" + where_clauses + ")",
-            params,
-        )
-        counts["bad_responses"] = cur.rowcount if cur else 0
-        if counts["bad_responses"] > 0:
-            logger.info(f"🌙 [sleep.filter] {counts['bad_responses']} bad-response rows removed from memory_history")
-    except Exception as e:
-        counts["bad_responses"] = 0
-        logger.warning(f"🌙 [sleep.filter] bad_responses skipped: {e}")
+    PRUNES = [
+        ("identity_activations",
+         "DELETE FROM identity_activations WHERE fired_at < NOW() - INTERVAL '%d days'" % RETENTION["identity_activations"],
+         "DELETE FROM identity_activations WHERE fired_at < datetime('now', '-%d days')" % RETENTION["identity_activations"]),
+        ("brain_feedback",
+         "DELETE FROM brain_feedback WHERE created_at < NOW() - INTERVAL '%d days'" % RETENTION["brain_feedback"],
+         "DELETE FROM brain_feedback WHERE created_at < datetime('now', '-%d days')" % RETENTION["brain_feedback"]),
+        ("brain_adaptation",
+         "DELETE FROM brain_adaptation WHERE updated_at < NOW() - INTERVAL '%d days'" % RETENTION["brain_adaptation"],
+         "DELETE FROM brain_adaptation WHERE updated_at < datetime('now', '-%d days')" % RETENTION["brain_adaptation"]),
+        ("iot_sensor_data",
+         "DELETE FROM iot_sensor_data WHERE created_at < NOW() - INTERVAL '%d days'" % RETENTION["iot_sensor_data"],
+         "DELETE FROM iot_sensor_data WHERE created_at < datetime('now', '-%d days')" % RETENTION["iot_sensor_data"]),
+        # user_notifications.read_at IS NOT NULL → read by senior, can drop sooner (14d).
+        # The schema has read_at + created_at — no delivered_at column (X21.23 fix).
+        ("user_notifications_read",
+         "DELETE FROM user_notifications WHERE read_at IS NOT NULL AND read_at < NOW() - INTERVAL '%d days'" % RETENTION["user_notifications_read"],
+         "DELETE FROM user_notifications WHERE read_at IS NOT NULL AND read_at < datetime('now', '-%d days')" % RETENTION["user_notifications_read"]),
+        # Unread notifications older than 60 days are stale anyway — drop them.
+        ("user_notifications_old",
+         "DELETE FROM user_notifications WHERE created_at < NOW() - INTERVAL '%d days'" % RETENTION["user_notifications_other"],
+         "DELETE FROM user_notifications WHERE created_at < datetime('now', '-%d days')" % RETENTION["user_notifications_other"]),
+    ]
 
-    # 2. Empty identity_activations
-    try:
-        cur = db.execute(
-            "DELETE FROM identity_activations WHERE text IS NULL OR text = ''"
-        )
-        counts["empty_identity"] = cur.rowcount if cur else 0
-    except Exception as e:
-        counts["empty_identity"] = 0
-        logger.warning(f"🌙 [sleep.filter] empty_identity skipped: {e}")
-
-    # 3. Orphan user_message rows with no assistant reply (1+ hours old)
-    # — these are interrupted conversations where Radim never responded.
-    # They confuse summarization. Keep only recent ones (might still be in-flight).
-    try:
-        if is_pg:
-            cur = db.execute(
-                "DELETE FROM memory_history h1 "
-                "WHERE h1.role = 'user' "
-                "AND h1.created_at < NOW() - INTERVAL '1 hour' "
-                "AND NOT EXISTS ("
-                "  SELECT 1 FROM memory_history h2 "
-                "  WHERE h2.user_id = h1.user_id "
-                "  AND h2.role IN ('assistant','radim') "
-                "  AND h2.created_at > h1.created_at "
-                "  AND h2.created_at < h1.created_at + INTERVAL '10 minutes'"
-                ")"
-            )
-        else:
-            # SQLite: simpler version
-            cur = db.execute(
-                "DELETE FROM memory_history WHERE role='user' "
-                "AND id IN ("
-                "  SELECT h1.id FROM memory_history h1 "
-                "  WHERE h1.role='user' "
-                "  AND h1.created_at < datetime('now', '-1 hour') "
-                "  AND NOT EXISTS ("
-                "    SELECT 1 FROM memory_history h2 "
-                "    WHERE h2.user_id = h1.user_id "
-                "    AND h2.role IN ('assistant','radim') "
-                "    AND h2.created_at > h1.created_at "
-                "    AND h2.created_at < datetime(h1.created_at, '+10 minutes')"
-                "  )"
-                ")"
-            )
-        counts["orphan_user_msgs"] = cur.rowcount if cur else 0
-        if counts["orphan_user_msgs"] > 0:
-            logger.info(f"🌙 [sleep.filter] {counts['orphan_user_msgs']} orphan user messages dropped")
-    except Exception as e:
-        counts["orphan_user_msgs"] = 0
-        logger.debug(f"🌙 [sleep.filter] orphan_user_msgs skipped: {e}")
+    for label, sql_pg, sql_sqlite in PRUNES:
+        counts[label] = _safe_delete(label, sql_pg, sql_sqlite, is_pg)
 
     return counts
 
 
-def consolidate_long_term(db, is_pg):
+def filter_bad_logs(is_pg):
+    """Drop entries that are functionally useless. Each query isolated."""
+    from database import db_context
+    counts = {}
+
+    # 1. Bad assistant responses in memory_history.
+    placeholder = "%s" if is_pg else "?"
+    where_clauses = " OR ".join(["content LIKE " + placeholder for _ in _BAD_RESPONSE_NEEDLES])
+    params = tuple("%" + s + "%" for s in _BAD_RESPONSE_NEEDLES)
+    try:
+        with db_context(commit=True) as db:
+            cur = db.execute(
+                "DELETE FROM memory_history WHERE role IN ('assistant','radim') AND (" + where_clauses + ")",
+                params,
+            )
+            counts["bad_responses"] = cur.rowcount if cur else 0
+            if counts["bad_responses"] > 0:
+                logger.info(f"🌙 [sleep.filter] {counts['bad_responses']} bad-response rows removed")
+    except Exception as e:
+        counts["bad_responses"] = 0
+        logger.warning(f"🌙 [sleep.filter] bad_responses skipped: {str(e)[:120]}")
+
+    # 2. Empty identity_activations
+    try:
+        with db_context(commit=True) as db:
+            cur = db.execute(
+                "DELETE FROM identity_activations WHERE text IS NULL OR text = ''"
+            )
+            counts["empty_identity"] = cur.rowcount if cur else 0
+    except Exception as e:
+        counts["empty_identity"] = 0
+        logger.warning(f"🌙 [sleep.filter] empty_identity skipped: {str(e)[:120]}")
+
+    # 3. Orphan user_message rows with no assistant reply (1+ hours old).
+    try:
+        with db_context(commit=True) as db:
+            if is_pg:
+                cur = db.execute(
+                    "DELETE FROM memory_history WHERE role = 'user' AND id IN ("
+                    "  SELECT h1.id FROM memory_history h1 "
+                    "  WHERE h1.role = 'user' "
+                    "  AND h1.created_at < NOW() - INTERVAL '1 hour' "
+                    "  AND NOT EXISTS ("
+                    "    SELECT 1 FROM memory_history h2 "
+                    "    WHERE h2.user_id = h1.user_id "
+                    "    AND h2.role IN ('assistant','radim') "
+                    "    AND h2.created_at > h1.created_at "
+                    "    AND h2.created_at < h1.created_at + INTERVAL '10 minutes'"
+                    "  )"
+                    ")"
+                )
+            else:
+                cur = db.execute(
+                    "DELETE FROM memory_history WHERE role='user' AND id IN ("
+                    "  SELECT h1.id FROM memory_history h1 "
+                    "  WHERE h1.role='user' "
+                    "  AND h1.created_at < datetime('now', '-1 hour') "
+                    "  AND NOT EXISTS ("
+                    "    SELECT 1 FROM memory_history h2 "
+                    "    WHERE h2.user_id = h1.user_id "
+                    "    AND h2.role IN ('assistant','radim') "
+                    "    AND h2.created_at > h1.created_at "
+                    "    AND h2.created_at < datetime(h1.created_at, '+10 minutes')"
+                    "  )"
+                    ")"
+                )
+            counts["orphan_user_msgs"] = cur.rowcount if cur else 0
+            if counts["orphan_user_msgs"] > 0:
+                logger.info(f"🌙 [sleep.filter] {counts['orphan_user_msgs']} orphan user messages dropped")
+    except Exception as e:
+        counts["orphan_user_msgs"] = 0
+        logger.debug(f"🌙 [sleep.filter] orphan_user_msgs skipped: {str(e)[:120]}")
+
+    return counts
+
+
+def consolidate_long_term(is_pg):
     """Trigger summarize_user_memory for users whose long-term context is stale.
 
     Users with >50 raw history rows and no summary OR summary >7 days old
@@ -258,28 +216,30 @@ def consolidate_long_term(db, is_pg):
     nobody falls through the cracks (e.g. users who hit 50 msgs but didn't
     cross 100).
     """
+    from database import db_context
     triggered = 0
     skipped = 0
+    rows = []
     try:
-        # Find active users (any history in last 30 days) with >50 messages.
-        if is_pg:
-            rows = db.execute(
-                "SELECT user_id, COUNT(*) AS n "
-                "FROM memory_history "
-                "WHERE created_at > NOW() - INTERVAL '30 days' "
-                "GROUP BY user_id "
-                "HAVING COUNT(*) > 50"
-            ).fetchall()
-        else:
-            rows = db.execute(
-                "SELECT user_id, COUNT(*) AS n "
-                "FROM memory_history "
-                "WHERE created_at > datetime('now', '-30 days') "
-                "GROUP BY user_id "
-                "HAVING COUNT(*) > 50"
-            ).fetchall()
+        with db_context() as db:
+            if is_pg:
+                rows = db.execute(
+                    "SELECT user_id, COUNT(*) AS n "
+                    "FROM memory_history "
+                    "WHERE created_at > NOW() - INTERVAL '30 days' "
+                    "GROUP BY user_id "
+                    "HAVING COUNT(*) > 50"
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT user_id, COUNT(*) AS n "
+                    "FROM memory_history "
+                    "WHERE created_at > datetime('now', '-30 days') "
+                    "GROUP BY user_id "
+                    "HAVING COUNT(*) > 50"
+                ).fetchall()
     except Exception as e:
-        logger.warning(f"🌙 [sleep.consolidate] candidate query failed: {e}")
+        logger.warning(f"🌙 [sleep.consolidate] candidate query failed: {str(e)[:120]}")
         return {"triggered": 0, "skipped": 0}
 
     try:
@@ -307,19 +267,16 @@ def consolidate_long_term(db, is_pg):
     return {"triggered": triggered, "skipped": skipped}
 
 
-def vacuum_postgres(db, is_pg):
-    """Run VACUUM ANALYZE on PostgreSQL to reclaim deleted space + refresh stats.
-
-    Must be outside any explicit transaction. We do it as a separate call.
+def vacuum_postgres(is_pg):
+    """Run ANALYZE on PostgreSQL to refresh table statistics after big deletes.
     Skipped on SQLite (auto-vacuum handles it).
     """
     if not is_pg:
         return {"skipped": "sqlite"}
     try:
-        # PG won't let us VACUUM inside a transaction. We need an AUTOCOMMIT
-        # connection here; the db_context default uses a transaction.
-        # Best-effort: just run ANALYZE which IS transaction-safe.
-        db.execute("ANALYZE")
+        from database import db_context
+        with db_context(commit=True) as db:
+            db.execute("ANALYZE")
         logger.info("🌙 [sleep.vacuum] ANALYZE complete (table statistics refreshed)")
         return {"analyze": "ok"}
     except Exception as e:
@@ -328,9 +285,16 @@ def vacuum_postgres(db, is_pg):
 
 
 def run_sleep(app):
-    """Main entry point — called by agent_loop.run_daily_cleanup."""
+    """Main entry point — called by agent_loop.run_daily_cleanup.
+
+    X21.23: every operation gets its OWN transaction so a schema mismatch
+    on one table can't poison the next delete. (Previous bug: missing
+    user_notifications.delivered_at column aborted the parent transaction
+    in PG, causing later deletes to silently roll back despite reporting
+    success rowcounts.)
+    """
     try:
-        from database import db_context, is_postgres
+        from database import is_postgres
     except ImportError:
         logger.warning("🌙 [sleep] database module unavailable")
         return None
@@ -339,18 +303,12 @@ def run_sleep(app):
     started = datetime.utcnow()
     result = {"started_at": started.isoformat(), "is_pg": is_pg}
 
-    # All three table-touching phases run in one transaction so they're
-    # committed atomically. VACUUM/ANALYZE runs separately afterwards.
     try:
         with app.app_context():
-            with db_context(commit=True) as db:
-                result["prune"] = prune_expired(db, is_pg)
-                result["filter"] = filter_bad_logs(db, is_pg)
-                result["consolidate"] = consolidate_long_term(db, is_pg)
-
-            # VACUUM/ANALYZE in its own context
-            with db_context(commit=True) as db:
-                result["vacuum"] = vacuum_postgres(db, is_pg)
+            result["prune"]       = prune_expired(is_pg)
+            result["filter"]      = filter_bad_logs(is_pg)
+            result["consolidate"] = consolidate_long_term(is_pg)
+            result["vacuum"]      = vacuum_postgres(is_pg)
 
             # Audit-log the sleep summary so admins can see what happened.
             try:
