@@ -71,7 +71,13 @@ RETENTION = {
     "user_notifications_read":  14,   # read_at IS NOT NULL → 14d
     "user_notifications_other": 60,   # everything else → 60d
     "iot_sensor_data":      7,
+    "orphan_grace_days":    7,        # safety buffer before pruning orphans
 }
+
+# User_id prefixes/values that legitimately don't appear in auth_users but
+# should still keep their memory rows (system jobs, demo data, baselines).
+_ORPHAN_KEEP_PREFIXES = ("system", "demo_", "baseline_", "test-")
+_ORPHAN_KEEP_EXACT = {"system", "anonymous", "demo_senior_1"}
 
 
 def _safe_delete(label, sql_pg, sql_sqlite, is_pg):
@@ -208,6 +214,83 @@ def filter_bad_logs(is_pg):
     return counts
 
 
+def prune_orphans(is_pg):
+    """Remove memory rows owned by user_ids that never existed in auth_users.
+
+    X21.24: production audit found 706 orphan memory_learning rows and
+    4,778 orphan brain_states — leftovers from anon-XXX sessions and
+    test scripts. Each is harmless individually but they pollute admin
+    queries and inflate row counts. Per-row footprint is small (JSONB
+    aggregate or one snapshot) so this is purely a hygiene pass.
+
+    Safety rails:
+      - Whitelist preserved (`system`, `demo_*`, `baseline_*`, `test-*`,
+        `anonymous`) — these are legitimately used by jobs/demos.
+      - Only deletes rows older than RETENTION["orphan_grace_days"]. New
+        anonymous sessions that just hit the chat get the grace period.
+      - Each table deleted in its own transaction (per X21.23 rule).
+    """
+    from database import db_context
+    counts = {}
+    grace = RETENTION["orphan_grace_days"]
+
+    # Build the "keep" SQL filter as a literal list. We can't easily
+    # parametrize a variable-length IN clause through the wrapper, so
+    # this is built inline. Values are constants from our module.
+    keep_exact_sql = "(" + ", ".join("'" + s.replace("'", "''") + "'" for s in _ORPHAN_KEEP_EXACT) + ")"
+    keep_prefix_sql = " AND ".join(
+        "ml.user_id NOT LIKE '" + p.replace("'", "''") + "%'"
+        for p in _ORPHAN_KEEP_PREFIXES
+    )
+
+    ORPHAN_TARGETS = [
+        # (table, alias, timecol, label)
+        ("memory_learning",   "ml", "updated_at",  "orphan_memory_learning"),
+        ("memory_history",    "ml", "created_at",  "orphan_memory_history"),
+        ("brain_states",      "ml", "created_at",  "orphan_brain_states"),
+        ("identity_activations", "ml", "fired_at", "orphan_identity_activations"),
+    ]
+
+    for table, alias, timecol, label in ORPHAN_TARGETS:
+        # SQL: delete rows in <table> where user_id not in auth_users AND
+        # not in keep-list AND older than grace period.
+        if is_pg:
+            sql = (
+                "DELETE FROM " + table + " " + alias + " "
+                "WHERE NOT EXISTS ("
+                "  SELECT 1 FROM auth_users au WHERE CAST(au.id AS TEXT) = " + alias + ".user_id"
+                ") "
+                "AND " + alias + ".user_id NOT IN " + keep_exact_sql + " "
+                "AND " + keep_prefix_sql + " "
+                "AND " + alias + "." + timecol + " < NOW() - INTERVAL '" + str(grace) + " days'"
+            )
+        else:
+            sql = (
+                "DELETE FROM " + table + " "
+                "WHERE rowid IN ( "
+                "  SELECT " + alias + ".rowid FROM " + table + " " + alias + " "
+                "  WHERE NOT EXISTS ("
+                "    SELECT 1 FROM auth_users au WHERE CAST(au.id AS TEXT) = " + alias + ".user_id"
+                "  ) "
+                "  AND " + alias + ".user_id NOT IN " + keep_exact_sql + " "
+                "  AND " + keep_prefix_sql + " "
+                "  AND " + alias + "." + timecol + " < datetime('now', '-" + str(grace) + " days')"
+                ")"
+            )
+        try:
+            with db_context(commit=True) as db:
+                cur = db.execute(sql)
+                n = cur.rowcount if cur else 0
+                counts[label] = n
+                if n > 0:
+                    logger.info(f"🌙 [sleep.orphans] {label}: {n} rows removed")
+        except Exception as e:
+            counts[label] = 0
+            logger.warning(f"🌙 [sleep.orphans] {label} skipped: {str(e)[:120]}")
+
+    return counts
+
+
 def consolidate_long_term(is_pg):
     """Trigger summarize_user_memory for users whose long-term context is stale.
 
@@ -307,6 +390,7 @@ def run_sleep(app):
         with app.app_context():
             result["prune"]       = prune_expired(is_pg)
             result["filter"]      = filter_bad_logs(is_pg)
+            result["orphans"]     = prune_orphans(is_pg)
             result["consolidate"] = consolidate_long_term(is_pg)
             result["vacuum"]      = vacuum_postgres(is_pg)
 
@@ -333,6 +417,7 @@ def run_sleep(app):
         f"🌙 [sleep] done in {result['duration_sec']:.2f}s — "
         f"prune={sum(result['prune'].values())} "
         f"filter={sum(result['filter'].values())} "
+        f"orphans={sum(result.get('orphans', {}).values())} "
         f"summarized={result['consolidate'].get('triggered', 0)}"
     )
     return result

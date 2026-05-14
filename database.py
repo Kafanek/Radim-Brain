@@ -278,13 +278,22 @@ class PgConnectionWrapper:
 # QUERY CONVERSION
 # ============================================
 def _convert_query(query):
-    """Convert SQLite query syntax to PostgreSQL"""
-    # Replace ? placeholders with %s
+    """Convert SQLite query syntax to PostgreSQL.
+
+    X21.24: PostgreSQL JSONB operators use `?` too — `data ? 'key'`,
+    `data ?| array[...]`, `data ?& array[...]`. We MUST NOT convert
+    those to placeholders. A `?` is treated as a placeholder only when
+    it's a standalone token (preceded/followed by whitespace, comma,
+    paren, semicolon, or string boundary) — NEVER when adjacent to
+    `|` / `&` (JSONB array ops) and NEVER when sitting between two
+    JSONB-style operands.
+    """
     result = []
     in_string = False
     string_char = None
     i = 0
-    while i < len(query):
+    n = len(query)
+    while i < n:
         c = query[i]
         if not in_string and c in ("'", '"'):
             in_string = True
@@ -294,7 +303,30 @@ def _convert_query(query):
             in_string = False
             result.append(c)
         elif not in_string and c == '?':
-            result.append('%s')
+            # Look at neighboring chars to decide: placeholder vs JSONB op.
+            prev_c = query[i - 1] if i > 0 else ''
+            next_c = query[i + 1] if i + 1 < n else ''
+            # JSONB array operators: ?| and ?&
+            if next_c in ('|', '&'):
+                # `?|` or `?&` — keep as-is (JSONB operator)
+                result.append(c)
+            # Standalone `?` between JSONB expressions: pattern is
+            #   `data ? 'key'` or `col ? 'key'`. Heuristic: preceded by
+            # whitespace AND followed by whitespace AND the next non-space
+            # token starts with a quote — that's JSONB has-key. Otherwise
+            # it's a placeholder.
+            elif prev_c == ' ' and next_c == ' ':
+                # Peek ahead past the space to see if the next token is a
+                # quoted string (JSONB key check) — if so, it's an operator.
+                j = i + 2
+                while j < n and query[j] == ' ':
+                    j += 1
+                if j < n and query[j] in ("'", '"'):
+                    result.append(c)  # JSONB has-key operator
+                else:
+                    result.append('%s')
+            else:
+                result.append('%s')
         else:
             result.append(c)
         i += 1
