@@ -535,10 +535,10 @@ from soul_routes import soul_bp
 app.register_blueprint(soul_bp)
 logger.info("✅ Soul routes registered: /api/soul/*")
 
-# 🎙️ Import Voice Runtime routes - Stavový automat
-from voice_runtime_routes import voice_runtime_bp
-app.register_blueprint(voice_runtime_bp)
-logger.info("✅ Voice Runtime routes registered: /api/voice/*")
+# X21.28: voice_runtime_routes HTTP blueprint retired — none of /api/voice/
+# {metrics,state,session,prompt,chat,stream,health} had any frontend caller.
+# The voice_runtime_engine module itself stays (used by claude_autonomous_agent
+# for proactive-speak session state tracking).
 
 # 🔮 Import Anticipation Engine - Předbudoucí čas
 from anticipation_routes import anticipation_bp
@@ -728,12 +728,10 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ HA pairing routes: {e}")
 
-try:
-    from voice_choice_routes import voice_choice_bp
-    app.register_blueprint(voice_choice_bp)
-    logger.info("✅ Voice choice routes registered: /api/voice/{choices,profile,preview}")
-except Exception as e:
-    logger.warning(f"⚠️ Voice choice routes: {e}")
+# X21.28: voice_choice_routes blueprint retired — /api/voice/{choices,
+# profile,preview} had zero callers; also contained a broken reference
+# ("/api/azure-tts" — real route is /api/azure/tts with slash). Voice
+# selection is now owned by tts_proxy_routes.azure_tts_proxy directly.
 
 try:
     from predictive_agent import prediction_bp

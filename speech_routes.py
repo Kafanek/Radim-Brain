@@ -1,3 +1,8 @@
+# X21.28: 4 dead routes retired from speech_routes — /synthesize,
+# /synthesize/stream, /voices, /azure-config. All zero callers.
+# Surviving: /transcribe (used by chat-module + smart-home),
+# /azure-token (used by frontend SDK), /health (admin probe).
+
 # ============================================
 # RADIM SPEECH ROUTES v2.1.0
 # ============================================
@@ -50,205 +55,6 @@ from speech_helpers import (
 _SPEECH_ANT_AVAILABLE = SPEECH_ANT_AVAILABLE
 _SPEECH_BRAIN_AVAILABLE = SPEECH_BRAIN_AVAILABLE
 _get_anticipation_tts = get_anticipation_tts
-
-
-# ============================================================================
-# TEXT-TO-SPEECH (REST API)
-# ============================================================================
-
-@speech_bp.route('/synthesize', methods=['POST'])
-@require_auth
-@rate_limit(30, 60, 'ip')
-def synthesize_speech():
-    """Prevod text na rec pomoci Azure REST API"""
-    if not AZURE_SPEECH_KEY:
-        return jsonify({'success': False, 'error': 'AZURE_SPEECH_KEY neni nastaven'}), 500
-
-    try:
-        data = request.get_json(silent=True) or {}
-        if not data:
-            return jsonify({'success': False, 'error': 'Chybi telo pozadavku (JSON)'}), 400
-        text = data.get('text', '')
-        voice_name = data.get('voice', 'radim').lower()
-        rate = data.get('rate', SENIOR_DEFAULTS['rate'])
-        pitch = data.get('pitch', SENIOR_DEFAULTS['pitch'])
-        senior_mode = data.get('senior_mode', True)
-        return_base64 = data.get('return_base64', True)
-
-        if not text:
-            return jsonify({'success': False, 'error': 'Text je povinny'}), 400
-
-        azure_voice = CZECH_VOICES.get(voice_name, CZECH_VOICES['antonin'])
-
-        # Emotion -> SSML style mapping
-        emotion = data.get('emotion', 'friendly')
-        style, styledegree = EMOTION_STYLES.get(emotion, ('friendly', '1.2'))
-
-        # Anticipation Engine: if C and alpha provided, compute adaptive params
-        C_val = data.get('C')
-        alpha_val = data.get('alpha')
-        ant_state = None
-        if C_val is not None and alpha_val is not None and SPEECH_ANT_AVAILABLE:
-            ant_result = get_anticipation_tts(float(C_val), float(alpha_val))
-            if ant_result:
-                rate, pitch, ant_state, _ = ant_result
-                senior_mode = False
-                s, d = apply_state_style(ant_state)
-                if s:
-                    style, styledegree = s, d
-
-        # Brain Engine: override with per-user Psi(t) speech adaptation
-        brain_speech = None
-        auth_user = getattr(g, 'auth_user', None) or {}
-        uid = str(auth_user.get('id', '')).strip()
-        if not uid or uid == '0':
-            uid = data.get('user_id', '')
-        if uid:
-            brain_speech = get_brain_speech(uid)
-            if brain_speech:
-                rate = str(brain_speech['rate'])
-                pitch = f"{brain_speech['pitch_pct']:+d}%"
-                senior_mode = False
-                ant_state = brain_speech['mode']
-                s, d = apply_state_style(brain_speech['mode'])
-                if s:
-                    style, styledegree = s, d
-
-        if senior_mode:
-            rate = SENIOR_DEFAULTS['rate']
-            pitch = SENIOR_DEFAULTS['pitch']
-
-        # Sanitize inputs to prevent SSML injection
-        safe_text = xml_escape(text)
-        if not _re.match(r'^[0-9.]+$', str(rate).replace('%', '')):
-            rate = SENIOR_DEFAULTS['rate']
-        if not _re.match(r'^[+-]?[0-9]+%?$', str(pitch).replace('Hz', '')):
-            pitch = SENIOR_DEFAULTS['pitch']
-
-        # SSML pro Azure REST API
-        ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
-               xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="cs-CZ">
-            <voice name="{azure_voice}">
-                <mstts:express-as style="{style}" styledegree="{styledegree}">
-                    <prosody rate="{rate}" pitch="{pitch}" volume="{SENIOR_DEFAULTS['volume']}">
-                        {safe_text}
-                    </prosody>
-                </mstts:express-as>
-            </voice>
-        </speak>'''
-
-        response = requests.post(
-            get_tts_url(), headers=get_tts_headers(),
-            data=ssml.encode('utf-8'), timeout=30
-        )
-
-        if response.status_code == 200:
-            audio_data = response.content
-
-            if return_base64:
-                audio_base64 = base64.b64encode(audio_data).decode('utf-8')
-                resp_data = {
-                    'success': True,
-                    'audio': audio_base64,
-                    'format': 'mp3',
-                    'voice': azure_voice,
-                    'text': text
-                }
-                if ant_state:
-                    resp_data['anticipation_state'] = ant_state
-                if brain_speech:
-                    resp_data['brain_speech'] = brain_speech
-                return jsonify(resp_data)
-            else:
-                return Response(
-                    audio_data,
-                    mimetype='audio/mpeg',
-                    headers={
-                        'Content-Disposition': f'attachment; filename=radim_{uuid.uuid4().hex[:8]}.mp3'
-                    }
-                )
-        else:
-            logger.error(f"Azure TTS error: {response.status_code} — {response.text[:200] if response.text else 'no body'}")
-            return jsonify({
-                'success': False,
-                'error': f'Azure TTS chyba (kod {response.status_code})'
-            }), 500
-
-    except requests.exceptions.Timeout:
-        return jsonify({'success': False, 'error': 'Azure TTS timeout'}), 504
-    except Exception as e:
-        logger.error(f"speech_routes.py error: {e}")
-        return jsonify({'success': False, 'error': 'Interni chyba serveru'}), 500
-
-
-@speech_bp.route('/synthesize/stream', methods=['POST'])
-@require_auth
-def synthesize_stream():
-    """Streamovana synteza pro okamzite prehravani"""
-    if not AZURE_SPEECH_KEY:
-        return jsonify({'success': False, 'error': 'Speech service not available'}), 500
-
-    try:
-        data = request.get_json(silent=True) or {}
-        if not data:
-            return jsonify({'success': False, 'error': 'Chybi telo pozadavku (JSON)'}), 400
-        text = data.get('text', '')
-        voice_name = data.get('voice', 'radim').lower()
-
-        if not text:
-            return jsonify({'success': False, 'error': 'Text je povinny'}), 400
-
-        azure_voice = CZECH_VOICES.get(voice_name, CZECH_VOICES['antonin'])
-
-        # Emotion -> SSML style mapping
-        emotion = data.get('emotion', 'friendly') if data else 'friendly'
-        style, styledegree = EMOTION_STYLES.get(emotion, ('friendly', '1.2'))
-
-        # Anticipation Engine adaptive params
-        rate = SENIOR_DEFAULTS['rate']
-        pitch = SENIOR_DEFAULTS['pitch']
-        C_val = data.get('C') if data else None
-        alpha_val = data.get('alpha') if data else None
-        if C_val is not None and alpha_val is not None and SPEECH_ANT_AVAILABLE:
-            ant_result = get_anticipation_tts(float(C_val), float(alpha_val))
-            if ant_result:
-                rate, pitch, ant_state, _ = ant_result
-                s, d = apply_state_style(ant_state)
-                if s:
-                    style, styledegree = s, d
-
-        safe_text = xml_escape(text)
-        ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
-               xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="cs-CZ">
-            <voice name="{azure_voice}">
-                <mstts:express-as style="{style}" styledegree="{styledegree}">
-                    <prosody rate="{rate}" pitch="{pitch}">
-                        {safe_text}
-                    </prosody>
-                </mstts:express-as>
-            </voice>
-        </speak>'''
-
-        response = requests.post(
-            get_tts_url(), headers=get_tts_headers(),
-            data=ssml.encode('utf-8'), timeout=30
-        )
-
-        if response.status_code == 200:
-            return Response(
-                response.content,
-                mimetype='audio/mpeg',
-                headers={
-                    'Content-Disposition': 'inline',
-                    'Content-Length': str(len(response.content))
-                }
-            )
-
-        return jsonify({'success': False, 'error': 'TTS synthesis failed'}), 500
-
-    except Exception as e:
-        logger.error(f"speech_routes.py error: {e}")
-        return jsonify({'success': False, 'error': 'Interni chyba serveru'}), 500
 
 
 # ============================================================================
@@ -364,45 +170,6 @@ def transcribe_speech():
     except Exception as e:
         logger.error(f"speech_routes.py error: {e}")
         return jsonify({'success': False, 'error': 'Interni chyba serveru'}), 500
-
-
-# ============================================================================
-# VOICE INFO
-# ============================================================================
-
-@speech_bp.route('/voices', methods=['GET'])
-def get_voices():
-    """Seznam dostupnych hlasu"""
-    return jsonify({
-        'success': True,
-        'voices': [
-            {
-                'id': 'radim',
-                'name': 'Radim (Antonin)',
-                'azure_name': 'cs-CZ-AntoninNeural',
-                'gender': 'male',
-                'description': 'Klidny muzsky hlas pro Radima',
-                'recommended': True
-            },
-            {
-                'id': 'antonin',
-                'name': 'Antonin',
-                'azure_name': 'cs-CZ-AntoninNeural',
-                'gender': 'male',
-                'description': 'Standardni muzsky cesky hlas'
-            },
-            {
-                'id': 'vlasta',
-                'name': 'Vlasta',
-                'azure_name': 'cs-CZ-VlastaNeural',
-                'gender': 'female',
-                'description': 'Pratelsky zensky hlas'
-            }
-        ],
-        'senior_settings': SENIOR_DEFAULTS,
-        'note': 'Pro seniory doporucujeme pomalejsi tempo (0.85)',
-        'api_type': 'REST'
-    })
 
 
 @speech_bp.route('/health', methods=['GET'])
@@ -522,18 +289,6 @@ def get_azure_token():
             'success': False,
             'error': 'Nepodarilo se ziskat Azure token'
         }), 500
-
-
-@speech_bp.route('/azure-config', methods=['GET'])
-@require_auth
-def get_azure_config():
-    """DEPRECATED: Use /azure-token instead. Returns region only (no key)."""
-    return jsonify({
-        'success': True,
-        'region': AZURE_SPEECH_REGION,
-        'note': 'API key no longer exposed. Use /api/speech/azure-token for token-based auth.',
-        'token_endpoint': '/api/speech/azure-token'
-    })
 
 
 # ============================================================================

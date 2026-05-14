@@ -736,31 +736,13 @@ def _palatalize_word(word):
 #
 # Add an entry here ONLY when there is concrete evidence that Azure
 # mispronounces the word AND the alias actually produces correct speech.
-_CZECH_PALATALIZATION_PATTERNS = [
-    # (intentionally empty — see comment above)
-]
-
-
-def _apply_czech_palatalization(text):
-    """Wrap each curated native Czech word in <sub alias="..."> where every
-    soft consonant cluster is rewritten with explicit ď/ť/ň/+e. Foreign
-    loanwords with overlapping spelling are excluded by the curated regex
-    list (diktát, prezident, magistr, tradice, etc. don't match)."""
-    def _make_sub(m):
-        original = m.group(0)
-        alias = _palatalize_word(original)
-        if alias == original:
-            return original  # no-op safety
-        return f'<sub alias="{xml_escape(alias)}">{xml_escape(original)}</sub>'
-
-    for pattern in _CZECH_PALATALIZATION_PATTERNS:
-        try:
-            if re.search(pattern, text):
-                text = re.sub(pattern, _make_sub, text)
-        except Exception as e:
-            logger.debug(f"palatalization pattern failed: {e}")
-            continue
-    return text
+# X21.28: _CZECH_PALATALIZATION_PATTERNS list was intentionally empty, so
+# _apply_czech_palatalization() always returned its input unchanged after
+# walking an empty loop. Both retired. The Czech abbreviation pass
+# (_apply_czech_abbreviations) and phoneme fixes (_CZECH_PHONEME_FIXES)
+# below are the actual mechanisms in active use. _palatalize_word()
+# helper kept for now — referenced from tests; safe no-op without
+# patterns to drive it.
 
 
 # ── v459: A1 — Czech abbreviations expansion ───────────────────────────────
@@ -1029,8 +1011,7 @@ def _fix_czech_pronunciation(text, user_id=None):
     # v459: A1 — Czech abbreviations (atd., tzv., např., academic titles, …)
     text = _apply_czech_abbreviations(text)
 
-    # v460: A4 — palatalization for native Czech words (di/ti/ni/dě/tě/ně)
-    text = _apply_czech_palatalization(text)
+    # X21.28: palatalization step removed — patterns list was empty (no-op).
 
     for pattern, ipa, display in _CZECH_PHONEME_FIXES:
         # Pre-check: pokud žádný match, přeskočit (re.sub by stejně neudělal nic,
@@ -1597,19 +1578,10 @@ def build_radim_ssml(text, mode="HARMONY", voice="cs-CZ-AntoninNeural",
     return ssml
 
 
-def apply_radim_filter(audio_bytes, mode="HARMONY", format="mp3"):
-    """
-    v2.0: No-op pass-through. Voice filtering is now done at SSML level
-    via build_radim_ssml(). This function exists for backward compatibility.
-
-    Returns audio_bytes unchanged.
-    """
-    return audio_bytes
-
-
-def is_available():
-    """Voice filter is always available (SSML-based, no dependencies)."""
-    return True
+# X21.28: apply_radim_filter() (no-op pass-through since v2.0) and
+# is_available() (always True) retired — zero callers in production code.
+# Voice filtering is owned by build_radim_ssml(). If you need either back,
+# the previous definitions are in git history.
 
 
 logger.info("✅ Voice Filter v2.0 loaded — SSML-based, no ffmpeg needed")
