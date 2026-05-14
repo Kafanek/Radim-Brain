@@ -628,6 +628,14 @@ if MEMORY_AVAILABLE:
     logger.info("✅ Memory routes registered: /api/memory/*")
     logger.info("✅ GDPR routes registered: /api/memory/gdpr/*")
 
+# X21.25: User-facing "what does Radim remember about me" inspector
+try:
+    from memory_inspector_routes import memory_inspector_bp
+    app.register_blueprint(memory_inspector_bp)
+    logger.info("✅ Memory Inspector registered: /api/user/memory/*")
+except ImportError as e:
+    logger.warning(f"⚠️ Memory Inspector not available: {e}")
+
 # 🌱 Sprint AS: Life situation presets
 if LIFE_PRESETS_AVAILABLE:
     app.register_blueprint(life_presets_bp)
