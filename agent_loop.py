@@ -2120,6 +2120,17 @@ def run_daily_cleanup(app):
         except Exception as e:
             logger.debug(f"Safe Web cleanup error: {e}")
 
+        # X21.22: Radim Sleep — extended memory hygiene
+        # Prunes 6 grow-only tables, filters bad logs, consolidates long-term
+        # context for stale users, runs ANALYZE on PG. Audit-logged.
+        try:
+            from radim_sleep import run_sleep
+            run_sleep(app)
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"Radim Sleep error: {e}")
+
 
 def _cleanup_subscriptions(db=None):
     """Auto-manage expired subscriptions and inactive accounts.

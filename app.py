@@ -1956,6 +1956,50 @@ def _check_admin():
 
     return False
 
+# X21.22: Radim Sleep — manual trigger + read-only stats
+@app.route('/api/admin/radim-sleep', methods=['POST', 'OPTIONS'])
+def admin_radim_sleep():
+    """Manually trigger the nightly memory-hygiene pass.
+
+    Same logic that runs at 3:00 AM via agent_loop.run_daily_cleanup.
+    Useful for testing the cleanup, recovering from a failed nightly run,
+    or one-off DB compaction.
+
+    Auth: X-Admin-Secret header OR JWT with admin role.
+    """
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    try:
+        from radim_sleep import run_sleep
+        result = run_sleep(app)
+        return jsonify({'success': True, 'result': result or {}}), 200
+    except Exception as e:
+        logger.error(f"admin_radim_sleep failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/memory-stats', methods=['GET', 'OPTIONS'])
+def admin_memory_stats():
+    """Read-only memory snapshot — row counts + oldest record per table.
+
+    Used by the admin dashboard to visualize Radim's memory state and
+    decide whether to trigger an extra sleep pass.
+    """
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    if request.method == 'OPTIONS':
+        return ('', 204)
+    try:
+        from radim_sleep import get_memory_stats
+        stats = get_memory_stats()
+        return jsonify({'success': True, **stats}), 200
+    except Exception as e:
+        logger.error(f"admin_memory_stats failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 # v383: Admin IoT simulator
 @app.route('/api/admin/iot-simulate', methods=['POST', 'OPTIONS'])
 def admin_iot_simulate():
