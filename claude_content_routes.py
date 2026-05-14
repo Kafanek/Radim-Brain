@@ -15,10 +15,32 @@ from flask import Blueprint, request, jsonify
 from auth_middleware import require_auth, optional_auth
 from rate_limiter import rate_limit
 
+# X21.17: i18n tables for news/weather/quiz/story prompts + fallbacks.
+from claude_content_i18n import (
+    normalize_lang,
+    NEWS_QUERIES, NEWS_SYSTEM, NEWS_USER, NEWS_SUMMARY,
+    NEWS_OFFLINE_SUMMARY, NEWS_FALLBACK,
+    WEATHER_SYSTEM, WEATHER_USER, WEATHER_FALLBACK_CONDITIONS,
+    QUIZ_SYSTEM, QUIZ_USER, QUIZ_FALLBACK,
+    STORY_SYSTEM, STORY_USER, STORY_FALLBACK,
+    STORY_ERROR_TITLE, STORY_ERROR_CONTENT,
+    t as _t,
+)
+
 logger = logging.getLogger(__name__)
 
 # Blueprint with same prefix as claude_bp — Flask allows multiple blueprints on same prefix
 claude_content_bp = Blueprint('claude_content', __name__, url_prefix='/api/claude')
+
+
+def _request_lang(data=None):
+    """X21.17: pick lang from body or Accept-Language header (cs default)."""
+    raw = None
+    if isinstance(data, dict):
+        raw = data.get('lang')
+    if not raw:
+        raw = (request.headers.get('Accept-Language') or '').split(',')[0]
+    return normalize_lang(raw)
 
 # ============================================================================
 # SHARED HELPERS (imported from claude_routes or defined locally)
@@ -37,14 +59,16 @@ def _get_claude_helpers():
 @claude_content_bp.route('/news', methods=['POST'])
 @optional_auth
 def get_news():
-    """📰 Získat aktuální české zprávy"""
+    """📰 Get current news in user's selected language (X21.17 i18n)."""
     get_claude_client, extract_text_from_response, get_today_info, is_credit_error, call_gemini_fallback, CLAUDE_MODEL = _get_claude_helpers()
     category = 'general'
     count = 5
+    lang = 'cs'
     try:
         data = request.get_json(silent=True) or {}
         category = data.get('category', 'general')
         count = data.get('count', 5)
+        lang = _request_lang(data)
 
         client = get_claude_client()
         info = get_today_info()
@@ -53,38 +77,21 @@ def get_news():
             return jsonify({
                 "success": True,
                 "category": category,
-                "articles": get_fallback_news(category),
-                "ai_summary": "Lokální zprávy (AI nedostupná)",
+                "articles": get_fallback_news(category, lang),
+                "ai_summary": _t(NEWS_OFFLINE_SUMMARY, lang),
                 "timestamp": datetime.utcnow().isoformat()
             })
 
-        category_queries = {
-            "politics": "české politické zprávy dnes",
-            "sports": "český sport zprávy hokej fotbal",
-            "health": "zdraví zprávy tipy pro seniory",
-            "culture": "kultura Praha divadlo koncerty",
-            "science": "věda technika zajímavosti Česko",
-            "local": "Praha zprávy doprava události",
-            "general": "hlavní české zprávy dnes"
-        }
-
-        query = category_queries.get(category, category_queries["general"])
-
-        system = f"""Vyhledej {count} aktuálních českých zpráv z kategorie: {category}.
-
-FORMÁT (pouze JSON pole):
-[
-  {{"title": "Titulek", "description": "Popis", "source": "Zdroj"}}
-]
-
-Dnešní datum: {info['date']}"""
+        query = _t(NEWS_QUERIES, lang, category) or _t(NEWS_QUERIES, lang, 'general')
+        system = _t(NEWS_SYSTEM, lang, count=count, category=category, date=info['date'])
+        user_msg = _t(NEWS_USER, lang, query=query)
 
         response = client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=2048,
             system=system,
             tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}],
-            messages=[{"role": "user", "content": f"Vyhledej zprávy: {query}"}]
+            messages=[{"role": "user", "content": user_msg}]
         )
 
         text = extract_text_from_response(response)
@@ -96,13 +103,13 @@ Dnešní datum: {info['date']}"""
             if json_match:
                 articles = json.loads(json_match.group())
         except Exception:
-            articles = [{"title": f"Zprávy z {category}", "description": text[:200], "source": "Claude AI"}]
+            articles = [{"title": f"News: {category}", "description": text[:200], "source": "Claude AI"}]
 
         return jsonify({
             "success": True,
             "category": category,
             "articles": articles,
-            "ai_summary": f"{len(articles)} zpráv ke dni {info['date']}",
+            "ai_summary": _t(NEWS_SUMMARY, lang, n=len(articles), date=info['date']),
             "timestamp": datetime.utcnow().isoformat()
         })
 
@@ -111,8 +118,10 @@ Dnešní datum: {info['date']}"""
         # Gemini fallback on credit errors
         if is_credit_error(e):
             info = get_today_info()
+            fallback_system = _t(NEWS_SYSTEM, lang, count=count, category=category, date=info['date'])
+            fallback_query = _t(NEWS_QUERIES, lang, category) or _t(NEWS_QUERIES, lang, 'general')
             gemini_text = call_gemini_fallback(
-                f"Vyhledej {count if 'count' in dir() else 5} aktuálních českých zpráv z kategorie: {category}. Dnešní datum: {info['date']}. Odpověz jako JSON pole [{{'title':'...','description':'...','source':'...'}}]",
+                f"{fallback_system}\n\n{_t(NEWS_USER, lang, query=fallback_query)}",
                 max_tokens=2048
             )
             if gemini_text:
@@ -124,7 +133,7 @@ Dnešní datum: {info['date']}"""
                             "success": True,
                             "category": category,
                             "articles": articles,
-                            "ai_summary": f"Zprávy via Gemini",
+                            "ai_summary": f"Gemini fallback",
                             "source": "gemini_fallback",
                             "timestamp": datetime.utcnow().isoformat()
                         })
@@ -133,7 +142,7 @@ Dnešní datum: {info['date']}"""
         return jsonify({
             "success": True,
             "category": category,
-            "articles": get_fallback_news(category),
+            "articles": get_fallback_news(category, lang),
             "timestamp": datetime.utcnow().isoformat()
         })
 
@@ -141,29 +150,31 @@ Dnešní datum: {info['date']}"""
 @claude_content_bp.route('/weather', methods=['GET', 'POST'])
 @optional_auth
 def get_weather():
-    """🌤️ Získat aktuální počasí"""
+    """🌤️ Get current weather in user's selected language (X21.17 i18n)."""
     get_claude_client, extract_text_from_response, get_today_info, is_credit_error, call_gemini_fallback, CLAUDE_MODEL = _get_claude_helpers()
+    data = {}
     if request.method == 'POST':
         data = request.get_json(silent=True) or {}
         location = data.get('city') or data.get('location', 'Praha')
     else:
         location = request.args.get('location', 'Praha')
+    lang = _request_lang(data)
 
     try:
         client = get_claude_client()
 
         if not client:
-            return jsonify(get_fallback_weather(location))
+            return jsonify(get_fallback_weather(location, lang))
 
-        system = """Vyhledej aktuální počasí a odpověz pouze JSON:
-{"temperature": 5, "condition": "Oblačno", "humidity": 75, "wind": 12, "forecast": "Odpoledne déšť."}"""
+        system = _t(WEATHER_SYSTEM, lang)
+        user_msg = _t(WEATHER_USER, lang, location=location)
 
         response = client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=512,
             system=system,
             tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 2}],
-            messages=[{"role": "user", "content": f"Aktuální počasí v {location}?"}]
+            messages=[{"role": "user", "content": user_msg}]
         )
 
         text = extract_text_from_response(response)
@@ -175,13 +186,13 @@ def get_weather():
             if json_match:
                 weather = json.loads(json_match.group())
         except Exception:
-            weather = {"condition": "Informace nedostupná"}
+            weather = {"condition": _t(WEATHER_FALLBACK_CONDITIONS, lang, 'unavailable')}
 
         return jsonify({
             "success": True,
             "location": location,
             "temperature": weather.get("temperature"),
-            "condition": weather.get("condition", "Neznámé"),
+            "condition": weather.get("condition", _t(WEATHER_FALLBACK_CONDITIONS, lang, 'unknown')),
             "humidity": weather.get("humidity"),
             "wind": weather.get("wind"),
             "forecast": weather.get("forecast"),
@@ -190,16 +201,17 @@ def get_weather():
 
     except Exception as e:
         logger.error(f"Weather error: {e}")
-        return jsonify(get_fallback_weather(location))
+        return jsonify(get_fallback_weather(location, lang))
 
 
 @claude_content_bp.route('/quiz', methods=['POST'])
 @optional_auth
 @rate_limit(max_requests=10, window_seconds=60, key_func='user')
 def generate_quiz():
-    """🎮 Vygenerovat kvíz"""
+    """🎮 Generate quiz in user's selected language (X21.17 i18n)."""
     get_claude_client, extract_text_from_response, get_today_info, is_credit_error, call_gemini_fallback, CLAUDE_MODEL = _get_claude_helpers()
     topic = 'general'
+    lang = 'cs'
     try:
         data = request.get_json(silent=True) or {}
         topic = data.get('topic', 'general')
@@ -208,14 +220,10 @@ def generate_quiz():
         # Hotfix: cap count at 7 (frontend uses 3/5/7) — anything more
         # makes Gemini exceed 22s timeout before Heroku router cuts.
         count = max(1, min(7, count))
+        lang = _request_lang(data)
 
-        system = f"""Vytvoř {count} kvízových otázek pro seniory.
-Téma: {topic}, Obtížnost: {difficulty}
-
-Krátké otázky, krátké odpovědi (max 60 znaků každá), krátké explanace.
-
-FORMÁT (pouze JSON):
-[{{"question": "Otázka?", "options": {{"A": "...", "B": "...", "C": "...", "D": "..."}}, "correct": "A", "explanation": "Vysvětlení."}}]"""
+        system = _t(QUIZ_SYSTEM, lang, count=count, topic=topic, difficulty=difficulty)
+        user_msg = _t(QUIZ_USER, lang, topic=topic)
 
         text = None
 
@@ -227,7 +235,7 @@ FORMÁT (pouze JSON):
                     model=CLAUDE_MODEL,
                     max_tokens=2048,
                     system=system,
-                    messages=[{"role": "user", "content": f"Vytvoř kvíz na téma: {topic}"}]
+                    messages=[{"role": "user", "content": user_msg}]
                 )
                 text = extract_text_from_response(response)
             except Exception as claude_err:
@@ -236,7 +244,7 @@ FORMÁT (pouze JSON):
         # Gemini fallback (1500 tokens to fit Heroku 30s budget for hard mode)
         if not text:
             gemini_text = call_gemini_fallback(
-                f"Vytvoř kvíz na téma: {topic}",
+                user_msg,
                 system,
                 1500
             )
@@ -255,7 +263,7 @@ FORMÁT (pouze JSON):
 
         # Static fallback if no AI response
         if not questions:
-            questions = get_fallback_quiz(topic)
+            questions = get_fallback_quiz(topic, lang)
 
         return jsonify({
             "success": True,
@@ -269,7 +277,7 @@ FORMÁT (pouze JSON):
         return jsonify({
             "success": True,
             "topic": topic,
-            "questions": get_fallback_quiz(topic),
+            "questions": get_fallback_quiz(topic, lang),
             "timestamp": datetime.utcnow().isoformat()
         })
 
@@ -278,23 +286,22 @@ FORMÁT (pouze JSON):
 @optional_auth
 @rate_limit(max_requests=10, window_seconds=60, key_func='user')
 def generate_story():
-    """📖 Vygenerovat příběh"""
+    """📖 Generate story in user's selected language (X21.17 i18n)."""
     get_claude_client, extract_text_from_response, get_today_info, is_credit_error, call_gemini_fallback, CLAUDE_MODEL = _get_claude_helpers()
     theme = 'nature'
+    lang = 'cs'
     try:
         data = request.get_json(silent=True) or {}
         theme = data.get('theme', 'nature')
         length = data.get('length', 'short')
         style = data.get('style', 'relaxing')
+        lang = _request_lang(data)
 
         length_words = {"short": "100-150", "medium": "200-300", "long": "400-500"}
+        words = length_words.get(length, '150')
 
-        system = f"""Vyprávěj {style} příběh pro seniory.
-Téma: {theme}, Délka: {length_words.get(length, '150')} slov.
-Česká jména a místa. Pozitivní a uklidňující.
-
-FORMÁT (pouze JSON):
-{{"title": "Název", "content": "Text příběhu..."}}"""
+        system = _t(STORY_SYSTEM, lang, style=style, theme=theme, length_words=words)
+        user_msg = _t(STORY_USER, lang, theme=theme)
 
         text = None
 
@@ -306,7 +313,7 @@ FORMÁT (pouze JSON):
                     model=CLAUDE_MODEL,
                     max_tokens=1024,
                     system=system,
-                    messages=[{"role": "user", "content": f"Vyprávěj příběh na téma: {theme}"}]
+                    messages=[{"role": "user", "content": user_msg}]
                 )
                 text = extract_text_from_response(response)
             except Exception as claude_err:
@@ -315,7 +322,7 @@ FORMÁT (pouze JSON):
         # Gemini fallback
         if not text:
             gemini_text = call_gemini_fallback(
-                f"Vyprávěj příběh na téma: {theme}",
+                user_msg,
                 system,
                 1024
             )
@@ -324,10 +331,11 @@ FORMÁT (pouze JSON):
 
         # Static fallback
         if not text:
+            fallback = STORY_FALLBACK.get(lang) or STORY_FALLBACK['cs']
             return jsonify({
                 "success": True,
-                "title": "Procházka parkem",
-                "content": "Bylo krásné jarní ráno. Pan Josef vyšel na svou oblíbenou procházku do parku. Slunce hřálo a ptáci zpívali. U rybníčku potkal svého starého přítele Karla a společně si povídali o starých časech. Byl to krásný den.",
+                "title": fallback["title"],
+                "content": fallback["content"],
                 "theme": theme,
                 "timestamp": datetime.utcnow().isoformat()
             })
@@ -338,11 +346,11 @@ FORMÁT (pouze JSON):
             if json_match:
                 story = json.loads(json_match.group())
         except Exception:
-            story = {"title": f"Příběh o {theme}", "content": text}
+            story = {"title": theme, "content": text}
 
         return jsonify({
             "success": True,
-            "title": story.get("title", "Příběh"),
+            "title": story.get("title", theme),
             "content": story.get("content", text),
             "theme": theme,
             "timestamp": datetime.utcnow().isoformat()
@@ -352,8 +360,8 @@ FORMÁT (pouze JSON):
         logger.error(f"Story error: {e}")
         return jsonify({
             "success": False,
-            "title": "Chyba",
-            "content": "Nepodařilo se vytvořit příběh.",
+            "title": _t(STORY_ERROR_TITLE, lang),
+            "content": _t(STORY_ERROR_CONTENT, lang),
             "theme": theme,
             "timestamp": datetime.utcnow().isoformat()
         })
@@ -363,53 +371,29 @@ FORMÁT (pouze JSON):
 # FALLBACK DATA
 # ============================================================================
 
-def get_fallback_news(category):
-    """Lokální fallback zprávy"""
-    news = {
-        "politics": [
-            {"title": "Vláda schválila sociální podporu", "description": "Rozšíření příspěvků pro seniory.", "source": "ČTK"},
-            {"title": "Prezident Pavel v Bruselu", "description": "Summit EU o bezpečnosti.", "source": "iDNES"}
-        ],
-        "sports": [
-            {"title": "Hokejisté vyhráli turnaj", "description": "Zlatá medaile pro ČR.", "source": "Sport.cz"},
-            {"title": "Sparta v Lize mistrů", "description": "Vítězství 2:1.", "source": "iSport"}
-        ],
-        "health": [
-            {"title": "Očkování proti chřipce", "description": "Zdarma pro seniory 65+.", "source": "VZP"},
-            {"title": "Prevence je základ", "description": "Pravidelné prohlídky.", "source": "MZ ČR"}
-        ],
-        "culture": [
-            {"title": "Národní divadlo: premiéra", "description": "Prodaná nevěsta.", "source": "Kultura.cz"},
-            {"title": "Výstava Muchy", "description": "Retrospektiva v Praze.", "source": "Aktuálně.cz"}
-        ],
-        "science": [
-            {"title": "Nová exoplaneta", "description": "Objev českých astronomů.", "source": "Akademie věd"},
-            {"title": "AI v medicíně", "description": "Diagnostika s 95% přesností.", "source": "Tech.cz"}
-        ],
-        "local": [
-            {"title": "Metro D se staví", "description": "Otevření v 2027.", "source": "Praha.eu"},
-            {"title": "Farmářské trhy", "description": "Každou sobotu.", "source": "Pražský deník"}
-        ]
-    }
-    return news.get(category, news["politics"])
+def get_fallback_news(category, lang='cs'):
+    """Local fallback news per language (X21.17)."""
+    bucket = NEWS_FALLBACK.get(lang) or NEWS_FALLBACK['cs']
+    return bucket.get(category) or bucket.get('politics') or []
 
 
-def get_fallback_weather(location):
-    """Lokální fallback počasí"""
+def get_fallback_weather(location, lang='cs'):
+    """Local fallback weather per language (X21.17)."""
     month = datetime.now().month
+    conds = WEATHER_FALLBACK_CONDITIONS.get(lang) or WEATHER_FALLBACK_CONDITIONS['cs']
 
     if month in [12, 1, 2]:
         temp = random.randint(-5, 3)
-        condition = "Zataženo"
+        condition = conds['winter']
     elif month in [3, 4, 5]:
         temp = random.randint(8, 16)
-        condition = "Polojasno"
+        condition = conds['spring']
     elif month in [6, 7, 8]:
         temp = random.randint(22, 30)
-        condition = "Jasno"
+        condition = conds['summer']
     else:
         temp = random.randint(6, 14)
-        condition = "Oblačno"
+        condition = conds['autumn']
 
     return {
         "success": True,
@@ -422,22 +406,9 @@ def get_fallback_weather(location):
     }
 
 
-def get_fallback_quiz(topic):
-    """Lokální fallback kvíz"""
-    return [
-        {
-            "question": "Který hrad je největší na světě?",
-            "options": {"A": "Pražský hrad", "B": "Windsor", "C": "Versailles", "D": "Kreml"},
-            "correct": "A",
-            "explanation": "Pražský hrad je podle Guinessovy knihy rekordů největší hradní komplex."
-        },
-        {
-            "question": "Která řeka protéká Prahou?",
-            "options": {"A": "Morava", "B": "Vltava", "C": "Labe", "D": "Odra"},
-            "correct": "B",
-            "explanation": "Vltava je nejdelší řeka v České republice."
-        }
-    ]
+def get_fallback_quiz(topic, lang='cs'):
+    """Local fallback quiz per language (X21.17)."""
+    return QUIZ_FALLBACK.get(lang) or QUIZ_FALLBACK['cs']
 
 
 logger.info("✅ Claude Content Blueprint loaded - news/weather/quiz/story endpoints ready")
