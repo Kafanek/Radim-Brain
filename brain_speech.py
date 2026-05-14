@@ -132,8 +132,14 @@ def compute_unified_speech(C, alpha, mode, user_id=None, ant_params=None,
         pause_ms = 900      # 1618 → 900 — calming but not endless
         pitch_st = 4
         phrasing = "single_command"
-        style = "calm"
-        styledegree = "1.0"
+        # X21.26: was style="calm" — but Azure cs-CZ-AntoninNeural does NOT
+        # support that style (see voice_filter.py:52-58). Setting it caused
+        # Azure to silently drop the override and render CRISIS audio with
+        # the neutral default voice. Use "empathetic" with high degree —
+        # matches voice_filter.VOICE_PROFILES.CRISIS — so the empathetic-
+        # slow rendering actually reaches Azure.
+        style = "empathetic"
+        styledegree = "2.0"
 
     # === Layer 2: Anticipation Engine fine-tuning (30% blend) ===
     if ant_params:

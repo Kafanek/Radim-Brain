@@ -38,7 +38,9 @@ SENIOR_DEFAULTS = {
 
 EMOTION_STYLES = {
     'friendly': ('friendly', '1.2'),
-    'calm': ('calm', '1.0'),
+    # X21.26: 'calm' is NOT supported by cs-CZ-AntoninNeural (Azure silently
+    # drops it). Map it to 'empathetic' so the override actually takes effect.
+    'calm': ('empathetic', '1.5'),
     'cheerful': ('cheerful', '1.3'),
     'empathetic': ('empathetic', '1.1'),
     'serious': ('serious', '0.9'),
@@ -104,9 +106,15 @@ def get_anticipation_tts(C, alpha):
 
 
 def apply_state_style(state):
-    """Return (style, styledegree) overrides based on anticipation/brain state"""
+    """Return (style, styledegree) overrides based on anticipation/brain state.
+
+    X21.26: CRISIS used to return 'calm' / '1.0' — but Azure cs-CZ-AntoninNeural
+    silently drops that style, so CRISIS audio came out as the neutral default
+    instead of the intended slow-and-empathetic rendering. Now mirrors
+    voice_filter.VOICE_PROFILES.CRISIS: 'empathetic' / '1.5'.
+    """
     if state == 'CRISIS':
-        return 'calm', '1.0'
+        return 'empathetic', '1.5'
     elif state == 'ALERT':
         return 'empathetic', '1.1'
     return None, None
