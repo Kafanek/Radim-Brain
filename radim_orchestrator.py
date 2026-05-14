@@ -1578,19 +1578,63 @@ def radim_chat():
 # INTERNAL CHAT API (v387 — for WhatsApp, proactive calls, etc.)
 # ============================================
 
-def radim_chat_internal(message, user_id=None, mode="senior"):
+def radim_chat_internal(message, user_id=None, mode="senior", lang=None):
     """Call Radim chat pipeline without HTTP request context.
 
     Used by: WhatsApp webhook, proactive calls, scheduled reminders.
 
+    X21.18: `lang` param (cs/sk/pl/hu/en). When None and user_id given,
+    falls back to user's preferred app language from profile. When still
+    unknown, defaults to 'cs'. Fixes a NameError bug introduced in X21.16
+    where this function referenced an undefined `chat_lang` variable.
+
     Returns:
         dict: {success, response, intent}
     """
+    # X21.18: localized error messages used by all early-return paths below.
+    _ERR_NO_MSG = {
+        'cs': "Promiňte, nerozuměl jsem.",
+        'sk': "Prepáčte, nerozumel som.",
+        'pl': "Przepraszam, nie zrozumiałem.",
+        'hu': "Elnézést, nem értettem.",
+        'en': "Sorry, I didn't catch that.",
+    }
+    _ERR_RETRY = {
+        'cs': "Omlouvám se, zkuste to prosím později.",
+        'sk': "Ospravedlňujem sa, skúste to prosím neskôr.",
+        'pl': "Przepraszam, spróbuj ponownie później.",
+        'hu': "Sajnálom, kérem próbálja meg később.",
+        'en': "Sorry, please try again later.",
+    }
+    _ERR_GENERIC = {
+        'cs': "Nastala chyba, omlouvám se.",
+        'sk': "Nastala chyba, ospravedlňujem sa.",
+        'pl': "Wystąpił błąd, przepraszam.",
+        'hu': "Hiba történt, elnézést.",
+        'en': "Something went wrong, sorry.",
+    }
+
     try:
+        # Resolve lang BEFORE early return so error messages can be localized.
+        if lang not in ('cs', 'sk', 'pl', 'hu', 'en'):
+            lang = None
+        if not lang and user_id:
+            try:
+                from memory_helpers import db_load_profile
+                _profile = db_load_profile(str(user_id)) or {}
+                _plang = _profile.get('lang') or _profile.get('language')
+                if _plang in ('cs', 'sk', 'pl', 'hu', 'en'):
+                    lang = _plang
+            except Exception:
+                pass
+        if not lang:
+            lang = 'cs'
+
         if not message:
-            return {"success": False, "response": "Promiňte, nerozuměl jsem.", "intent": None}
+            return {"success": False, "response": _ERR_NO_MSG[lang], "intent": None}
 
         user_id = user_id or "anonymous"
+
 
         # Intent resolver first
         text_response = None
@@ -1630,11 +1674,11 @@ def radim_chat_internal(message, user_id=None, mode="senior"):
 
             text_response, _ = call_gemini_whatsapp(
                 message, {}, mode, personalized, history, "", None,
-                lang=chat_lang
+                lang=lang
             )
 
         if not text_response:
-            text_response = "Omlouvám se, zkuste to prosím později."
+            text_response = _ERR_RETRY[lang]
 
         # Record to memory + compute brain state
         brain_mode = None
@@ -1716,7 +1760,9 @@ def radim_chat_internal(message, user_id=None, mode="senior"):
 
     except Exception as e:
         logger.error(f"radim_chat_internal error: {e}")
-        return {"success": False, "response": "Nastala chyba, omlouvám se.", "intent": None}
+        # lang may have been resolved by now; fall back to cs if NameError early.
+        _safe_lang = lang if (isinstance(lang, str) and lang in _ERR_GENERIC) else 'cs'
+        return {"success": False, "response": _ERR_GENERIC[_safe_lang], "intent": None}
 
 
 # ============================================
