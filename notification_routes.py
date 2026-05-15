@@ -301,28 +301,47 @@ def sos_trigger():
     except Exception as e:
         logger.debug(f"SOS audit log: {e}")
 
-    # 3. Optional: fire crisis flow (HA mock + proactive call)
+    # 3. Crisis flow — HA actions + FULL escalation (SMS, outbound call, push)
+    # X21.38 SAFETY FIX: was only doing _ha_crisis_actions with severity='crisis'
+    # (lowercase) — but _ha_crisis_actions compares to CRISIS='CRISIS' (uppercase)
+    # at agent_loop.py:2985, so it FAILED SILENTLY → no lights, no door unlock.
+    # And it never called emergency_with_retry — meaning the red SOS button
+    # only sent an in-app push. If family had notifications muted, NOTHING
+    # reached them. Now: severity normalized to uppercase + full escalation.
     crisis_result = None
     if trigger_crisis:
+        crisis_result = {"ha_actions_fired": False, "escalation_fired": False}
         try:
-            # Reuse admin_crisis_demo logic without admin check
             from agent_loop import _ha_crisis_actions
             obs = {
                 "user_id": senior_id, "observation_type": "sos_triggered",
-                "severity": "crisis", "message": body,
+                "severity": "CRISIS",  # X21.38: was "crisis" (lowercase) — fails == "CRISIS"
+                "message": body,
             }
-            ha_result = None
             try:
                 ha_result = _ha_crisis_actions(senior_id, obs)
+                crisis_result["ha_actions_fired"] = True
+                crisis_result["ha_result"] = ha_result
             except Exception as e:
-                logger.debug(f"HA crisis actions (live): {e}")
+                logger.warning(f"SOS HA crisis actions failed: {e}")
 
-            crisis_result = {
-                "ha_actions_fired": bool(ha_result),
-                "ha_result": ha_result,
-            }
+            # X21.38: fire the REAL escalation chain (SMS + outbound call + push)
+            try:
+                from agent_bridge import emergency_with_retry
+                from flask import current_app
+                esc = emergency_with_retry(
+                    user_id=str(senior_id),
+                    trigger=f"SOS button ({source})",
+                    app=current_app,
+                    max_retries=3,
+                )
+                crisis_result["escalation_fired"] = True
+                crisis_result["escalation"] = esc
+            except Exception as e:
+                logger.error(f"SOS emergency_with_retry failed: {e}")
+                crisis_result["escalation_error"] = str(e)[:200]
         except Exception as e:
-            logger.debug(f"SOS crisis flow: {e}")
+            logger.error(f"SOS crisis flow outer error: {e}")
 
     return jsonify({
         "success": True,

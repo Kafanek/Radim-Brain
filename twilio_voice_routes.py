@@ -210,14 +210,34 @@ def twilio_gather_webhook():
             if priority["priority"] == "CRITICAL" and priority["bypass_ai"]:
                 logger.warning(f"🚨 CRITICAL SAFETY: '{speech_result}' → bypass AI [{priority['reason']}]")
                 say_help = twiml_say("Rozumím, potřebujete pomoc. Zůstaňte v klidu, volám pomoc a informuji rodinu.")
-                # Trigger escalation in background
+                # X21.38 SAFETY FIX: was only calling _alert_caregiver (in-app
+                # push + SocketIO). _crisis_escalate was imported but never
+                # invoked — meaning SMS to caregiver + crisis_events audit
+                # row never happened. If family had notifications muted, the
+                # senior's phone "pomoc" reached no one. Now: BOTH fire,
+                # plus emergency_with_retry for the full escalation chain
+                # (outbound call to family + HA lights + door unlock).
                 try:
                     from agent_loop import _alert_caregiver, _crisis_escalate
                     obs = {"type": "voice_crisis", "severity": "CRISIS",
-                           "message": f"Hlasová krize: '{speech_result}'", "details": {"confidence": confidence}}
+                           "message": f"Hlasová krize: '{speech_result}'",
+                           "details": {"confidence": confidence, "recent_avg": 0}}
                     _alert_caregiver(_user_id, obs, None)
-                except Exception:
-                    pass
+                    _crisis_escalate(_user_id, obs, None)  # SMS + crisis_events
+                except Exception as e:
+                    logger.error(f"voice crisis _alert/escalate failed: {e}")
+                # Fire the full escalation chain (outbound call + HA + retries)
+                try:
+                    from agent_bridge import emergency_with_retry
+                    from flask import current_app
+                    emergency_with_retry(
+                        user_id=str(_user_id),
+                        trigger=f"voice crisis: '{speech_result[:80]}'",
+                        app=current_app,
+                        max_retries=3,
+                    )
+                except Exception as e:
+                    logger.error(f"voice crisis emergency_with_retry failed: {e}")
                 return twiml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     {say_help}

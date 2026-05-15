@@ -9,7 +9,7 @@ import uuid
 import logging
 import requests as http_requests
 from datetime import datetime
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app  # X21.38: current_app for emergency_with_retry
 
 from database import get_db_for_flask
 from auth_middleware import require_auth
@@ -497,16 +497,84 @@ def admin_system():
 @admin_bp.route('/api/emergency', methods=['POST', 'OPTIONS'])
 @require_auth
 def api_emergency():
+    """X21.38: was a NO-OP — logged to console + returned success based on
+    the request's contacts count, pretending to have notified them. Frontend
+    `RadimEmergencySystem.notifyBackend` POSTs `emergency_triggered/confirmed/
+    cancelled` here. The UI renders green checkmarks for "✅ Kontaktován"
+    based on the success response — but no SMS/call/HA-actions/crisis_events
+    were actually fired.
+
+    SAFETY-CRITICAL FIX: now writes a `crisis_events` audit row + fires
+    `emergency_with_retry` (the full escalation chain: log → HA lights →
+    outbound call → SMS → push) when event == 'emergency_confirmed' or
+    'emergency_triggered'. `emergency_cancelled` is logged but doesn't
+    escalate.
+    """
     if request.method == 'OPTIONS':
         return '', 204
     data = request.get_json(silent=True) or {}
     event = data.get('event', 'unknown')
     user_id = data.get('user_id', 'unknown')
     timestamp = data.get('timestamp', now_iso())
-    logger.info(f"[EMERGENCY] {event} from {user_id} at {timestamp}")
+    source = data.get('source') or 'frontend_emergency_system'
     contacts = data.get('contacts', [])
+
+    logger.warning(f"🚨 [EMERGENCY] event={event} user={user_id} ts={timestamp} source={source}")
+
+    # cancellation path — just log + audit, no escalation
+    if event == 'emergency_cancelled':
+        try:
+            from memory_helpers import audit_log
+            audit_log(user_id=str(user_id), action='emergency_cancelled',
+                      resource='admin_routes', detail=f'source={source}')
+        except Exception:
+            pass
+        return jsonify({'success': True, 'event': event, 'cancelled': True}), 200
+
+    # Confirmed / triggered emergency — REAL escalation
+    crisis_id = None
+    try:
+        from database import db_context, db_insert
+        with db_context(commit=True) as db:
+            crisis_id = db_insert(
+                db, 'crisis_events',
+                ['user_id', 'message_excerpt', 'created_at'],
+                [str(user_id),
+                 f"Frontend emergency: {event} (source={source})",
+                 datetime.utcnow().isoformat()]
+            )
+    except Exception as e:
+        logger.error(f"emergency: crisis_events insert failed: {e}")
+
+    # Fire the full escalation chain (SMS + call + HA + push, with retries).
+    escalation_result = None
+    try:
+        from agent_bridge import emergency_with_retry
+        escalation_result = emergency_with_retry(
+            user_id=str(user_id),
+            trigger=f"frontend emergency ({event})",
+            app=current_app,
+            max_retries=3,
+        )
+    except Exception as e:
+        logger.error(f"emergency: emergency_with_retry failed: {e}")
+
+    # Audit
+    try:
+        from memory_helpers import audit_log
+        audit_log(user_id=str(user_id), action='emergency_triggered',
+                  resource='admin_routes',
+                  detail=f'event={event} source={source} crisis_id={crisis_id}')
+    except Exception:
+        pass
+
     return jsonify({
-        'success': True, 'event': event, 'user_id': user_id,
-        'timestamp': timestamp, 'contacts_notified': len(contacts),
-        'message': 'Emergency logged successfully'
+        'success': True,
+        'event': event,
+        'user_id': user_id,
+        'timestamp': timestamp,
+        'crisis_event_id': crisis_id,
+        'contacts_in_request': len(contacts),
+        'escalation': escalation_result or {'status': 'attempted'},
+        'message': 'Emergency escalation triggered',
     }), 200

@@ -2980,7 +2980,11 @@ def _ha_crisis_actions(user_id, obs):
         if not ha_client.connected:
             return
 
-        severity = obs.get("severity", "")
+        # X21.38: normalize severity case. SOS button used to pass "crisis"
+        # (lowercase) and the == "CRISIS" comparison below failed silently —
+        # no lights, no door unlock. Defense in depth even though the caller
+        # was also fixed.
+        severity = (obs.get("severity") or "").upper()
         obs_type = obs.get("type", "")
 
         if severity == CRISIS:
