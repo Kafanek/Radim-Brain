@@ -107,7 +107,22 @@ def transcribe_speech():
 
         stt_url = f"https://{AZURE_SPEECH_REGION}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1"
 
-        params = {'language': 'cs-CZ', 'format': 'detailed'}
+        # X21.35: respect app language. X21.15 made the frontend webkit STT
+        # locale-aware (UnifiedVoiceManager), but Azure-server STT was still
+        # hard-pinned to cs-CZ — so Slovak/Polish/Hungarian/English users got
+        # Czech transcription on voice-notes and smart-home commands. Now
+        # accepts `lang` from form/JSON body or Accept-Language header,
+        # mapped to BCP-47, allowlist-validated.
+        _BCP47 = {'cs': 'cs-CZ', 'sk': 'sk-SK', 'pl': 'pl-PL', 'hu': 'hu-HU', 'en': 'en-US'}
+        _raw_lang = None
+        if request.is_json and isinstance(request.json, dict):
+            _raw_lang = request.json.get('lang')
+        if not _raw_lang and 'audio' in request.files:
+            _raw_lang = request.form.get('lang')
+        if not _raw_lang:
+            _raw_lang = (request.headers.get('Accept-Language') or '').split(',')[0].split('-')[0].strip().lower()
+        stt_lang = _BCP47.get((_raw_lang or '').lower(), 'cs-CZ')
+        params = {'language': stt_lang, 'format': 'detailed'}
 
         headers = {
             'Ocp-Apim-Subscription-Key': AZURE_SPEECH_KEY,
