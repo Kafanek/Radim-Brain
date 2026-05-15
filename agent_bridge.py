@@ -224,7 +224,9 @@ def evaluate_proactive_observation(user_id, observation):
                 'reason': decision.reason
             }
 
-    except (ImportError, Exception) as e:
+    except Exception as e:
+        # X21.31: was `except (ImportError, Exception)` — ImportError is a
+        # subclass of Exception, so the tuple was redundant. Cleaner this way.
         logger.debug(f"Coordinator bridge skipped: {e}")
 
     return None
@@ -264,7 +266,12 @@ def emergency_with_retry(user_id, trigger, app=None, max_retries=3):
     # on ValueError; only retry transient failures (network, timeout,
     # third-party API hiccups → RuntimeError, ConnectionError, requests
     # exceptions, etc.).
-    permanent_error_types = (ValueError, AttributeError)
+    # X21.31: removed AttributeError from this tuple. On the HA client path
+    # (_emergency_ha), AttributeError is usually transient — a momentarily
+    # disconnected/half-initialized client, not a config bug. Treating it
+    # as permanent was disabling the retry that was supposed to recover the
+    # path. ValueError stays (config-level errors that won't fix on retry).
+    permanent_error_types = (ValueError,)
 
     results = {}
     for action_name, action_fn in actions:

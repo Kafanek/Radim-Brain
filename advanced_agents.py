@@ -785,73 +785,14 @@ def agent_thresholds(user_id):
 # v10.34 — proxy around browser_agent module so it shows up here
 # ═══════════════════════════════════════════════════════════════════
 
-class BrowserAgent:
-    """Safe read-only web access for internal AI agents.
-
-    Usage (from radim_orchestrator or any agent):
-        result = BrowserAgent.research("Počasí v Praze", user_id="...")
-        if result['success']:
-            context = result['summary']  # text for AI context injection
-
-    All calls honor ENABLE_BROWSER_AGENT feature flag in browser_agent module.
-    Every call is audit-logged to agent_observations.
-    """
-
-    @staticmethod
-    def open_url(url, user_id=None):
-        """Open a URL — thin wrapper around browser_agent.open_page."""
-        try:
-            from browser_agent import open_page
-            return open_page(url, user_id=user_id)
-        except ImportError:
-            return {'success': False, 'error_code': 'NOT_AVAILABLE',
-                    'error': 'Browser agent module not installed'}
-
-    @staticmethod
-    def research(url, user_id=None, max_chars=2000):
-        """Open URL and return a compact summary suitable for AI context.
-
-        Returns:
-            {success, summary, title, url, links_count} or error dict.
-        """
-        result = BrowserAgent.open_url(url, user_id=user_id)
-        if not result.get('success'):
-            return result
-
-        main = result.get('main_content', '')
-        summary = main[:max_chars]
-        if len(main) > max_chars:
-            # Cut at sentence boundary if possible
-            cut_at = max(summary.rfind('. '), summary.rfind('? '), summary.rfind('! '))
-            if cut_at > max_chars // 2:
-                summary = summary[:cut_at + 1]
-            summary += ' […]'
-
-        return {
-            'success': True,
-            'title': result.get('title', ''),
-            'url': result.get('final_url', result.get('url', '')),
-            'summary': summary,
-            'links_count': len(result.get('links', [])),
-            'session_id': result.get('session_id'),
-            'language': result.get('metadata', {}).get('language', 'cs'),
-        }
-
-    @staticmethod
-    def find(session_id, query):
-        try:
-            from browser_agent import find_on_page
-            return find_on_page(session_id, query)
-        except ImportError:
-            return {'success': False, 'error_code': 'NOT_AVAILABLE'}
-
-    @staticmethod
-    def close(session_id):
-        try:
-            from browser_agent import close_session
-            return close_session(session_id)
-        except ImportError:
-            return {'success': False, 'error_code': 'NOT_AVAILABLE'}
+# X21.31: BrowserAgent class retired — 67 lines of static-method proxy
+# around the browser_agent module that no code ever instantiated or
+# invoked. Verified zero callers across the repo for BrowserAgent.research(/
+# .open_url(/.find(/.close( and BrowserAgent( construction.
+# The dashboard label maps in app.py:3698-3810 use "BrowserAgent" only
+# as a string identifier — they never construct or invoke the class.
+# Real callers import directly from browser_agent (open_page,
+# find_on_page, close_session).
 
 
 # ═══════════════════════════════════════════════════════════════════

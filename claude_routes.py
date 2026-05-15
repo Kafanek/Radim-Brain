@@ -91,7 +91,14 @@ def get_nameday():
 @require_auth
 @rate_limit(max_requests=30, window_seconds=60, key_func='user')
 def chat_with_radim():
-    """Hlavni chat endpoint s Claude + Web Search"""
+    """Hlavni chat endpoint s Claude + Web Search."""
+    # X21.31: pre-init names used in the `except` Gemini fallback branch.
+    # If request.get_json() ever raises (RequestEntityTooLarge bypasses
+    # silent=True), or any later step before `message`/`user_id` are bound
+    # fails, the except branch used to hit NameError on `message` —
+    # same class of bug as X21.18's chat_lang regression.
+    message = ''
+    user_id = 'anonymous'
     try:
         data = request.get_json(silent=True) or {}
         message = data.get('message', '')

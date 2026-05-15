@@ -120,22 +120,21 @@ except ImportError:
 try:
     from voice_learning import (
         get_voice_prefs as _get_voice_prefs,
-        save_voice_prefs as _save_voice_prefs,
         record_voice_feedback as _record_voice_feedback,
-        DEFAULT_PREFS as _DEFAULT_VOICE_PREFS,
+        # X21.31: dropped save_voice_prefs and DEFAULT_PREFS — imported but
+        # never called anywhere in this file (verified by grep).
     )
     _TTS_LEARNING = True
 except ImportError:
     _TTS_LEARNING = False
-    _DEFAULT_VOICE_PREFS = {}
 
 # ─── Agent bus (shared intelligence with other app agents) ──────────
 try:
     from agent_bus import (
         emit as _bus_emit,
         recent as _bus_recent,
-        context as _bus_context,
         dedupe as _bus_dedupe,
+        # X21.31: dropped `context as _bus_context` — never called.
     )
     _AGENT_BUS = True
 except ImportError:
@@ -148,11 +147,8 @@ try:
 except ImportError:
     _RTCF_BEAT = False
 
-try:
-    from rtcf_bridge import enhance_with_rtcf as _enhance_rtcf
-    _RTCF_BRIDGE = True
-except ImportError:
-    _RTCF_BRIDGE = False
+# X21.31: rtcf_bridge.enhance_with_rtcf was imported but never invoked.
+# Module-level flag _RTCF_BRIDGE was checked nowhere either. Both removed.
 
 # ─── Komunikace module (32 medical scenarios + topic/mood) ──────────
 try:
@@ -231,11 +227,9 @@ try:
 except ImportError:
     _LEGACY_DISTILL = False
 
-try:
-    from experience_routes import _calc_senior_net as _exp_calc_net
-    _EXP_HELPERS = True
-except ImportError:
-    _EXP_HELPERS = False
+# X21.31: experience_routes._calc_senior_net was imported as _exp_calc_net
+# but never called. _EXP_HELPERS flag was set but never read either.
+# Both removed.
 
 # ─── Medical Team + Telemedicine ───────────────────────────────────
 try:
@@ -393,11 +387,9 @@ except ImportError:
     _CARE_PLAN = False
 
 try:
-    from relationship_engine import (
-        identify_relationship as _identify_rel,
-        load_relationship as _load_rel,
-        compute_trust as _compute_trust,
-    )
+    from relationship_engine import load_relationship as _load_rel
+    # X21.31: dropped identify_relationship + compute_trust — never called.
+    # Only _load_rel and _RELATIONSHIP flag are referenced (at line ~5515).
     _RELATIONSHIP = True
 except ImportError:
     _RELATIONSHIP = False
@@ -3267,6 +3259,34 @@ def _tool_get_voice_memory(senior_id):
         return {"error": str(e)[:200]}
 
 
+def _pick_mode_for_senior(senior_id, default='HARMONY'):
+    """X21.31: shared brain-mode lookup for TTS tools.
+
+    Previously duplicated inline in _tool_compose_ssml and
+    _tool_generate_voice_audio — same 14-line SELECT + fallback ladder.
+    Centralised so that if we ever need to differentiate (e.g., default
+    to ALERT for safety-flagged seniors), both call sites pick it up.
+
+    Returns one of: 'HARMONY' | 'ALERT' | 'CRISIS'.
+    Always returns a valid string — never None — caller does not need
+    to apply its own fallback.
+    """
+    if not _DB:
+        return default
+    try:
+        with db_context() as db:
+            row = db.execute("""
+                SELECT mode FROM brain_states WHERE user_id = ?
+                ORDER BY created_at DESC LIMIT 1
+            """, (str(senior_id),)).fetchone()
+        if row:
+            vals = _row_to_list(row)
+            return vals[0] or default
+    except Exception:
+        pass
+    return default
+
+
 def _tool_compose_ssml(senior_id, text, mode=None):
     """Compose SSML for given text WITHOUT calling Azure (no $ cost).
 
@@ -3285,21 +3305,8 @@ def _tool_compose_ssml(senior_id, text, mode=None):
     if not text or len(text.strip()) == 0:
         return {"error": "empty text"}
     try:
-        # Auto-pick mode from latest brain state if not specified
-        if mode is None and _DB:
-            try:
-                with db_context() as db:
-                    row = db.execute("""
-                        SELECT mode FROM brain_states WHERE user_id = ?
-                        ORDER BY created_at DESC LIMIT 1
-                    """, (str(senior_id),)).fetchone()
-                if row:
-                    vals = _row_to_list(row)
-                    mode = vals[0] or 'HARMONY'
-                else:
-                    mode = 'HARMONY'
-            except Exception:
-                mode = 'HARMONY'
+        if mode is None:
+            mode = _pick_mode_for_senior(senior_id)
         mode = mode or 'HARMONY'
 
         ssml = _build_ssml(text[:500], mode=mode,
@@ -3347,18 +3354,8 @@ def _tool_generate_voice_audio(senior_id, text, mode=None):
         return {"error": f"text too long ({len(text)} chars > 800 max)"}
 
     try:
-        if mode is None and _DB:
-            try:
-                with db_context() as db:
-                    row = db.execute("""
-                        SELECT mode FROM brain_states WHERE user_id = ?
-                        ORDER BY created_at DESC LIMIT 1
-                    """, (str(senior_id),)).fetchone()
-                if row:
-                    vals = _row_to_list(row)
-                    mode = vals[0] or 'HARMONY'
-            except Exception:
-                pass
+        if mode is None:
+            mode = _pick_mode_for_senior(senior_id)
         mode = mode or 'HARMONY'
 
         audio_bytes = _gen_azure_tts(text, mode=mode, user_id=str(senior_id))
