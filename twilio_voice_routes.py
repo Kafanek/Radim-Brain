@@ -915,6 +915,16 @@ def whatsapp_incoming():
     if len(response_text) > 1500:
         response_text = response_text[:1497] + "..."
 
+    # X21.42 USER-REPORTED BUG FIX: persist to chat_messages so the senior
+    # can see this WhatsApp conversation in the Komunikace module after
+    # the fact (same fix as for Twilio Voice — see twilio_voice_helpers).
+    if user_id:
+        try:
+            from twilio_voice_helpers import _persist_phone_conversation_turn
+            _persist_phone_conversation_turn(user_id, body, response_text, channel='whatsapp')
+        except Exception as e:
+            logger.warning(f"💬 WhatsApp persist failed: {e}")
+
     # TwiML response
     twiml = f'<Response><Message>{xml_escape(response_text)}</Message></Response>'
     return twiml, 200, {'Content-Type': 'text/xml'}

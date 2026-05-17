@@ -438,11 +438,133 @@ def twiml_response(twiml_xml):
     return Response(twiml_xml, content_type="text/xml")
 
 
+def _persist_phone_conversation_turn(senior_id, user_text, ai_text, channel='voice'):
+    """X21.42: persist a phone-call turn into chat_messages so the senior
+    can see the conversation in the Komunikace module after hanging up.
+
+    Was missing entirely — Twilio Voice + WhatsApp stored dialogue only in
+    the in-memory active_calls[call_sid]["history"] dict, so once the call
+    ended the senior had no record of what Radim said. That's the exact
+    "nevidím ... konverzaci na telefonu" symptom in the user-reported bug.
+
+    Strategy: find-or-create a 1:1 conversation between senior_id and the
+    well-known pseudo-participant 'radim', insert two messages (user turn
+    + AI turn), update conversation last_message, emit socketio new_message
+    so the Komunikace module live-updates if the senior happens to be
+    looking.
+
+    Fails silently on any error — must NEVER block the phone conversation.
+    """
+    if not senior_id or (not user_text and not ai_text):
+        return
+    try:
+        from database import db_context, is_postgres
+        import json as _json
+        import uuid as _uuid
+
+        senior_id = str(senior_id)
+        now = datetime.utcnow().isoformat()
+
+        with db_context(commit=True) as db:
+            # Find existing 1:1 senior↔radim conversation, or create one.
+            # `participants` is a JSON array of user_ids. We look for the
+            # canonical 1:1 type='direct' between senior and 'radim'.
+            try:
+                if is_postgres():
+                    row = db.execute(
+                        "SELECT id FROM chat_conversations "
+                        "WHERE type = 'direct' AND participants::text LIKE ? "
+                        "AND participants::text LIKE ? LIMIT 1",
+                        (f'%"{senior_id}"%', '%"radim"%')
+                    ).fetchone()
+                else:
+                    row = db.execute(
+                        "SELECT id FROM chat_conversations "
+                        "WHERE type = 'direct' AND participants LIKE ? "
+                        "AND participants LIKE ? LIMIT 1",
+                        (f'%"{senior_id}"%', '%"radim"%')
+                    ).fetchone()
+                conv_id = row['id'] if row else None
+            except Exception:
+                conv_id = None
+
+            if not conv_id:
+                conv_id = 'rd_' + _uuid.uuid4().hex[:12]
+                db.execute(
+                    "INSERT INTO chat_conversations "
+                    "(id, participants, type, name, created_at, updated_at) "
+                    "VALUES (?, ?, 'direct', 'Radim', ?, ?)",
+                    (conv_id, _json.dumps([senior_id, 'radim']), now, now)
+                )
+
+            # Insert user turn (if any text)
+            if user_text:
+                msg_id = 'm_' + _uuid.uuid4().hex[:12]
+                db.execute(
+                    "INSERT INTO chat_messages "
+                    "(id, conversation_id, sender_id, type, content, "
+                    "reply_to, metadata, timestamp, status, reactions, read_by, ai_generated) "
+                    "VALUES (?, ?, ?, ?, ?, NULL, ?, ?, 'sent', ?, ?, 0)",
+                    (msg_id, conv_id, senior_id,
+                     'voice' if channel == 'voice' else 'text',
+                     user_text,
+                     _json.dumps({'source': channel, 'transcribed': True}),
+                     now, _json.dumps([]), _json.dumps([senior_id]))
+                )
+
+            # Insert AI turn (if any text)
+            if ai_text:
+                ai_id = 'm_' + _uuid.uuid4().hex[:12]
+                db.execute(
+                    "INSERT INTO chat_messages "
+                    "(id, conversation_id, sender_id, type, content, "
+                    "reply_to, metadata, timestamp, status, reactions, read_by, ai_generated) "
+                    "VALUES (?, ?, 'radim', 'text', ?, NULL, ?, ?, 'sent', ?, ?, 1)",
+                    (ai_id, conv_id, ai_text,
+                     _json.dumps({'source': channel}),
+                     now, _json.dumps([]), _json.dumps([]))
+                )
+
+            # Update conversation preview
+            preview = (ai_text or user_text or '')[:50]
+            db.execute(
+                "UPDATE chat_conversations SET updated_at = ?, last_message = ? WHERE id = ?",
+                (now, _json.dumps({
+                    'content': preview,
+                    'sender_id': 'radim' if ai_text else senior_id,
+                    'timestamp': now,
+                }), conv_id)
+            )
+
+        # Live push to Komunikace module via SocketIO (best-effort).
+        try:
+            from flask import current_app
+            socketio = current_app.extensions.get('socketio') if current_app else None
+            if socketio and ai_text:
+                socketio.emit('new_message', {
+                    'conversation_id': conv_id,
+                    'sender_id': 'radim',
+                    'content': ai_text,
+                    'type': 'text',
+                    'timestamp': now,
+                    'ai_generated': 1,
+                    'source': channel,
+                }, room=conv_id)
+        except Exception:
+            pass
+
+    except Exception as e:
+        # Persistence must never block the phone path. Log and move on.
+        logger.warning(f"📞 phone-turn persist failed: {e}")
+
+
 def get_ai_response_for_call(user_text, call_sid, user_id=None):
     """Get AI response for phone conversation — through full orchestrator pipeline.
 
     v10.20: Routes through radim_chat_internal() for brain Ψ(t) + voice_mode.
     Falls back to direct Claude if orchestrator fails.
+    X21.42: also persists the turn to chat_messages so the senior can see
+    the conversation in the Komunikace module afterwards.
     """
     call_data = active_calls.get(call_sid, {})
     uid = call_data.get("user_id") or user_id
@@ -460,6 +582,10 @@ def get_ai_response_for_call(user_text, call_sid, user_id=None):
                 active_calls[call_sid]["history"].append({"role": "user", "content": user_text})
                 active_calls[call_sid]["history"].append({"role": "assistant", "content": ai_text})
                 active_calls[call_sid]["voice_mode"] = voice_mode
+
+            # X21.42 USER-REPORTED BUG FIX: persist to chat_messages so the
+            # Komunikace module can show the phone conversation history.
+            _persist_phone_conversation_turn(uid, user_text, ai_text, channel='voice')
 
             logger.info(f"📞 Call AI via orchestrator: voice_mode={voice_mode} user={uid}")
             return ai_text
