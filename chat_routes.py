@@ -822,3 +822,47 @@ def add_contact():
     except Exception as e:
         logger.error(f"chat_routes error: {e}")
         return jsonify({'success': False, 'error': 'Interni chyba serveru'}), 500
+
+
+# ============================================
+# X21.46 — ADMIN DEBUG: chat dump
+# ============================================
+# Diagnostic endpoint to inspect raw chat data when the UI shows "empty
+# thread despite preview". Guarded by X-Admin-Secret. Returns:
+#   • all conversations where the given user_id is a participant (raw rows)
+#   • for each conversation, full chat_messages rows (raw, no JSON parsing
+#     of inner fields) so we can see what the renderer is actually receiving
+@chat_bp.route('/api/admin/chat-debug/<user_id>', methods=['GET'])
+def admin_chat_debug(user_id):
+    # Lazy import to avoid circular dep with app._check_admin
+    try:
+        from app import _check_admin
+    except Exception:
+        _check_admin = lambda: False
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        db = get_db()
+        convs = db.execute(
+            "SELECT id, participants, type, name, last_message, created_at, updated_at "
+            "FROM chat_conversations WHERE participants LIKE ? ORDER BY updated_at DESC",
+            (f'%"{user_id}"%',)
+        ).fetchall()
+
+        out = {'user_id': user_id, 'conversations': []}
+        for c in convs:
+            cdict = dict(c)
+            msgs = db.execute(
+                "SELECT id, conversation_id, sender_id, type, content, metadata, "
+                "timestamp, status, reactions, read_by, ai_generated "
+                "FROM chat_messages WHERE conversation_id = ? "
+                "ORDER BY timestamp ASC LIMIT 200",
+                (cdict['id'],)
+            ).fetchall()
+            cdict['_message_count'] = len(msgs)
+            cdict['_messages'] = [dict(m) for m in msgs]
+            out['conversations'].append(cdict)
+        return jsonify(out), 200
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500

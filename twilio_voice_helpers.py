@@ -501,17 +501,22 @@ def _persist_phone_conversation_turn(senior_id, user_text, ai_text, channel='voi
                 )
 
             # Insert user turn (if any text)
+            # X21.46: type ALWAYS 'text' — the phone audio file is NOT
+            # persisted, so type='voice' would make the renderer draw a
+            # broken voice-bubble (empty <audio>, no transcript metadata
+            # in expected shape). We carry the channel via metadata so
+            # the UI can optionally show a "📞 z hovoru" badge later.
             if user_text:
                 msg_id = 'm_' + _uuid.uuid4().hex[:12]
                 db.execute(
                     "INSERT INTO chat_messages "
                     "(id, conversation_id, sender_id, type, content, "
                     "reply_to, metadata, timestamp, status, reactions, read_by, ai_generated) "
-                    "VALUES (?, ?, ?, ?, ?, NULL, ?, ?, 'sent', ?, ?, 0)",
+                    "VALUES (?, ?, ?, 'text', ?, NULL, ?, ?, 'sent', ?, ?, 0)",
                     (msg_id, conv_id, senior_id,
-                     'voice' if channel == 'voice' else 'text',
                      user_text,
-                     _json.dumps({'source': channel, 'transcribed': True}),
+                     _json.dumps({'source': channel, 'channel': channel,
+                                  'transcribed': True}),
                      now, _json.dumps([]), _json.dumps([senior_id]))
                 )
 
