@@ -340,7 +340,22 @@ def _evaluate_user(user_id, app):
 
     for obs in observations:
         _save_observation(user_id, obs)
-        _execute_action(user_id, obs, app)
+        # X21.40 multi-worker safety: action firing is now gated by a PG
+        # advisory lock per (user_id, observation_type). Before this fix,
+        # multiple gunicorn workers on Heroku could simultaneously pass
+        # _is_in_cooldown (race window between check and _save_observation
+        # commit), then both fire _execute_action → 4× SMS to family,
+        # 4× outbound Twilio calls, 4× Anthropic spend per emergency.
+        # The lock is non-blocking (pg_try_advisory_lock); losers skip
+        # silently. SQLite (single-process tests) bypasses the lock.
+        with _action_lock_or_skip(user_id, obs.get("type")) as got_lock:
+            if got_lock:
+                _execute_action(user_id, obs, app)
+            else:
+                logger.info(
+                    f"🔒 [multi-worker] {user_id}/{obs.get('type')} "
+                    "action claimed by another worker — skipping fan-out"
+                )
 
 
 # ============================================================================
@@ -1159,6 +1174,82 @@ TAPO_DETECTORS = (
 # ============================================================================
 # COOLDOWN + PERSISTENCE
 # ============================================================================
+
+from contextlib import contextmanager
+import hashlib
+
+@contextmanager
+def _action_lock_or_skip(user_id, observation_type):
+    """X21.40: multi-worker safe lock for emergency-action firing.
+
+    Yields True if THIS worker owns the lock and should fire the action,
+    False if another gunicorn worker is already firing it (and the caller
+    should skip).
+
+    Mechanism: PG `pg_try_advisory_lock` keyed on hash(user_id || obs_type).
+    The lock is session-scoped — held until the connection is closed in
+    the `finally` block, after the action has run. Non-blocking — losers
+    return immediately with False, no waiting.
+
+    SQLite (single-process pytest path) bypasses the lock since there's
+    no race possible.
+
+    Closes the audit-flagged race where, on Heroku with 4 gunicorn
+    workers, an ALERT/CRISIS detection could fan out to 4× SMS, 4×
+    outbound Twilio calls, and 4× Anthropic credit burn for a single
+    emergency event.
+    """
+    if not observation_type:
+        observation_type = "unknown"
+    try:
+        from database import is_postgres, get_connection
+    except ImportError:
+        yield True
+        return
+
+    if not is_postgres():
+        # SQLite — no multi-worker possible
+        yield True
+        return
+
+    # Stable signed 64-bit key from md5 hash
+    key_str = f"radim_action:{user_id}:{observation_type}"
+    key = int(hashlib.md5(key_str.encode()).hexdigest()[:15], 16)
+    # Clip to signed bigint range
+    if key > 9_223_372_036_854_775_807:
+        key -= 18_446_744_073_709_551_616
+
+    conn = None
+    got_lock = False
+    try:
+        try:
+            conn = get_connection()
+            row = conn.execute("SELECT pg_try_advisory_lock(?)", (key,)).fetchone()
+            # Cursor wrapper returns either dict-like or tuple-like row
+            if row is not None:
+                try:
+                    got_lock = bool(row['pg_try_advisory_lock'])
+                except (KeyError, TypeError):
+                    try:
+                        got_lock = bool(row[0])
+                    except (IndexError, TypeError):
+                        got_lock = False
+        except Exception as e:
+            logger.warning(f"_action_lock_or_skip: lock attempt failed (fail-open): {e}")
+            got_lock = True  # fail-open so emergencies aren't silently dropped
+        yield got_lock
+    finally:
+        if conn is not None:
+            try:
+                if got_lock:
+                    conn.execute("SELECT pg_advisory_unlock(?)", (key,))
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+
 
 def _is_in_cooldown(user_id, observation_type):
     """Check if same observation was logged recently."""
