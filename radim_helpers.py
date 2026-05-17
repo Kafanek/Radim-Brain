@@ -282,45 +282,109 @@ def _safety_notify_caregivers(user_id, message, severity):
 
 
 # v8.19.103: cache pro Twilio SMS-capability check
-_TWILIO_SMS_BROKEN = False
+# X21.39: was permanent-latch (module global never reset). One Twilio config
+# glitch disabled SMS for the entire dyno lifetime — heroku ps:restart was
+# the only way to recover. Now: latch with 1-hour TTL so transient failures
+# don't permanently disable the SMS safety path.
+_TWILIO_SMS_BROKEN_UNTIL = 0.0  # epoch seconds; 0 = working
 
 
 def _safety_notify_caregivers_async(user_id, message, severity):
-    """Actual implementation of caregiver notification — called via eventlet.spawn_n."""
-    global _TWILIO_SMS_BROKEN
+    """Actual implementation of caregiver notification — called via eventlet.spawn_n.
+
+    X21.39 SAFETY-CRITICAL FIX: caregiver SMS + admin push were NOT filtered
+    by senior_id. Senior A's crisis SMS was sent to every active caregiver
+    in iot_caregivers (across ALL seniors) → GDPR violation + alert fatigue.
+    Admin push went to every admin/caregiver/family in chat_users system-wide.
+    Now: caregivers filtered by room_id = str(user_id) (the convention used
+    by iot_dashboard_routes when caregivers are added). Admin push filtered
+    through senior_family_links + legacy caregiver_id from memory_profiles.
+    """
+    global _TWILIO_SMS_BROKEN_UNTIL
     try:
         from database import db_context
+        import time
 
+        caregivers = []
         with db_context() as db:
-            # 1. Find caregivers
-            caregivers = db.execute(
-                "SELECT name, phone, email, notify_push, notify_sms FROM iot_caregivers WHERE active = ?",
-                (True,)
-            ).fetchall()
-
-            # 2. Push to admins/caregivers/family
+            # 1. Find caregivers FOR THIS SENIOR ONLY (X21.39 privacy fix)
             try:
-                from app import send_push_notification
-                admins = db.execute(
-                    "SELECT id FROM chat_users WHERE role IN ('admin', 'caregiver', 'family') AND id != ?",
+                caregivers = db.execute(
+                    "SELECT name, phone, email, notify_push, notify_sms FROM iot_caregivers "
+                    "WHERE active = ? AND room_id = ?",
+                    (True, str(user_id))
+                ).fetchall()
+            except Exception as e:
+                logger.warning(f"SAFETY: caregiver lookup failed: {e}")
+
+            # 2. Push to people LINKED TO THIS SENIOR — confirmed family links
+            #    + legacy memory_profiles.caregiver_id. Plus SYSTEM admins
+            #    (role='admin' only) so platform operators see crisis events
+            #    cluster-wide for incident response.
+            recipient_ids = set()
+
+            # 2a. senior_family_links (modern)
+            try:
+                rows = db.execute(
+                    "SELECT family_user_id FROM senior_family_links "
+                    "WHERE senior_id = ? AND confirmed_at IS NOT NULL "
+                    "AND revoked_at IS NULL AND notify_on_sos = ?",
+                    (str(user_id), True)
+                ).fetchall()
+                for r in rows:
+                    fid = r['family_user_id'] if 'family_user_id' in r.keys() else r[0]
+                    if fid:
+                        recipient_ids.add(fid)
+            except Exception as e:
+                logger.debug(f"SAFETY: senior_family_links lookup: {e}")
+
+            # 2b. Legacy memory_profiles.caregiver_id
+            try:
+                from memory_helpers import db_load_profile
+                profile = db_load_profile(str(user_id)) or {}
+                legacy_cg = profile.get('caregiver_id')
+                if legacy_cg:
+                    recipient_ids.add(legacy_cg)
+            except Exception:
+                pass
+
+            # 2c. System admins (operators) — NOT all caregivers/family
+            try:
+                rows = db.execute(
+                    "SELECT id FROM chat_users WHERE role = 'admin' AND id != ?",
                     (user_id,)
                 ).fetchall()
-                for admin in admins:
-                    admin_id = admin.get('id') or admin[0]
-                    send_push_notification(
-                        admin_id,
-                        f"KRIZOVA SITUACE — {severity.upper()}",
-                        f"Uzivatel {user_id} potrebuje pomoc: {message[:100]}",
-                        data={'type': 'safety_alert', 'severity': severity, 'user_id': user_id}
-                    )
-                    logger.info(f"SAFETY: Push sent to {admin_id}")
+                for r in rows:
+                    aid = r['id'] if 'id' in r.keys() else r[0]
+                    if aid:
+                        recipient_ids.add(aid)
+            except Exception as e:
+                logger.debug(f"SAFETY: admin lookup: {e}")
+
+            try:
+                from app import send_push_notification
+                for rid in recipient_ids:
+                    try:
+                        send_push_notification(
+                            rid,
+                            f"KRIZOVA SITUACE — {severity.upper()}",
+                            f"Uzivatel {user_id} potrebuje pomoc: {message[:100]}",
+                            data={'type': 'safety_alert', 'severity': severity, 'user_id': user_id}
+                        )
+                        logger.info(f"SAFETY: Push sent to {rid}")
+                    except Exception as e:
+                        logger.debug(f"SAFETY: push to {rid} failed: {e}")
             except ImportError:
                 logger.warning("SAFETY: Cannot import send_push_notification")
 
         # 3. SMS (outside db_context — Twilio HTTP call can be slow)
-        # v8.19.103: skip if Twilio FROM number is not SMS-capable (cached fail).
-        if _TWILIO_SMS_BROKEN:
-            logger.debug("SAFETY: SMS skipped — TWILIO_PHONE_NUMBER not SMS-capable (cached)")
+        # X21.39: was permanent latch; now 1-hour TTL on the SMS-broken flag
+        # so a transient Twilio outage doesn't disable SMS until dyno restart.
+        if time.time() < _TWILIO_SMS_BROKEN_UNTIL:
+            logger.debug(
+                f"SAFETY: SMS skipped — TWILIO unhealthy for "
+                f"{int(_TWILIO_SMS_BROKEN_UNTIL - time.time())}s more"
+            )
             return
 
         try:
@@ -347,10 +411,13 @@ def _safety_notify_caregivers_async(user_id, message, severity):
                         except Exception as sms_err:
                             err_str = str(sms_err)
                             logger.error(f"SAFETY: SMS failed to {cg_phone}: {err_str}")
-                            # v8.19.103: cache "FROM not SMS-capable" → skip ALL further SMS
+                            # X21.39: was `_TWILIO_SMS_BROKEN = True` (permanent
+                            # latch — only reset by dyno restart). Now a 1-hour
+                            # TTL so a transient Twilio config glitch doesn't
+                            # permanently disable the SMS safety path.
                             if 'not SMS-capable' in err_str or "is not a valid SMS" in err_str:
-                                logger.warning(f"SAFETY: TWILIO_PHONE_NUMBER {twilio_from} is not SMS-capable — disabling SMS for session")
-                                _TWILIO_SMS_BROKEN = True
+                                logger.warning(f"SAFETY: TWILIO_PHONE_NUMBER {twilio_from} is not SMS-capable — disabling SMS for 1 hour")
+                                _TWILIO_SMS_BROKEN_UNTIL = time.time() + 3600
                                 return  # stop iteration — won't work for any number
         except ImportError:
             logger.warning("SAFETY: Twilio library not available for SMS")

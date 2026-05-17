@@ -485,8 +485,14 @@ def get_live_risk_summary(user_id):
     try:
         from database import db_context
         with db_context(commit=False) as db:
+            # X21.39: was SELECT `type` — but the column is observation_type
+            # (per database_schema.py; also matches the INSERT statements
+            # at lines 308 and 336 in this same file). Caregiver dashboard
+            # "recent alerts" was silently empty for 24h windows because
+            # this query threw "column type does not exist" and got
+            # swallowed by the outer try/except.
             rows = db.execute("""
-                SELECT type, severity, message, created_at
+                SELECT observation_type, severity, message, created_at
                 FROM agent_observations
                 WHERE user_id = ? AND created_at > ?
                 ORDER BY created_at DESC LIMIT 10
