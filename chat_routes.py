@@ -447,17 +447,33 @@ def send_message():
 
         if ai_should_run:
             try:
-                # Ziskej historii konverzace
-                cursor = db.execute('''
-                    SELECT sender_id, content FROM chat_messages
-                    WHERE conversation_id = ?
-                    ORDER BY timestamp DESC LIMIT 10
-                ''', (conversation_id,))
-                history = [dict(row) for row in cursor.fetchall()]
-                history.reverse()
-
-                # Ziskej AI odpoved (může timeoutovat / vyhodit)
-                ai_response = get_ai_response(history)
+                # X21.44 UNIFICATION: was `get_ai_response(history)` via
+                # ai_bridge — a separate "engine B" with NO brain Ψ(t), NO
+                # long-term memory, NO identity layer, NO voice_mode, NO
+                # lang awareness. Result: Radim in Komunikace was a
+                # different, "weaker" Radim than the one users got on
+                # phone / WhatsApp / main chat (which all routed through
+                # radim_chat_internal — "engine A").
+                #
+                # Now: chat_routes also routes through radim_chat_internal,
+                # so Komunikace Radim has the same memory + brain + lang +
+                # identity as everywhere else. Single source of truth.
+                #
+                # Trade-off: we lose conv-specific chat_messages history
+                # context (the AI no longer sees "what was said in this
+                # exact thread before"). But radim_chat_internal pulls
+                # memory_history which is CROSS-SURFACE — it captures
+                # everything the senior said anywhere. Net better.
+                from radim_orchestrator import radim_chat_internal
+                _result = radim_chat_internal(content, user_id=sender_id, mode='senior')
+                ai_response = _result.get('response') if _result else None
+                # If radim_chat_internal returned the canned error string
+                # ("Omlouvám se, zkuste to prosím později.") on a real
+                # failure, the chat_message INSERT below would persist
+                # that as Radim's reply — better to surface as ai_error
+                # so the typing indicator hides.
+                if _result and not _result.get('success', True):
+                    ai_response = None
             except Exception as ai_err:
                 # B1: AI selhalo (timeout, rate limit, výpadek poskytovatele).
                 # User msg už je commitnutá z dřívějška. Frontend by čekal na
