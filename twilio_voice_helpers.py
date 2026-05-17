@@ -439,19 +439,21 @@ def twiml_response(twiml_xml):
 
 
 def _persist_phone_conversation_turn(senior_id, user_text, ai_text, channel='voice'):
-    """X21.42: persist a phone-call turn into chat_messages so the senior
-    can see the conversation in the Komunikace module after hanging up.
+    """X21.42 / X21.43: persist a phone-call turn into chat_messages so
+    the senior can see the conversation in the Komunikace module after
+    hanging up.
 
-    Was missing entirely — Twilio Voice + WhatsApp stored dialogue only in
-    the in-memory active_calls[call_sid]["history"] dict, so once the call
-    ended the senior had no record of what Radim said. That's the exact
-    "nevidím ... konverzaci na telefonu" symptom in the user-reported bug.
-
-    Strategy: find-or-create a 1:1 conversation between senior_id and the
-    well-known pseudo-participant 'radim', insert two messages (user turn
-    + AI turn), update conversation last_message, emit socketio new_message
-    so the Komunikace module live-updates if the senior happens to be
-    looking.
+    X21.43 follow-up fixes after user reported X21.42 didn't fully work:
+      • `participants` column is plain TEXT (not JSONB) — dropped the
+        bogus `::text` cast on the PG branch which would fail on real PG
+        connections. Both PG and SQLite now use the same simple LIKE.
+      • Invalidate the conversations + messages caches so the next REST
+        GET returns fresh data immediately (was 5s stale otherwise).
+      • Emit `new_message` ALSO to the senior's personal room
+        (`room=senior_id`) — not just `room=conv_id`. The senior hasn't
+        joined the conversation room yet (no UI open), but they HAVE
+        joined their personal room. So the personal-room emit is the
+        one that actually reaches them live.
 
     Fails silently on any error — must NEVER block the phone conversation.
     """
@@ -465,27 +467,28 @@ def _persist_phone_conversation_turn(senior_id, user_text, ai_text, channel='voi
         senior_id = str(senior_id)
         now = datetime.utcnow().isoformat()
 
+        conv_id = None
         with db_context(commit=True) as db:
             # Find existing 1:1 senior↔radim conversation, or create one.
-            # `participants` is a JSON array of user_ids. We look for the
-            # canonical 1:1 type='direct' between senior and 'radim'.
+            # `participants` is plain TEXT holding a JSON-encoded array.
+            # X21.43: dropped the ::text cast — on PG it's a no-op on TEXT
+            # columns but the (now-current) X21.24 _convert_query may not
+            # recognize it cleanly. Plain LIKE works on both backends.
             try:
-                if is_postgres():
-                    row = db.execute(
-                        "SELECT id FROM chat_conversations "
-                        "WHERE type = 'direct' AND participants::text LIKE ? "
-                        "AND participants::text LIKE ? LIMIT 1",
-                        (f'%"{senior_id}"%', '%"radim"%')
-                    ).fetchone()
-                else:
-                    row = db.execute(
-                        "SELECT id FROM chat_conversations "
-                        "WHERE type = 'direct' AND participants LIKE ? "
-                        "AND participants LIKE ? LIMIT 1",
-                        (f'%"{senior_id}"%', '%"radim"%')
-                    ).fetchone()
-                conv_id = row['id'] if row else None
-            except Exception:
+                row = db.execute(
+                    "SELECT id FROM chat_conversations "
+                    "WHERE type = 'direct' "
+                    "AND participants LIKE ? "
+                    "AND participants LIKE ? LIMIT 1",
+                    (f'%"{senior_id}"%', '%"radim"%')
+                ).fetchone()
+                if row:
+                    try:
+                        conv_id = row['id']
+                    except (KeyError, TypeError):
+                        conv_id = row[0]
+            except Exception as e:
+                logger.warning(f"📞 conv lookup failed: {e}")
                 conv_id = None
 
             if not conv_id:
@@ -536,12 +539,29 @@ def _persist_phone_conversation_turn(senior_id, user_text, ai_text, channel='voi
                 }), conv_id)
             )
 
-        # Live push to Komunikace module via SocketIO (best-effort).
+        # X21.43: invalidate the in-process REST caches so the next
+        # GET /api/chat/conversations/{senior_id} returns fresh data
+        # without a 5s stale window.
+        try:
+            from chat_routes import (
+                chat_cache_invalidate_user,
+                chat_cache_invalidate_conversation,
+            )
+            chat_cache_invalidate_user(senior_id)
+            chat_cache_invalidate_conversation(conv_id)
+        except Exception:
+            pass
+
+        # X21.43: Live push to BOTH rooms — the personal room (where the
+        # senior is definitely subscribed) AND the conversation room
+        # (where they'll be subscribed if Komunikace is open). Frontend
+        # Komunikace listens on its socket for new_message and updates
+        # the open thread if the conv_id matches.
         try:
             from flask import current_app
             socketio = current_app.extensions.get('socketio') if current_app else None
             if socketio and ai_text:
-                socketio.emit('new_message', {
+                payload = {
                     'conversation_id': conv_id,
                     'sender_id': 'radim',
                     'content': ai_text,
@@ -549,7 +569,11 @@ def _persist_phone_conversation_turn(senior_id, user_text, ai_text, channel='voi
                     'timestamp': now,
                     'ai_generated': 1,
                     'source': channel,
-                }, room=conv_id)
+                }
+                # Personal room — guaranteed reachable
+                socketio.emit('new_message', payload, room=senior_id)
+                # Conversation room — best effort
+                socketio.emit('new_message', payload, room=conv_id)
         except Exception:
             pass
 
