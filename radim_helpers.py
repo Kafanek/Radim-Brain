@@ -361,14 +361,28 @@ def _safety_notify_caregivers_async(user_id, message, severity):
             except Exception as e:
                 logger.debug(f"SAFETY: admin lookup: {e}")
 
+            # X21.41: push title/body localized per recipient — each
+            # caregiver/family member receives the alert in THEIR own app
+            # language (looked up from their memory_profiles, not the
+            # senior's). This way a Polish daughter caring for a Czech
+            # mother gets a Polish push notification.
             try:
                 from app import send_push_notification
+                from emergency_i18n import get_emergency
+                msg_short = (message or '')[:100]
                 for rid in recipient_ids:
                     try:
+                        title = get_emergency(
+                            'PUSH_TITLE', None, user_id=rid,
+                            severity=severity.upper()
+                        )
+                        body = get_emergency(
+                            'PUSH_BODY', None, user_id=rid,
+                            senior_id=user_id, message_short=msg_short,
+                            severity=severity.upper()
+                        )
                         send_push_notification(
-                            rid,
-                            f"KRIZOVA SITUACE — {severity.upper()}",
-                            f"Uzivatel {user_id} potrebuje pomoc: {message[:100]}",
+                            rid, title, body,
                             data={'type': 'safety_alert', 'severity': severity, 'user_id': user_id}
                         )
                         logger.info(f"SAFETY: Push sent to {rid}")
@@ -396,14 +410,35 @@ def _safety_notify_caregivers_async(user_id, message, severity):
                 from twilio.rest import Client as TwilioClient
                 twilio_client = TwilioClient(twilio_sid, twilio_token)
 
+                # X21.41: SMS body is in the SENIOR's language (caregivers
+                # don't have a profile we can look up by phone number).
+                # The senior's lang is the most relevant for context — the
+                # alert tells the caregiver who and what.
+                try:
+                    from emergency_i18n import get_emergency
+                    sms_template_user_id = user_id  # use senior's lang
+                except ImportError:
+                    get_emergency = None
+                    sms_template_user_id = None
+
                 for cg in caregivers:
                     cg_phone = cg.get('phone') or cg[1]
                     cg_sms = cg.get('notify_sms') or cg[4]
                     cg_name = cg.get('name') or cg[0]
                     if cg_sms and cg_phone:
                         try:
+                            if get_emergency:
+                                sms_body = get_emergency(
+                                    'SMS_BODY', None,
+                                    user_id=sms_template_user_id,
+                                    severity=severity.upper(),
+                                    senior_id=user_id,
+                                    message_short=(message or '')[:120],
+                                )
+                            else:
+                                sms_body = f"RADIM KRIZOVY ALERT [{severity.upper()}]: Uzivatel {user_id} - {(message or '')[:120]}"
                             twilio_client.messages.create(
-                                body=f"RADIM KRIZOVY ALERT [{severity.upper()}]: Uzivatel {user_id} - {message[:120]}",
+                                body=sms_body,
                                 from_=twilio_from,
                                 to=cg_phone
                             )

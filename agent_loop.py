@@ -1806,14 +1806,20 @@ def _call_senior(user_id, obs):
             logger.debug(f"No phone for {user_id}, skipping proactive call")
             return
 
-        # Build greeting based on observation type
-        greetings = {
-            "c_trend_rising": "Dobrý den, tady Radim. Všiml jsem si, že v posledních rozhovorech jste byl trochu napjatější. Chtěl jsem se zeptat, jestli je vše v pořádku.",
-            "activity_drop": "Dobrý den, tady Radim. Dnes jste byl méně aktivní než obvykle, tak jsem vám chtěl zavolat a zeptat se, jak se máte.",
-            "vital_anomaly": "Dobrý den, tady Radim. Zaznamenal jsem neobvyklou hodnotu vašich životních funkcí. Jak se cítíte?",
-            "no_interaction": "Dobrý den, tady Radim. Už jsme spolu delší dobu nemluvili, tak jsem vám chtěl zavolat. Jak se vám daří?",
-        }
-        greeting = greetings.get(obs["type"], "Dobrý den, tady Radim. Chtěl jsem se zeptat, jak se máte.")
+        # X21.41: greeting localized via emergency_i18n. Resolves senior's
+        # preferred language from memory_profiles.data.lang; falls back to
+        # Czech if unknown. Twilio TTS voice will also need to match — see
+        # twilio_voice_helpers.initiate_proactive_call which now accepts
+        # the lang param and picks the right Azure neural voice.
+        try:
+            from emergency_i18n import get_emergency, _resolve_user_lang
+            senior_lang = _resolve_user_lang(user_id)
+            greeting = get_emergency('CALL_GREETINGS', obs.get("type"), lang=senior_lang)
+        except Exception:
+            # Defensive fallback — never let an i18n failure silence a
+            # welfare call. If the helper module is broken, ship the Czech.
+            senior_lang = 'cs'
+            greeting = "Dobrý den, tady Radim. Chtěl jsem se zeptat, jak se máte."
 
         # v10.20: Compute brain Ψ(t) → voice_mode for proactive call
         _call_mode = 'ALERT'  # default for proactive calls
@@ -1827,7 +1833,10 @@ def _call_senior(user_id, obs):
         except Exception:
             pass
 
-        result = initiate_proactive_call(phone, greeting, user_id=user_id, reason=obs["type"], voice_mode=_call_mode)
+        # X21.41: pass senior's lang so Azure picks the matching neural voice.
+        result = initiate_proactive_call(phone, greeting, user_id=user_id,
+                                         reason=obs["type"], voice_mode=_call_mode,
+                                         lang=senior_lang)
         if result.get("success"):
             logger.info(f"📞 Proactive call to {user_id}: {result['call_sid']}")
         else:

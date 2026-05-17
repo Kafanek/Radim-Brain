@@ -611,7 +611,7 @@ def _looks_like_dummy_phone(phone_number):
     return False
 
 
-def initiate_proactive_call(phone_number, greeting, user_id=None, reason="check_in", voice_mode=None):
+def initiate_proactive_call(phone_number, greeting, user_id=None, reason="check_in", voice_mode=None, lang=None):
     """
     Initiate outbound call from Radim to a senior or caregiver.
 
@@ -619,9 +619,15 @@ def initiate_proactive_call(phone_number, greeting, user_id=None, reason="check_
 
     Args:
         phone_number: E.164 format (+420...)
-        greeting: Czech text Radim will say when call connects
-        user_id: senior's user_id (for tracking)
+        greeting: text Radim will say when call connects (already localized
+                  by caller via emergency_i18n.get_emergency)
+        user_id: senior's user_id (for tracking + lang lookup if not passed)
         reason: 'check_in', 'alert', 'crisis', 'medication_reminder'
+        voice_mode: brain Ψ(t) voice mode (HARMONY/ALERT/CRISIS)
+        lang: X21.41 — senior's locale (cs/sk/pl/hu/en). If None, looked up
+              from memory_profiles. Drives the Azure neural voice + the
+              Twilio <Gather language="..."> attribute below so STT and TTS
+              both happen in the senior's own language.
 
     Returns:
         dict: {success, call_sid, error}
@@ -657,14 +663,43 @@ def initiate_proactive_call(phone_number, greeting, user_id=None, reason="check_
     try:
         # v10.20: Use Azure TTS with brain voice_mode (not Polly.Adela)
         _mode = voice_mode or 'ALERT'
-        _greeting_say = twiml_say(greeting, {"mode": _mode, "user_id": user_id})
-        _listen_say = twiml_say("Poslouchám vás.", {"mode": _mode, "user_id": user_id})
-        _bye_say = twiml_say("Neslyšel jsem vás. Zkusím zavolat později.", {"mode": _mode, "user_id": user_id})
+
+        # X21.41: resolve lang + the matching Twilio <Gather language="…">
+        # locale + the "Listening" / "I didn't hear" follow-up prompts in
+        # the senior's own language.
+        try:
+            from emergency_i18n import normalize_lang, _resolve_user_lang, get_voice_for_lang
+            _lang = normalize_lang(lang) if lang else _resolve_user_lang(user_id)
+        except Exception:
+            _lang = 'cs'
+
+        _BCP47 = {'cs': 'cs-CZ', 'sk': 'sk-SK', 'pl': 'pl-PL', 'hu': 'hu-HU', 'en': 'en-US'}
+        _bcp47 = _BCP47.get(_lang, 'cs-CZ')
+
+        _LISTEN_PROMPT = {
+            'cs': 'Poslouchám vás.',
+            'sk': 'Počúvam vás.',
+            'pl': 'Słucham.',
+            'hu': 'Hallgatom.',
+            'en': "I'm listening.",
+        }
+        _BYE_PROMPT = {
+            'cs': 'Neslyšel jsem vás. Zkusím zavolat později.',
+            'sk': 'Nepočul som vás. Skúsim zavolať neskôr.',
+            'pl': 'Nie słyszałem Pana/Pani. Spróbuję zadzwonić później.',
+            'hu': 'Nem hallottam Önt. Később megpróbálom hívni.',
+            'en': "I didn't hear you. I'll try again later.",
+        }
+        _greeting_say = twiml_say(greeting, {"mode": _mode, "user_id": user_id, "lang": _lang})
+        _listen_say = twiml_say(_LISTEN_PROMPT.get(_lang, _LISTEN_PROMPT['cs']),
+                                 {"mode": _mode, "user_id": user_id, "lang": _lang})
+        _bye_say = twiml_say(_BYE_PROMPT.get(_lang, _BYE_PROMPT['cs']),
+                              {"mode": _mode, "user_id": user_id, "lang": _lang})
 
         twiml = (
             f'<Response>'
             f'{_greeting_say}'
-            f'<Gather input="speech" language="cs-CZ" '
+            f'<Gather input="speech" language="{_bcp47}" '
             f'action="/api/twilio/gather" method="POST" speechTimeout="auto" timeout="10">'
             f'{_listen_say}'
             f'</Gather>'

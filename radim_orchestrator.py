@@ -553,15 +553,35 @@ def radim_chat():
             else:
                 # HIGH severity (pain, fall, breathing) → empathetic structured response
                 # AI in CRISIS mode gives too-short answers, so we build it here
+                # X21.41: crisis_resp localized via emergency_i18n.CRISIS_CHAT.
+                # The trigger-word detection stays Czech because the local
+                # intent_resolver patterns are Czech-only (X21.16 audit). If
+                # we later add multi-language pattern matching, this dispatch
+                # will already work — the response templates are localized.
                 msg_lower = message.lower()
                 if any(w in msg_lower for w in ['dýchat', 'dech', 'dušnost', 'hrud']):
-                    crisis_resp = 'Jsem tady s vámi, nikam neodcházím. Zkuste se posadit a dýchat pomalu — nádech nosem, výdech ústy. Bolí to stále stejně, nebo se to mění? Doporučuji zavolat záchrannou službu na 155. Chcete, abych zavolal?'
+                    _crisis_key = 'breathing'
                 elif any(w in msg_lower for w in ['spadl', 'upadl', 'nemůžu vstát', 'nemuzu vstat', 'zlomen']):
-                    crisis_resp = 'Hlavně se nehýbejte a zůstaňte na místě. Bolí vás i hlava, nebo jen to místo kde jste spadl? Pro jistotu doporučuji zavolat na 155. Chcete, abych zavolal záchranku nebo rodinu?'
+                    _crisis_key = 'fall'
                 elif any(w in msg_lower for w in ['krev', 'rána', 'řízl', 'pořezal']):
-                    crisis_resp = 'Zůstaňte v klidu. Přitiskněte na ránu čistý hadřík a držte tlak. Je to velká rána? Doporučuji zavolat záchranku na 155.'
+                    _crisis_key = 'bleeding'
                 else:
-                    crisis_resp = 'Slyším, že vám není dobře, a jsem tady s vámi. Posaďte se nebo si lehněte. Můžete mi říct víc o tom, co cítíte? Pokud je to vážné, doporučuji zavolat na 155. Chcete, abych zavolal lékaře nebo rodinu?'
+                    _crisis_key = '_default'
+
+                try:
+                    from emergency_i18n import get_emergency
+                    crisis_resp = get_emergency('CRISIS_CHAT', _crisis_key,
+                                                lang=chat_lang, user_id=user_id)
+                except Exception:
+                    # Defensive fallback — never let an i18n bug silence the
+                    # safety response. Czech default.
+                    _fallback = {
+                        'breathing': 'Jsem tady s vámi, nikam neodcházím. Zkuste se posadit a dýchat pomalu — nádech nosem, výdech ústy. Bolí to stále stejně, nebo se to mění? Doporučuji zavolat záchrannou službu na 155. Chcete, abych zavolal?',
+                        'fall':      'Hlavně se nehýbejte a zůstaňte na místě. Bolí vás i hlava, nebo jen to místo kde jste spadl? Pro jistotu doporučuji zavolat na 155. Chcete, abych zavolal záchranku nebo rodinu?',
+                        'bleeding':  'Zůstaňte v klidu. Přitiskněte na ránu čistý hadřík a držte tlak. Je to velká rána? Doporučuji zavolat záchranku na 155.',
+                        '_default':  'Slyším, že vám není dobře, a jsem tady s vámi. Posaďte se nebo si lehněte. Můžete mi říct víc o tom, co cítíte? Pokud je to vážné, doporučuji zavolat na 155. Chcete, abych zavolal lékaře nebo rodinu?',
+                    }
+                    crisis_resp = _fallback[_crisis_key]
 
                 # Sprint AD: persist CRISIS to memory + C_history (see critical branch)
                 try:
